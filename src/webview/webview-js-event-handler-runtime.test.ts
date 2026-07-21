@@ -45,6 +45,7 @@ class FakeElement {
   public classList = new FakeClassList();
   public parentElement: FakeElement | null = null;
   private listeners = new Map<string, (event: unknown) => void>();
+  private attributes = new Map<string, string>();
 
   addEventListener(name: string, handler: (event: unknown) => void): void {
     this.listeners.set(name, handler);
@@ -68,11 +69,13 @@ class FakeElement {
 
   setSelectionRange(_start: number, _end: number): void {}
 
-  getAttribute(_name: string): string | null {
-    return null;
+  getAttribute(name: string): string | null {
+    return this.attributes.get(name) ?? null;
   }
 
-  setAttribute(_name: string, _value: string): void {}
+  setAttribute(name: string, value: string): void {
+    this.attributes.set(name, value);
+  }
 }
 
 function createRuntimeHarness() {
@@ -187,7 +190,7 @@ function createRuntimeHarness() {
 }
 
 describe("webview-js-event-handler runtime", () => {
-  it("updates only the visible settings labels for ready/settingsUpdated messages", () => {
+  it("updates the visible settings labels and ready status text for ready/settingsUpdated messages", () => {
     const harness = createRuntimeHarness();
 
     expect(harness.postMessages).toEqual([{ type: "webviewReady" }]);
@@ -215,7 +218,60 @@ describe("webview-js-event-handler runtime", () => {
     expect(harness.getElement("current-mode").textContent).toBe("agent");
     expect(harness.getElement("current-model").textContent).toBe("deepseek-v4-pro");
     expect(harness.getElement("current-reasoning").textContent).toBe("high");
+    expect(harness.getElement("status-text").textContent).toBe("Ready (deepseek-v4-pro)");
     expect(harness.postMessages).toEqual([{ type: "webviewReady" }]);
+  });
+
+  it("updates the visible model label and ready status text from providerModels currentModel", () => {
+    const harness = createRuntimeHarness();
+
+    harness.getElement("current-model").textContent = "deepseek-v4-pro";
+
+    harness.dispatchMessage({
+      type: "providerModels",
+      provider: "openai",
+      models: ["gpt-4.1", "gpt-4.1-mini"],
+      currentModel: "gpt-4.1",
+      hasCatalog: true,
+    });
+
+    expect(harness.getElement("current-model").textContent).toBe("gpt-4.1");
+    expect(harness.getElement("status-text").textContent).toBe("Ready (gpt-4.1)");
+  });
+
+  it("ignores stale providerModels responses for a provider that is no longer active", () => {
+    const harness = createRuntimeHarness();
+
+    harness.dispatchMessage({
+      type: "providersUpdated",
+      current: "volcengine",
+      providers: [
+        { id: "deepseek", display_name: "DeepSeek" },
+        { id: "volcengine", display_name: "Volcengine Ark" },
+      ],
+    });
+    harness.getElement("current-model").textContent = "DeepSeek-V4-Pro";
+
+    harness.dispatchMessage({
+      type: "providerModels",
+      provider: "deepseek",
+      models: ["deepseek-v4-pro", "deepseek-v4-flash"],
+      currentModel: "deepseek-v4-pro",
+      hasCatalog: true,
+    });
+
+    expect(harness.getElement("current-model").textContent).toBe("DeepSeek-V4-Pro");
+
+    harness.dispatchMessage({
+      type: "providerModels",
+      provider: "volcengine",
+      models: ["DeepSeek-V4-Pro", "DeepSeek-V4-Flash"],
+      currentModel: "DeepSeek-V4-Flash",
+      hasCatalog: true,
+    });
+
+    expect(harness.getElement("current-model").textContent).toBe("DeepSeek-V4-Flash");
+    expect(harness.getElement("status-text").textContent).toBe("Ready (DeepSeek-V4-Flash)");
   });
 
   it("routes taskDetail and agentDetail messages to the sidebar detail views", () => {

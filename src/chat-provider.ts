@@ -6,6 +6,7 @@ import { SlashCommandHandler, type SlashCommandContext } from "./commands/slash-
 import {
   CodeWhaleApiClient,
   CodeWhaleEngine,
+  ProviderEntry,
   RuntimeApiCapabilities,
   RuntimeEvent,
   TaskRecord,
@@ -116,6 +117,12 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
   private currentAttachments: Array<{ kind: string; path: string; name: string }> = [];
   private showAllWorkspaces: boolean = false;
   private runtimeVersion: string | null = null;
+  /** Cached provider list from `GET /v1/providers`. Refreshed on init and
+   * after the active provider changes so the webview picker stays in sync. */
+  private providersCache: ProviderEntry[] | null = null;
+  /** Active provider id (mirrors `GuiConfigResponse.provider`). Used to
+   * render the picker's selected value without waiting for a config refresh. */
+  private currentProvider: string | null = null;
   private apiCapabilities: RuntimeApiCapabilities = {
     saveSession: false,
     threadUndo: false,
@@ -266,6 +273,17 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
           msg.args as string
         );
         break;
+      case "switchProvider":
+        await this.handleSwitchProvider(msg.provider as string, msg.model as string | undefined);
+        break;
+      case "switchProviderFromSlash":
+        // Forwarded from the /provider slash command handler — convert to the
+        // standard switchProvider flow so all state updates go through one path.
+        await this.handleSwitchProvider(msg.provider as string, msg.model as string | undefined);
+        break;
+      case "requestProviderModels":
+        await this.handleRequestProviderModels(msg.provider as string);
+        break;
       case "newThread":
         await this.handleNewThread();
         break;
@@ -374,6 +392,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
   private async syncWebviewState(): Promise<void> {
     await this.refreshRuntimeVersion();
     await this.refreshApiCapabilities();
+    await this.refreshProviders();
     this.refreshSessionList();
     this.refreshThreadList();
     this.refreshTaskList();
@@ -391,13 +410,14 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
 
     const cfg = vscode.workspace.getConfiguration("brotherwhale");
     this.postMessage({
-      type: "ready",
-      model: this.getCurrentModel(),
-      mode: this.getCurrentMode(),
-      reasoningEffort: this.getCurrentReasoningEffort(),
-      runtimeVersion: this.runtimeVersion,
-      showThreadList: cfg.get<boolean>("showThreadList", false),
-    });
+        type: "ready",
+        model: this.getCurrentModel(),
+        mode: this.getCurrentMode(),
+        reasoningEffort: this.getCurrentReasoningEffort(),
+        provider: this.currentProvider || undefined,
+        runtimeVersion: this.runtimeVersion,
+        showThreadList: cfg.get<boolean>("showThreadList", false),
+      });
   }
 
   // ── Initialization ──
@@ -443,12 +463,17 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       }
 
       this.debugLog("initializeThread SUCCESS, posting ready");
+      // Refresh provider list in the background so the picker is populated
+      // even on first load. Don't await — this is best-effort and must not
+      // block the ready signal.
+      void this.refreshProviders();
       var initCfg = vscode.workspace.getConfiguration("brotherwhale");
       this.postMessage({ 
         type: "ready", 
         model: this.currentThread?.model || this.getCurrentModel(),
         mode: this.currentThread?.mode || this.getCurrentMode(),
         reasoningEffort: this.getCurrentReasoningEffort(),
+        provider: this.currentProvider || undefined,
         runtimeVersion: this.runtimeVersion,
         showThreadList: initCfg.get<boolean>("showThreadList", false),
       });
@@ -464,6 +489,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         model: this.currentThread?.model || this.getCurrentModel(),
         mode: this.currentThread?.mode || this.getCurrentMode(),
         reasoningEffort: this.getCurrentReasoningEffort(),
+        provider: this.currentProvider || undefined,
         runtimeVersion: this.runtimeVersion,
         showThreadList: errCfg.get<boolean>("showThreadList", false),
       });
@@ -1693,6 +1719,141 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     } catch {
       this.runtimeVersion = null;
     }
+  }
+
+  /**
+   * Fetch the provider list from `GET /v1/providers` and push it to the
+   * webview. Called on init and after a provider switch so the picker stays
+   * in sync with the backend.
+   *
+   * Failures are logged but not surfaced to the user — the picker falls
+   * back to the hard-coded deepseek-only list baked into the HTML.
+   */
+  private async refreshProviders(): Promise<void> {
+    try {
+      const resp = await this.api.listProviders();
+      this.providersCache = resp.providers;
+      this.currentProvider = resp.current;
+      this.postProviders();
+    } catch (err) {
+      this.debugLog(`refreshProviders failed: ${getErrorMessage(err)}`);
+    }
+  }
+
+  /** Push the cached provider list + active provider to the webview. */
+  private postProviders(): void {
+    if (!this.providersCache) return;
+    this.postMessage({
+      type: "providersUpdated",
+      providers: this.providersCache,
+      current: this.currentProvider || "",
+    });
+  }
+
+  /**
+   * Handle `switchProvider` webview message: delegate to the TUI's
+   * `POST /v1/providers/{id}/switch` endpoint, which atomically persists
+   * `provider` (+ optional `model`), reloads config, and returns the
+   * backend-resolved active model.
+   *
+   * This mirrors the TUI's `/provider` command flow exactly: the backend
+   * decides whether to persist `model` based on whether the caller passed
+   * one. Previously the GUI emulated this with separate
+   * `setConfig({key:"provider"})` + `setConfig({key:"model"})` + `reloadConfig`
+   * calls, which clobbered the user's per-provider `model` config with the
+   * catalog default when the picker was clicked without an explicit model.
+   *
+   * The resolved `model` in the response is what the runtime will actually
+   * use for new turns — display THAT, not the cached
+   * `ProviderEntry.default_model`, so the UI matches reality when the user
+   * has `[providers.<id>].model` configured.
+   */
+  private async handleSwitchProvider(providerId: string, model?: string): Promise<void> {
+    const trimmed = providerId.trim();
+    if (!trimmed) {
+      this.postMessage({ type: "error", message: "Empty provider id" });
+      return;
+    }
+    try {
+      // Single backend call: persists provider (+ model only when given),
+      // reloads config, syncs to engines, and returns the resolved model.
+      const effectiveModel = model?.trim() || undefined;
+      const resp = await this.api.switchProvider(trimmed, effectiveModel);
+      const resolvedModel = resp.model;
+
+      // Keep the VSCode-side `defaultModel` config in sync with the
+      // backend-resolved model so other UI surfaces (status bar, slash
+      // commands) read the same value. Only write when the user explicitly
+      // chose a model — when they didn't, the backend's resolved model may
+      // already reflect their per-provider config and we don't want to
+      // surface it as a global default.
+      if (effectiveModel) {
+        await vscode.workspace.getConfiguration("brotherwhale").update(
+          "defaultModel", resolvedModel, vscode.ConfigurationTarget.Global
+        );
+      }
+
+      await this.refreshProviders();
+      await this.handleRequestProviderModels(trimmed, resolvedModel);
+      this.postMessage({
+        type: "settingsUpdated",
+        model: resolvedModel,
+        mode: this.getCurrentMode(),
+        reasoningEffort: this.getCurrentReasoningEffort(),
+        provider: resp.provider || trimmed,
+      });
+      this.postMessage({
+        type: "info",
+        message: resp.message ||
+          `Provider switched to ${resp.provider || trimmed} (model: ${resolvedModel}).`,
+      });
+    } catch (err) {
+      this.postMessage({
+        type: "error",
+        message: `Failed to switch provider: ${getErrorMessage(err)}`,
+      });
+    }
+  }
+
+  /**
+   * Handle `requestProviderModels` webview message: fetch the model catalog
+   * for a provider and push it to the webview so the model dropdown can be
+   * re-rendered. Used when the user picks a different provider.
+   */
+  private async handleRequestProviderModels(providerId: string, currentModel?: string): Promise<void> {
+    const trimmed = providerId.trim();
+    if (!trimmed) return;
+    try {
+      const resp = await this.api.listProviderModels(trimmed);
+      // Determine whether this provider has a built-in catalog so the
+      // webview can show a free-text hint when models is empty.
+      const info = this.providersCache?.find(p => p.id === trimmed);
+      const effectiveCurrentModel = currentModel?.trim()
+        || info?.default_model
+        || undefined;
+      this.postMessage({
+        type: "providerModels",
+        provider: trimmed,
+        models: resp.models.map(m => m.id),
+        currentModel: effectiveCurrentModel,
+        hasCatalog: info ? info.has_model_catalog : (resp.models.length > 0),
+      });
+    } catch (err) {
+      this.postMessage({
+        type: "error",
+        message: `Failed to list models for provider ${trimmed}: ${getErrorMessage(err)}`,
+      });
+    }
+  }
+
+  /** Public accessor for slash command handlers (`/provider`, `/models`). */
+  public getProvidersCache(): ProviderEntry[] | null {
+    return this.providersCache;
+  }
+
+  /** Public accessor for the active provider id. */
+  public getCurrentProvider(): string | null {
+    return this.currentProvider;
   }
 
   private startPeriodicTaskRefresh(): void {

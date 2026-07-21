@@ -45,6 +45,9 @@ import type {
   SetConfigRequest,
   SetConfigResponse,
   ReloadConfigResponse,
+  ProvidersResponse,
+  ProviderModelsResponse,
+  SwitchProviderResponse,
   EventListener,
   EngineRef,
 } from "../types";
@@ -94,6 +97,9 @@ export type {
   AgentRunsResponse,
   EventListener,
   EngineRef,
+  ProvidersResponse,
+  ProviderModelsResponse,
+  SwitchProviderResponse,
 };
 
 const NOT_SYNCED: unique symbol = Symbol("NOT_SYNCED");
@@ -562,6 +568,54 @@ export class CodeWhaleApiClient {
 
   async reloadConfig(): Promise<ReloadConfigResponse> {
     return (await this.post("/v1/config/reload", {})) as ReloadConfigResponse;
+  }
+
+  // ── Provider / Model catalog ──
+
+  /**
+   * List all supported providers and the currently active one.
+   *
+   * Backed by `GET /v1/providers`. The GUI should call this on startup and
+   * whenever the provider picker needs to be rendered, then cache the result
+   * for the session.
+   */
+  async listProviders(): Promise<ProvidersResponse> {
+    return (await this.get("/v1/providers")) as ProvidersResponse;
+  }
+
+  /**
+   * List the built-in model catalog for a provider.
+   *
+   * Backed by `GET /v1/providers/{id}/models`. Returns an empty list for
+   * pass-through providers (Ollama, Custom) — callers should fall back to a
+   * free-text input when `ProviderEntry.has_model_catalog` is false.
+   */
+  async listProviderModels(providerId: string): Promise<ProviderModelsResponse> {
+    return (await this.get(`/v1/providers/${encodeURIComponent(providerId)}/models`)) as ProviderModelsResponse;
+  }
+
+  /**
+   * Switch the active provider, optionally overriding the model.
+   *
+   * Backed by `POST /v1/providers/{id}/switch` — the GUI-facing counterpart
+   * of the TUI's `/provider` slash command. The backend persists `provider`
+   * always, and persists `model` only when `model` is provided, mirroring
+   * `tui/ui.rs::switch_provider`. The resolved active model is returned in
+   * the response and must be used for display (NOT the cached
+   * `ProviderEntry.default_model`).
+   *
+   * Callers SHOULD NOT chain `setConfig({key:"provider"})` + `reloadConfig()`
+   * around this — that flow historically clobbered the user's per-provider
+   * `model` config with the catalog default.
+   */
+  async switchProvider(providerId: string, model?: string): Promise<SwitchProviderResponse> {
+    const body: Record<string, unknown> = {};
+    const trimmedModel = model?.trim();
+    if (trimmedModel) body.model = trimmedModel;
+    return (await this.post(
+      `/v1/providers/${encodeURIComponent(providerId)}/switch`,
+      body
+    )) as SwitchProviderResponse;
   }
 
   // ── SSE Event Stream ──

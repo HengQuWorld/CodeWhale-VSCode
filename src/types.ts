@@ -563,6 +563,65 @@ export interface ReloadConfigResponse {
   message: string;
 }
 
+// ── Provider / Model catalog ──
+
+export interface ProviderEntry {
+  /** Stable id matching `ApiProvider::as_str()`. Use as the canonical value
+   * when persisting `provider = "<id>"` or comparing. */
+  id: string;
+  /** Human-friendly name for picker UIs (e.g. "DeepSeek", "OpenAI"). */
+  display_name: string;
+  /** Default base URL. Informational; the live value may be overridden in
+   * config.toml. */
+  default_base_url: string;
+  /** Default model id for this provider, or empty string for pass-through
+   * providers (Ollama / Custom). */
+  default_model: string;
+  /** When false, the provider exposes no built-in model list — render a
+   * free-text input instead of calling `/v1/providers/{id}/models`. */
+  has_model_catalog: boolean;
+  /** API key environment variable candidates. */
+  env_vars: string[];
+}
+
+export interface ProvidersResponse {
+  /** Currently active provider id (matches `GuiConfigResponse.provider`). */
+  current: string;
+  providers: ProviderEntry[];
+}
+
+export interface ProviderModelEntry {
+  /** Canonical model id suitable for `default_text_model` or
+   * `POST /v1/threads/{id}` `model` field. */
+  id: string;
+}
+
+export interface ProviderModelsResponse {
+  provider: string;
+  models: ProviderModelEntry[];
+}
+
+// ── Provider switch ──
+
+/** Request body for `POST /v1/providers/{id}/switch`.
+ *  `model` is optional: when omitted, the TUI resolves the active model from
+ *  `[providers.<id>].model` (or its built-in default) and does NOT persist a
+ *  `model` key — mirroring the TUI's `/provider <id>` command (model: None). */
+export interface SwitchProviderRequest {
+  model?: string;
+}
+
+/** Response for `POST /v1/providers/{id}/switch`. The GUI must display
+ *  `model` (the backend-resolved active model) instead of the cached
+ *  `ProviderEntry.default_model`, so the UI matches the runtime's actual
+ *  state when the user has a per-provider `model` configured. */
+export interface SwitchProviderResponse {
+  provider: string;
+  model: string;
+  message: string;
+  persisted: boolean;
+}
+
 // ── Re-exports from other modules ──
 
 export { CodeWhaleEngine } from "./api/engine";

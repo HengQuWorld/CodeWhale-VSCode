@@ -15,7 +15,7 @@ import { t } from "../i18n";
 import { formatCostAmount } from "../utils/cost-calculator";
 import { isCommandAvailableInGui } from "./slash-commands";
 import { formatError, getErrorMessage } from "../utils/error-handler";
-import type { CodeWhaleApiClient, CodeWhaleEngine, ThreadRecord, TaskSummary } from "../types";
+import type { CodeWhaleApiClient, CodeWhaleEngine, ThreadRecord, TaskSummary, ProviderEntry } from "../types";
 
 // ── Context interface for dependency injection ──
 
@@ -35,6 +35,12 @@ export interface SlashCommandContext {
 
   postMessage(msg: Record<string, unknown>): void;
   getCurrentModel(): string;
+  /** Returns the cached provider list from `GET /v1/providers`, or null if
+   * not yet loaded. Slash handlers (`/provider`, `/models`) use this to
+   * render dynamic output instead of the hard-coded deepseek-only list. */
+  getProvidersCache(): ProviderEntry[] | null;
+  /** Returns the active provider id, or null if not yet loaded. */
+  getCurrentProvider(): string | null;
   /** Returns the current session ID tracking auto-save continuity, or null if none. */
   getCurrentSessionId(): string | null;
   /** Sets the current session ID for auto-save continuity. Pass null to reset. */
@@ -160,6 +166,33 @@ async function handleModel(ctx: SlashCommandContext, args: string): Promise<void
 }
 
 async function handleModels(ctx: SlashCommandContext, _args: string): Promise<void> {
+  // Prefer the dynamic provider catalog when available. Falls back to the
+  // legacy hard-coded list only if the backend hasn't returned a provider
+  // list yet (e.g. older TUI runtime without GET /v1/providers).
+  const providers = ctx.getProvidersCache();
+  const currentProvider = ctx.getCurrentProvider();
+  if (providers && providers.length > 0) {
+    const target = providers.find(p => p.id === currentProvider) || providers[0];
+    const lines: string[] = [`Available models for provider ${target.id} (${target.display_name}):`];
+    if (target.has_model_catalog) {
+      // Fetch live catalog via the API for accuracy. This is async but
+      // handleModels is already async, so we can await it.
+      try {
+        const resp = await ctx.api.listProviderModels(target.id);
+        for (const m of resp.models) {
+          lines.push(`- ${m.id}${m.id === ctx.getCurrentModel() ? " (current)" : ""}`);
+        }
+      } catch (err) {
+        lines.push(`(failed to fetch model list: ${getErrorMessage(err)})`);
+      }
+    } else {
+      lines.push("(this provider exposes no built-in model list; pass any model id to /model)");
+    }
+    lines.push("");
+    lines.push(`Tip: switch provider via /provider <id>. Available providers: ${providers.map(p => p.id).join(", ")}`);
+    ctx.postMessage({ type: "info", message: lines.join("\n") });
+    return;
+  }
   ctx.postMessage({ type: "info", message: "Available models:\n- deepseek-v4-pro\n- deepseek-v4-flash\n- deepseek-chat (alias for deepseek-v4-flash)\n- deepseek-reasoner (alias for deepseek-v4-flash)" });
 }
 
@@ -560,8 +593,50 @@ async function handleMcp(ctx: SlashCommandContext, _args: string): Promise<void>
   ctx.postMessage({ type: "info", message: "MCP server configuration is available in VSCode settings." });
 }
 
-async function handleProvider(ctx: SlashCommandContext, _args: string): Promise<void> {
-  ctx.postMessage({ type: "info", message: "Provider is configured via DEEPSEEK_API_KEY environment variable. Use /config to open settings." });
+async function handleProvider(ctx: SlashCommandContext, args: string): Promise<void> {
+  const trimmed = args.trim();
+  const providers = ctx.getProvidersCache();
+  const current = ctx.getCurrentProvider();
+
+  // /provider <id> [model] — switch provider (and optionally model).
+  if (trimmed) {
+    const parts = trimmed.split(/\s+/);
+    const providerId = parts[0];
+    const model = parts.slice(1).join(" ") || undefined;
+    const known = providers?.find(p => p.id === providerId);
+    if (providers && !known) {
+      ctx.postMessage({
+        type: "error",
+        message: `Unknown provider '${providerId}'. Available: ${providers.map(p => p.id).join(", ")}`,
+      });
+      return;
+    }
+    // Delegate to the chat-provider's switchProvider flow (persist + reload +
+    // refresh). Posting a switchProvider message lets the chat-provider own
+    // the state machine instead of duplicating it here.
+    ctx.postMessage({ type: "switchProviderFromSlash", provider: providerId, model });
+    return;
+  }
+
+  // /provider — show current provider + available list.
+  const lines: string[] = [];
+  if (current) {
+    lines.push(`Current provider: ${current}`);
+  } else {
+    lines.push("Current provider: (unknown — backend has not reported yet)");
+  }
+  if (providers && providers.length > 0) {
+    lines.push("");
+    lines.push("Available providers (use /provider <id> [model] to switch):");
+    for (const p of providers) {
+      const marker = p.id === current ? " *" : "";
+      lines.push(`- ${p.id}${marker}  (${p.display_name})`);
+    }
+  } else {
+    lines.push("");
+    lines.push("Provider catalog not yet loaded. Use /config to set `provider` manually.");
+  }
+  ctx.postMessage({ type: "info", message: lines.join("\n") });
 }
 
 async function handleLinks(ctx: SlashCommandContext, _args: string): Promise<void> {

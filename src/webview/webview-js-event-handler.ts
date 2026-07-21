@@ -18,6 +18,9 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
   var currentModeEl = document.getElementById('current-mode');
   var currentModelEl = document.getElementById('current-model');
   var currentReasoningEl = document.getElementById('current-reasoning');
+  var currentProviderEl = document.getElementById('current-provider');
+  var dropdownProviderEl = document.getElementById('dropdown-provider');
+  var dropdownModelEl = document.getElementById('dropdown-model');
   var _diffStore = window.__wvDiffStore;
   var _diffIdCounter = window.__wvDiffIdCounter;
 
@@ -100,6 +103,50 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
     statusStatsEl.innerHTML = statsHtml;
   }
 
+  // ── Provider / model dropdown renderers ──
+  // These rebuild the dropdown items from data pushed by the backend so the
+  // picker reflects the live provider registry instead of the hard-coded
+  // deepseek-only list baked into the HTML.
+
+  function renderProviderDropdown(providers, currentId) {
+    if (!dropdownProviderEl) return;
+    dropdownProviderEl.innerHTML = '';
+    for (var i = 0; i < providers.length; i++) {
+      var p = providers[i];
+      var item = document.createElement('div');
+      item.className = 'dropdown-item';
+      item.setAttribute('data-value', p.id);
+      // Show display_name (e.g. "OpenAI") when available, falling back to id.
+      var label = p.display_name || p.id;
+      if (p.id === currentId) label = label + ' \\u2713';
+      item.textContent = label;
+      dropdownProviderEl.appendChild(item);
+    }
+    if (currentProviderEl) {
+      currentProviderEl.setAttribute('data-provider-id', currentId || '');
+      // Show the display_name of the active provider if we can find it;
+      // otherwise fall back to the raw id.
+      var active = null;
+      for (var j = 0; j < providers.length; j++) {
+        if (providers[j].id === currentId) { active = providers[j]; break; }
+      }
+      currentProviderEl.textContent = active ? (active.display_name || active.id) : currentId;
+    }
+  }
+
+  function renderModelDropdown(models, currentModel) {
+    if (!dropdownModelEl) return;
+    dropdownModelEl.innerHTML = '';
+    for (var i = 0; i < models.length; i++) {
+      var id = models[i];
+      var item = document.createElement('div');
+      item.className = 'dropdown-item';
+      item.setAttribute('data-value', id);
+      item.textContent = id === currentModel ? id + ' \\u2713' : id;
+      dropdownModelEl.appendChild(item);
+    }
+  }
+
   // ── Tell extension we're ready ──
   vscode.postMessage({ type: 'webviewReady' });
 
@@ -152,6 +199,10 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
             vscode.postMessage({ type: 'slashCommand', command: '/model', args: val });
           } else if (setting === 'reasoning') {
             vscode.postMessage({ type: 'slashCommand', command: '/reasoning', args: val });
+          } else if (setting === 'provider') {
+            // Switching provider triggers a runtime reload. The model list
+            // will be re-rendered when the backend pushes providerModels.
+            vscode.postMessage({ type: 'switchProvider', provider: val });
           }
         }
       }
@@ -184,15 +235,76 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
         if (msg.mode) currentModeEl.textContent = msg.mode;
         if (msg.model) currentModelEl.textContent = msg.model;
         if (msg.reasoningEffort) currentReasoningEl.textContent = msg.reasoningEffort;
+        if (msg.provider && currentProviderEl) currentProviderEl.textContent = msg.provider;
         runtimeVersion = msg.runtimeVersion || runtimeVersion || '';
         renderStatusStats();
         window.__wvSidebar.applyShowThreadList(!!msg.showThreadList);
         break;
 
       case 'settingsUpdated':
+        if (msg.model) {
+          setStreamingState(false, '${tr.ready} (' + msg.model + ')');
+        }
         if (msg.mode) currentModeEl.textContent = msg.mode;
         if (msg.model) currentModelEl.textContent = msg.model;
         if (msg.reasoningEffort) currentReasoningEl.textContent = msg.reasoningEffort;
+        if (msg.provider && currentProviderEl) {
+          currentProviderEl.textContent = msg.provider;
+          currentProviderEl.setAttribute('data-provider-id', msg.provider);
+        }
+        break;
+
+      case 'providersUpdated':
+        // Backend pushed the full provider list + active id. Re-render the
+        // provider dropdown and request the model catalog for the active
+        // provider so the model dropdown stays in sync.
+        if (Array.isArray(msg.providers) && dropdownProviderEl && currentProviderEl) {
+          renderProviderDropdown(msg.providers, msg.current || '');
+          // After re-rendering, ask the backend for the active provider's
+          // model list so the model dropdown reflects the new provider.
+          var activeId = msg.current || (msg.providers[0] && msg.providers[0].id);
+          if (activeId) {
+            vscode.postMessage({ type: 'requestProviderModels', provider: activeId });
+          }
+        }
+        break;
+
+      case 'providerModels':
+        // Backend pushed the model catalog for a provider. Re-render the
+        // model dropdown. For pass-through providers (Ollama, Custom) with
+        // no built-in catalog, show a placeholder item so the dropdown
+        // isn't empty — the user can still set a model via /model.
+        if (dropdownModelEl) {
+          var activeProviderId = currentProviderEl
+            ? (currentProviderEl.getAttribute('data-provider-id') || '').trim()
+            : '';
+          var responseProviderId = (msg.provider || '').trim();
+          if (activeProviderId && responseProviderId && activeProviderId !== responseProviderId) {
+            break;
+          }
+          var models = Array.isArray(msg.models) ? msg.models : [];
+          var selectedModel = (msg.currentModel || '').trim();
+          if (!selectedModel && currentModelEl) {
+            selectedModel = currentModelEl.textContent.trim();
+          }
+          if (selectedModel && currentModelEl) {
+            currentModelEl.textContent = selectedModel;
+            setStreamingState(false, '${tr.ready} (' + selectedModel + ')');
+          }
+          if (models.length === 0 && !msg.hasCatalog) {
+            // No-catalog provider: show a single placeholder hint.
+            dropdownModelEl.innerHTML = '';
+            var hint = document.createElement('div');
+            hint.className = 'dropdown-item';
+            hint.setAttribute('data-value', '');
+            hint.textContent = '(enter model id with /model)';
+            hint.style.opacity = '0.6';
+            hint.style.pointerEvents = 'none';
+            dropdownModelEl.appendChild(hint);
+          } else {
+            renderModelDropdown(models, selectedModel);
+          }
+        }
         break;
 
       case 'sessionList':

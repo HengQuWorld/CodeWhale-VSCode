@@ -5,7 +5,7 @@
  */
 
 import * as vscode from "vscode";
-import type { CodeWhaleApiClient, GuiConfigResponse } from "./types";
+import type { CodeWhaleApiClient, GuiConfigResponse, ProviderEntry } from "./types";
 import { getErrorMessage } from "./utils/error-handler";
 
 export class ConfigPanel {
@@ -14,6 +14,7 @@ export class ConfigPanel {
   private readonly api: CodeWhaleApiClient;
   private readonly extensionUri: vscode.Uri;
   private disposables: vscode.Disposable[] = [];
+  private providersCache: ProviderEntry[] | null = null;
 
   private constructor(
     panel: vscode.WebviewPanel,
@@ -38,6 +39,10 @@ export class ConfigPanel {
 
     // Load initial config
     this.loadConfig();
+    // Load provider catalog so the provider/model selects are populated
+    // dynamically instead of being limited to the hard-coded deepseek-only
+    // options baked into the HTML.
+    this.loadProviders();
   }
 
   public static createOrShow(
@@ -69,10 +74,67 @@ export class ConfigPanel {
     try {
       const config = await this.api.getConfig();
       this.panel.webview.postMessage({ type: "configData", config });
+      // After loading config, refresh the model list for the active provider
+      // so the model <select> reflects the provider's catalog rather than
+      // the hard-coded deepseek-only list.
+      if (config.provider) {
+        this.loadProviderModels(config.provider, config.model);
+      }
     } catch (err) {
       this.panel.webview.postMessage({
         type: "error",
         message: `Failed to load config: ${getErrorMessage(err)}`,
+      });
+    }
+  }
+
+  /**
+   * Fetch the provider catalog from `GET /v1/providers` and push it to the
+   * webview so the provider <select> can be re-rendered dynamically. Falls
+   * back silently on error — the hard-coded deepseek option remains.
+   */
+  private async loadProviders(): Promise<void> {
+    try {
+      const resp = await this.api.listProviders();
+      this.providersCache = resp.providers;
+      this.panel.webview.postMessage({
+        type: "providersData",
+        providers: resp.providers,
+        current: resp.current,
+      });
+    } catch (err) {
+      // Non-fatal: the static deepseek-only <option> stays in place.
+      this.panel.webview.postMessage({
+        type: "error",
+        message: `Failed to load providers: ${getErrorMessage(err)}`,
+      });
+    }
+  }
+
+  /**
+   * Fetch the model catalog for a provider and push it to the webview so
+   * the model <select> can be re-rendered when the provider changes.
+   */
+  private async loadProviderModels(
+    providerId: string,
+    currentModel?: string,
+    previewBaseUrl?: string,
+  ): Promise<void> {
+    try {
+      const resp = await this.api.listProviderModels(providerId);
+      const info = this.providersCache?.find(p => p.id === providerId);
+      this.panel.webview.postMessage({
+        type: "providerModels",
+        provider: providerId,
+        models: resp.models.map(m => m.id),
+        currentModel: currentModel || "",
+        previewBaseUrl,
+        hasCatalog: info ? info.has_model_catalog : (resp.models.length > 0),
+      });
+    } catch (err) {
+      this.panel.webview.postMessage({
+        type: "error",
+        message: `Failed to load models for ${providerId}: ${getErrorMessage(err)}`,
       });
     }
   }
@@ -155,6 +217,19 @@ export class ConfigPanel {
           });
         }
         break;
+      case "providerChanged": {
+        // User changed the provider <select> in the form. Fetch the new
+        // provider's model catalog so the model <select> updates. This does
+        // NOT persist the change — that happens when the user clicks "Apply
+        // to Backend". It only re-renders the model options for preview.
+        const providerId = msg.provider as string;
+        if (providerId) {
+          const providerInfo = this.providersCache?.find(p => p.id === providerId);
+          const previewModel = providerInfo?.default_model;
+          await this.loadProviderModels(providerId, previewModel, providerInfo?.default_base_url);
+        }
+        break;
+      }
     }
   }
 
@@ -295,8 +370,6 @@ export class ConfigPanel {
           <select id="cfg-model">
             <option value="deepseek-v4-pro">deepseek-v4-pro</option>
             <option value="deepseek-v4-flash">deepseek-v4-flash</option>
-            <option value="deepseek-chat">deepseek-chat</option>
-            <option value="deepseek-reasoner">deepseek-reasoner</option>
             <option value="auto">auto</option>
           </select>
         </div>
@@ -346,6 +419,7 @@ export class ConfigPanel {
         <div class="field-value">
           <select id="cfg-provider">
             <option value="deepseek">deepseek</option>
+            <!-- Dynamically populated from GET /v1/providers -->
           </select>
         </div>
       </div>
@@ -644,6 +718,16 @@ export class ConfigPanel {
       vscode.postMessage({ type: 'setConfigBatch', changes: changes });
     });
 
+    // When the user changes the provider dropdown, ask the backend for the
+    // new provider's model catalog so the model <select> updates as a
+    // preview (the change is NOT persisted until "Apply to Backend").
+    $('cfg-provider').addEventListener('change', function() {
+      var providerId = this.value;
+      if (providerId) {
+        vscode.postMessage({ type: 'providerChanged', provider: providerId });
+      }
+    });
+
     // ── Message handling ──
 
     window.addEventListener('message', function(event) {
@@ -651,6 +735,60 @@ export class ConfigPanel {
       if (msg.type === 'configData') {
         populateForm(msg.config);
         showStatus('Config loaded', 'info');
+      } else if (msg.type === 'providersData') {
+        // Backend pushed the provider catalog — rebuild the provider <select>.
+        var sel = $('cfg-provider');
+        if (sel && Array.isArray(msg.providers)) {
+          sel.innerHTML = '';
+          for (var i = 0; i < msg.providers.length; i++) {
+            var p = msg.providers[i];
+            var opt = document.createElement('option');
+            opt.value = p.id;
+            opt.textContent = p.display_name || p.id;
+            if (p.id === msg.current) opt.selected = true;
+            sel.appendChild(opt);
+          }
+        }
+      } else if (msg.type === 'providerModels') {
+        // Backend pushed the model catalog for a provider — rebuild the
+        // model <select>.
+        var modelSel = $('cfg-model');
+        if (modelSel && Array.isArray(msg.models)) {
+          var explicitCurrentModel = typeof msg.currentModel === 'string'
+            ? msg.currentModel.trim()
+            : '';
+          var hasExplicitCurrentModel = explicitCurrentModel.length > 0;
+          var prev = hasExplicitCurrentModel ? explicitCurrentModel : modelSel.value;
+          modelSel.innerHTML = '';
+          if (msg.models.length === 0) {
+            // Pass-through provider — add an "auto" placeholder.
+            var autoOpt = document.createElement('option');
+            autoOpt.value = 'auto';
+            autoOpt.textContent = 'auto (enter model id manually)';
+            modelSel.appendChild(autoOpt);
+          }
+          for (var j = 0; j < msg.models.length; j++) {
+            var mOpt = document.createElement('option');
+            mOpt.value = msg.models[j];
+            mOpt.textContent = msg.models[j];
+            if (msg.models[j] === prev) mOpt.selected = true;
+            modelSel.appendChild(mOpt);
+          }
+          // If the previous value wasn't in the new list, add it as a
+          // custom option so the user doesn't lose their choice. Skip this
+          // when the backend has already told us the target provider's
+          // explicit current model for the preview.
+          if (!hasExplicitCurrentModel && prev && !msg.models.includes(prev)) {
+            var customOpt = document.createElement('option');
+            customOpt.value = prev;
+            customOpt.textContent = prev + ' (custom)';
+            customOpt.selected = true;
+            modelSel.appendChild(customOpt);
+          }
+        }
+        if (typeof msg.previewBaseUrl === 'string') {
+          setFieldValue('cfg-base_url', msg.previewBaseUrl);
+        }
       } else if (msg.type === 'setConfigResult') {
         if (msg.success) {
           showStatus(msg.key + ' = ' + msg.value + ' applied', 'success');

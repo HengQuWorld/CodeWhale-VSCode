@@ -273,6 +273,15 @@ ${css}
           </div>
         </div>
         <div class="setting-item">
+          <span class="setting-label">Provider:</span>
+          <div class="setting-dropdown" data-setting="provider">
+            <span class="setting-value" id="current-provider">deepseek</span>
+            <div class="dropdown-menu" id="dropdown-provider">
+              <div class="dropdown-item" data-value="deepseek">deepseek</div>
+            </div>
+          </div>
+        </div>
+        <div class="setting-item">
           <span class="setting-label">${tr.modelLabel}:</span>
           <div class="setting-dropdown" data-setting="model">
             <span class="setting-value" id="current-model">deepseek-v4-pro</span>
