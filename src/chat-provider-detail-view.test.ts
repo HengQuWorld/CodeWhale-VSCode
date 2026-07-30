@@ -44,6 +44,16 @@ vi.mock("vscode", () => ({
 
 import { ChatProvider } from "./chat-provider";
 
+function createDeferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
 describe("ChatProvider detail view routing", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -248,9 +258,22 @@ describe("ChatProvider detail view routing", () => {
 
     await provider.refreshTaskList();
 
-    expect(api.getThreadDetail).toHaveBeenCalledTimes(1);
-    expect(api.getThreadDetail).toHaveBeenCalledWith("thread-1");
-    expect(provider.postMessage).toHaveBeenCalledWith({
+    // Phase 1: raw list sent immediately (no pending_approvals yet).
+    const pmMock = provider.postMessage as ReturnType<typeof vi.fn>;
+    const call1 = pmMock.mock.calls[0][0] as Record<string, unknown>;
+    expect(call1.type).toBe("taskList");
+    const rawTasks = call1.tasks as Array<Record<string, unknown>>;
+    expect(rawTasks).toHaveLength(2);
+    expect(rawTasks[0].id).toBe("task-1");
+    expect(rawTasks[0]).not.toHaveProperty("pending_approvals");
+    expect(rawTasks[1].id).toBe("task-2");
+    // Phase 2: enrichment runs async; wait for the enriched taskList message.
+    await vi.waitFor(() => {
+      expect(api.getThreadDetail).toHaveBeenCalledTimes(1);
+      expect(api.getThreadDetail).toHaveBeenCalledWith("thread-1");
+      expect(provider.postMessage).toHaveBeenCalledTimes(2);
+    });
+    expect(provider.postMessage).toHaveBeenNthCalledWith(2, {
       type: "taskList",
       tasks: [
         expect.objectContaining({
@@ -259,6 +282,131 @@ describe("ChatProvider detail view routing", () => {
         }),
         expect.objectContaining({
           id: "task-2",
+        }),
+      ],
+    });
+  });
+
+  it("uses tuiWorkspace as the task filter fallback when no VS Code folder is open", async () => {
+    const api = {
+      bindEngine: vi.fn(),
+      listTasks: vi.fn(async () => ({
+        tasks: [],
+        counts: { queued: 0, running: 0, completed: 0, failed: 0, canceled: 0 },
+      })),
+    };
+
+    const provider = new ChatProvider({} as any, {} as any, api as any);
+    provider.postMessage = vi.fn();
+    (provider as any).tuiWorkspace = "/tmp/tui-workspace";
+
+    await provider.refreshTaskList();
+
+    expect(api.listTasks).toHaveBeenCalledWith({
+      limit: 50,
+      workspace: "/tmp/tui-workspace",
+    });
+  });
+
+  it("keeps the newest task list when enrichment from an older refresh resolves later", async () => {
+    const oldDetail = createDeferred<{ pending_approvals: Array<{ id: string; tool_name: string; description: string }>; pending_user_inputs: [] }>();
+    const newDetail = createDeferred<{ pending_approvals: Array<{ id: string; tool_name: string; description: string }>; pending_user_inputs: [] }>();
+
+    const api = {
+      bindEngine: vi.fn(),
+      listTasks: vi
+        .fn()
+        .mockResolvedValueOnce({
+          tasks: [
+            {
+              id: "task-old",
+              status: "running",
+              prompt_summary: "Old list",
+              model: "m",
+              mode: "agent",
+              workspace: "/tmp/old",
+              created_at: "2026-07-01T00:00:00Z",
+              started_at: null,
+              ended_at: null,
+              duration_ms: null,
+              error: null,
+              thread_id: "thread-old",
+              turn_id: "turn-old",
+            },
+          ],
+          counts: { queued: 0, running: 1, completed: 0, failed: 0, canceled: 0 },
+        })
+        .mockResolvedValueOnce({
+          tasks: [
+            {
+              id: "task-new",
+              status: "running",
+              prompt_summary: "New list",
+              model: "m",
+              mode: "agent",
+              workspace: "/tmp/new",
+              created_at: "2026-07-01T00:00:00Z",
+              started_at: null,
+              ended_at: null,
+              duration_ms: null,
+              error: null,
+              thread_id: "thread-new",
+              turn_id: "turn-new",
+            },
+          ],
+          counts: { queued: 0, running: 1, completed: 0, failed: 0, canceled: 0 },
+        }),
+      getThreadDetail: vi.fn((threadId: string) => {
+        if (threadId === "thread-old") {
+          return oldDetail.promise;
+        }
+        if (threadId === "thread-new") {
+          return newDetail.promise;
+        }
+        return Promise.resolve({
+          pending_approvals: [],
+          pending_user_inputs: [],
+        });
+      }),
+    };
+
+    const provider = new ChatProvider({} as any, {} as any, api as any);
+    provider.postMessage = vi.fn();
+
+    await provider.refreshTaskList();
+    await provider.refreshTaskList();
+
+    newDetail.resolve({
+      pending_approvals: [{ id: "approval-new", tool_name: "shell", description: "Newest approval" }],
+      pending_user_inputs: [],
+    });
+    await vi.waitFor(() => {
+      expect(provider.postMessage).toHaveBeenCalledWith({
+        type: "taskList",
+        tasks: [
+          expect.objectContaining({
+            id: "task-new",
+            pending_approvals: [expect.objectContaining({ id: "approval-new" })],
+          }),
+        ],
+      });
+    });
+
+    oldDetail.resolve({
+      pending_approvals: [{ id: "approval-old", tool_name: "shell", description: "Stale approval" }],
+      pending_user_inputs: [],
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(provider.postMessage).toHaveBeenCalledTimes(3);
+
+    const lastMessage = (provider.postMessage as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[0] as Record<string, unknown>;
+    expect(lastMessage).toEqual({
+      type: "taskList",
+      tasks: [
+        expect.objectContaining({
+          id: "task-new",
+          pending_approvals: [expect.objectContaining({ id: "approval-new" })],
         }),
       ],
     });

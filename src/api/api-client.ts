@@ -356,9 +356,10 @@ export class CodeWhaleApiClient {
 
   // ── Tasks ──
 
-  async listTasks(opts?: { limit?: number }): Promise<{ tasks: TaskSummary[]; counts: TaskCounts }> {
+  async listTasks(opts?: { limit?: number; workspace?: string }): Promise<{ tasks: TaskSummary[]; counts: TaskCounts }> {
     const params = new URLSearchParams();
     if (opts?.limit) params.set("limit", String(opts.limit));
+    if (opts?.workspace) params.set("workspace", opts.workspace);
     const qs = params.toString() ? `?${params.toString()}` : "";
     return (await this.get(`/v1/tasks${qs}`)) as { tasks: TaskSummary[]; counts: TaskCounts };
   }

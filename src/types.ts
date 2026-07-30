@@ -165,6 +165,7 @@ export interface TaskSummary {
   prompt_summary: string;
   model: string;
   mode: string;
+  workspace: string;
   created_at: string;
   started_at: string | null;
   ended_at: string | null;

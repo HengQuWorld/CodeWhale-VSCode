@@ -369,6 +369,7 @@ describe("TaskSummary type validation", () => {
       prompt_summary: "Fix the bug",
       model: "deepseek-v4-pro",
       mode: "agent",
+      workspace: "/tmp/workspace",
       created_at: new Date().toISOString(),
       started_at: new Date().toISOString(),
       ended_at: null,
@@ -738,13 +739,30 @@ describe("CodeWhaleApiClient - HTTP methods with mocked server", () => {
 
   it("listTasks() returns tasks and counts", async () => {
     const response = {
-      tasks: [{ id: "task-1", status: "running", prompt_summary: "Fix", model: "", mode: "", created_at: "", started_at: null, ended_at: null, duration_ms: null, error: null, thread_id: null, turn_id: null }],
+      tasks: [{ id: "task-1", status: "running", prompt_summary: "Fix", model: "", mode: "", workspace: "/tmp/workspace", created_at: "", started_at: null, ended_at: null, duration_ms: null, error: null, thread_id: null, turn_id: null }],
       counts: { queued: 0, running: 1, completed: 5, failed: 0, canceled: 0 },
     };
     mockHttpRequest(200, JSON.stringify(response));
     const result = await client.listTasks();
     expect(result.tasks).toHaveLength(1);
     expect(result.counts.running).toBe(1);
+  });
+
+  it("listTasks() includes workspace query when provided", async () => {
+    const response = {
+      tasks: [],
+      counts: { queued: 0, running: 0, completed: 0, failed: 0, canceled: 0 },
+    };
+    mockHttpRequest(200, JSON.stringify(response));
+
+    await client.listTasks({ limit: 50, workspace: "/tmp/workspace" });
+
+    const lastCall = vi.mocked(http.request).mock.calls.at(-1);
+    expect(lastCall).toBeDefined();
+    const requestUrl = lastCall?.[0] as URL;
+    expect(requestUrl.pathname).toBe("/v1/tasks");
+    expect(requestUrl.searchParams.get("limit")).toBe("50");
+    expect(requestUrl.searchParams.get("workspace")).toBe("/tmp/workspace");
   });
 
   it("getRuntimeInfo() returns RuntimeInfoResponse", async () => {

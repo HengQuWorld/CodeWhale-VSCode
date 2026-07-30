@@ -119,6 +119,10 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
   private _disposables: vscode.Disposable[] = [];
   private currentAttachments: Array<{ kind: string; path: string; name: string }> = [];
   private showAllWorkspaces: boolean = false;
+  /** Fallback workspace from the TUI, used when VS Code has no folder open. */
+  private tuiWorkspace: string | null = null;
+  /** Monotonic task-list refresh token used to drop stale async enrichment results. */
+  private taskListRefreshToken: number = 0;
   private runtimeVersion: string | null = null;
   /** Cached provider list from `GET /v1/providers`. Refreshed on init and
    * after the active provider changes so the webview picker stays in sync. */
@@ -322,8 +326,12 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         break;
       case "toggleAllWorkspaces":
         this.showAllWorkspaces = !this.showAllWorkspaces;
-        await this.refreshSessionList();
-        await this.refreshThreadList();
+        // Fire all three refreshes in parallel — they're independent.
+        await Promise.all([
+          this.refreshSessionList(),
+          this.refreshThreadList(),
+          this.refreshTaskList(),
+        ]);
         break;
       case "webviewReady":
         try {
@@ -446,6 +454,8 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       this.debugLog("calling api.ensureReady()...");
       await this.api.ensureReady();
       this.debugLog(`engine running on ${this.engine.baseUrl}`);
+      // Cache the TUI workspace as a fallback for when VS Code has no folder open.
+      this.api.getWorkspaceStatus().then(r => { this.tuiWorkspace = r.workspace; }).catch(() => {});
       await this.refreshRuntimeVersion();
       await this.refreshApiCapabilities();
 
@@ -1542,13 +1552,34 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
   /** Refresh the task list shown in the sidebar, scoped to the current workspace */
   public async refreshTaskList(): Promise<void> {
     try {
-      const result = await this.api.listTasks({ limit: 50 });
+      const refreshToken = ++this.taskListRefreshToken;
+      // Determine current workspace: VS Code folder first, then TUI fallback.
+      const currentWorkspace =
+        vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? this.tuiWorkspace ?? undefined;
+      const result = await this.api.listTasks({
+        limit: 50,
+        workspace: !this.showAllWorkspaces ? currentWorkspace : undefined,
+      });
+      // Backend handles workspace filtering; push raw list immediately.
+      this.postMessage({ type: "taskList", tasks: result.tasks });
+      // Enrichment (attention badges from thread detail) runs async.
+      void this.enrichTaskList(result.tasks, refreshToken);
+    } catch {
+      // best-effort
+    }
+  }
+
+  /** Enrich task list with pending-approval/input counts from thread details. */
+  private async enrichTaskList(tasks: TaskSummary[], refreshToken: number): Promise<void> {
+    try {
       const threadDetailCache = new Map<string, Promise<ThreadDetailResponse | null>>();
-      const tasks = await Promise.all(
-        result.tasks.map((task) => this.enrichTaskSummary(task, threadDetailCache))
+      const enriched = await Promise.all(
+        tasks.map((task) => this.enrichTaskSummary(task, threadDetailCache))
       );
-      this.postMessage({ type: "taskList", tasks });
-      await this.refreshActiveTaskDetail();
+      if (refreshToken !== this.taskListRefreshToken) {
+        return;
+      }
+      this.postMessage({ type: "taskList", tasks: enriched });
     } catch {
       // best-effort
     }
