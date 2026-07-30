@@ -2,7 +2,7 @@
   "name": "brotherwhale-vscode",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "publisher": "hengquworld",
   "repository": "https://github.com/HengQuWorld/CodeWhale-VSCode",
   "engines": {

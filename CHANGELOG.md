@@ -1,5 +1,15 @@
 # Change Log
 
+## 0.4.1
+
+### New Features
+
+- **Dynamic Provider Switching** — Provider dropdown with live model preview, switching providers without losing model preferences, and integrated provider/model catalog APIs for real-time backend registry updates.
+
+- **Enhanced Task Workflow** — Modal-based task creation, compact task actions, attention indicators, and stable task detail handling with improved CSP compliance and thread-switch timing.
+
+- **Workspace-Scoped Task List** — Filter tasks by workspace with async enrichment; task list shows tasks from all workspaces or just the current one.
+
 ## 0.4.0
 
 ### New Features
