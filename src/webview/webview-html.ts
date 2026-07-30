@@ -30,6 +30,18 @@ export interface WebviewTranslations {
   approvalAwaiting: string;
   noConversations: string;
   noTasks: string;
+  taskCreate: string;
+  taskCreateTitle: string;
+  taskCreatePlaceholder: string;
+  taskCreateSubmit: string;
+  taskRefresh: string;
+  taskDetails: string;
+  taskOpenThread: string;
+  taskAttention: string;
+  taskNeedsAttention: string;
+  taskPendingApprovals: string;
+  taskPendingInputs: string;
+  taskContinueInThread: string;
   threadsCountPattern: string; // "{n} threads" / "{n} 个会话"
   modelLabel: string;
   workspaceLabel: string;
@@ -215,8 +227,9 @@ ${css}
   </style>
 </head>
 <body>
-  <div id="task-detail-overlay" class="task-detail-overlay" style="display:none"></div>
-  <div id="agent-detail-overlay" class="task-detail-overlay" style="display:none"></div>
+  <div id="task-detail-overlay" class="task-detail-overlay"></div>
+  <div id="agent-detail-overlay" class="task-detail-overlay"></div>
+  <div id="task-create-overlay" class="task-detail-overlay"></div>
   <div id="layout">
     <div id="threads-panel">
       <div class="sidebar-section" id="sidebar-threads" data-active-tab="sessions">
@@ -335,7 +348,7 @@ ${css}
         <span class="status-right" id="status-stats"></span>
       </div>
       <div id="ui-tooltip" role="tooltip" aria-hidden="true"></div>
-      <div id="debug-panel" style="display:none;position:fixed;bottom:0;left:0;right:0;background:#1a1a2e;color:#0f0;font-size:11px;padding:4px 8px;z-index:99999;max-height:80px;overflow-y:auto;font-family:monospace;pointer-events:none;"></div>
+      <div id="debug-panel" class="debug-panel"></div>
     </div>
   </div>
 
@@ -351,7 +364,7 @@ ${css}
         document.title = 'FATAL: acquireVsCodeApi failed: ' + e.message;
       }
       if (!vscode) {
-        document.body.innerHTML = '<div style="color:red;padding:20px;">FATAL: acquireVsCodeApi() returned null. Webview cannot communicate with extension.</div>';
+        document.body.innerHTML = '<div class="fatal-webview-message">FATAL: acquireVsCodeApi() returned null. Webview cannot communicate with extension.</div>';
       }
       window.__wvVscode = vscode;
 

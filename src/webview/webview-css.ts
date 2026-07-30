@@ -1307,7 +1307,78 @@ export function getWebviewCss(): string {
       transform: translateY(0);
     }
 
+    .status-completed { color: #4caf50; }
+    .status-running { color: #ff9800; }
+    .status-queued { color: #888; }
+    .status-failed { color: #f44336; }
+    .status-canceled { color: #888; }
+    .status-muted { color: var(--muted); }
+    .text-muted { color: var(--muted); }
+    .detail-monospace {
+      font-family: var(--vscode-editor-font-family, monospace);
+      font-size: 0.85em;
+    }
+    .debug-panel {
+      display: none;
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: #1a1a2e;
+      color: #0f0;
+      font-size: 11px;
+      padding: 4px 8px;
+      z-index: 99999;
+      max-height: 80px;
+      overflow-y: auto;
+      font-family: var(--vscode-editor-font-family, monospace);
+      pointer-events: none;
+    }
+    .fatal-webview-message {
+      color: #f44336;
+      padding: 20px;
+    }
+
     /* ── Task Cards ── */
+
+    .task-toolbar {
+      display: flex;
+      justify-content: flex-end;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 10px;
+      border-bottom: 1px solid rgba(128,128,128,0.08);
+      background: rgba(128, 128, 128, 0.03);
+    }
+    .task-icon-btn {
+      border: 1px solid var(--border);
+      background: rgba(128, 128, 128, 0.08);
+      color: var(--fg);
+      border-radius: 6px;
+      width: 26px;
+      height: 26px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      padding: 0;
+      font-size: 13px;
+      line-height: 1;
+      transition: background 0.12s, border-color 0.12s, color 0.12s;
+    }
+    .task-icon-btn:hover {
+      background: rgba(128, 128, 128, 0.16);
+      border-color: var(--fg);
+    }
+    .task-icon-btn.primary {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: var(--vscode-button-foreground);
+    }
+    .task-icon-btn.primary:hover {
+      background: var(--accent-hover);
+      border-color: var(--accent-hover);
+    }
 
     .task-card {
       padding: 7px 10px;
@@ -1335,6 +1406,22 @@ export function getWebviewCss(): string {
       white-space: nowrap;
       font-weight: 500;
     }
+    .task-card .task-attention-badge {
+      min-width: 18px;
+      height: 18px;
+      padding: 0 5px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 999px;
+      background: rgba(255, 152, 0, 0.16);
+      color: #ff9800;
+      border: 1px solid rgba(255, 152, 0, 0.28);
+      font-size: 0.75em;
+      font-weight: 700;
+      line-height: 1;
+      flex-shrink: 0;
+    }
     .task-card .task-meta {
       font-size: 0.75em;
       color: var(--muted);
@@ -1343,28 +1430,42 @@ export function getWebviewCss(): string {
       align-items: center;
       gap: 4px;
     }
+    .task-card .task-attention-meta {
+      color: #ff9800;
+      font-weight: 600;
+    }
     .task-card .task-actions {
       display: flex;
       gap: 4px;
       margin-top: 4px;
     }
-    .task-card .task-actions button {
-      background: none;
+    .task-card .task-actions .task-action-btn {
+      background: rgba(128,128,128,0.05);
       border: 1px solid var(--border);
       color: var(--muted);
-      padding: 2px 6px;
-      font-size: 0.7em;
+      width: 22px;
+      height: 22px;
+      padding: 0;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.75em;
       cursor: pointer;
-      border-radius: 3px;
+      border-radius: 4px;
       transition: all 0.12s;
     }
-    .task-card .task-actions button:hover {
+    .task-card .task-actions .task-action-btn:hover {
       color: var(--fg);
       border-color: var(--fg);
       background: rgba(128,128,128,0.04);
     }
-    .task-card .task-actions button:active {
+    .task-card .task-actions .task-action-btn:active {
       background: rgba(128,128,128,0.1);
+    }
+    .task-card .task-actions .task-action-btn.danger:hover {
+      color: #f44336;
+      border-color: rgba(244,67,54,0.4);
+      background: rgba(244,67,54,0.08);
     }
 
     /* ── Agent Card (sidebar) ── */
@@ -1554,6 +1655,11 @@ export function getWebviewCss(): string {
       border-radius: 4px;
       font-size: 0.85em;
       color: #f44336;
+    }
+    .fc-tool-info-muted {
+      font-size: 0.8em;
+      color: var(--muted);
+      padding: 2px 8px;
     }
 
     /* ── Work Section ── */
@@ -1921,11 +2027,14 @@ export function getWebviewCss(): string {
     .task-detail-overlay {
       position: fixed;
       top: 0; left: 0; right: 0; bottom: 0;
-      background: rgba(0,0,0,0.5);
+      background: rgba(0,0,0,0.42);
+      backdrop-filter: blur(4px);
       z-index: 1000;
-      display: flex;
+      display: none;
       align-items: center;
       justify-content: center;
+      padding: 16px;
+      box-sizing: border-box;
     }
     .task-detail-panel {
       background: var(--bg);
@@ -1939,6 +2048,104 @@ export function getWebviewCss(): string {
       font-size: 0.85em;
       position: relative;
       box-shadow: 0 16px 48px rgba(0, 0, 0, 0.35);
+    }
+    .task-create-panel {
+      background: color-mix(in srgb, var(--bg) 92%, white 8%);
+      border: 1px solid rgba(128, 128, 128, 0.18);
+      border-radius: 14px;
+      width: min(520px, calc(100vw - 32px));
+      position: relative;
+      box-shadow: 0 22px 56px rgba(0, 0, 0, 0.32);
+      overflow: hidden;
+    }
+    .task-create-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 18px 18px 12px;
+      border-bottom: 1px solid rgba(128, 128, 128, 0.1);
+      background: linear-gradient(180deg, rgba(128, 128, 128, 0.08), rgba(128, 128, 128, 0.02));
+    }
+    .task-create-panel h3 {
+      margin: 0;
+      font-size: 1.02em;
+      font-weight: 600;
+      color: var(--fg);
+    }
+    .task-create-body {
+      padding: 16px 18px 10px;
+    }
+    .task-create-textarea {
+      width: 100%;
+      min-height: 144px;
+      resize: vertical;
+      border-radius: 10px;
+      border: 1px solid rgba(128, 128, 128, 0.2);
+      background: color-mix(in srgb, var(--bg) 94%, black 6%);
+      color: var(--fg);
+      padding: 12px 14px;
+      font: inherit;
+      line-height: 1.45;
+      box-sizing: border-box;
+      transition: border-color 0.14s ease, box-shadow 0.14s ease, background 0.14s ease;
+    }
+    .task-create-textarea:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+      background: var(--bg);
+    }
+    .task-create-footer {
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      padding: 12px 18px 18px;
+      border-top: 1px solid rgba(128, 128, 128, 0.08);
+      background: rgba(128, 128, 128, 0.03);
+    }
+    .task-create-panel .task-create-close {
+      position: static;
+      width: 28px;
+      height: 28px;
+      border-radius: 999px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(128, 128, 128, 0.08);
+      border: 1px solid rgba(128, 128, 128, 0.14);
+    }
+    .task-create-panel .task-create-close:hover {
+      background: rgba(128, 128, 128, 0.16);
+    }
+    .task-create-panel .detail-action-btn {
+      min-width: 84px;
+      padding: 7px 14px;
+      border-radius: 9px;
+      font-weight: 500;
+      transition: transform 0.12s ease, background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+    }
+    .task-create-panel .detail-action-btn:hover {
+      transform: translateY(-1px);
+    }
+    .task-create-panel .task-create-submit {
+      background: linear-gradient(180deg, var(--accent), var(--accent-hover));
+      border-color: color-mix(in srgb, var(--accent) 78%, black 22%);
+      color: var(--vscode-button-foreground);
+      box-shadow: 0 8px 20px color-mix(in srgb, var(--accent) 24%, transparent);
+    }
+    .task-create-panel .task-create-submit:hover {
+      background: linear-gradient(180deg, var(--accent-hover), var(--accent));
+      border-color: var(--accent-hover);
+    }
+    .task-create-panel .task-create-cancel {
+      background: rgba(128, 128, 128, 0.06);
+      color: var(--muted);
+      border-color: rgba(128, 128, 128, 0.16);
+    }
+    .task-create-panel .task-create-cancel:hover {
+      color: var(--fg);
+      background: rgba(128, 128, 128, 0.12);
     }
     .task-detail-panel h3 {
       margin: 0 0 8px 0;
@@ -2022,6 +2229,22 @@ export function getWebviewCss(): string {
       color: var(--muted);
       font-size: 0.92em;
       margin-top: 2px;
+    }
+    .task-detail-panel .detail-subsection {
+      margin-top: 8px;
+    }
+    .task-detail-panel .detail-sublabel {
+      color: var(--muted);
+      font-size: 0.78em;
+      font-weight: 600;
+      text-transform: uppercase;
+      margin-bottom: 6px;
+    }
+    .task-detail-panel .detail-option-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 6px;
     }
     .task-detail-panel .detail-json {
       margin: 0;

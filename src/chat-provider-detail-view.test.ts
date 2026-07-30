@@ -101,6 +101,167 @@ describe("ChatProvider detail view routing", () => {
         ],
       }),
     });
+
+    (provider as any).handleCloseTaskDetail();
+  });
+
+  it("hydrates task detail attention state from the linked thread snapshot", async () => {
+    const api = {
+      bindEngine: vi.fn(),
+      getTask: vi.fn(async () => ({
+        id: "task-approval",
+        status: "running",
+        prompt: "run guarded tool",
+        thread_id: "thread-approval",
+        tool_calls: [],
+        timeline: [],
+      })),
+      getThreadDetail: vi.fn(async () => ({
+        pending_approvals: [
+          {
+            id: "approval-1",
+            tool_name: "shell",
+            description: "Run a guarded command",
+          },
+        ],
+        pending_user_inputs: [
+          {
+            id: "input-1",
+            request: {
+              questions: [
+                {
+                  id: "q-1",
+                  header: "Confirm",
+                  question: "Continue?",
+                  options: [{ label: "Yes", description: "Proceed" }],
+                },
+              ],
+            },
+          },
+        ],
+      })),
+    };
+
+    const provider = new ChatProvider({} as any, {} as any, api as any);
+    provider.postMessage = vi.fn();
+
+    await (provider as any).handleShowTaskDetail("task-approval");
+
+    expect(api.getThreadDetail).toHaveBeenCalledWith("thread-approval");
+    expect(provider.postMessage).toHaveBeenCalledWith({
+      type: "taskDetail",
+      task: expect.objectContaining({
+        id: "task-approval",
+        pending_approvals: [
+          expect.objectContaining({
+            id: "approval-1",
+            tool_name: "shell",
+          }),
+        ],
+        pending_user_inputs: [
+          expect.objectContaining({
+            id: "input-1",
+          }),
+        ],
+      }),
+    });
+
+    (provider as any).handleCloseTaskDetail();
+  });
+
+  it("does not reopen task detail on task list refresh after the detail was closed", async () => {
+    const api = {
+      bindEngine: vi.fn(),
+      listTasks: vi.fn(async () => ({
+        tasks: [{ id: "task-1", status: "running" }],
+      })),
+      getTask: vi.fn(async () => ({
+        id: "task-1",
+        status: "running",
+        prompt: "run it",
+        tool_calls: [],
+        timeline: [],
+      })),
+    };
+
+    const provider = new ChatProvider({} as any, {} as any, api as any);
+    provider.postMessage = vi.fn();
+
+    await (provider as any).handleShowTaskDetail("task-1");
+    (provider as any).handleCloseTaskDetail();
+    vi.mocked(provider.postMessage).mockClear();
+
+    await provider.refreshTaskList();
+
+    expect(provider.postMessage).toHaveBeenCalledWith({
+      type: "taskList",
+      tasks: [{ id: "task-1", status: "running" }],
+    });
+    expect(provider.postMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: "taskDetail" }),
+    );
+  });
+
+  it("adds attention data to running tasks in the sidebar list", async () => {
+    const api = {
+      bindEngine: vi.fn(),
+      listTasks: vi.fn(async () => ({
+        tasks: [
+          {
+            id: "task-1",
+            status: "running",
+            prompt_summary: "Needs approval",
+            model: "m",
+            mode: "agent",
+            created_at: "2026-07-01T00:00:00Z",
+            started_at: null,
+            ended_at: null,
+            duration_ms: null,
+            error: null,
+            thread_id: "thread-1",
+            turn_id: "turn-1",
+          },
+          {
+            id: "task-2",
+            status: "completed",
+            prompt_summary: "Done",
+            model: "m",
+            mode: "agent",
+            created_at: "2026-07-01T00:00:00Z",
+            started_at: null,
+            ended_at: null,
+            duration_ms: null,
+            error: null,
+            thread_id: "thread-2",
+            turn_id: "turn-2",
+          },
+        ],
+      })),
+      getThreadDetail: vi.fn(async (threadId: string) => ({
+        pending_approvals: threadId === "thread-1" ? [{ id: "approval-1", tool_name: "shell", description: "Run guarded command" }] : [],
+        pending_user_inputs: [],
+      })),
+    };
+
+    const provider = new ChatProvider({} as any, {} as any, api as any);
+    provider.postMessage = vi.fn();
+
+    await provider.refreshTaskList();
+
+    expect(api.getThreadDetail).toHaveBeenCalledTimes(1);
+    expect(api.getThreadDetail).toHaveBeenCalledWith("thread-1");
+    expect(provider.postMessage).toHaveBeenCalledWith({
+      type: "taskList",
+      tasks: [
+        expect.objectContaining({
+          id: "task-1",
+          pending_approvals: [expect.objectContaining({ id: "approval-1" })],
+        }),
+        expect.objectContaining({
+          id: "task-2",
+        }),
+      ],
+    });
   });
 
   it("posts agentDetail into the main webview for agent sidebar clicks", async () => {

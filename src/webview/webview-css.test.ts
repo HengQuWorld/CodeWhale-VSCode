@@ -70,7 +70,11 @@ describe("webview-css.ts", () => {
     expect(css).toContain(".sidebar-section");
     expect(css).toContain(".sidebar-tab");
     expect(css).toContain(".thread-item");
+    expect(css).toContain(".task-toolbar");
+    expect(css).toContain(".task-icon-btn");
+    expect(css).toContain(".task-create-panel");
     expect(css).toContain(".task-card");
+    expect(css).toContain(".task-attention-badge");
     expect(css).toContain(".work-section");
   });
 

@@ -23,6 +23,7 @@ export function getSidebarScript(tr: WebviewTranslations): string {
   var showThreadList = false;
   var threadCountEl = document.getElementById('thread-count');
   var sessionSearchQuery = '';
+  var taskDraftPrompt = '';
 
   // ── Work state ──
   var workState = { goal: null, checklist: [], checklistCompletionPct: 0, strategy: [], cycleCount: 0, coherenceState: 'healthy', coherenceLabel: '' };
@@ -71,6 +72,16 @@ export function getSidebarScript(tr: WebviewTranslations): string {
     return '#888';
   }
 
+  function agentStatusClass(status) {
+    if (status === 'completed') return 'status-completed';
+    if (status === 'failed' || status === 'interrupted') return 'status-failed';
+    if (status === 'cancelled') return 'status-canceled';
+    if (status === 'running' || status === 'starting' || status === 'running_tool' || status === 'model_wait') return 'status-running';
+    if (status === 'queued') return 'status-queued';
+    if (status === 'waiting_for_user') return 'status-muted';
+    return 'status-muted';
+  }
+
   function formatAgentTokenUsage(usage) {
     if (!usage) return '';
     var inp = usage.input_tokens || 0;
@@ -101,9 +112,41 @@ export function getSidebarScript(tr: WebviewTranslations): string {
 
   function taskToolStatusIcon(status) {
     if (status === 'completed' || status === 'success') return '\\u2713';
-    if (status === 'running' || status === 'queued') return '\\u27F3';
+    if (status === 'running' || status === 'in_progress' || status === 'queued') return '\\u27F3';
     if (status === 'failed' || status === 'error' || status === 'interrupted') return '\\u2717';
+    if (status === 'canceled' || status === 'cancelled') return '\\u2298';
     return '\\u00B7';
+  }
+
+  function taskStatusIcon(status) {
+    if (status === 'completed') return '\\u2713';
+    if (status === 'running' || status === 'in_progress') return '\\u27F3';
+    if (status === 'failed' || status === 'interrupted') return '\\u2717';
+    if (status === 'queued') return '\\u23F3';
+    if (status === 'canceled' || status === 'cancelled') return '\\u2298';
+    return '\\u00B7';
+  }
+
+  function taskStatusColor(status) {
+    if (status === 'completed') return '#4caf50';
+    if (status === 'running' || status === 'in_progress') return '#ff9800';
+    if (status === 'failed' || status === 'interrupted') return '#f44336';
+    if (status === 'queued') return '#888';
+    if (status === 'canceled' || status === 'cancelled') return '#888';
+    return '#888';
+  }
+
+  function taskStatusClass(status) {
+    if (status === 'completed') return 'status-completed';
+    if (status === 'running' || status === 'in_progress') return 'status-running';
+    if (status === 'failed' || status === 'interrupted') return 'status-failed';
+    if (status === 'queued') return 'status-queued';
+    if (status === 'canceled' || status === 'cancelled') return 'status-canceled';
+    return 'status-muted';
+  }
+
+  function taskIsCancelable(status) {
+    return status === 'running' || status === 'in_progress' || status === 'queued';
   }
 
   function timelineKindLabel(kind) {
@@ -150,6 +193,63 @@ export function getSidebarScript(tr: WebviewTranslations): string {
         e.stopPropagation();
         var url = openExternalBtn.getAttribute('data-url');
         if (url) vscode.postMessage({ type: 'openExternal', url: url });
+        return;
+      }
+      var taskCancelBtn = target.closest && target.closest('.detail-task-cancel');
+      if (taskCancelBtn) {
+        e.stopPropagation();
+        var taskId = taskCancelBtn.getAttribute('data-task-id');
+        if (taskId) vscode.postMessage({ type: 'cancelTask', taskId: taskId });
+        return;
+      }
+      var taskRefreshBtn = target.closest && target.closest('.detail-task-refresh');
+      if (taskRefreshBtn) {
+        e.stopPropagation();
+        var refreshTaskId = taskRefreshBtn.getAttribute('data-task-id');
+        if (refreshTaskId) vscode.postMessage({ type: 'showTaskDetail', taskId: refreshTaskId });
+        else vscode.postMessage({ type: 'refreshTaskList' });
+        return;
+      }
+      var taskThreadBtn = target.closest && target.closest('.detail-task-open-thread');
+      if (taskThreadBtn) {
+        e.stopPropagation();
+        var threadId = taskThreadBtn.getAttribute('data-thread-id');
+        if (threadId) vscode.postMessage({ type: 'openTaskThread', threadId: threadId });
+        return;
+      }
+      var approvalBtn = target.closest && target.closest('.detail-approval-action');
+      if (approvalBtn) {
+        e.stopPropagation();
+        var approvalId = approvalBtn.getAttribute('data-approval-id');
+        var decision = approvalBtn.getAttribute('data-decision');
+        if (approvalId && decision) {
+          vscode.postMessage({ type: 'approvalDecision', approvalId: approvalId, decision: decision, remember: false });
+        }
+        return;
+      }
+      var userInputOptionBtn = target.closest && target.closest('.detail-user-input-option');
+      if (userInputOptionBtn) {
+        e.stopPropagation();
+        var inputId = userInputOptionBtn.getAttribute('data-input-id');
+        var questionId = userInputOptionBtn.getAttribute('data-question-id');
+        var optionIdx = userInputOptionBtn.getAttribute('data-option-idx');
+        var optionLabel = userInputOptionBtn.getAttribute('data-option-label');
+        if (inputId && questionId && optionIdx !== null && optionLabel) {
+          vscode.postMessage({
+            type: 'userInputSelect',
+            inputId: inputId,
+            questionId: questionId,
+            optionIdx: parseInt(optionIdx),
+            optionLabel: optionLabel,
+          });
+        }
+        return;
+      }
+      var userInputCancelBtn = target.closest && target.closest('.detail-user-input-cancel');
+      if (userInputCancelBtn) {
+        e.stopPropagation();
+        var cancelInputId = userInputCancelBtn.getAttribute('data-input-id');
+        if (cancelInputId) vscode.postMessage({ type: 'userInputCancel', inputId: cancelInputId });
       }
     };
   }
@@ -407,12 +507,101 @@ export function getSidebarScript(tr: WebviewTranslations): string {
       switchSidebarTab('sessions');
     }
   }
+  function closeTaskCreateDialog() {
+    var overlay = document.getElementById('task-create-overlay');
+    if (overlay) {
+      overlay.style.display = 'none';
+      overlay.innerHTML = '';
+      overlay.onclick = null;
+    }
+  }
+
+  function submitTaskDraftAndClose() {
+    var trimmed = String(taskDraftPrompt || '').trim();
+    if (!trimmed) return;
+    vscode.postMessage({ type: 'createTask', prompt: trimmed });
+    taskDraftPrompt = '';
+    closeTaskCreateDialog();
+  }
+
+  function openTaskCreateDialog() {
+    var overlay = document.getElementById('task-create-overlay');
+    if (!overlay) return;
+    var html = '<div class="task-create-panel">';
+    html += '<div class="task-create-header">';
+    html += '<h3>' + __wvEscapeHtml(__i18n.taskCreateTitle || __i18n.taskCreate || 'Create Task') + '</h3>';
+    html += '<button class="close-btn task-create-close" type="button">\\u2715</button>';
+    html += '</div>';
+    html += '<div class="task-create-body">';
+    html += '<textarea class="task-create-textarea" id="task-create-textarea" placeholder="' + __wvEscapeHtml(__i18n.taskCreatePlaceholder || 'Describe the background task...') + '">' + __wvEscapeHtml(taskDraftPrompt) + '</textarea>';
+    html += '</div>';
+    html += '<div class="task-create-footer">';
+    html += '<button class="detail-action-btn task-create-cancel" type="button">' + __wvEscapeHtml(__i18n.cancel || 'Cancel') + '</button>';
+    html += '<button class="detail-action-btn task-create-submit" type="button">' + __wvEscapeHtml(__i18n.taskCreateSubmit || 'Create') + '</button>';
+    html += '</div></div>';
+    overlay.innerHTML = html;
+    overlay.style.display = 'flex';
+    overlay.onclick = function(e) {
+      var target = e.target;
+      if (target === overlay || (target.closest && (target.closest('.task-create-close') || target.closest('.task-create-cancel')))) {
+        closeTaskCreateDialog();
+        return;
+      }
+      if (target.closest && target.closest('.task-create-submit')) {
+        var submitInput = document.getElementById('task-create-textarea');
+        if (submitInput && typeof submitInput.value === 'string') {
+          taskDraftPrompt = submitInput.value;
+        }
+        submitTaskDraftAndClose();
+      }
+    };
+    var input = document.getElementById('task-create-textarea');
+    if (input) {
+      input.focus();
+      input.setSelectionRange(input.value.length, input.value.length);
+      input.addEventListener('input', function() {
+        taskDraftPrompt = input.value;
+      });
+      input.addEventListener('keydown', function(e) {
+        if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+          e.preventDefault();
+          submitTaskDraftAndClose();
+        } else if (e.key === 'Escape') {
+          e.preventDefault();
+          closeTaskCreateDialog();
+        }
+      });
+    }
+  }
 
   // ── Render Tasks ──
   function renderTasks(tasks) {
     var container = document.getElementById('tab-tasks');
     if (!container) return;
     container.innerHTML = '';
+    var controls = document.createElement('div');
+    controls.className = 'task-toolbar';
+    var createBtn = document.createElement('button');
+    createBtn.className = 'task-icon-btn primary';
+    createBtn.type = 'button';
+    createBtn.title = __i18n.taskCreate || 'New Task';
+    createBtn.setAttribute('aria-label', __i18n.taskCreate || 'New Task');
+    createBtn.textContent = '+';
+    createBtn.onclick = function() {
+      openTaskCreateDialog();
+    };
+    var refreshBtn = document.createElement('button');
+    refreshBtn.className = 'task-icon-btn';
+    refreshBtn.type = 'button';
+    refreshBtn.title = __i18n.taskRefresh || 'Refresh';
+    refreshBtn.setAttribute('aria-label', __i18n.taskRefresh || 'Refresh');
+    refreshBtn.textContent = '\\u21BB';
+    refreshBtn.onclick = function() {
+      vscode.postMessage({ type: 'refreshTaskList' });
+    };
+    controls.appendChild(createBtn);
+    controls.appendChild(refreshBtn);
+    container.appendChild(controls);
     if (!tasks || tasks.length === 0) {
       var el = document.createElement('div');
       el.className = 'work-empty';
@@ -424,15 +613,32 @@ export function getSidebarScript(tr: WebviewTranslations): string {
       var t = tasks[i];
       var card = document.createElement('div');
       card.className = 'task-card';
-      var statusIcon = t.status === 'completed' ? '\\u2713' : t.status === 'running' ? '\\u27F3' : t.status === 'failed' ? '\\u2717' : t.status === 'queued' ? '\\u23F3' : '\\u00B7';
-      var statusColor = t.status === 'completed' ? '#4caf50' : t.status === 'running' ? '#ff9800' : t.status === 'failed' ? '#f44336' : t.status === 'queued' ? '#888' : '#888';
+      var statusIcon = taskStatusIcon(t.status);
+      var statusClass = taskStatusClass(t.status);
       var title = (t.prompt_summary || t.id).slice(0, 30);
+      var pendingApprovalCount = Array.isArray(t.pending_approvals) ? t.pending_approvals.length : 0;
+      var pendingInputCount = Array.isArray(t.pending_user_inputs) ? t.pending_user_inputs.length : 0;
+      var attentionCount = pendingApprovalCount + pendingInputCount;
+      var attentionTitle = __i18n.taskNeedsAttention || 'Needs attention';
+      if (pendingApprovalCount > 0 || pendingInputCount > 0) {
+        var parts = [];
+        if (pendingApprovalCount > 0) parts.push(pendingApprovalCount + ' ' + (__i18n.taskPendingApprovals || 'Pending Approvals'));
+        if (pendingInputCount > 0) parts.push(pendingInputCount + ' ' + (__i18n.taskPendingInputs || 'Pending Inputs'));
+        attentionTitle += ': ' + parts.join(' · ');
+      }
+      var attentionBadge = attentionCount > 0
+        ? '<span class="task-attention-badge" title="' + __wvEscapeHtml(attentionTitle) + '">' + attentionCount + '</span>'
+        : '';
+      var attentionMeta = attentionCount > 0
+        ? ' <span class="task-attention-meta" title="' + __wvEscapeHtml(attentionTitle) + '">\\u26A0 ' + __wvEscapeHtml(__i18n.taskAttention || 'Attention') + '</span>'
+        : '';
       card.innerHTML =
         '<div class="task-header">' +
-          '<span class="task-status-icon" style="color:' + statusColor + '">' + statusIcon + '</span>' +
+          '<span class="task-status-icon ' + statusClass + '">' + statusIcon + '</span>' +
           '<span class="task-title">' + __wvEscapeHtml(title) + '</span>' +
+          attentionBadge +
         '</div>' +
-        '<div class="task-meta">' + __wvEscapeHtml(t.status) + ' \\u00B7 ' + __wvEscapeHtml(t.model || '') + '</div>';
+        '<div class="task-meta">' + __wvEscapeHtml(t.status) + ' \\u00B7 ' + __wvEscapeHtml(t.model || '') + attentionMeta + '</div>';
       (function(taskId, taskStatus, hasResult) {
         card.addEventListener('click', function(e) {
           if (e.target.tagName === 'BUTTON') return;
@@ -441,24 +647,36 @@ export function getSidebarScript(tr: WebviewTranslations): string {
         var actions = document.createElement('div');
         actions.className = 'task-actions';
         var detailsBtn = document.createElement('button');
-        detailsBtn.textContent = 'Details';
+        detailsBtn.type = 'button';
+        detailsBtn.className = 'task-action-btn';
+        detailsBtn.title = __i18n.taskDetails || 'Details';
+        detailsBtn.setAttribute('aria-label', __i18n.taskDetails || 'Details');
+        detailsBtn.textContent = '\\u2139';
         detailsBtn.onclick = function() {
           vscode.postMessage({ type: 'showTaskDetail', taskId: taskId });
         };
         actions.appendChild(detailsBtn);
         if (hasResult) {
           var resultBtn = document.createElement('button');
-          resultBtn.textContent = __i18n.agentResult || 'Result';
+          resultBtn.type = 'button';
+          resultBtn.className = 'task-action-btn';
+          resultBtn.title = __i18n.agentResult || 'Result';
+          resultBtn.setAttribute('aria-label', __i18n.agentResult || 'Result');
+          resultBtn.textContent = '\\u25A4';
           resultBtn.onclick = function() {
             vscode.postMessage({ type: 'showTaskDetail', taskId: taskId });
           };
           actions.appendChild(resultBtn);
         }
-        if (taskStatus === 'running' || taskStatus === 'queued') {
+        if (taskIsCancelable(taskStatus)) {
           var cancelBtn = document.createElement('button');
-          cancelBtn.textContent = __i18n.cancel;
+          cancelBtn.type = 'button';
+          cancelBtn.className = 'task-action-btn danger';
+          cancelBtn.title = __i18n.cancel;
+          cancelBtn.setAttribute('aria-label', __i18n.cancel);
+          cancelBtn.textContent = '\\u25A0';
           cancelBtn.onclick = function() {
-            vscode.postMessage({ type: 'slashCommand', command: '/task', args: 'cancel ' + taskId });
+            vscode.postMessage({ type: 'cancelTask', taskId: taskId });
           };
           actions.appendChild(cancelBtn);
         }
@@ -493,7 +711,7 @@ export function getSidebarScript(tr: WebviewTranslations): string {
       var card = document.createElement('div');
       card.className = 'agent-card' + (r.status === 'running' || r.status === 'starting' || r.status === 'running_tool' || r.status === 'model_wait' ? ' agent-active' : '');
       var icon = agentStatusIcon(r.status);
-      var color = agentStatusColor(r.status);
+      var statusClass = agentStatusClass(r.status);
       var statusLabel = agentStatusLabel(r.status);
       var objective = (spec.objective || r.spec.run_id || '').slice(0, 60);
       var role = spec.role || '';
@@ -501,11 +719,11 @@ export function getSidebarScript(tr: WebviewTranslations): string {
       var steps = r.steps_taken || 0;
       var html =
         '<div class="agent-header">' +
-          '<span class="agent-status-icon" style="color:' + color + '">' + icon + '</span>' +
+          '<span class="agent-status-icon ' + statusClass + '">' + icon + '</span>' +
           '<span class="agent-objective">' + __wvEscapeHtml(objective) + '</span>' +
         '</div>' +
         '<div class="agent-meta">' +
-          '<span class="agent-status-badge" style="color:' + color + '">' + __wvEscapeHtml(statusLabel) + '</span>';
+          '<span class="agent-status-badge ' + statusClass + '">' + __wvEscapeHtml(statusLabel) + '</span>';
       if (role) {
         html += ' <span class="agent-role-badge">' + __wvEscapeHtml(role) + '</span>';
       }
@@ -603,7 +821,7 @@ export function getSidebarScript(tr: WebviewTranslations): string {
       if (workState.checklistCompletionPct > 0) {
         var pct = Number(workState.checklistCompletionPct);
         var fillClass = pct >= 100 ? 'completed' : pct >= 40 ? 'in-progress' : 'partial';
-        html += '<div class="work-progress-bar-bg"><div class="work-progress-bar-fill ' + fillClass + '" style="width:' + pct + '%"></div></div>';
+        html += '<div class="work-progress-bar-bg"><div class="work-progress-bar-fill ' + fillClass + '" data-progress-pct="' + pct + '"></div></div>';
       }
       for (var ci = 0; ci < workState.checklist.length; ci++) {
         var item = workState.checklist[ci];
@@ -612,6 +830,10 @@ export function getSidebarScript(tr: WebviewTranslations): string {
         html += '<div class="' + itemClass + '"><span class="work-checklist-icon">' + icon + '</span><span class="work-checklist-text">' + __wvEscapeHtml(item.content) + '</span></div>';
       }
       section.innerHTML = html;
+      section.querySelectorAll('.work-progress-bar-fill[data-progress-pct]').forEach(function(fillEl) {
+        var pctAttr = fillEl.getAttribute('data-progress-pct');
+        if (pctAttr) fillEl.style.width = pctAttr + '%';
+      });
       container.appendChild(section);
     }
     // ── Strategy Steps ──
@@ -732,13 +954,14 @@ export function getSidebarScript(tr: WebviewTranslations): string {
       overlay.innerHTML = '';
       overlay.onclick = null;
     }
+    vscode.postMessage({ type: 'closeTaskDetail' });
   }
 
   function showTaskDetail(task) {
     var overlay = document.getElementById('task-detail-overlay');
     if (!overlay) return;
-    var statusIcon = task.status === 'completed' ? '\\u2713' : task.status === 'running' ? '\\u27F3' : task.status === 'failed' ? '\\u2717' : task.status === 'queued' ? '\\u23F3' : '\\u00B7';
-    var statusColor = task.status === 'completed' ? '#4caf50' : task.status === 'running' ? '#ff9800' : task.status === 'failed' ? '#f44336' : '#888';
+    var statusIcon = taskStatusIcon(task.status);
+    var statusClass = taskStatusClass(task.status);
     var duration = task.duration_ms ? (task.duration_ms / 1000).toFixed(1) + 's' : '-';
     var prompt = task.prompt || task.prompt_summary || '';
     var resultText = task.result_summary || '';
@@ -748,10 +971,21 @@ export function getSidebarScript(tr: WebviewTranslations): string {
     var attempts = Array.isArray(task.attempts) ? task.attempts : [];
     var artifacts = Array.isArray(task.artifacts) ? task.artifacts : [];
     var githubEvents = Array.isArray(task.github_events) ? task.github_events : [];
+    var pendingApprovals = Array.isArray(task.pending_approvals) ? task.pending_approvals : [];
+    var pendingInputs = Array.isArray(task.pending_user_inputs) ? task.pending_user_inputs : [];
     var html = '<div class="task-detail-panel">';
     html += '<button class="close-btn" type="button">\\u2715</button>';
     html += '<h3>' + statusIcon + ' Task ' + __wvEscapeHtml((task.id || '').slice(0, 8)) + '</h3>';
-    html += '<div class="detail-section"><div class="detail-label">Status</div><div class="detail-value" style="color:' + statusColor + '">' + __wvEscapeHtml(task.status) + '</div></div>';
+    html += '<div class="detail-actions">';
+    html += '<button class="detail-action-btn detail-task-refresh" data-task-id="' + __wvEscapeHtml(task.id || '') + '">' + __wvEscapeHtml(__i18n.taskRefresh || 'Refresh') + '</button>';
+    if (task.thread_id) {
+      html += '<button class="detail-action-btn detail-task-open-thread" data-thread-id="' + __wvEscapeHtml(task.thread_id) + '">' + __wvEscapeHtml(__i18n.taskOpenThread || 'Open Thread') + '</button>';
+    }
+    if (taskIsCancelable(task.status)) {
+      html += '<button class="detail-action-btn detail-task-cancel" data-task-id="' + __wvEscapeHtml(task.id || '') + '">' + __wvEscapeHtml(__i18n.cancel) + '</button>';
+    }
+    html += '</div>';
+    html += '<div class="detail-section"><div class="detail-label">Status</div><div class="detail-value ' + statusClass + '">' + __wvEscapeHtml(task.status) + '</div></div>';
     html += '<div class="detail-section"><div class="detail-label">Model / Mode</div><div class="detail-value">' + __wvEscapeHtml(task.model) + ' \\u00B7 ' + __wvEscapeHtml(task.mode) + '</div></div>';
     if (task.workspace) {
       html += '<div class="detail-section"><div class="detail-label">Workspace</div><div class="detail-value">' + __wvEscapeHtml(task.workspace) + '</div></div>';
@@ -783,6 +1017,50 @@ export function getSidebarScript(tr: WebviewTranslations): string {
     }
     if (task.error) {
       html += '<div class="detail-section"><div class="detail-label">Error</div><div class="detail-value error">' + __wvEscapeHtml(task.error) + '</div></div>';
+    }
+    if (pendingApprovals.length > 0 || pendingInputs.length > 0) {
+      html += '<div class="detail-section"><div class="detail-label">' + __wvEscapeHtml(__i18n.taskAttention || 'Attention') + '</div>';
+      if (pendingApprovals.length > 0) {
+        html += '<div class="detail-subsection"><div class="detail-sublabel">' + __wvEscapeHtml(__i18n.taskPendingApprovals || 'Pending Approvals') + '</div>';
+        for (var pa = 0; pa < pendingApprovals.length; pa++) {
+          var approval = pendingApprovals[pa];
+          html += '<div class="detail-list-item">';
+          html += '<div><strong>' + __wvEscapeHtml(approval.tool_name || 'tool') + '</strong></div>';
+          html += '<div class="detail-subtle">' + __wvEscapeHtml(approval.description || approval.intent_summary || '') + '</div>';
+          html += '<div class="detail-actions">';
+          html += '<button class="detail-action-btn detail-approval-action" data-approval-id="' + __wvEscapeHtml(approval.id || '') + '" data-decision="allow">Allow</button>';
+          html += '<button class="detail-action-btn detail-approval-action" data-approval-id="' + __wvEscapeHtml(approval.id || '') + '" data-decision="deny">Deny</button>';
+          html += '</div></div>';
+        }
+        html += '</div>';
+      }
+      if (pendingInputs.length > 0) {
+        html += '<div class="detail-subsection"><div class="detail-sublabel">' + __wvEscapeHtml(__i18n.taskPendingInputs || 'Pending Inputs') + '</div>';
+        for (var pu = 0; pu < pendingInputs.length; pu++) {
+          var pending = pendingInputs[pu];
+          var questions = pending.request && Array.isArray(pending.request.questions) ? pending.request.questions : [];
+          html += '<div class="detail-list-item">';
+          for (var pq = 0; pq < questions.length; pq++) {
+            var question = questions[pq];
+            html += '<div><strong>' + __wvEscapeHtml(question.header || '') + '</strong></div>';
+            html += '<div class="detail-subtle">' + __wvEscapeHtml(question.question || '') + '</div>';
+            html += '<div class="detail-option-list">';
+            for (var po = 0; po < (question.options || []).length; po++) {
+              var option = question.options[po];
+              html += '<button class="detail-action-btn detail-user-input-option" data-input-id="' + __wvEscapeHtml(pending.id || '') + '" data-question-id="' + __wvEscapeHtml(question.id || '') + '" data-option-idx="' + po + '" data-option-label="' + __wvEscapeHtml(option.label || '') + '">' + __wvEscapeHtml(option.label || '') + ': ' + __wvEscapeHtml(option.description || '') + '</button>';
+            }
+            html += '</div>';
+          }
+          html += '<div class="detail-actions">';
+          html += '<button class="detail-action-btn detail-user-input-cancel" data-input-id="' + __wvEscapeHtml(pending.id || '') + '">' + __wvEscapeHtml(__i18n.cancel || 'Cancel') + '</button>';
+          if (task.thread_id) {
+            html += '<button class="detail-action-btn detail-task-open-thread" data-thread-id="' + __wvEscapeHtml(task.thread_id) + '">' + __wvEscapeHtml(__i18n.taskContinueInThread || 'Continue in thread') + '</button>';
+          }
+          html += '</div></div>';
+        }
+        html += '</div>';
+      }
+      html += '</div>';
     }
     if (checklistItems.length > 0) {
       html += '<div class="detail-section"><div class="detail-label">Checklist</div>';
@@ -912,7 +1190,7 @@ export function getSidebarScript(tr: WebviewTranslations): string {
     if (!overlay) return;
     var spec = run.spec || {};
     var statusIcon = agentStatusIcon(run.status);
-    var statusColor = agentStatusColor(run.status);
+    var statusClass = agentStatusClass(run.status);
     var statusLabel = agentStatusLabel(run.status);
     var objective = spec.objective || '';
     var role = spec.role || '';
@@ -933,12 +1211,12 @@ export function getSidebarScript(tr: WebviewTranslations): string {
 
     // Status
     html += '<div class="detail-section"><div class="detail-label">Status</div>';
-    html += '<div class="detail-value" style="color:' + statusColor + '">' + __wvEscapeHtml(statusLabel) + '</div></div>';
+    html += '<div class="detail-value ' + statusClass + '">' + __wvEscapeHtml(statusLabel) + '</div></div>';
 
     // Run ID
     if (runId) {
       html += '<div class="detail-section"><div class="detail-label">Run ID</div>';
-      html += '<div class="detail-value" style="font-family:monospace;font-size:0.85em">' + __wvEscapeHtml(runId) + '</div></div>';
+      html += '<div class="detail-value detail-monospace">' + __wvEscapeHtml(runId) + '</div></div>';
     }
 
     // Objective
@@ -966,7 +1244,7 @@ export function getSidebarScript(tr: WebviewTranslations): string {
     // Parent run
     if (parentId) {
       html += '<div class="detail-section"><div class="detail-label">Parent Run</div>';
-      html += '<div class="detail-value" style="font-family:monospace;font-size:0.85em">' + __wvEscapeHtml(parentId) + '</div></div>';
+      html += '<div class="detail-value detail-monospace">' + __wvEscapeHtml(parentId) + '</div></div>';
     }
 
     // Timestamps
@@ -1004,7 +1282,7 @@ export function getSidebarScript(tr: WebviewTranslations): string {
         var artPath = art.path || '';
         var artKind = art.kind || '';
         html += '<div class="tool-call-item">\\u00B7 ' + __wvEscapeHtml(artPath);
-        if (artKind) html += ' <span style="color:var(--muted)">(' + __wvEscapeHtml(artKind) + ')</span>';
+        if (artKind) html += ' <span class="text-muted">(' + __wvEscapeHtml(artKind) + ')</span>';
         html += '</div>';
       }
       html += '</div>';

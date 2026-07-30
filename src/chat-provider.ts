@@ -14,6 +14,7 @@ import {
   TurnRecord,
   TurnItemRecord,
 } from "./types";
+import type { TaskSummary, ThreadDetailResponse } from "./types";
 import { formatError, getErrorMessage } from "./utils/error-handler";
 import { getWebviewHtml } from "./webview/webview-html";
 import { renderMarkdown } from "./utils/markdown";
@@ -113,6 +114,8 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
   private slashHandler: SlashCommandHandler;
   private eventController: AbortController | null = null;
   private taskRefreshTimer: ReturnType<typeof setInterval> | null = null;
+  private taskDetailRefreshTimer: ReturnType<typeof setInterval> | null = null;
+  private activeTaskDetailId: string | null = null;
   private _disposables: vscode.Disposable[] = [];
   private currentAttachments: Array<{ kind: string; path: string; name: string }> = [];
   private showAllWorkspaces: boolean = false;
@@ -385,6 +388,21 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         break;
       case "showTaskDetail":
         this.handleShowTaskDetail(msg.taskId as string);
+        break;
+      case "closeTaskDetail":
+        this.handleCloseTaskDetail();
+        break;
+      case "openTaskThread":
+        await this.loadThread(msg.threadId as string);
+        break;
+      case "createTask":
+        await this.handleCreateTaskFromSidebar(msg.prompt as string);
+        break;
+      case "cancelTask":
+        await this.handleCancelTaskFromSidebar(msg.taskId as string);
+        break;
+      case "refreshTaskList":
+        await this.refreshTaskList();
         break;
     }
   }
@@ -1140,9 +1158,12 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         type: "status",
         text: `Thread ${threadId.slice(0, 12)}: ${this.messages.length} messages`,
       });
-      // Refresh sidebar task/agent lists for the new thread
-      this.refreshTaskList();
-      this.refreshAgentRuns();
+      // Refresh sidebar task/agent lists for the new thread before returning
+      // so the webview and tests observe a stable post-load state.
+      await Promise.allSettled([
+        this.refreshTaskList(),
+        this.refreshAgentRuns(),
+      ]);
       // Push current work/changes state for this thread
       this.refreshWorkPanel();
     } catch (err) {
@@ -1522,11 +1543,41 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
   public async refreshTaskList(): Promise<void> {
     try {
       const result = await this.api.listTasks({ limit: 50 });
-      const tasks = result.tasks;
+      const threadDetailCache = new Map<string, Promise<ThreadDetailResponse | null>>();
+      const tasks = await Promise.all(
+        result.tasks.map((task) => this.enrichTaskSummary(task, threadDetailCache))
+      );
       this.postMessage({ type: "taskList", tasks });
+      await this.refreshActiveTaskDetail();
     } catch {
       // best-effort
     }
+  }
+
+  private async enrichTaskSummary(
+    task: TaskSummary,
+    threadDetailCache: Map<string, Promise<ThreadDetailResponse | null>>,
+  ): Promise<TaskSummary> {
+    if (!task.thread_id || this.isTerminalTaskStatus(task.status) || typeof this.api.getThreadDetail !== "function") {
+      return task;
+    }
+
+    let detailPromise = threadDetailCache.get(task.thread_id);
+    if (!detailPromise) {
+      detailPromise = this.api.getThreadDetail(task.thread_id).catch(() => null);
+      threadDetailCache.set(task.thread_id, detailPromise);
+    }
+
+    const threadDetail = await detailPromise;
+    if (!threadDetail) {
+      return task;
+    }
+
+    return {
+      ...task,
+      pending_approvals: threadDetail.pending_approvals || [],
+      pending_user_inputs: threadDetail.pending_user_inputs || [],
+    };
   }
 
   /** Refresh the agent runs list shown in the sidebar */
@@ -1542,11 +1593,131 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
   /** Open session panel showing a specific task's detail */
   private async handleShowTaskDetail(taskId: string): Promise<void> {
     try {
+      this.activeTaskDetailId = taskId;
       const task = await this.api.getTask(taskId);
       const enrichedTask = await this.enrichTaskDetail(task);
       this.postMessage({ type: "taskDetail", task: enrichedTask });
+      this.syncActiveTaskDetailPolling(enrichedTask.status);
     } catch (err) {
+      if (this.activeTaskDetailId === taskId) {
+        this.activeTaskDetailId = null;
+      }
+      this.stopActiveTaskDetailRefresh();
       vscode.window.showErrorMessage(`Failed to load task: ${(err as Error).message}`);
+    }
+  }
+
+  private handleCloseTaskDetail(): void {
+    this.activeTaskDetailId = null;
+    this.stopActiveTaskDetailRefresh();
+  }
+
+  private async refreshActiveTaskDetail(): Promise<void> {
+    if (!this.activeTaskDetailId) {
+      return;
+    }
+
+    try {
+      const task = await this.api.getTask(this.activeTaskDetailId);
+      const enrichedTask = await this.enrichTaskDetail(task);
+      this.postMessage({ type: "taskDetail", task: enrichedTask });
+      this.syncActiveTaskDetailPolling(enrichedTask.status);
+    } catch {
+      this.stopActiveTaskDetailRefresh();
+    }
+  }
+
+  private isTerminalTaskStatus(status: string | null | undefined): boolean {
+    return status === "completed"
+      || status === "failed"
+      || status === "interrupted"
+      || status === "canceled"
+      || status === "cancelled";
+  }
+
+  private startActiveTaskDetailRefresh(): void {
+    if (!this.activeTaskDetailId || this.taskDetailRefreshTimer) {
+      return;
+    }
+    this.taskDetailRefreshTimer = setInterval(() => {
+      void this.refreshActiveTaskDetail();
+    }, 1500);
+  }
+
+  private stopActiveTaskDetailRefresh(): void {
+    if (this.taskDetailRefreshTimer) {
+      clearInterval(this.taskDetailRefreshTimer);
+      this.taskDetailRefreshTimer = null;
+    }
+  }
+
+  private syncActiveTaskDetailPolling(status: string | null | undefined): void {
+    if (!this.activeTaskDetailId) {
+      this.stopActiveTaskDetailRefresh();
+      return;
+    }
+    if (this.isTerminalTaskStatus(status)) {
+      this.stopActiveTaskDetailRefresh();
+      return;
+    }
+    this.startActiveTaskDetailRefresh();
+  }
+
+  private async pollTaskStatus(taskId: string, attempts = 6, delayMs = 1000): Promise<void> {
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      try {
+        const task = await this.api.getTask(taskId);
+        if (this.activeTaskDetailId === taskId) {
+          const enrichedTask = await this.enrichTaskDetail(task);
+          this.postMessage({ type: "taskDetail", task: enrichedTask });
+        }
+        await this.refreshTaskList();
+        if (this.isTerminalTaskStatus(task.status)) {
+          return;
+        }
+      } catch {
+        return;
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+
+  private async handleCreateTaskFromSidebar(prompt: string): Promise<void> {
+    const trimmed = prompt.trim();
+    if (!trimmed) {
+      return;
+    }
+
+    try {
+      await this.api.ensureReady();
+      const taskCfg = vscode.workspace.getConfiguration("brotherwhale");
+      const task = await this.api.createTask({
+        prompt: trimmed,
+        model: taskCfg.get<string>("defaultModel", "deepseek-v4-pro"),
+        mode: taskCfg.get<string>("defaultMode", "agent"),
+        workspace: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
+        auto_approve: taskCfg.get<boolean>("autoApprove", false),
+      });
+      await this.refreshTaskList();
+      await this.handleShowTaskDetail(task.id);
+    } catch (err) {
+      vscode.window.showErrorMessage(`Failed to create task: ${(err as Error).message}`);
+    }
+  }
+
+  private async handleCancelTaskFromSidebar(taskId: string): Promise<void> {
+    if (!taskId) {
+      return;
+    }
+
+    try {
+      await this.api.ensureReady();
+      await this.api.cancelTask(taskId);
+      await this.refreshTaskList();
+      void this.pollTaskStatus(taskId);
+    } catch (err) {
+      vscode.window.showErrorMessage(`Failed to cancel task: ${(err as Error).message}`);
     }
   }
 
@@ -1608,6 +1779,32 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
   private async enrichTaskDetail(task: TaskRecord): Promise<TaskRecord> {
     const resultDetailPath = this.normalizeOptionalPath((task as TaskRecord & Record<string, unknown>).result_detail_path);
     const resultDetail = await this.readTaskTextArtifact(resultDetailPath);
+    let pendingApprovals = ((task as TaskRecord & Record<string, unknown>).pending_approvals as TaskRecord["pending_approvals"] | undefined) || [];
+    let pendingUserInputs = ((task as TaskRecord & Record<string, unknown>).pending_user_inputs as TaskRecord["pending_user_inputs"] | undefined) || [];
+
+    if (task.thread_id) {
+      try {
+        const threadDetail = await this.api.getThreadDetail(task.thread_id);
+        pendingApprovals = threadDetail.pending_approvals || [];
+        pendingUserInputs = threadDetail.pending_user_inputs || [];
+        for (const pending of pendingUserInputs) {
+          this.pendingUserInputs.set(pending.id, {
+            threadId: task.thread_id,
+            questions: (pending.request?.questions || []).map((question) => ({
+              header: question.header,
+              id: question.id,
+              question: question.question,
+              options: question.options || [],
+            })),
+            answers: [],
+            answeredQuestions: new Set(),
+          });
+        }
+      } catch {
+        // Keep task detail usable even when linked thread detail is unavailable.
+      }
+    }
+
     if (resultDetailPath && resultDetail?.content) {
       this.cacheTextArtifactPreview(resultDetailPath, resultDetail.content, "markdown");
     }
@@ -1639,6 +1836,8 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         path: this.normalizeOptionalPath(artifact.path) || artifact.path,
       })) || [],
       github_events: ((task as TaskRecord & Record<string, unknown>).github_events as TaskRecord["github_events"] | undefined) || [],
+      pending_approvals: pendingApprovals,
+      pending_user_inputs: pendingUserInputs,
     };
   }
 
@@ -2215,6 +2414,8 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       }
       this.pendingApprovals.delete(approvalId);
       this.postMessage({ type: "approvalResolved", approvalId, decision });
+      await this.refreshActiveTaskDetail();
+      await this.refreshTaskList();
     } catch (err) {
       this.postMessage({
         type: "error",
@@ -2250,7 +2451,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     const allAnswered = pending.questions.every(q => pending.answeredQuestions.has(q.id));
     if (allAnswered) {
       try {
-        await this.api.submitUserInput(this.currentThread!.id, inputId, pending.answers);
+        await this.api.submitUserInput(pending.threadId, inputId, pending.answers);
         this.pendingUserInputs.delete(inputId);
         this.postMessage({
           type: "userInputResolved",
@@ -2258,6 +2459,8 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
           cancelled: false,
           answers: pending.answers,
         });
+        await this.refreshActiveTaskDetail();
+        await this.refreshTaskList();
       } catch (err) {
         this.postMessage({
           type: "error",
@@ -2269,8 +2472,11 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
   }
 
   private async handleUserInputCancel(inputId: string): Promise<void> {
+    const pending = this.pendingUserInputs.get(inputId);
     try {
-      await this.api.submitUserInput(this.currentThread!.id, inputId, []);
+      if (pending) {
+        await this.api.submitUserInput(pending.threadId, inputId, []);
+      }
     } catch {
       // ignore cancellation errors
     }
@@ -2284,6 +2490,8 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       type: "info",
       message: "User input cancelled. The turn will be interrupted. Use /interrupt if needed.",
     });
+    await this.refreshActiveTaskDetail();
+    await this.refreshTaskList();
   }
 
   private diffContentStore = new Map<string, string>();
@@ -2757,7 +2965,12 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
           messageId = lastMsg?.id;
         }
 
-        this.pendingUserInputs.set(inputId, { questions, answers: [], answeredQuestions: new Set() });
+        this.pendingUserInputs.set(inputId, {
+          threadId: event.thread_id,
+          questions,
+          answers: [],
+          answeredQuestions: new Set(),
+        });
         this.postMessage({
           type: "userInputRequired",
           messageId,
@@ -3207,6 +3420,9 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
   private cleanup(): void {
     this.eventController?.abort();
     this.eventController = null;
+    this.stopPeriodicTaskRefresh();
+    this.stopActiveTaskDetailRefresh();
+    this.activeTaskDetailId = null;
     this.diffContentStore.clear();
     this.diffProviderDisposable?.dispose();
     this.diffProviderDisposable = null;

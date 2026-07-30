@@ -118,6 +118,8 @@ export interface ThreadDetailResponse {
   turns: TurnRecord[];
   items: TurnItemRecord[];
   latest_seq?: number;
+  pending_approvals?: PendingApprovalRequest[];
+  pending_user_inputs?: PendingUserInputRequest[];
 }
 
 export interface ApprovalRequest {
@@ -125,6 +127,36 @@ export interface ApprovalRequest {
   tool_name: string;
   tool_input: Record<string, unknown>;
   reason: string;
+}
+
+export interface PendingApprovalRequest {
+  id: string;
+  turn_id: string;
+  tool_name: string;
+  description: string;
+  intent_summary?: string | null;
+}
+
+export interface UserInputOption {
+  label: string;
+  description: string;
+}
+
+export interface UserInputQuestion {
+  header: string;
+  id: string;
+  question: string;
+  options: UserInputOption[];
+  allow_free_text?: boolean;
+  multi_select?: boolean;
+}
+
+export interface PendingUserInputRequest {
+  id: string;
+  turn_id: string;
+  request: {
+    questions: UserInputQuestion[];
+  };
 }
 
 export interface TaskSummary {
@@ -140,6 +172,8 @@ export interface TaskSummary {
   error: string | null;
   thread_id: string | null;
   turn_id: string | null;
+  pending_approvals?: PendingApprovalRequest[];
+  pending_user_inputs?: PendingUserInputRequest[];
 }
 
 export interface TaskCounts {
@@ -259,6 +293,8 @@ export interface TaskRecord {
   allow_shell: boolean;
   trust_mode: boolean;
   auto_approve: boolean;
+  pending_approvals?: PendingApprovalRequest[];
+  pending_user_inputs?: PendingUserInputRequest[];
 }
 
 export interface SkillEntry {

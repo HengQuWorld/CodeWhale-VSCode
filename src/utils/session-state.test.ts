@@ -310,6 +310,7 @@ describe("SessionStateStore - matches current chat-provider reset patterns", () 
       status: "awaiting_approval",
     });
     store.data.pendingUserInputs.set("input-1", {
+      threadId: "thread-1",
       questions: [{ header: "H", id: "q1", question: "Q?", options: [] }],
       answers: [],
       answeredQuestions: new Set(),

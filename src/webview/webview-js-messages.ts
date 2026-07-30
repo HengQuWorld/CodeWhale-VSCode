@@ -148,7 +148,7 @@ export function getMessagesScript(tr: WebviewTranslations): string {
       html += '<span class="delegate-icon">\\uD83E\\uDDE0</span>';
       html += '<span class="delegate-title">' + __wvEscapeHtml(toolName) + '</span>';
     }
-    html += ' <span class="delegate-status" style="color:var(--muted)">' + statusIcon + ' ' + statusText + '</span>';
+    html += ' <span class="delegate-status status-muted">' + statusIcon + ' ' + statusText + '</span>';
     html += '</div>';
 
     // Objective
@@ -208,7 +208,7 @@ export function getMessagesScript(tr: WebviewTranslations): string {
 
     var html = '<div class="tool-call" id="tc-' + msgId + '-' + tcIdx + '">';
     html += '<span class="tool-name">\\uD83D\\uDD27 ' + __wvEscapeHtml(tc.displayName || tc.name) + '</span>';
-    html += ' <span class="tool-status" style="color:var(--muted)">' + statusIcon + ' ' + statusText + '</span>';
+    html += ' <span class="tool-status status-muted">' + statusIcon + ' ' + statusText + '</span>';
     if (tc.fileChange) {
       html += renderFileChangeCard(tc.fileChange);
     } else if (tc.output) {
@@ -247,7 +247,7 @@ export function getMessagesScript(tr: WebviewTranslations): string {
     html += '</div>';
     if (fc.toolName) {
       var friendlyName = fc.toolName.replace(/_/g, ' ').replace(/\\b\\w/g, function(c) { return c.toUpperCase(); });
-      html += '<div class="fc-tool-info" style="font-size:0.8em;color:var(--muted);padding:2px 8px">\\uD83D\\uDD27 ' + __wvEscapeHtml(friendlyName) + '</div>';
+      html += '<div class="fc-tool-info fc-tool-info-muted">\\uD83D\\uDD27 ' + __wvEscapeHtml(friendlyName) + '</div>';
     }
     html += '<div class="fc-actions">';
     if (fc.diff) {

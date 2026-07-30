@@ -26,6 +26,18 @@ interface Translations {
   userInputAwaiting: string;
   noConversations: string;
   noTasks: string;
+  taskCreate: string;
+  taskCreateTitle: string;
+  taskCreatePlaceholder: string;
+  taskCreateSubmit: string;
+  taskRefresh: string;
+  taskDetails: string;
+  taskOpenThread: string;
+  taskAttention: string;
+  taskNeedsAttention: string;
+  taskPendingApprovals: string;
+  taskPendingInputs: string;
+  taskContinueInThread: string;
   threadsCount: (n: number) => string;
   modelLabel: string;
   workspaceLabel: string;
@@ -254,6 +266,8 @@ const en: Translations = {
   userInputRequired: "Input required",
   userInputAwaiting: "⏳ Awaiting your input...",
   noConversations: "No conversations yet", noTasks: "No tasks",
+  taskCreate: "New Task", taskCreateTitle: "Create Task", taskCreatePlaceholder: "Describe the background task…", taskCreateSubmit: "Create", taskRefresh: "Refresh", taskDetails: "Details",
+  taskOpenThread: "Open Thread", taskAttention: "Attention", taskNeedsAttention: "Needs attention", taskPendingApprovals: "Pending Approvals", taskPendingInputs: "Pending Inputs", taskContinueInThread: "Continue in thread",
   threadsCount: (n) => `${n} thread${n !== 1 ? "s" : ""}`,
   modelLabel: "Model", workspaceLabel: "Workspace",
   modeLabel: "Mode", reasoningEffortLabel: "Reasoning Effort",
@@ -469,6 +483,8 @@ const zhCn: Translations = {
   userInputRequired: "需要输入",
   userInputAwaiting: "⏳ 等待您的输入...",
   noConversations: "暂无会话", noTasks: "暂无任务",
+  taskCreate: "新建任务", taskCreateTitle: "新建任务", taskCreatePlaceholder: "描述要后台执行的任务…", taskCreateSubmit: "创建", taskRefresh: "刷新", taskDetails: "详情",
+  taskOpenThread: "打开线程", taskAttention: "待处理", taskNeedsAttention: "需要处理", taskPendingApprovals: "待授权", taskPendingInputs: "待输入", taskContinueInThread: "在线程中继续",
   threadsCount: (n) => `${n} 个会话`,
   modelLabel: "模型", workspaceLabel: "工作区",
   modeLabel: "模式", reasoningEffortLabel: "思考深度",
@@ -721,6 +737,18 @@ export function webviewTranslations(tr: Translations) {
     userInputAwaiting: tr.userInputAwaiting,
     noConversations: tr.noConversations,
     noTasks: tr.noTasks,
+    taskCreate: tr.taskCreate,
+    taskCreateTitle: tr.taskCreateTitle,
+    taskCreatePlaceholder: tr.taskCreatePlaceholder,
+    taskCreateSubmit: tr.taskCreateSubmit,
+    taskRefresh: tr.taskRefresh,
+    taskDetails: tr.taskDetails,
+    taskOpenThread: tr.taskOpenThread,
+    taskAttention: tr.taskAttention,
+    taskNeedsAttention: tr.taskNeedsAttention,
+    taskPendingApprovals: tr.taskPendingApprovals,
+    taskPendingInputs: tr.taskPendingInputs,
+    taskContinueInThread: tr.taskContinueInThread,
     threadsCountPattern: tr.threadsCountPattern,
     modelLabel: tr.modelLabel,
     workspaceLabel: tr.workspaceLabel,

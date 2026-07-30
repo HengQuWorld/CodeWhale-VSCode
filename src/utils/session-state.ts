@@ -76,6 +76,7 @@ export interface ActiveItem {
 }
 
 export interface UserInputState {
+  threadId: string;
   questions: Array<{
     header: string;
     id: string;

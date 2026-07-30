@@ -47,8 +47,40 @@ describe("webview-js-sidebar.ts", () => {
 
   it("adds task card action buttons for details and result access", () => {
     const script = getSidebarScript(makeTr());
-    expect(script).toContain("detailsBtn.textContent = 'Details'");
-    expect(script).toContain("resultBtn.textContent = __i18n.agentResult || 'Result'");
+    expect(script).toContain("detailsBtn.title = __i18n.taskDetails || 'Details'");
+    expect(script).toContain("resultBtn.title = __i18n.agentResult || 'Result'");
+  });
+
+  it("renders task toolbar icon controls and create dialog", () => {
+    const script = getSidebarScript(makeTr());
+    expect(script).toContain("function openTaskCreateDialog");
+    expect(script).toContain("task-create-overlay");
+    expect(script).toContain("task-icon-btn primary");
+    expect(script).toContain("task-create-textarea");
+    expect(script).toContain("type: 'createTask'");
+    expect(script).toContain("type: 'refreshTaskList'");
+  });
+
+  it("renders compact icon buttons for task card actions", () => {
+    const script = getSidebarScript(makeTr());
+    expect(script).toContain("detailsBtn.className = 'task-action-btn'");
+    expect(script).toContain("resultBtn.className = 'task-action-btn'");
+    expect(script).toContain("cancelBtn.className = 'task-action-btn danger'");
+  });
+
+  it("renders attention badges for tasks waiting on approvals or input", () => {
+    const script = getSidebarScript(makeTr());
+    expect(script).toContain("Array.isArray(t.pending_approvals)");
+    expect(script).toContain("Array.isArray(t.pending_user_inputs)");
+    expect(script).toContain("task-attention-badge");
+    expect(script).toContain("task-attention-meta");
+  });
+
+  it("routes sidebar task cancel actions through direct task messages", () => {
+    const script = getSidebarScript(makeTr());
+    expect(script).toContain("type: 'cancelTask'");
+    expect(script).toContain("detail-task-cancel");
+    expect(script).toContain("detail-task-refresh");
   });
 
   it("contains renderWork function", () => {
@@ -65,6 +97,7 @@ describe("webview-js-sidebar.ts", () => {
     const script = getSidebarScript(makeTr());
     expect(script).toContain("function showTaskDetail");
     expect(script).toContain("function closeTaskDetail");
+    expect(script).toContain("type: 'closeTaskDetail'");
   });
 
   it("renders richer task process sections and overlay actions", () => {
