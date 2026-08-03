@@ -1,5 +1,11 @@
 # Change Log
 
+## 0.4.2
+
+### New Features
+
+- **Message Navigation Rail** — Add a vertical navigation rail along the right edge of the chat messages panel. Each user message gets a clickable dot positioned proportionally to its location in the scrollable content; hovering shows a text preview and clicking smooth-scrolls to that message with a brief flash highlight. The dot nearest the viewport center is highlighted as active. Includes keyboard shortcuts: `Ctrl/Cmd+Up` jumps to the previous user message and `Ctrl/Cmd+Down` jumps to the next, both wrapping around at the ends of the conversation.
+
 ## 0.4.1
 
 ### New Features
