@@ -322,7 +322,10 @@ ${css}
         </div>
         <button id="btn-config" title="Open Config Panel">⚙</button>
       </div>
-      <div id="messages"></div>
+      <div id="messages-wrapper">
+        <div id="messages"></div>
+        <div id="message-nav"></div>
+      </div>
       <div id="toolbar">
         <button id="btn-new-thread">${tr.newThread}</button>
         <button id="btn-compact">${tr.compact}</button>

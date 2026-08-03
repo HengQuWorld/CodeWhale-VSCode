@@ -224,6 +224,23 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
     for (var i = 0; i < menus.length; i++) { menus[i].classList.remove('open'); }
   });
 
+  // ── Keyboard shortcuts for global navigation ──
+  document.addEventListener('keydown', function(e) {
+    // Ctrl+Up / Ctrl+Down: jump between user messages
+    if ((e.ctrlKey || e.metaKey) && e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (window.__wvMessages && window.__wvMessages.jumpToUserMessage) {
+        window.__wvMessages.jumpToUserMessage('prev');
+      }
+    }
+    if ((e.ctrlKey || e.metaKey) && e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (window.__wvMessages && window.__wvMessages.jumpToUserMessage) {
+        window.__wvMessages.jumpToUserMessage('next');
+      }
+    }
+  });
+
   // ── Main message handler ──
   window.addEventListener('message', function(event) {
     var msg = event.data;
@@ -398,6 +415,8 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
           var showRole = !msg.compactMode || !!m._realContent;
           window.__wvMessages.addMessage(m, showRole);
         }
+        // Nav dots are rebuilt by addMessage() via scheduleNavUpdate(); no
+        // explicit call needed here.
         break;
 
       case 'addMessage':
@@ -831,7 +850,7 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
       }
 
       case 'loadLastUserMessage': {
-        var userMsgs = messagesEl.querySelectorAll('.message.user .message-content');
+        var userMsgs = messagesEl.querySelectorAll('.message.user .message-body');
         if (userMsgs.length > 0) {
           var lastMsg = userMsgs[userMsgs.length - 1];
           inputEl.value = lastMsg.textContent || '';

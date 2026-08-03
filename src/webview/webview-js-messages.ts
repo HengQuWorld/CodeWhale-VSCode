@@ -21,6 +21,7 @@ export function getMessagesScript(tr: WebviewTranslations): string {
   var streamingTimeout = null;
   var userScrolledUp = false;
   var SCROLL_BOTTOM_THRESHOLD = 80;
+  var _navScrollTimer = null;
 
   function smartScrollToBottom() {
     if (userScrolledUp) return;
@@ -31,12 +32,21 @@ export function getMessagesScript(tr: WebviewTranslations): string {
     return messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight < SCROLL_BOTTOM_THRESHOLD;
   }
 
+  // Single scroll listener: maintains userScrolledUp flag and throttles
+  // navigation-dot active-state updates. (updateActiveDot is a hoisted
+  // function declaration, so it is callable here even though it is defined
+  // later in the IIFE.)
   messagesEl.addEventListener('scroll', function() {
     if (isNearBottom()) {
       userScrolledUp = false;
     } else {
       userScrolledUp = true;
     }
+    if (_navScrollTimer) return;
+    _navScrollTimer = setTimeout(function() {
+      updateActiveDot();
+      _navScrollTimer = null;
+    }, 80);
   });
 
   // ── Welcome Screen ──
@@ -356,6 +366,7 @@ export function getMessagesScript(tr: WebviewTranslations): string {
     }
 
     smartScrollToBottom();
+    scheduleNavUpdate();
   }
 
   // ── Thinking Toggle ──
@@ -468,6 +479,157 @@ export function getMessagesScript(tr: WebviewTranslations): string {
     }
   });
 
+  // ── Message Navigation ──
+  var navRail = document.getElementById('message-nav');
+  var navDots = [];
+  var activeDotIndex = -1;
+
+  /** Get the plain-text preview of a user message (first ~80 chars). */
+  function getUserMsgPreview(el) {
+    var body = el.querySelector('.message-body');
+    if (!body) return '';
+    var text = (body.textContent || '').trim().replace(/\\s+/g, ' ');
+    return text.length > 80 ? text.slice(0, 77) + '...' : text;
+  }
+
+  /** Rebuild the navigation dots to match current user messages. */
+  function updateNavDots() {
+    if (!navRail) return;
+
+    var userMsgs = messagesEl.querySelectorAll('.message.user');
+    if (userMsgs.length === 0) {
+      // No user messages: clear dots (rail hidden via :empty CSS)
+      while (navRail.firstChild) navRail.removeChild(navRail.firstChild);
+      navDots = [];
+      activeDotIndex = -1;
+      return;
+    }
+
+    var scrollHeight = messagesEl.scrollHeight;
+    if (scrollHeight === 0) {
+      // Layout not ready yet; retry on next frame
+      requestAnimationFrame(updateNavDots);
+      return;
+    }
+
+    // Clear existing dots
+    while (navRail.firstChild) navRail.removeChild(navRail.firstChild);
+    navDots = [];
+
+    for (var i = 0; i < userMsgs.length; i++) {
+      var msg = userMsgs[i];
+      var dot = document.createElement('div');
+      dot.className = 'msg-nav-dot';
+      // Position dot proportionally along the scroll height
+      var msgOffset = msg.offsetTop + msg.offsetHeight / 2;
+      var pct = Math.min(98, Math.max(2, (msgOffset / scrollHeight) * 100));
+      dot.style.top = pct + '%';
+      dot.setAttribute('data-msg-id', msg.id);
+      dot.setAttribute('data-preview', getUserMsgPreview(msg));
+      dot.setAttribute('data-index', String(i));
+
+      dot.addEventListener('click', function(e) {
+        e.stopPropagation();
+        var targetId = this.getAttribute('data-msg-id');
+        if (targetId) scrollToMessage(document.getElementById(targetId));
+      });
+
+      navRail.appendChild(dot);
+      navDots.push({ el: dot, msg: msg });
+    }
+
+    updateActiveDot();
+  }
+
+  /** Highlight the dot whose message is nearest the viewport center. */
+  function updateActiveDot() {
+    if (!navRail || navDots.length === 0) return;
+    var viewCenter = messagesEl.scrollTop + messagesEl.clientHeight / 2;
+    var bestIdx = -1;
+    var bestDist = Infinity;
+
+    for (var i = 0; i < navDots.length; i++) {
+      var msg = navDots[i].msg;
+      var msgCenter = msg.offsetTop + msg.offsetHeight / 2;
+      var dist = Math.abs(msgCenter - viewCenter);
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestIdx = i;
+      }
+    }
+
+    if (bestIdx !== activeDotIndex) {
+      if (activeDotIndex >= 0 && navDots[activeDotIndex]) {
+        navDots[activeDotIndex].el.classList.remove('active');
+      }
+      if (bestIdx >= 0 && navDots[bestIdx]) {
+        navDots[bestIdx].el.classList.add('active');
+      }
+      activeDotIndex = bestIdx;
+    }
+  }
+
+  /** Flash highlight and scroll a message into view. */
+  function scrollToMessage(el) {
+    if (!el) return;
+
+    // Disable user-scrolled-up flag so smartScrollToBottom won't fight us
+    userScrolledUp = false;
+
+    // Scroll the message to the top of the viewport with some padding
+    var containerTop = messagesEl.getBoundingClientRect().top;
+    var msgTop = el.getBoundingClientRect().top;
+    var offset = msgTop - containerTop + messagesEl.scrollTop - 20;
+    messagesEl.scrollTo({ top: Math.max(0, offset), behavior: 'smooth' });
+
+    // Flash highlight
+    el.classList.remove('jump-flash');
+    void el.offsetWidth; // force reflow
+    el.classList.add('jump-flash');
+    setTimeout(function() { el.classList.remove('jump-flash'); }, 850);
+
+    // Update active dot after scroll settles
+    setTimeout(updateActiveDot, 400);
+  }
+
+  /** Jump to the previous or next user message. */
+  function jumpToUserMessage(direction) {
+    var userMsgs = messagesEl.querySelectorAll('.message.user');
+    if (userMsgs.length === 0) return;
+
+    // Find the index of the user message closest to (at or just above)
+    // the viewport top. If scrolled past all messages, use the last one.
+    var scrollTop = messagesEl.scrollTop;
+    var currentIdx = userMsgs.length - 1;
+    for (var i = 0; i < userMsgs.length; i++) {
+      if (userMsgs[i].offsetTop > scrollTop + 20) break;
+      currentIdx = i;
+    }
+
+    var targetIdx;
+    if (direction === 'prev') {
+      targetIdx = currentIdx - 1;
+      if (targetIdx < 0) return;
+    } else {
+      targetIdx = currentIdx + 1;
+      if (targetIdx >= userMsgs.length) return;
+    }
+
+    scrollToMessage(userMsgs[targetIdx]);
+  }
+
+  /** Force a rebuild of navigation dots (called after messages change). */
+  var _scheduledNavUpdate = false;
+  function scheduleNavUpdate() {
+    // Debounce: update after layout settles on the next animation frame
+    if (_scheduledNavUpdate) return;
+    _scheduledNavUpdate = true;
+    requestAnimationFrame(function() {
+      updateNavDots();
+      _scheduledNavUpdate = false;
+    });
+  }
+
   // ── Expose for event handler module ──
   window.__wvMessages = {
     addMessage: addMessage,
@@ -481,6 +643,9 @@ export function getMessagesScript(tr: WebviewTranslations): string {
     setStreamingTimeout: function(v) { streamingTimeout = v; },
     getUserScrolledUp: function() { return userScrolledUp; },
     setUserScrolledUp: function(v) { userScrolledUp = v; },
+    updateNavDots: updateNavDots,
+    jumpToUserMessage: jumpToUserMessage,
+    scrollToMessage: scrollToMessage,
   };
 
   renderWelcome();

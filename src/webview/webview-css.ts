@@ -338,10 +338,102 @@ export function getWebviewCss(): string {
 
     #chat-area { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 
-    #messages {
+    #messages-wrapper {
       flex: 1;
+      position: relative;
+      overflow: hidden;
+    }
+
+    #messages {
+      height: 100%;
       overflow-y: auto;
       padding: 8px;
+      scroll-behavior: smooth;
+    }
+
+    /* ── Message Navigation Rail ── */
+
+    #message-nav {
+      position: absolute;
+      right: 2px;
+      top: 0;
+      bottom: 0;
+      width: 10px;
+      pointer-events: none;
+      z-index: 5;
+    }
+    #message-nav:empty {
+      display: none;
+    }
+
+    .msg-nav-dot {
+      position: absolute;
+      right: 2px;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--brand-primary);
+      opacity: 0.25;
+      pointer-events: auto;
+      cursor: pointer;
+      transition: opacity 0.2s ease, transform 0.2s ease, background 0.2s ease;
+      transform: translateX(0);
+    }
+    #messages:hover .msg-nav-dot {
+      opacity: 0.45;
+    }
+    .msg-nav-dot:hover {
+      opacity: 0.95 !important;
+      transform: scale(1.8);
+      background: var(--brand-primary-light);
+    }
+    .msg-nav-dot.active {
+      opacity: 0.85 !important;
+      transform: scale(1.4);
+      background: var(--brand-primary-light);
+      box-shadow: 0 0 6px rgba(109, 158, 166, 0.5);
+    }
+
+    /* Tooltip on hover */
+    .msg-nav-dot::after {
+      content: attr(data-preview);
+      position: absolute;
+      right: 14px;
+      top: 50%;
+      transform: translateY(-50%) translateX(4px);
+      white-space: nowrap;
+      max-width: 260px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      padding: 5px 10px;
+      border-radius: 6px;
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      color: var(--fg);
+      font-size: 0.78em;
+      font-family: var(--vscode-font-family);
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.15s ease, transform 0.15s ease;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    }
+    .msg-nav-dot:hover::after {
+      opacity: 1;
+      transform: translateY(-50%) translateX(0);
+    }
+
+    /* ── Message Jump Highlight Animation ── */
+
+    @keyframes msgJumpFlash {
+      0%   { box-shadow: 0 0 0 0 rgba(109, 158, 166, 0.6); }
+      30%  { box-shadow: 0 0 0 4px rgba(109, 158, 166, 0.4); }
+      70%  { box-shadow: 0 0 0 8px rgba(109, 158, 166, 0.1); }
+      100% { box-shadow: 0 0 0 12px rgba(109, 158, 166, 0); }
+    }
+
+    .message.jump-flash {
+      animation: msgJumpFlash 0.8s ease-out;
+      z-index: 2;
     }
 
     /* ── Welcome Screen ── */
