@@ -1,5 +1,15 @@
 # Change Log
 
+## 0.4.3
+
+### New Features
+
+- **Mid-Turn Steering** — While a turn is streaming, plain text sent via Enter now guides the active turn instead of starting a new one (mirrors TUI's steering input `POST /v1/threads/{id}/turns/{turn_id}/steer`). The composer shows a "steer the running turn..." hint and keeps the send button as Stop; slash commands still block except `/interrupt` and `/clear`. Steered prompts render as interrupt bubbles with a steer pill badge, and subsequent output flows into a fresh streaming segment — in-flight tool updates keep landing on the segment they started on, and history reloads interleave steered messages as separate bubbles. Capability-gated with graceful fallback to the previous blocking behavior on older engines.
+
+### Bug Fixes
+
+- **Steer Badge Tooltip** — The steer badge now shows a dedicated "Sent as mid-turn steering" tooltip instead of reusing the composer's placeholder hint text.
+
 ## 0.4.2
 
 ### New Features
