@@ -62,6 +62,7 @@ export function makeTr(overrides?: Partial<WebviewTranslations>): WebviewTransla
     thinkingClose: "▼ Thinking",
     steerPlaceholder: "Steer the running turn...",
     steerBadge: "steer",
+    steerBadgeTitle: "Sent as mid-turn steering",
     modeLabel: "Mode",
     reasoningEffortLabel: "Reasoning",
     welcomeTitle: "CodeWhale",

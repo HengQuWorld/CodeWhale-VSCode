@@ -82,6 +82,7 @@ interface Translations {
   steerFailed: string;
   steerPlaceholder: string;
   steerBadge: string;
+  steerBadgeTitle: string;
   engineRestarted: string;
   engineRestartFailed: string;
   engineNotRunning: string;
@@ -313,6 +314,7 @@ const en: Translations = {
   steerFailed: "Failed to steer",
   steerPlaceholder: "Steer the running turn...",
   steerBadge: "steer",
+  steerBadgeTitle: "Sent as mid-turn steering",
   engineRestarted: "CodeWhale engine restarted",
   engineRestartFailed: "Failed to restart engine",
   engineNotRunning: "CodeWhale engine is not running",
@@ -535,6 +537,7 @@ const zhCn: Translations = {
   steerFailed: "引导失败",
   steerPlaceholder: "引导当前回复...",
   steerBadge: "引导",
+  steerBadgeTitle: "作为中途引导发送",
   engineRestarted: "CodeWhale 引擎已重启",
   engineRestartFailed: "重启引擎失败",
   engineNotRunning: "CodeWhale 引擎未运行",
@@ -783,6 +786,7 @@ export function webviewTranslations(tr: Translations) {
     eventStreamError: tr.eventStreamError,
     steerPlaceholder: tr.steerPlaceholder,
     steerBadge: tr.steerBadge,
+    steerBadgeTitle: tr.steerBadgeTitle,
     engineRestarted: tr.engineRestarted,
     engineRestartFailed: tr.engineRestartFailed,
     engineNotRunning: tr.engineNotRunning,

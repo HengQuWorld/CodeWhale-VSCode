@@ -295,7 +295,7 @@ export function getMessagesScript(tr: WebviewTranslations): string {
     if (showRole !== false) {
       html += '<div class="role">' + __wvEscapeHtml(msg.role);
       if (msg.steered) {
-        html += ' <span class="steer-badge" title="' + __wvEscapeHtml(__i18n.steerPlaceholder) + '">' + __wvEscapeHtml(__i18n.steerBadge) + '</span>';
+        html += ' <span class="steer-badge" title="' + __wvEscapeHtml(__i18n.steerBadgeTitle) + '">' + __wvEscapeHtml(__i18n.steerBadge) + '</span>';
       }
       html += '</div>';
     }

@@ -58,6 +58,7 @@ function makeTr(): WebviewTranslations {
     thinkingClose: "▼ Thinking",
     steerPlaceholder: "Steer the running turn...",
     steerBadge: "steer",
+    steerBadgeTitle: "Sent as mid-turn steering",
     modeLabel: "Mode",
     reasoningEffortLabel: "Reasoning",
     welcomeTitle: "CodeWhale",

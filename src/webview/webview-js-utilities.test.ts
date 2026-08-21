@@ -46,10 +46,11 @@ describe("webview-js-utilities.ts", () => {
   });
 
   it("injects steer translations into __wvI18n (input placeholder relies on them)", () => {
-    const tr = makeTr({ steerPlaceholder: "Steer the running turn...", steerBadge: "steer" });
+    const tr = makeTr({ steerPlaceholder: "Steer the running turn...", steerBadge: "steer", steerBadgeTitle: "Sent as mid-turn steering" });
     const script = getUtilitiesScript(tr);
     expect(script).toContain("steerPlaceholder: 'Steer the running turn...'");
     expect(script).toContain("steerBadge: 'steer'");
+    expect(script).toContain("steerBadgeTitle: 'Sent as mid-turn steering'");
   });
 
   it("escapeHtml function handles special characters", () => {

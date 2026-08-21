@@ -116,5 +116,9 @@ describe("webview-js-messages.ts", () => {
     expect(script).toContain("msg.steered");
     // Steered messages get a dedicated class for accent styling.
     expect(script).toContain("' steered'");
+    // The badge tooltip uses the dedicated description, not the input
+    // placeholder (which is a different concept).
+    expect(script).toContain("__i18n.steerBadgeTitle");
+    expect(script).not.toContain("__i18n.steerPlaceholder");
   });
 });

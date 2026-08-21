@@ -27,6 +27,7 @@ export function getUtilitiesScript(tr: WebviewTranslations): string {
     thinkingToggle: '${tr.thinkingToggle}',
     steerPlaceholder: '${tr.steerPlaceholder || ""}',
     steerBadge: '${tr.steerBadge || ""}',
+    steerBadgeTitle: '${tr.steerBadgeTitle || ""}',
     welcomeTitle: '${tr.welcomeTitle}',
     welcomeSubtitle: '${tr.welcomeSubtitle}',
     welcomeQuote: '${tr.welcomeQuote}',
