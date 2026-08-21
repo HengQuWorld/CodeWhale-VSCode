@@ -114,4 +114,20 @@ describe("webview-js-input.ts", () => {
     const script = getInputScript(tr);
     expect(script).toContain("/mode - Custom mode desc");
   });
+
+  it("routes plain text during streaming to steer (TUI steer parity)", () => {
+    const script = getInputScript(makeTr());
+    expect(script).toContain("type: 'steer'");
+    // Steering is gated on the runtime capability probe.
+    expect(script).toContain("turnSteer");
+    // Slash commands other than /interrupt and /clear stay blocked while streaming.
+    expect(script).toContain("slashAllowedWhileStreaming");
+  });
+
+  it("swaps the input placeholder to the steer hint while streaming", () => {
+    const script = getInputScript(makeTr());
+    expect(script).toContain("updateInputPlaceholder");
+    expect(script).toContain("__i18n.steerPlaceholder");
+    expect(script).toContain("inputDefaultPlaceholder");
+  });
 });

@@ -278,17 +278,26 @@ export function getMessagesScript(tr: WebviewTranslations): string {
   }
 
   // ── Add Message ──
+  function removeMessage(id) {
+    var el = document.getElementById('msg-' + id);
+    if (el) el.remove();
+  }
+
   function addMessage(msg, showRole) {
     var welcomeEl = messagesEl.querySelector('.welcome-screen');
     if (welcomeEl) welcomeEl.remove();
 
     var el = document.createElement('div');
-    el.className = 'message ' + msg.role;
+    el.className = 'message ' + msg.role + (msg.steered ? ' steered' : '');
     el.id = 'msg-' + msg.id;
 
     var html = '';
     if (showRole !== false) {
-      html += '<div class="role">' + __wvEscapeHtml(msg.role) + '</div>';
+      html += '<div class="role">' + __wvEscapeHtml(msg.role);
+      if (msg.steered) {
+        html += ' <span class="steer-badge" title="' + __wvEscapeHtml(__i18n.steerPlaceholder) + '">' + __wvEscapeHtml(__i18n.steerBadge) + '</span>';
+      }
+      html += '</div>';
     }
     html += '<div class="message-body" id="body-' + msg.id + '"></div>';
 
@@ -633,6 +642,7 @@ export function getMessagesScript(tr: WebviewTranslations): string {
   // ── Expose for event handler module ──
   window.__wvMessages = {
     addMessage: addMessage,
+    removeMessage: removeMessage,
     renderWelcome: renderWelcome,
     renderToolCall: renderToolCall,
     renderFileChangeCard: renderFileChangeCard,

@@ -109,6 +109,79 @@ describe("ChatProvider thread history rendering", () => {
     });
   });
 
+  it("renders steered turns as interleaved segments, not one merged bubble", async () => {
+    const detail = {
+      latest_seq: 20,
+      thread: { id: "thread-1", model: "deepseek-v4-pro" },
+      turns: [
+        {
+          id: "turn-1",
+          input_summary: "run the tests",
+          created_at: "2026-08-20T10:00:00Z",
+          ended_at: "2026-08-20T10:00:10Z",
+          status: "completed",
+          item_ids: ["u1", "a1", "u2", "a2"],
+        },
+      ],
+      items: [
+        { id: "u1", kind: "user_message", summary: "run the tests", detail: "run the tests", status: "completed", started_at: "2026-08-20T10:00:00Z" },
+        { id: "a1", kind: "agent_message", summary: "Starting...", detail: "Starting...", status: "completed" },
+        { id: "u2", kind: "user_message", summary: "focus on vitest", detail: "focus on vitest", status: "completed", started_at: "2026-08-20T10:00:04Z" },
+        { id: "a2", kind: "agent_message", summary: " Done with vitest", detail: "Done with vitest", status: "completed" },
+      ],
+    };
+
+    const { provider } = createProvider(detail);
+
+    await (provider as any).loadHistory("thread-1");
+
+    // user → assistant(seg 1) → steered user → assistant(seg 2), matching
+    // the live interrupt rendering instead of one merged user bubble.
+    expect(provider.messages.map((m) => `${m.role}:${m.content}:${m.steered ? "steer" : ""}`)).toEqual([
+      "user:run the tests:",
+      "assistant:Starting...:",
+      "user:focus on vitest:steer",
+      "assistant:Done with vitest:",
+    ]);
+  });
+
+  it("applies tool results that arrive after a steer to the pre-steer segment's tool", async () => {
+    const detail = {
+      latest_seq: 30,
+      thread: { id: "thread-1", model: "deepseek-v4-pro" },
+      turns: [
+        {
+          id: "turn-1",
+          input_summary: "check files",
+          created_at: "2026-08-20T10:00:00Z",
+          ended_at: "2026-08-20T10:00:10Z",
+          status: "completed",
+          item_ids: ["u1", "t1", "u2", "t1r", "a1"],
+        },
+      ],
+      items: [
+        { id: "u1", kind: "user_message", summary: "check files", detail: "check files", status: "completed" },
+        { id: "t1", kind: "tool_call", summary: "read_file: a.txt", detail: null, status: "completed", metadata: { tool_use_id: "tool-1" } },
+        { id: "u2", kind: "user_message", summary: "hurry up", detail: "hurry up", status: "completed" },
+        { id: "t1r", kind: "tool_call", summary: "contents from a.txt", detail: "hello world", status: "completed", metadata: { tool_result_for: "tool-1", is_error: false } },
+        { id: "a1", kind: "agent_message", summary: "All checked", detail: "All checked", status: "completed" },
+      ],
+    };
+
+    const { provider } = createProvider(detail);
+
+    await (provider as any).loadHistory("thread-1");
+
+    const segments = provider.messages.filter((m) => m.role === "assistant");
+    expect(segments).toHaveLength(2);
+    // The tool call lives in the pre-steer segment...
+    expect(segments[0].toolCalls).toHaveLength(1);
+    // ...and its result, persisted after the steer item, still lands on it.
+    expect(segments[0].toolCalls?.[0].output).toBe("hello world");
+    expect(segments[0].toolCalls?.[0].status).toBe("complete");
+    expect(segments[1].content).toBe("All checked");
+  });
+
   it("renders file-edit tool calls from session history as diff cards", async () => {
     const session = {
       metadata: {

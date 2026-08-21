@@ -77,6 +77,11 @@ interface Translations {
   sendFailed: string;
   initFailed: string;
   eventStreamError: string;
+  steerNoActiveTurn: string;
+  steerUnsupported: string;
+  steerFailed: string;
+  steerPlaceholder: string;
+  steerBadge: string;
   engineRestarted: string;
   engineRestartFailed: string;
   engineNotRunning: string;
@@ -303,6 +308,11 @@ const en: Translations = {
   contextCompacted: "Context compacted", compactFailed: "Compact failed",
   sendFailed: "Failed to send message", initFailed: "Failed to initialize",
   eventStreamError: "Event stream error",
+  steerNoActiveTurn: "No running turn to steer",
+  steerUnsupported: "Steering is not supported by this engine version",
+  steerFailed: "Failed to steer",
+  steerPlaceholder: "Steer the running turn...",
+  steerBadge: "steer",
   engineRestarted: "CodeWhale engine restarted",
   engineRestartFailed: "Failed to restart engine",
   engineNotRunning: "CodeWhale engine is not running",
@@ -520,6 +530,11 @@ const zhCn: Translations = {
   contextCompacted: "上下文已压缩", compactFailed: "压缩失败",
   sendFailed: "发送消息失败", initFailed: "初始化失败",
   eventStreamError: "事件流错误",
+  steerNoActiveTurn: "当前没有进行中的回复可引导",
+  steerUnsupported: "当前引擎版本不支持引导",
+  steerFailed: "引导失败",
+  steerPlaceholder: "引导当前回复...",
+  steerBadge: "引导",
   engineRestarted: "CodeWhale 引擎已重启",
   engineRestartFailed: "重启引擎失败",
   engineNotRunning: "CodeWhale 引擎未运行",
@@ -766,6 +781,8 @@ export function webviewTranslations(tr: Translations) {
     sendFailed: tr.sendFailed,
     initFailed: tr.initFailed,
     eventStreamError: tr.eventStreamError,
+    steerPlaceholder: tr.steerPlaceholder,
+    steerBadge: tr.steerBadge,
     engineRestarted: tr.engineRestarted,
     engineRestartFailed: tr.engineRestartFailed,
     engineNotRunning: tr.engineNotRunning,

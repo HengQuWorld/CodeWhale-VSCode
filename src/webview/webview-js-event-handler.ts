@@ -436,6 +436,10 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
         }
         break;
 
+      case 'removeMessage':
+        window.__wvMessages.removeMessage(msg.messageId);
+        break;
+
       case 'updateMessage': {
         var blockIdx = msg.blockIdx !== undefined ? msg.blockIdx : 0;
         var contentEl = document.getElementById('content-' + msg.messageId + '-' + blockIdx);

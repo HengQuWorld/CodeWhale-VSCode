@@ -555,6 +555,26 @@ export function getWebviewCss(): string {
     .message.user .role { color: rgba(255,255,255,0.8); }
     .message.assistant .role { color: var(--muted); }
 
+    /* Mid-turn steering: steered user messages use the accent color so they
+       stand out from regular user messages, with a filled pill badge. */
+    .message.user.steered {
+      background: var(--accent);
+    }
+
+    .steer-badge {
+      display: inline-block;
+      font-size: 0.72em;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      padding: 2px 8px;
+      margin-left: 6px;
+      border-radius: 999px;
+      vertical-align: 1px;
+      background: rgba(255,255,255,0.22);
+      color: inherit;
+    }
+
     .message .content {
       line-height: 1.6;
       word-wrap: break-word;

@@ -256,6 +256,16 @@ export class CodeWhaleApiClient {
     await this.post(`/v1/threads/${threadId}/turns/${turnId}/interrupt`, {});
   }
 
+  /** Steer a running turn (mid-turn user guidance). Mirrors TUI's steering
+   *  input: the prompt is appended as a user message on the active turn and
+   *  delivered to the engine mid-stream. */
+  async steerTurn(threadId: string, turnId: string, prompt: string): Promise<TurnRecord> {
+    return (await this.post(
+      `/v1/threads/${threadId}/turns/${turnId}/steer`,
+      { prompt }
+    )) as TurnRecord;
+  }
+
   async compactThread(threadId: string, reason?: string): Promise<void> {
     const body: Record<string, unknown> = {};
     if (reason) body.reason = reason;
@@ -478,6 +488,7 @@ export class CodeWhaleApiClient {
       threadUndo,
       threadPatchUndo,
       threadRetry,
+      turnSteer,
       snapshotList,
       snapshotRestore,
     ] = await Promise.all([
@@ -485,6 +496,7 @@ export class CodeWhaleApiClient {
       this.probePath("/v1/threads/__probe__/undo"),
       this.probePath("/v1/threads/__probe__/patch-undo"),
       this.probePath("/v1/threads/__probe__/retry"),
+      this.probePath("/v1/threads/__probe__/turns/__probe__/steer"),
       this.probePath("/v1/snapshots"),
       this.probePath("/v1/snapshots/__probe__/restore"),
     ]);
@@ -494,6 +506,7 @@ export class CodeWhaleApiClient {
       threadUndo,
       threadPatchUndo,
       threadRetry,
+      turnSteer,
       snapshotList,
       snapshotRestore,
     };

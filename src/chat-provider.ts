@@ -135,6 +135,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     threadUndo: false,
     threadPatchUndo: false,
     threadRetry: false,
+    turnSteer: false,
     snapshotList: false,
     snapshotRestore: false,
   };
@@ -273,6 +274,9 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         break;
       case "sendMessage":
         await this.handleSendMessage(msg.text as string);
+        break;
+      case "steer":
+        await this.handleSteer(msg.text as string);
         break;
       case "slashCommand":
         await this.handleSlashCommand(
@@ -535,21 +539,85 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       const itemById = new Map(detail.items.map((item) => [item.id, item]));
 
       for (const turn of detail.turns) {
-        const userTexts: string[] = [];
+        // A mid-turn steer splits the turn into multiple assistant segments.
+        // Segment state below resets at each steer boundary so history
+        // renders like the live view: assistant → steer bubble → assistant
+        // (TUI dispatch.rs flush_active_cell ordering).
         let content = "";
         let thinking = "";
-        const toolCalls: ToolCallInfo[] = [];
-        const toolCallIdToIndex = new Map<string, number>();
-        const blocks: ContentBlock[] = [];
+        let toolCalls: ToolCallInfo[] = [];
+        let blocks: ContentBlock[] = [];
         let currentTextBlock: ContentBlock | undefined;
         let currentThinkingBlock: ContentBlock | undefined;
+        let segmentIdx = 0;
+        let emittedUserBubble = false;
+        const turnStartIdx = this.messages.length;
 
+        // Turn-level: a tool in flight when the steer landed has its result
+        // item persisted AFTER the steer item, so resolve by object
+        // reference rather than a per-segment index.
+        const toolCallById = new Map<string, ToolCallInfo>();
         const applyToolResult = (toolUseId: string, output: string, isError: boolean): void => {
-          const tcIdx = toolCallIdToIndex.get(toolUseId);
-          const tc = tcIdx !== undefined ? toolCalls[tcIdx] : undefined;
+          const tc = toolCallById.get(toolUseId);
           if (!tc) return;
           tc.output = output;
           tc.status = isError ? "error" : "complete";
+        };
+
+        const flushAssistantSegment = (): void => {
+          if (content || thinking || toolCalls.length > 0 || blocks.length > 0) {
+            for (const b of blocks) {
+              if ((b.type === "text" || b.type === "thinking") && b.content) {
+                try { b.contentHtml = renderMarkdown(b.content); } catch { b.contentHtml = b.content; }
+              }
+            }
+            this.messages.push({
+              id: segmentIdx === 0 ? `assistant-${turn.id}` : `assistant-${turn.id}-s${segmentIdx}`,
+              role: "assistant",
+              content: content || (segmentIdx === 0 ? turn.input_summary.slice(0, 100) : ""),
+              thinking: thinking || undefined,
+              toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+              blocks: blocks.length > 0 ? blocks : undefined,
+              status: turn.status === "completed" ? "complete" : "error",
+              timestamp: new Date(turn.ended_at || turn.created_at).getTime(),
+            });
+
+            for (const tc of toolCalls) {
+              if (tc.fileChange) {
+                const normPath = normalizePath(tc.fileChange.filePath);
+                const existingIdx = this.turnFileChanges.findIndex(existing => normalizePath(existing.filePath) === normPath);
+                if (existingIdx >= 0) {
+                  // Merge with existing change for cumulative stats
+                  const existing = this.turnFileChanges[existingIdx];
+                  const existingDiffs = existing.diffs ?? (existing.diff ? [existing.diff] : []);
+                  const newDiffs = tc.fileChange.diff ? [...existingDiffs, tc.fileChange.diff] : existingDiffs;
+                  this.turnFileChanges[existingIdx] = {
+                    ...tc.fileChange,
+                    addedLines: existing.addedLines + tc.fileChange.addedLines,
+                    removedLines: existing.removedLines + tc.fileChange.removedLines,
+                    changeType: tc.fileChange.changeType === "created" ? "created" :
+                               tc.fileChange.changeType === "deleted" && existing.changeType !== "created" ? "deleted" :
+                               existing.changeType,
+                    diff: tc.fileChange.diff ?? existing.diff,
+                    diffs: newDiffs,
+                    toolName: tc.fileChange.toolName ?? existing.toolName,
+                  };
+                } else {
+                  this.turnFileChanges.push({
+                    ...tc.fileChange,
+                    diffs: tc.fileChange.diff ? [tc.fileChange.diff] : [],
+                  });
+                }
+              }
+            }
+          }
+          content = "";
+          thinking = "";
+          toolCalls = [];
+          blocks = [];
+          currentTextBlock = undefined;
+          currentThinkingBlock = undefined;
+          segmentIdx++;
         };
 
         const turnItems = (turn.item_ids || [])
@@ -559,9 +627,30 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         for (const item of turnItems) {
           switch (item.kind) {
             case "user_message": {
-              const text = item.detail || item.summary;
-              if (text && text.trim()) {
-                userTexts.push(text);
+              const text = stripTurnMeta(item.detail || item.summary || "").trim();
+              if (!text) break;
+              if (!emittedUserBubble) {
+                emittedUserBubble = true;
+                this.messages.push({
+                  id: `user-${turn.id}`,
+                  role: "user",
+                  content: text.slice(0, 280),
+                  status: "complete",
+                  timestamp: new Date(item.started_at || turn.created_at).getTime(),
+                });
+              } else {
+                // Steer (TUI parity): flush the segment above it, then the
+                // steer bubble, then continue accumulating into a fresh
+                // segment — matching the live interrupt rendering.
+                flushAssistantSegment();
+                this.messages.push({
+                  id: `user-steer-${item.id}`,
+                  role: "user",
+                  content: text,
+                  status: "complete",
+                  timestamp: new Date(item.started_at || turn.created_at).getTime(),
+                  steered: true,
+                });
               }
               break;
             }
@@ -614,7 +703,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
                 itemId: typeof metadata.tool_use_id === "string" ? metadata.tool_use_id : item.id,
               };
               if (tc.itemId) {
-                toolCallIdToIndex.set(tc.itemId, tcIdx);
+                toolCallById.set(tc.itemId, tc);
               }
               if (isFileChangeTool(tc.name) && tc.input) {
                 const filePath = extractFilePath(tc.name, tc.input);
@@ -676,63 +765,31 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
           }
         }
 
-        const userContent = stripTurnMeta(userTexts.join("\n")).trim()
-          || turn.input_summary.trim();
-        if (userContent) {
-          this.messages.push({
+        // Turns without a persisted user_message item (e.g. runtime-initiated
+        // turns) still show the input summary as the turn's user bubble.
+        if (!emittedUserBubble && turn.input_summary.trim()) {
+          this.messages.splice(turnStartIdx, 0, {
             id: `user-${turn.id}`,
             role: "user",
-            content: userContent.slice(0, 280),
+            content: turn.input_summary.trim().slice(0, 280),
             status: "complete",
             timestamp: new Date(turn.created_at).getTime(),
           });
         }
 
-        for (const b of blocks) {
-          if ((b.type === "text" || b.type === "thinking") && b.content) {
-            try { b.contentHtml = renderMarkdown(b.content); } catch { b.contentHtml = b.content; }
-          }
-        }
+        flushAssistantSegment();
 
-        const assistantMsg: ChatMessage = {
-          id: `assistant-${turn.id}`,
-          role: "assistant",
-          content: content || turn.input_summary.slice(0, 100),
-          thinking: thinking || undefined,
-          toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
-          blocks: blocks.length > 0 ? blocks : undefined,
-          status: turn.status === "completed" ? "complete" : "error",
-          timestamp: new Date(turn.ended_at || turn.created_at).getTime(),
-        };
-        this.messages.push(assistantMsg);
-
-        for (const tc of toolCalls) {
-          if (tc.fileChange) {
-            const normPath = normalizePath(tc.fileChange.filePath);
-            const existingIdx = this.turnFileChanges.findIndex(existing => normalizePath(existing.filePath) === normPath);
-            if (existingIdx >= 0) {
-              // Merge with existing change for cumulative stats
-              const existing = this.turnFileChanges[existingIdx];
-              const existingDiffs = existing.diffs ?? (existing.diff ? [existing.diff] : []);
-              const newDiffs = tc.fileChange.diff ? [...existingDiffs, tc.fileChange.diff] : existingDiffs;
-              this.turnFileChanges[existingIdx] = {
-                ...tc.fileChange,
-                addedLines: existing.addedLines + tc.fileChange.addedLines,
-                removedLines: existing.removedLines + tc.fileChange.removedLines,
-                changeType: tc.fileChange.changeType === "created" ? "created" :
-                           tc.fileChange.changeType === "deleted" && existing.changeType !== "created" ? "deleted" :
-                           existing.changeType,
-                diff: tc.fileChange.diff ?? existing.diff,
-                diffs: newDiffs,
-                toolName: tc.fileChange.toolName ?? existing.toolName,
-              };
-            } else {
-              this.turnFileChanges.push({
-                ...tc.fileChange,
-                diffs: tc.fileChange.diff ? [tc.fileChange.diff] : [],
-              });
-            }
-          }
+        // Preserve the legacy behavior for turns with no assistant output
+        // at all: emit the fallback bubble (input summary preview) rather
+        // than rendering nothing for the turn.
+        if (!this.messages.slice(turnStartIdx).some((m) => m.role === "assistant")) {
+          this.messages.push({
+            id: `assistant-${turn.id}`,
+            role: "assistant",
+            content: turn.input_summary.slice(0, 100),
+            status: turn.status === "completed" ? "complete" : "error",
+            timestamp: new Date(turn.ended_at || turn.created_at).getTime(),
+          });
         }
       }
 
@@ -896,27 +953,34 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       }
 
       if (msg.role === "user") {
-        const textBlocks: string[] = [];
+        // Consecutive user text messages are mid-turn steers (the engine
+        // appends each steered prompt as its own user message). Render each
+        // as its own bubble — the first is the turn input, later ones carry
+        // the steer badge — instead of concatenating them into one blob.
+        let isFirstUserText = true;
         while (i < rawMessages.length && rawMessages[i].role === "user") {
+          const textBlocks: string[] = [];
           for (const block of rawMessages[i].content || []) {
             if (block.type === "text" && block.text) {
               textBlocks.push(block.text);
             }
           }
           i++;
+
+          const combined = stripTurnMeta(textBlocks.join("\n"));
+          if (!combined.trim()) continue;
+
+          this.messages.push({
+            id: `user-turn-${this.messages.length}`,
+            role: "user",
+            content: combined,
+            status: "complete" as const,
+            timestamp: Date.now(),
+            steered: !isFirstUserText || undefined,
+            _realContent: true,
+          } as ChatMessage & { _realContent: boolean });
+          isFirstUserText = false;
         }
-
-        const combined = stripTurnMeta(textBlocks.join("\n"));
-        if (!combined.trim()) continue;
-
-        this.messages.push({
-          id: `user-turn-${this.messages.length}`,
-          role: "user",
-          content: combined,
-          status: "complete" as const,
-          timestamp: Date.now(),
-          _realContent: true,
-        } as ChatMessage & { _realContent: boolean });
       } else {
         const blocks: ContentBlock[] = [];
         const turnToolCallIndices: number[] = [];
@@ -1419,6 +1483,99 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     }
   }
 
+  /** Steer the active turn: append mid-turn user guidance without starting a
+   *  new turn (mirrors TUI's steering input via POST /threads/{id}/turns/{turn_id}/steer).
+   *  TUI parity (dispatch.rs steer_user_message): call the engine first and
+   *  only touch the transcript on success; flush the streaming assistant
+   *  segment so the steer bubble interrupts it, and route subsequent output
+   *  to a fresh segment. The steered prompt is persisted server-side as a
+   *  user_message item on the turn, so loadHistory renders it after reload. */
+  private async handleSteer(text: string): Promise<void> {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+
+    const thread = this.currentThread;
+    const turnId = this.currentTurnId;
+    if (!thread || !turnId) {
+      this.postMessage({ type: "error", message: t().steerNoActiveTurn });
+      return;
+    }
+    if (!this.apiCapabilities.turnSteer) {
+      this.postMessage({ type: "error", message: t().steerUnsupported });
+      return;
+    }
+
+    // TUI parity (dispatch.rs steer_user_message): the engine is called
+    // FIRST and the transcript is only touched on success — on failure the
+    // TUI restores state and surfaces the error without visual changes.
+    // The engine rejects steering when the turn is stopping (interrupt
+    // requested) or already finished.
+    try {
+      await this.api.steerTurn(thread.id, turnId, trimmed);
+    } catch (err) {
+      this.postMessage({
+        type: "error",
+        message: formatError(t().steerFailed, err),
+      });
+      return;
+    }
+
+    const steerMsg: ChatMessage = {
+      id: `user-steer-${Date.now()}`,
+      role: "user",
+      content: trimmed,
+      status: "complete",
+      timestamp: Date.now(),
+      steered: true,
+    };
+    // Display-only: do NOT push into this.messages. The SSE router keys
+    // item deltas and turn completion off this.messages[last] being the
+    // streaming assistant message — appending a user message mid-turn
+    // hijacks that routing (AI output invisible, streaming never cleared).
+    // The steered prompt is persisted server-side as a user_message item
+    // on the turn, so loadHistory restores it after any reload.
+    this.postMessage({ type: "addMessage", message: steerMsg });
+
+    // Interruption semantics (TUI parity, dispatch.rs steer_user_message):
+    // flush_active_cell() commits the streaming content so the steer bubble
+    // appears below what chronologically preceded it — but an EMPTY active
+    // cell is discarded, not finalized. Same here: a streaming placeholder
+    // with no content yet (steer raced the first delta, or a double-steer)
+    // is removed instead of left as an empty bubble.
+    const lastMsg = this.messages[this.messages.length - 1];
+    if (lastMsg && lastMsg.role === "assistant" && lastMsg.status === "streaming") {
+      const isEmpty = !lastMsg.content && !lastMsg.thinking
+        && !(lastMsg.toolCalls && lastMsg.toolCalls.length > 0)
+        && !(lastMsg.blocks && lastMsg.blocks.length > 0);
+
+      if (isEmpty) {
+        this.messages.pop();
+        this.postMessage({ type: "removeMessage", messageId: lastMsg.id });
+      } else {
+        lastMsg.status = "complete";
+        this.postMessage({ type: "messageComplete", messageId: lastMsg.id });
+        // activeItems is intentionally kept: tool calls started before the
+        // steer still route their item.completed updates to the old segment.
+      }
+
+      // New segment starts fresh blocks (text/thinking indices reset).
+      this.currentTextBlockIdx = -1;
+      this.currentThinkingBlockIdx = -1;
+
+      const nextMsg: ChatMessage = {
+        id: `assistant-${Date.now()}`,
+        role: "assistant",
+        content: "",
+        status: "streaming",
+        timestamp: Date.now(),
+        toolCalls: [],
+        blocks: [],
+      };
+      this.messages.push(nextMsg);
+      this.postMessage({ type: "addMessage", message: nextMsg });
+    }
+  }
+
   private async handleNewThread(): Promise<void> {
     this.cleanup();
     this.sessionState.reset();
@@ -1909,6 +2066,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     undoLastTurn: boolean;
     retryLastTurn: boolean;
     revertFileChange: boolean;
+    turnSteer: boolean;
   } {
     return {
       saveSession: this.apiCapabilities.saveSession,
@@ -1916,6 +2074,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       retryLastTurn: this.apiCapabilities.threadRetry,
       revertFileChange:
         this.apiCapabilities.snapshotList && this.apiCapabilities.snapshotRestore,
+      turnSteer: this.apiCapabilities.turnSteer,
     };
   }
 
@@ -1935,6 +2094,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         threadUndo: false,
         threadPatchUndo: false,
         threadRetry: false,
+        turnSteer: false,
         snapshotList: false,
         snapshotRestore: false,
       };
@@ -2770,10 +2930,14 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         // turn was interrupted mid-execution), the toolCall would stay
         // "running" forever and the UI would freeze on "⟳ running...".
         // This mirrors the TUI's own cleanup in runtime_threads.rs:3395.
+        // Scan ALL messages, not just the last one: a mid-turn steer splits
+        // the turn into multiple assistant segments, and a tool started in
+        // an earlier segment can still be running when the turn ends.
         const lastMsg = this.messages[this.messages.length - 1];
-        if (lastMsg?.toolCalls) {
-          for (let i = 0; i < lastMsg.toolCalls.length; i++) {
-            const tc = lastMsg.toolCalls[i];
+        for (const msg of this.messages) {
+          if (!msg.toolCalls) continue;
+          for (let i = 0; i < msg.toolCalls.length; i++) {
+            const tc = msg.toolCalls[i];
             if (tc.status === "running" || tc.status === "awaiting_approval") {
               tc.status = isTerminalError ? "error" : "complete";
               tc.approvalId = undefined;
@@ -2784,7 +2948,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
               }
               this.postMessage({
                 type: "updateToolCall",
-                messageId: lastMsg.id,
+                messageId: msg.id,
                 toolCallIdx: i,
                 toolName: tc.name,
                 status: tc.status,
@@ -2798,12 +2962,33 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         this.activeItems.clear();
 
         if (lastMsg?.role === "assistant") {
-          const payload = finalizeAssistantMessage(
-            lastMsg,
-            isTerminalError ? "error" : "complete",
-            { usage: pl.turn?.usage },
-          );
-          this.postMessage(payload);
+          // TUI parity (flush_active_cell): a streaming placeholder that
+          // never received output (steer raced the turn end, or the model
+          // returned nothing) is discarded, not finalized as an empty
+          // bubble. loadHistory skips empty segments the same way, so the
+          // live view and the reloaded view stay consistent.
+          const isEmpty = lastMsg.status === "streaming" && !lastMsg.content
+            && !lastMsg.thinking && !(lastMsg.toolCalls && lastMsg.toolCalls.length > 0)
+            && !(lastMsg.blocks && lastMsg.blocks.length > 0);
+          if (isEmpty) {
+            this.messages.pop();
+            // messageComplete is the webview's streaming-end signal (clears
+            // the streaming flag, spinner timeout, and status bar); it is
+            // sent even though the node is removed right after, because
+            // removeMessage alone would leave the status bar stuck on
+            // "streaming".
+            this.postMessage(
+              finalizeAssistantMessage(lastMsg, isTerminalError ? "error" : "complete", { usage: pl.turn?.usage }),
+            );
+            this.postMessage({ type: "removeMessage", messageId: lastMsg.id });
+          } else {
+            const payload = finalizeAssistantMessage(
+              lastMsg,
+              isTerminalError ? "error" : "complete",
+              { usage: pl.turn?.usage },
+            );
+            this.postMessage(payload);
+          }
         }
         // Auto-save session after each completed turn (mirrors TUI's
         // build_session_snapshot → SessionSnapshot). Same thread always
@@ -2853,16 +3038,18 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         const lastMsg = this.messages[this.messages.length - 1];
         let tc: ToolCallInfo | undefined;
         let tcIdx: number | undefined;
+        let tcMsg: ChatMessage | undefined = lastMsg;
         if (callId) {
           const active = this.activeItems.get(callId);
           if (active?.toolCallIdx !== undefined) {
+            tcMsg = this.resolveActiveMessage(active, lastMsg);
             tcIdx = active.toolCallIdx;
-            tc = lastMsg?.toolCalls?.[tcIdx];
+            tc = tcMsg?.toolCalls?.[tcIdx];
           }
         }
-        if (!tc && lastMsg?.toolCalls) {
-          tc = lastMsg.toolCalls.find((t) => t.status === "running");
-          if (tc) tcIdx = lastMsg.toolCalls.indexOf(tc);
+        if (!tc && tcMsg?.toolCalls) {
+          tc = tcMsg.toolCalls.find((t) => t.status === "running");
+          if (tc) tcIdx = tcMsg.toolCalls.indexOf(tc);
         }
 
         // Safety net: if the tool call is already complete, the TUI has
@@ -3016,6 +3203,18 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     }
   }
 
+  /** Resolve the message an active item belongs to. Mid-turn steers split a
+   *  turn into multiple assistant segments, so an item started before a
+   *  steer must keep routing its events to its original (earlier) segment —
+   *  `messages[last]` is only correct for items started after the steer. */
+  private resolveActiveMessage(
+    active: { msgId?: string } | undefined,
+    fallback: ChatMessage | undefined,
+  ): ChatMessage | undefined {
+    if (!active?.msgId) return fallback;
+    return this.messages.find((m) => m.id === active.msgId) ?? fallback;
+  }
+
   private handleItemEvent(event: RuntimeEvent): void {
     const itemId = event.item_id!;
     const lastMsg = this.messages[this.messages.length - 1];
@@ -3138,8 +3337,9 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         this.activeItems.delete(itemId);
 
         if (kind === "tool_call" || kind === "file_change" || kind === "command_execution") {
+          const msg = this.resolveActiveMessage(active, lastMsg)!;
           const tcIdx = active?.toolCallIdx;
-          const tc = tcIdx !== undefined ? lastMsg.toolCalls?.[tcIdx] : undefined;
+          const tc = tcIdx !== undefined ? msg.toolCalls?.[tcIdx] : undefined;
           const toolName = active?.toolCallName || extractToolNameFromSummary(pl.item?.summary || "");
 
           if (tc) {
@@ -3147,7 +3347,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
             tc.output = pl.item?.detail || pl.item?.summary;
             this.postMessage({
               type: "updateToolCall",
-              messageId: lastMsg.id,
+              messageId: msg.id,
               toolCallIdx: tcIdx!,
               toolName: tc.name,
               status: "complete",
@@ -3220,7 +3420,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
               if (tcIdx !== undefined) {
                 this.postMessage({
                   type: "fileChangeDetected",
-                  messageId: lastMsg.id,
+                  messageId: msg.id,
                   toolCallIdx: tcIdx,
                   fileChange: fc,
                 });
@@ -3274,15 +3474,16 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         this.activeItems.delete(itemId);
 
         if (kind === "tool_call" || kind === "file_change" || kind === "command_execution") {
+          const msg = this.resolveActiveMessage(active, lastMsg)!;
           const tcIdx = active?.toolCallIdx;
-          const tc = tcIdx !== undefined ? lastMsg.toolCalls?.[tcIdx] : undefined;
+          const tc = tcIdx !== undefined ? msg.toolCalls?.[tcIdx] : undefined;
 
           if (tc) {
             tc.status = "error";
             tc.output = pl.item?.detail || pl.item?.summary;
             this.postMessage({
               type: "updateToolCall",
-              messageId: lastMsg.id,
+              messageId: msg.id,
               toolCallIdx: tcIdx!,
               toolName: tc.name,
               status: "error",
@@ -3312,8 +3513,9 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         this.activeItems.delete(itemId);
 
         if (kind === "tool_call" || kind === "file_change" || kind === "command_execution") {
+          const msg = this.resolveActiveMessage(active, lastMsg)!;
           const tcIdx = active?.toolCallIdx;
-          const tc = tcIdx !== undefined ? lastMsg.toolCalls?.[tcIdx] : undefined;
+          const tc = tcIdx !== undefined ? msg.toolCalls?.[tcIdx] : undefined;
 
           if (tc) {
             tc.status = "error";
@@ -3321,7 +3523,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
             tc.output = pl.item?.detail || pl.item?.summary || "Interrupted";
             this.postMessage({
               type: "updateToolCall",
-              messageId: lastMsg.id,
+              messageId: msg.id,
               toolCallIdx: tcIdx!,
               toolName: tc.name,
               status: "error",

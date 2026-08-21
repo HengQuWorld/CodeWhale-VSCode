@@ -170,11 +170,20 @@ export function getInputScript(tr: WebviewTranslations): string {
   });
 
   // ── Send Message ──
+  function steerCapable() {
+    var caps = window.__wvApiCapabilities || {};
+    return !!caps.turnSteer;
+  }
+
   function sendMessage() {
     var text = inputEl.value.trim();
     var isStreaming = window.__wvMessages.isStreaming();
     if (!text && currentAttachments.length === 0) return;
-    if (isStreaming && !text.startsWith('/interrupt') && !text.startsWith('/clear')) return;
+    var isSlash = text.startsWith('/');
+    var slashAllowedWhileStreaming = text.startsWith('/interrupt') || text.startsWith('/clear');
+    var canSteer = isStreaming && steerCapable();
+    if (isStreaming && isSlash && !slashAllowedWhileStreaming) return;
+    if (isStreaming && !isSlash && !canSteer) return;
     inputEl.value = '';
     inputEl.style.height = 'auto';
     window.__wvMessages.setUserScrolledUp(false);
@@ -183,11 +192,15 @@ export function getInputScript(tr: WebviewTranslations): string {
     historyIndex = -1;
     draftBeforeHistory = '';
 
-    if (text.startsWith('/')) {
+    if (isSlash) {
       var parts = text.split(' ');
       var command = parts[0].toLowerCase();
       var args = parts.slice(1).join(' ');
       vscode.postMessage({ type: 'slashCommand', command: command, args: args });
+    } else if (canSteer) {
+      // Mid-turn steering: plain text during a running turn guides the
+      // active turn instead of starting a new one (TUI steer parity).
+      vscode.postMessage({ type: 'steer', text: text });
     } else {
       vscode.postMessage({ type: 'sendMessage', text: text });
     }
@@ -207,6 +220,20 @@ export function getInputScript(tr: WebviewTranslations): string {
     var apiCapabilities = window.__wvApiCapabilities || {};
     setButtonCapabilityState(undoBtn, !!apiCapabilities.undoLastTurn, undoDefaultTitle, __i18n.undoUnsupportedTooltip);
     setButtonCapabilityState(retryBtn, !!apiCapabilities.retryLastTurn, retryDefaultTitle, __i18n.retryUnsupportedTooltip);
+    updateInputPlaceholder();
+  }
+
+  // ── Input placeholder: steer hint while a turn is running ──
+  var inputDefaultPlaceholder = inputEl.getAttribute('placeholder') || '';
+
+  function updateInputPlaceholder() {
+    var isStreaming = !!(window.__wvMessages && window.__wvMessages.isStreaming());
+    var steerHint = (__i18n && __i18n.steerPlaceholder) || inputDefaultPlaceholder;
+    if (isStreaming && steerCapable()) {
+      inputEl.setAttribute('placeholder', steerHint);
+    } else {
+      inputEl.setAttribute('placeholder', inputDefaultPlaceholder);
+    }
   }
 
   // ── Send/Stop button toggle ──
@@ -217,6 +244,7 @@ export function getInputScript(tr: WebviewTranslations): string {
     } else {
       sendStopBtn.classList.remove('streaming');
     }
+    updateInputPlaceholder();
   }
 
   // ── Event listeners ──

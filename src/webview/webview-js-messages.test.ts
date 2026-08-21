@@ -109,4 +109,12 @@ describe("webview-js-messages.ts", () => {
     const script = getMessagesScript(makeTr());
     expect(script).toContain("renderWelcome()");
   });
+
+  it("renders a steer badge on steered user messages", () => {
+    const script = getMessagesScript(makeTr());
+    expect(script).toContain("steer-badge");
+    expect(script).toContain("msg.steered");
+    // Steered messages get a dedicated class for accent styling.
+    expect(script).toContain("' steered'");
+  });
 });

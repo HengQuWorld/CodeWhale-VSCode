@@ -53,6 +53,8 @@ export interface ChatMessage {
   blocks?: ContentBlock[];
   status: "streaming" | "complete" | "error";
   timestamp: number;
+  /** True when this user message was sent as mid-turn steering (TUI steer). */
+  steered?: boolean;
 }
 
 export interface ChecklistItem {

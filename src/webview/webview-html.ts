@@ -54,6 +54,8 @@ export interface WebviewTranslations {
   thinkingToggle: string;
   thinkingOpen: string;
   thinkingClose: string;
+  steerPlaceholder: string;
+  steerBadge: string;
   modeLabel: string;
   reasoningEffortLabel: string;
   welcomeTitle: string;

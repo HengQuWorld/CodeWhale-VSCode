@@ -274,6 +274,11 @@ describe("API URL construction", () => {
     const url = new URL("/v1/threads/thread-1/turns/turn-1/interrupt", baseUrl);
     expect(url.pathname).toBe("/v1/threads/thread-1/turns/turn-1/interrupt");
   });
+
+  it("constructs steer turn URL", () => {
+    const url = new URL("/v1/threads/thread-1/turns/turn-1/steer", baseUrl);
+    expect(url.pathname).toBe("/v1/threads/thread-1/turns/turn-1/steer");
+  });
 });
 
 describe("ThreadRecord type validation", () => {

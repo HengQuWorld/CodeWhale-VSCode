@@ -394,6 +394,7 @@ export interface RuntimeApiCapabilities {
   threadUndo: boolean;
   threadPatchUndo: boolean;
   threadRetry: boolean;
+  turnSteer: boolean;
   snapshotList: boolean;
   snapshotRestore: boolean;
 }
