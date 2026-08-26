@@ -14,5 +14,6 @@
   "config.reasoningEffort.description": "思考深度级别（auto、off、low、medium、high、max）",
   "config.autoStartEngine.description": "扩展激活时自动启动 CodeWhale 引擎",
   "config.autoApprove.description": "自动批准 agent 模式下的工具调用（等同于信任模式 / YOLO 审批行为）",
-  "config.showThreadList.description": "在侧边栏显示 Threads 标签页。遗留功能 — threads 已被 sessions 取代。"
+  "config.showThreadList.description": "在侧边栏显示 Threads 标签页。遗留功能 — threads 已被 sessions 取代。",
+  "config.costCurrency.description": "费用显示货币：auto 跟随界面语言（中文 → 人民币，其他 → 美元），也可强制指定 USD/CNY。金额来自 TUI 运行时的厂商发布价；无原生人民币价时回退显示美元（与 TUI 行为一致）。"
 }

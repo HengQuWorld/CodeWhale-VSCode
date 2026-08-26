@@ -99,6 +99,11 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
     }
     if (sessionStats && (sessionStats.totalInputTokens || sessionStats.totalOutputTokens)) {
       statsHtml += '<span class="stat-chip tokens">\\u2191' + Number(sessionStats.totalInputTokens || 0).toLocaleString() + ' \\u2193' + Number(sessionStats.totalOutputTokens || 0).toLocaleString() + '</span>';
+    } else if (sessionStats && sessionStats.totalTokens) {
+      // Session view mode: the persisted session records only a grand
+      // token total (no input/output split), so render a sum chip instead
+      // of hiding all token information.
+      statsHtml += '<span class="stat-chip tokens">\\u03a3' + Number(sessionStats.totalTokens).toLocaleString() + '</span>';
     }
     statusStatsEl.innerHTML = statsHtml;
   }
@@ -779,6 +784,7 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
           cacheHitRate: msg.cacheHitRate,
           totalInputTokens: msg.totalInputTokens,
           totalOutputTokens: msg.totalOutputTokens,
+          totalTokens: msg.totalTokens,
         };
         renderStatusStats();
         break;

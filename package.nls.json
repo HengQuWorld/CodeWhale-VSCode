@@ -14,5 +14,6 @@
   "config.reasoningEffort.description": "Reasoning effort level (auto, off, low, medium, high, max)",
   "config.autoStartEngine.description": "Automatically start the CodeWhale engine when the extension activates",
   "config.autoApprove.description": "Auto-approve tool calls in agent mode (equivalent to trust mode / YOLO approval behavior)",
-  "config.showThreadList.description": "Show the Threads tab in the sidebar. Legacy feature — threads are superseded by sessions."
+  "config.showThreadList.description": "Show the Threads tab in the sidebar. Legacy feature — threads are superseded by sessions.",
+  "config.costCurrency.description": "Currency for cost display: auto follows the interface language (Chinese → CNY, otherwise USD), or force USD/CNY. Amounts come from the TUI runtime's provider-published pricing; when no native CNY price exists the display falls back to USD (same as the TUI)."
 }

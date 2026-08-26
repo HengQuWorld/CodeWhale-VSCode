@@ -35,6 +35,7 @@ import type {
   UsageTotals,
   UsageBucket,
   UsageAggregation,
+  ThreadUsageResponse,
   AutomationStatus,
   AutomationRunStatus,
   AutomationRecord,
@@ -491,6 +492,7 @@ export class CodeWhaleApiClient {
       turnSteer,
       snapshotList,
       snapshotRestore,
+      threadUsage,
     ] = await Promise.all([
       this.probePath("/v1/sessions"),
       this.probePath("/v1/threads/__probe__/undo"),
@@ -499,6 +501,11 @@ export class CodeWhaleApiClient {
       this.probePath("/v1/threads/__probe__/turns/__probe__/steer"),
       this.probePath("/v1/snapshots"),
       this.probePath("/v1/snapshots/__probe__/restore"),
+      // POST-probe: the usage route is GET-only, so a POST on an existing
+      // route yields 405 Method Not Allowed (→ true), while a missing route
+      // on older runtimes yields 404 (→ false). A GET probe would invoke
+      // the handler and conflate "thread not found" 404 with "no route" 404.
+      this.probePath("/v1/threads/__probe__/usage", "POST"),
     ]);
 
     return {
@@ -509,6 +516,7 @@ export class CodeWhaleApiClient {
       turnSteer,
       snapshotList,
       snapshotRestore,
+      threadUsage,
     };
   }
 
@@ -521,6 +529,25 @@ export class CodeWhaleApiClient {
     if (opts?.group_by) params.set("group_by", opts.group_by);
     const qs = params.toString() ? `?${params.toString()}` : "";
     return (await this.get(`/v1/usage${qs}`)) as UsageAggregation;
+  }
+
+  /** Thread-scoped token + cost totals computed by the TUI runtime — the
+   *  authoritative source for the GUI's session-cost display. Prefers the
+   *  dedicated per-thread endpoint (recorded-time pricing in both published
+   *  currencies, including native CNY); falls back to the
+   *  `/v1/usage?group_by=thread` bucket on older runtimes, which carries
+   *  USD only (no `cost_cny`). A thread with no turns returns zeros from
+   *  the endpoint and has no bucket in the fallback. */
+  async getThreadUsage(threadId: string): Promise<UsageTotals> {
+    const resp = (await this.get(`/v1/threads/${threadId}/usage`)) as ThreadUsageResponse;
+    return resp.totals;
+  }
+
+  /** Fallback for runtimes without the per-thread usage endpoint: the
+   *  same accumulation scoped via `group_by=thread` (USD only). */
+  async getThreadUsageBucket(threadId: string): Promise<UsageBucket | undefined> {
+    const aggregation = await this.getUsage({ group_by: "thread" });
+    return aggregation.buckets.find((bucket) => bucket.key === threadId);
   }
 
   // ── Automations ──
@@ -730,12 +757,13 @@ export class CodeWhaleApiClient {
     return this.request("PUT", path, body);
   }
 
-  private async probePath(path: string): Promise<boolean> {
+  private async probePath(path: string, method: "GET" | "POST" = "GET"): Promise<boolean> {
     try {
       // Use GET instead of HEAD since TUI doesn't explicitly support HEAD.
-      // For 404, return false; for other errors (401, 500), still return true
-      // since the endpoint exists (just requires auth or has internal error).
-      const { statusCode } = await this.requestRaw("GET", path, undefined);
+      // For 404, return false; for other errors (401, 405, 500), still
+      // return true since the endpoint exists (just requires auth, has a
+      // different method, or has an internal error).
+      const { statusCode } = await this.requestRaw(method, path, method === "POST" ? {} : undefined);
       return statusCode !== 404;
     } catch {
       return false;

@@ -128,6 +128,16 @@
           "type": "boolean",
           "default": false,
           "description": "%config.showThreadList.description%"
+        },
+        "brotherwhale.costCurrency": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "usd",
+            "cny"
+          ],
+          "default": "auto",
+          "description": "%config.costCurrency.description%"
         }
       }
     }

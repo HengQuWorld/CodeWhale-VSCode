@@ -80,13 +80,20 @@ vi.mock("child_process", () => ({
 
 vi.mock("../i18n", () => ({
   t: vi.fn(() => ({ commandNotAvailableInGui: "This command is not available in GUI mode." })),
+  currentLocale: vi.fn(() => "en"),
 }));
 
 // ── Mock cost-calculator ──
 
-vi.mock("./cost-calculator", () => ({
+vi.mock("../utils/cost-calculator", () => ({
+  resolveCostCurrency: vi.fn((configured: string | undefined, locale: string) => {
+    if (configured === "usd" || configured === "cny") return configured;
+    return locale.toLowerCase().startsWith("zh") ? "cny" : "usd";
+  }),
   formatCostAmount: vi.fn((amount: number, currency: string) =>
-    currency === "cny" ? `¥${amount.toFixed(2)}` : `$${amount.toFixed(2)}`
+    currency === "cny"
+      ? (amount < 0.0001 ? "<¥0.0001" : amount < 0.01 ? `¥${amount.toFixed(4)}` : `¥${amount.toFixed(2)}`)
+      : (amount < 0.0001 ? "<$0.0001" : amount < 0.01 ? `$${amount.toFixed(4)}` : `$${amount.toFixed(2)}`)
   ),
 }));
 
@@ -861,6 +868,58 @@ describe("SlashCommandHandler - Dispatcher Pattern", () => {
       await handler.handle("/cost", "history");
 
       expect(ctx.api.getUsage).toHaveBeenCalled();
+    });
+
+    it("history cost shows the native CNY subtotal when currency is cny", async () => {
+      vscodeState.configValues.set("costCurrency", "cny");
+      const base = createContext();
+      const postMessage = vi.fn();
+      const ctx = createContext({
+        api: {
+          ...base.api,
+          getUsage: vi.fn(async () => ({
+            since: "2025-01-01",
+            until: "2025-12-31",
+            group_by: "day",
+            totals: {
+              input_tokens: 10000,
+              output_tokens: 5000,
+              cached_tokens: 8000,
+              reasoning_tokens: 1000,
+              cost_usd: 1.5,
+              // Provider-published CNY (DeepSeek native rows), never an FX
+              // projection of cost_usd.
+              cost_cny: 10.8,
+              turns: 20,
+            },
+            buckets: [],
+          })),
+        } as any,
+        postMessage,
+      });
+      const handler = new SlashCommandHandler(ctx);
+
+      await handler.handle("/cost", "history");
+
+      const msg = postMessage.mock.calls[0][0].message;
+      // ¥10.80 comes from the runtime's own CNY aggregate — a different
+      // ratio than any FX conversion of $1.50 would produce.
+      expect(msg).toContain("¥10.80");
+    });
+
+    it("history cost falls back to USD when no native CNY subtotal exists", async () => {
+      vscodeState.configValues.set("costCurrency", "cny");
+      const postMessage = vi.fn();
+      const ctx = createContext({ postMessage });
+      const handler = new SlashCommandHandler(ctx);
+
+      await handler.handle("/cost", "history");
+
+      const msg = postMessage.mock.calls[0][0].message;
+      // Default mock returns no cost_cny: a CNY preference without native
+      // CNY coverage displays USD (mirrors TUI cost_display_currency)
+      // instead of a fabricated ¥.
+      expect(msg).toContain("$1.50");
     });
   });
 

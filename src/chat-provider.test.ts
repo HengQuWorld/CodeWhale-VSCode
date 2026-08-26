@@ -1,5 +1,4 @@
 import { describe, it, expect } from "vitest";
-import { calculateTurnCost } from "./utils/cost-calculator";
 import { shouldRefreshTaskList, TASK_REFRESH_TOOL_NAMES } from "./utils/tool-utils";
 
 // Note: Cost calculation, diff-utils, and tool-utils tests have been moved to
@@ -405,18 +404,24 @@ describe("Session stats tracking", () => {
     expect(stats.lastOutputTokens).toBe(800);
   });
 
-  it("accumulates cost across turns", () => {
+  it("replaces session cost with server-computed thread totals (no client-side accumulation)", () => {
+    // Cost is SET from the TUI's `/v1/threads/{id}/usage` response — the
+    // GUI never accumulates per-turn cost locally. Re-fetching after each
+    // turn must therefore be idempotent (no double counting) even if the
+    // same response arrives twice.
     const stats = createInitialStats();
-    const cost1 = calculateTurnCost("deepseek-v4-flash", 1000, 500)!;
-    stats.sessionCostUsd += cost1.usd;
-    stats.sessionCostCny += cost1.cny;
+    const applyServerTotals = (usd: number, cny: number) => {
+      stats.sessionCostUsd = usd;
+      stats.sessionCostCny = cny;
+    };
+    applyServerTotals(0.0123, 0.089);
+    applyServerTotals(0.0123, 0.089); // duplicate refresh
+    expect(stats.sessionCostUsd).toBe(0.0123);
+    expect(stats.sessionCostCny).toBe(0.089);
 
-    const cost2 = calculateTurnCost("deepseek-v4-flash", 2000, 800)!;
-    stats.sessionCostUsd += cost2.usd;
-    stats.sessionCostCny += cost2.cny;
-
-    expect(stats.sessionCostUsd).toBeGreaterThan(cost1.usd);
-    expect(stats.sessionCostUsd).toBeCloseTo(cost1.usd + cost2.usd, 10);
+    applyServerTotals(0.0456, 0.33);
+    expect(stats.sessionCostUsd).toBe(0.0456);
+    expect(stats.sessionCostCny).toBe(0.33);
   });
 
   it("resets on new session", () => {

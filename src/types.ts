@@ -397,6 +397,11 @@ export interface RuntimeApiCapabilities {
   turnSteer: boolean;
   snapshotList: boolean;
   snapshotRestore: boolean;
+  /** `GET /v1/threads/{id}/usage` exists (TUI ≥ the version that exports
+   *  native CNY cost). When true the GUI reads provider-published CNY
+   *  directly; when false it falls back to the `/v1/usage?group_by=thread`
+   *  bucket, which carries USD only. */
+  threadUsage: boolean;
 }
 
 export interface UsageTotals {
@@ -405,6 +410,9 @@ export interface UsageTotals {
   cached_tokens: number;
   reasoning_tokens: number;
   cost_usd: number;
+  /** Provider-published CNY subtotal (never an FX projection of
+   *  `cost_usd`). Optional: absent on runtimes that predate the field. */
+  cost_cny?: number;
   turns: number;
 }
 
@@ -415,6 +423,7 @@ export interface UsageBucket {
   cached_tokens: number;
   reasoning_tokens: number;
   cost_usd: number;
+  cost_cny?: number;
   turns: number;
 }
 
@@ -424,6 +433,15 @@ export interface UsageAggregation {
   group_by: string;
   totals: UsageTotals;
   buckets: UsageBucket[];
+}
+
+/** Response of `GET /v1/threads/{id}/usage`: thread-scoped token + cost
+ *  totals computed by the TUI runtime (same accumulation as `/v1/usage`).
+ *  This is the authoritative source for the GUI's session-cost display —
+ *  recorded-time provider pricing in both published currencies. */
+export interface ThreadUsageResponse {
+  thread_id: string;
+  totals: UsageTotals;
 }
 
 export type AutomationStatus = "active" | "paused";

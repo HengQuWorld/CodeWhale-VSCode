@@ -237,6 +237,21 @@ describe("webview-js-event-handler.ts", () => {
     expect(script).toContain("case 'sessionStats'");
   });
 
+  it("renders a token-sum chip when no input/output split is available", () => {
+    // Session view mode: only a grand token total is recorded, so the
+    // stats bar shows a Σ chip instead of hiding token information.
+    const script = getEventHandlerScript(makeTr());
+    expect(script).toContain("sessionStats.totalTokens");
+    expect(script).toContain("\\u03a3");
+  });
+
+  it("omits the cache chip when no cache sample exists", () => {
+    // The backend omits cacheHitRate in view mode; the webview must
+    // check for it rather than render a misleading 0.0%.
+    const script = getEventHandlerScript(makeTr());
+    expect(script).toContain("sessionStats.cacheHitRate !== undefined");
+  });
+
   it("sends webviewReady message on init", () => {
     const script = getEventHandlerScript(makeTr());
     expect(script).toContain("type: 'webviewReady'");

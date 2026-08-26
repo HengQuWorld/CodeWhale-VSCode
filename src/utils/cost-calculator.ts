@@ -1,74 +1,36 @@
 /**
- * Cost calculation utilities for DeepSeek models.
+ * Cost display utilities.
  *
- * Extracted from chat-provider.ts for independent testing and reuse.
+ * Cost arithmetic lives in the TUI runtime: `GET /v1/threads/{id}/usage`
+ * (with `/v1/usage?group_by=thread` as the older-runtime fallback) returns
+ * thread-scoped totals priced at recorded-time provider rates in both
+ * published currencies — CNY is the provider-published subtotal (e.g.
+ * DeepSeek's native CNY rows), never an FX projection of USD. The GUI only
+ * picks a display currency and formats amounts, so provider rate changes
+ * (e.g. DeepSeek repricing) are picked up by updating the TUI, not this
+ * extension.
  */
 
-export interface CostEstimate {
-  usd: number;
-  cny: number;
+export type CostCurrency = "usd" | "cny";
+
+/**
+ * Resolve the configured currency into a concrete one.
+ *
+ * `auto` (the default) follows the interface language: Chinese locales
+ * display CNY, everything else USD. Explicit `usd` / `cny` always win.
+ * Unknown values fall back to the `auto` behavior so a stale setting
+ * never breaks rendering.
+ *
+ * Note: a resolved `cny` is a *preference* — callers should mirror the
+ * TUI's `cost_display_currency` and fall back to USD when no native-CNY
+ * spend exists, rather than displaying a fabricated ¥0.
+ */
+export function resolveCostCurrency(configured: string | undefined, locale: string): CostCurrency {
+  if (configured === "usd" || configured === "cny") return configured;
+  return locale.toLowerCase().startsWith("zh") ? "cny" : "usd";
 }
 
-export interface ModelPricing {
-  inputCacheHitPerMillion: number;
-  inputCacheMissPerMillion: number;
-  outputPerMillion: number;
-  inputCacheHitPerMillionCny: number;
-  inputCacheMissPerMillionCny: number;
-  outputPerMillionCny: number;
-}
-
-export function getModelPricing(model: string): ModelPricing | null {
-  const lower = model.toLowerCase();
-  if (!lower.includes("deepseek")) return null;
-  const discountEnd = new Date("2026-05-31T15:59:00Z").getTime();
-  const now = Date.now();
-  if (lower.includes("v4-pro") || lower.includes("v4pro")) {
-    if (now <= discountEnd) {
-      return {
-        inputCacheHitPerMillion: 0.003625, inputCacheMissPerMillion: 0.435, outputPerMillion: 0.87,
-        inputCacheHitPerMillionCny: 0.025, inputCacheMissPerMillionCny: 3.0, outputPerMillionCny: 6.0,
-      };
-    }
-    return {
-      inputCacheHitPerMillion: 0.0145, inputCacheMissPerMillion: 1.74, outputPerMillion: 3.48,
-      inputCacheHitPerMillionCny: 0.1, inputCacheMissPerMillionCny: 12.0, outputPerMillionCny: 24.0,
-    };
-  }
-  return {
-    inputCacheHitPerMillion: 0.0028, inputCacheMissPerMillion: 0.14, outputPerMillion: 0.28,
-    inputCacheHitPerMillionCny: 0.02, inputCacheMissPerMillionCny: 1.0, outputPerMillionCny: 2.0,
-  };
-}
-
-export function calculateTurnCost(
-  model: string,
-  inputTokens: number,
-  outputTokens: number,
-  cacheHitTokens?: number,
-  cacheMissTokens?: number,
-  reasoningTokens?: number,
-): CostEstimate | null {
-  const pricing = getModelPricing(model);
-  if (!pricing) return null;
-  const hit = cacheHitTokens ?? 0;
-  const miss = cacheMissTokens ?? Math.max(0, inputTokens - hit);
-  const uncategorized = Math.max(0, inputTokens - hit - miss);
-  const effectiveMiss = miss + uncategorized;
-  const effectiveOutput = outputTokens + (reasoningTokens ?? 0);
-  const hitCost = (hit / 1_000_000) * pricing.inputCacheHitPerMillion;
-  const missCost = (effectiveMiss / 1_000_000) * pricing.inputCacheMissPerMillion;
-  const outputCost = (effectiveOutput / 1_000_000) * pricing.outputPerMillion;
-  const hitCostCny = (hit / 1_000_000) * pricing.inputCacheHitPerMillionCny;
-  const missCostCny = (effectiveMiss / 1_000_000) * pricing.inputCacheMissPerMillionCny;
-  const outputCostCny = (effectiveOutput / 1_000_000) * pricing.outputPerMillionCny;
-  return {
-    usd: hitCost + missCost + outputCost,
-    cny: hitCostCny + missCostCny + outputCostCny,
-  };
-}
-
-export function formatCostAmount(cost: number, currency: "usd" | "cny"): string {
+export function formatCostAmount(cost: number, currency: CostCurrency): string {
   const symbol = currency === "usd" ? "$" : "¥";
   if (cost < 0.0001) return `<${symbol}0.0001`;
   if (cost < 0.01) return `${symbol}${cost.toFixed(4)}`;

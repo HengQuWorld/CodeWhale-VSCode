@@ -19,7 +19,7 @@ import { formatError, getErrorMessage } from "./utils/error-handler";
 import { getWebviewHtml } from "./webview/webview-html";
 import { renderMarkdown } from "./utils/markdown";
 import { finalizeAssistantMessage } from "./utils/event-helpers";
-import { calculateTurnCost, formatCostAmount } from "./utils/cost-calculator";
+import { formatCostAmount, resolveCostCurrency } from "./utils/cost-calculator";
 import {
   parseDiffStats,
   extractDiffFromOutput,
@@ -31,7 +31,7 @@ import {
   reconstructOriginalContent,
   getDiffStateForIndex,
 } from "./utils/diff-utils";
-import { t, webviewTranslations } from "./i18n";
+import { t, webviewTranslations, currentLocale } from "./i18n";
 import { ConfigPanel } from "./config-panel";
 import {
   SessionStateStore,
@@ -138,6 +138,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     turnSteer: false,
     snapshotList: false,
     snapshotRestore: false,
+    threadUsage: false,
   };
   // Guard to prevent concurrent autoSaveSession calls.  When multiple
   // turn.completed events fire in quick succession (e.g. SSE reconnection
@@ -797,30 +798,19 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         this.refreshWorkPanel();
       }
 
+      // "Last turn" cache stats come from the most recent persisted usage
+      // record; token/cost TOTALS are fetched from the TUI runtime below,
+      // which owns the rate tables and the recorded-time pricing.
       for (const turn of detail.turns) {
         if (turn.usage) {
           const u = turn.usage;
-          this.totalInputTokens += u.input_tokens;
-          this.totalOutputTokens += u.output_tokens;
-          this.totalTokens += u.input_tokens + u.output_tokens;
           this.lastCacheHitTokens = u.prompt_cache_hit_tokens ?? 0;
           this.lastCacheMissTokens = u.prompt_cache_miss_tokens ?? Math.max(0, u.input_tokens - (u.prompt_cache_hit_tokens ?? 0));
           this.lastInputTokens = u.input_tokens;
           this.lastOutputTokens = u.output_tokens;
-          const model = this.currentThread?.model || this.getCurrentModel();
-          const cost = calculateTurnCost(
-            model, u.input_tokens, u.output_tokens,
-            u.prompt_cache_hit_tokens, u.prompt_cache_miss_tokens, u.reasoning_tokens,
-          );
-          if (cost) {
-            this.sessionCostUsd += cost.usd;
-            this.sessionCostCny += cost.cny;
-            this.displayedCostHighWaterUsd = Math.max(this.displayedCostHighWaterUsd, this.sessionCostUsd);
-            this.displayedCostHighWaterCny = Math.max(this.displayedCostHighWaterCny, this.sessionCostCny);
-          }
         }
       }
-      this.sendSessionStats();
+      await this.refreshThreadUsage(id);
 
       this.postMessage({ type: "loadHistory", messages: this.messages });
       this.postMessage({ type: "status", text: `Loaded ${this.messages.length / 2} turns` });
@@ -1157,6 +1147,27 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       message: `Viewing session: ${title.slice(0, 80)}\n${msgCount} messages | ${session.metadata.total_tokens.toLocaleString()} tokens${costStr}${modelStr}\n\nStart typing to resume this session and continue the conversation.`
     });
     this.postMessage({ type: "sessionLoaded", sessionId: session.metadata.id });
+
+    // Reflect the session's recorded stats so the stats bar doesn't keep
+    // stale chips from the previously viewed thread. Cost metadata written
+    // by TUI's runtime-API save endpoint is zero (it snapshots
+    // messages/tokens but drops cost), so sessions with tokens but no
+    // recorded cost render "—" in sendSessionStats instead of a fake
+    // "<$0.0001". Input/output split is not recorded per session, so the
+    // ↑/↓ chips stay hidden in view mode (totals appear in the info line).
+    const viewCost = session.metadata.cost;
+    this.sessionCostUsd = viewCost?.session_cost_usd || 0;
+    this.sessionCostCny = viewCost?.session_cost_cny || 0;
+    this.displayedCostHighWaterUsd = Math.max(
+      viewCost?.displayed_cost_high_water_usd || 0,
+      viewCost?.session_cost_usd || 0,
+    );
+    this.displayedCostHighWaterCny = Math.max(
+      viewCost?.displayed_cost_high_water_cny || 0,
+      viewCost?.session_cost_cny || 0,
+    );
+    this.totalTokens = session.metadata.total_tokens || 0;
+    this.sendSessionStats();
     } catch (err) {
       const errorMsg = getErrorMessage(err);
       this.debugLog(`loadSessionMessages error: ${errorMsg}`);
@@ -1351,16 +1362,19 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         this.viewingSessionId = null;
         await this.loadThread(result.thread_id);
         // Restore cost from the original session's metadata. loadThread →
-        // loadHistory iterates the NEW thread's seeded turns, which have
-        // usage: None, so stats are zeroed. Restore the persisted cost here
-        // (mirrors TUI's apply_loaded_session, ui.rs:9399-9413).
+        // loadHistory may already have computed totals from the new
+        // thread's turns; MERGE with max rather than overwrite, because
+        // sessions saved by TUI's runtime-API endpoint carry zero cost
+        // metadata (the endpoint snapshots messages/tokens but drops cost)
+        // and a plain assignment would zero out real figures. Mirrors TUI's
+        // monotonic (high-water) cost display philosophy.
         if (this.pendingSessionCost) {
-          this.sessionCostUsd = this.pendingSessionCost.sessionCostUsd;
-          this.sessionCostCny = this.pendingSessionCost.sessionCostCny;
-          this.displayedCostHighWaterUsd = this.pendingSessionCost.displayedCostHighWaterUsd;
-          this.displayedCostHighWaterCny = this.pendingSessionCost.displayedCostHighWaterCny;
-          this.totalTokens = this.pendingSessionCost.totalTokens;
-          this.cumulativeTurnSecs = this.pendingSessionCost.cumulativeTurnSecs;
+          this.sessionCostUsd = Math.max(this.sessionCostUsd, this.pendingSessionCost.sessionCostUsd);
+          this.sessionCostCny = Math.max(this.sessionCostCny, this.pendingSessionCost.sessionCostCny);
+          this.displayedCostHighWaterUsd = Math.max(this.displayedCostHighWaterUsd, this.pendingSessionCost.displayedCostHighWaterUsd);
+          this.displayedCostHighWaterCny = Math.max(this.displayedCostHighWaterCny, this.pendingSessionCost.displayedCostHighWaterCny);
+          this.totalTokens = Math.max(this.totalTokens, this.pendingSessionCost.totalTokens);
+          this.cumulativeTurnSecs = Math.max(this.cumulativeTurnSecs, this.pendingSessionCost.cumulativeTurnSecs);
           this.pendingSessionCost = null;
           this.sendSessionStats();
         }
@@ -2097,6 +2111,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         turnSteer: false,
         snapshotList: false,
         snapshotRestore: false,
+        threadUsage: false,
       };
     }
     this.postApiCapabilities();
@@ -2348,14 +2363,15 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         const result = await this.api.resumeSessionThread(sessionId);
         this.viewingSessionId = null;
         await this.loadThread(result.thread_id);
-        // Restore cost and preserve original session ID for auto-save.
+        // Restore cost (merge with max — see the resume-restore comment
+        // above) and preserve original session ID for auto-save.
         if (this.pendingSessionCost) {
-          this.sessionCostUsd = this.pendingSessionCost.sessionCostUsd;
-          this.sessionCostCny = this.pendingSessionCost.sessionCostCny;
-          this.displayedCostHighWaterUsd = this.pendingSessionCost.displayedCostHighWaterUsd;
-          this.displayedCostHighWaterCny = this.pendingSessionCost.displayedCostHighWaterCny;
-          this.totalTokens = this.pendingSessionCost.totalTokens;
-          this.cumulativeTurnSecs = this.pendingSessionCost.cumulativeTurnSecs;
+          this.sessionCostUsd = Math.max(this.sessionCostUsd, this.pendingSessionCost.sessionCostUsd);
+          this.sessionCostCny = Math.max(this.sessionCostCny, this.pendingSessionCost.sessionCostCny);
+          this.displayedCostHighWaterUsd = Math.max(this.displayedCostHighWaterUsd, this.pendingSessionCost.displayedCostHighWaterUsd);
+          this.displayedCostHighWaterCny = Math.max(this.displayedCostHighWaterCny, this.pendingSessionCost.displayedCostHighWaterCny);
+          this.totalTokens = Math.max(this.totalTokens, this.pendingSessionCost.totalTokens);
+          this.cumulativeTurnSecs = Math.max(this.cumulativeTurnSecs, this.pendingSessionCost.cumulativeTurnSecs);
           this.pendingSessionCost = null;
           this.sendSessionStats();
         }
@@ -2454,14 +2470,15 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         const result = await this.api.resumeSessionThread(sessionId);
         this.viewingSessionId = null;
         await this.loadThread(result.thread_id);
-        // Restore cost and preserve original session ID for auto-save.
+        // Restore cost (merge with max — see the resume-restore comment
+        // above) and preserve original session ID for auto-save.
         if (this.pendingSessionCost) {
-          this.sessionCostUsd = this.pendingSessionCost.sessionCostUsd;
-          this.sessionCostCny = this.pendingSessionCost.sessionCostCny;
-          this.displayedCostHighWaterUsd = this.pendingSessionCost.displayedCostHighWaterUsd;
-          this.displayedCostHighWaterCny = this.pendingSessionCost.displayedCostHighWaterCny;
-          this.totalTokens = this.pendingSessionCost.totalTokens;
-          this.cumulativeTurnSecs = this.pendingSessionCost.cumulativeTurnSecs;
+          this.sessionCostUsd = Math.max(this.sessionCostUsd, this.pendingSessionCost.sessionCostUsd);
+          this.sessionCostCny = Math.max(this.sessionCostCny, this.pendingSessionCost.sessionCostCny);
+          this.displayedCostHighWaterUsd = Math.max(this.displayedCostHighWaterUsd, this.pendingSessionCost.displayedCostHighWaterUsd);
+          this.displayedCostHighWaterCny = Math.max(this.displayedCostHighWaterCny, this.pendingSessionCost.displayedCostHighWaterCny);
+          this.totalTokens = Math.max(this.totalTokens, this.pendingSessionCost.totalTokens);
+          this.cumulativeTurnSecs = Math.max(this.cumulativeTurnSecs, this.pendingSessionCost.cumulativeTurnSecs);
           this.pendingSessionCost = null;
           this.sendSessionStats();
         }
@@ -2901,20 +2918,12 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
           this.totalInputTokens += u.input_tokens;
           this.totalOutputTokens += u.output_tokens;
           this.totalTokens += u.input_tokens + u.output_tokens;
-          const model = this.getCurrentModel();
-          const cost = calculateTurnCost(
-            model, u.input_tokens, u.output_tokens,
-            u.prompt_cache_hit_tokens, u.prompt_cache_miss_tokens, u.reasoning_tokens,
-          );
-          if (cost) {
-            this.sessionCostUsd += cost.usd;
-            this.sessionCostCny += cost.cny;
-            // Maintain monotonic high-water mark so the displayed cost
-            // never decreases across turns (mirrors TUI #244).
-            this.displayedCostHighWaterUsd = Math.max(this.displayedCostHighWaterUsd, this.sessionCostUsd);
-            this.displayedCostHighWaterCny = Math.max(this.displayedCostHighWaterCny, this.sessionCostCny);
-          }
-          this.sendSessionStats();
+          // Cost comes from the TUI runtime (recorded-time provider rates),
+          // not a client-side rate table. Fire-and-forget: the totals are
+          // SET from the server response, so a delayed fetch can never
+          // double-count, and the monotonic high-water mark keeps the
+          // display stable meanwhile.
+          void this.refreshThreadUsage();
         }
 
         // TUI emits turn.completed for ALL terminal turn states
@@ -3548,26 +3557,93 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
 
   // ── Helpers ──
 
+  /** Pull thread-scoped usage + cost totals from the TUI runtime — the
+   *  authoritative source for the session-cost display. Prefers the
+   *  dedicated per-thread endpoint (recorded-time provider pricing in both
+   *  published currencies, native CNY included); on older runtimes falls
+   *  back to the `/v1/usage?group_by=thread` bucket (USD only). Totals are
+   *  SET (never incremented), so retries cannot double-count, and the
+   *  monotonic high-water mark keeps the display from reversing. */
+  private async refreshThreadUsage(threadId?: string): Promise<void> {
+    const id = threadId ?? this.currentThread?.id;
+    if (!id) return;
+    try {
+      const totals = this.apiCapabilities.threadUsage
+        ? await this.api.getThreadUsage(id)
+        : (await this.api.getThreadUsageBucket(id)) ?? {
+            input_tokens: 0,
+            output_tokens: 0,
+            cached_tokens: 0,
+            reasoning_tokens: 0,
+            cost_usd: 0,
+            turns: 0,
+          };
+      this.totalInputTokens = totals.input_tokens;
+      this.totalOutputTokens = totals.output_tokens;
+      this.totalTokens = totals.input_tokens + totals.output_tokens;
+      // CNY is the provider-published subtotal from the TUI pricing engine,
+      // never an FX projection of the USD column. Absent (older runtime) or
+      // zero (USD-only route) means "no native CNY coverage"; the display
+      // then falls back to USD, mirroring TUI's cost_display_currency.
+      this.sessionCostUsd = totals.cost_usd || 0;
+      this.sessionCostCny = totals.cost_cny || 0;
+      // Maintain monotonic high-water mark so the displayed cost never
+      // decreases across turns or server-side undo (mirrors TUI #244).
+      this.displayedCostHighWaterUsd = Math.max(this.displayedCostHighWaterUsd, this.sessionCostUsd);
+      this.displayedCostHighWaterCny = Math.max(this.displayedCostHighWaterCny, this.sessionCostCny);
+      this.sendSessionStats();
+    } catch {
+      // Best-effort refresh: keep the last known totals on failure.
+    }
+  }
+
   private sendSessionStats(): void {
     const totalCacheHit = this.lastCacheHitTokens;
     const totalCacheMiss = this.lastCacheMissTokens;
     const total = totalCacheHit + totalCacheMiss;
     const cacheHitRate = total > 0 ? (totalCacheHit / total * 100) : 0;
     const cfg = vscode.workspace.getConfiguration("brotherwhale");
-    const currency = cfg.get<string>("costCurrency", "usd");
-    // Use the monotonic high-water mark for display so the cost never
-    // decreases across turns or session restarts (mirrors TUI #244).
-    const costDisplay = currency === "cny"
-      ? formatCostAmount(this.displayedCostHighWaterCny, "cny")
-      : formatCostAmount(this.displayedCostHighWaterUsd, "usd");
+    const configured = resolveCostCurrency(
+      cfg.get<string>("costCurrency", "auto"),
+      currentLocale(),
+    );
+    // Mirror the TUI's cost_display_currency: a CNY preference with no
+    // native-CNY-priced spend falls back to USD rather than showing a
+    // fabricated ¥0. Both figures use the monotonic high-water mark so the
+    // cost never decreases across turns or session restarts (TUI #244).
+    const currency: "usd" | "cny" = configured === "cny" && this.displayedCostHighWaterCny > 0
+      ? "cny"
+      : "usd";
+    const costHighWater = currency === "cny"
+      ? this.displayedCostHighWaterCny
+      : this.displayedCostHighWaterUsd;
+    let costDisplay: string;
+    if (costHighWater > 0) {
+      costDisplay = formatCostAmount(costHighWater, currency);
+    } else {
+      // Zero cost with tokens means "not recorded" (e.g. a session saved by
+      // an older runtime that dropped cost metadata), not "free". An em
+      // dash is honest; "<$0.0001" next to six-figure token counts would be
+      // actively wrong. A genuinely empty session still shows the floor
+      // marker, matching the pre-existing behavior.
+      costDisplay = this.totalTokens > 0 || this.totalInputTokens > 0 || this.totalOutputTokens > 0
+        ? "—"
+        : formatCostAmount(0, currency);
+    }
     this.postMessage({
       type: "sessionStats",
       cost: costDisplay,
-      cacheHitRate: cacheHitRate.toFixed(1),
+      // Omit cacheHitRate when no cache sample exists (e.g. session view
+      // mode): the webview hides the chip entirely rather than showing a
+      // misleading "0.0%".
+      ...(total > 0 ? { cacheHitRate: cacheHitRate.toFixed(1) } : {}),
       cacheHitTokens: totalCacheHit,
       cacheMissTokens: totalCacheMiss,
       totalInputTokens: this.totalInputTokens,
       totalOutputTokens: this.totalOutputTokens,
+      // Grand total for view modes that record no input/output split; the
+      // webview renders a Σ chip when the split is unavailable.
+      totalTokens: this.totalTokens,
       lastInputTokens: this.lastInputTokens,
       lastOutputTokens: this.lastOutputTokens,
     });

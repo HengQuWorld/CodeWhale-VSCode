@@ -11,8 +11,8 @@ import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 import { exec } from "child_process";
-import { t } from "../i18n";
-import { formatCostAmount } from "../utils/cost-calculator";
+import { t, currentLocale } from "../i18n";
+import { formatCostAmount, resolveCostCurrency } from "../utils/cost-calculator";
 import { isCommandAvailableInGui } from "./slash-commands";
 import { formatError, getErrorMessage } from "../utils/error-handler";
 import type { CodeWhaleApiClient, CodeWhaleEngine, ThreadRecord, TaskSummary, ProviderEntry } from "../types";
@@ -378,14 +378,29 @@ Usage: /tokens [history|today|since <date>]`
       ctx.postMessage({ type: "error", message: formatError("Failed to get usage history", err) });
     }
   } else {
-    const currency = cfg().get<string>("costCurrency", "usd");
-    const costStr = currency === "cny"
-      ? formatCostAmount(ctx.sessionCostCny, "cny")
-      : formatCostAmount(ctx.sessionCostUsd, "usd");
+    // Mirror the TUI's cost_display_currency: a CNY preference with no
+    // native-CNY-priced spend falls back to USD rather than a fabricated ¥.
+    const costStr = preferredCostString(
+      resolveCostCurrency(cfg().get<string>("costCurrency", "auto"), currentLocale()),
+      ctx.sessionCostUsd,
+      ctx.sessionCostCny,
+    );
     const cacheTotal = ctx.lastCacheHitTokens + ctx.lastCacheMissTokens;
     const cacheRate = cacheTotal > 0 ? (ctx.lastCacheHitTokens / cacheTotal * 100).toFixed(1) : "N/A";
     ctx.postMessage({ type: "info", message: `Token Usage (session):\n  Total input: ${ctx.totalInputTokens.toLocaleString()}\n  Total output: ${ctx.totalOutputTokens.toLocaleString()}\n  Last turn input: ${ctx.lastInputTokens.toLocaleString()}\n  Last turn output: ${ctx.lastOutputTokens.toLocaleString()}\n  Cache hit rate (last): ${cacheRate}%\n  Cache hit: ${ctx.lastCacheHitTokens.toLocaleString()} | miss: ${ctx.lastCacheMissTokens.toLocaleString()}\n  Estimated cost: ${costStr}\n\nUsage: /tokens [history|today|since <date>] for historical data` });
   }
+}
+
+/** Format cost in the preferred currency, falling back to USD when no
+ *  native (provider-published) CNY subtotal exists — same rule as the
+ *  TUI's `cost_display_currency`, so GUI and TUI never disagree. */
+function preferredCostString(
+  currency: "usd" | "cny",
+  costUsd: number,
+  costCny: number,
+): string {
+  if (currency === "cny" && costCny > 0) return formatCostAmount(costCny, "cny");
+  return formatCostAmount(costUsd, "usd");
 }
 
 async function handleCost(ctx: SlashCommandContext, args: string): Promise<void> {
@@ -423,10 +438,13 @@ async function handleCost(ctx: SlashCommandContext, args: string): Promise<void>
         ? `${new Date(usage.since).toLocaleDateString()} - ${new Date(usage.until).toLocaleDateString()}`
         : "All time";
 
-      const currency = cfg().get<string>("costCurrency", "usd");
-      const costDisplay = currency === "cny"
-        ? `¥${(totals.cost_usd * 7.2).toFixed(2)} (≈ $${totals.cost_usd.toFixed(2)})`
-        : `$${totals.cost_usd.toFixed(2)}`;
+      // Native CNY subtotal from the TUI pricing engine when the runtime
+      // publishes it; USD fallback mirrors TUI's cost_display_currency.
+      const costDisplay = preferredCostString(
+        resolveCostCurrency(cfg().get<string>("costCurrency", "auto"), currentLocale()),
+        totals.cost_usd,
+        totals.cost_cny ?? 0,
+      );
 
       ctx.postMessage({
         type: "info",
@@ -443,10 +461,11 @@ Usage: /cost [history|today|since <date>]`
       ctx.postMessage({ type: "error", message: formatError("Failed to get cost history", err) });
     }
   } else {
-    const currency = cfg().get<string>("costCurrency", "usd");
-    const costStr = currency === "cny"
-      ? formatCostAmount(ctx.sessionCostCny, "cny")
-      : formatCostAmount(ctx.sessionCostUsd, "usd");
+    const costStr = preferredCostString(
+      resolveCostCurrency(cfg().get<string>("costCurrency", "auto"), currentLocale()),
+      ctx.sessionCostUsd,
+      ctx.sessionCostCny,
+    );
     const cacheTotal = ctx.lastCacheHitTokens + ctx.lastCacheMissTokens;
     const cacheRate = cacheTotal > 0 ? (ctx.lastCacheHitTokens / cacheTotal * 100).toFixed(1) : "N/A";
     ctx.postMessage({ type: "info", message: `Session Cost (approximate):\n  Total: ${costStr}\n  Tokens: ↥${ctx.totalInputTokens.toLocaleString()} ↧${ctx.totalOutputTokens.toLocaleString()}\n  Cache hit rate: ${cacheRate}% (hit: ${ctx.lastCacheHitTokens.toLocaleString()}, miss: ${ctx.lastCacheMissTokens.toLocaleString()})\n  Model: ${ctx.getCurrentModel()}\n\nUsage: /cost [history|today|since <date>] for historical data` });
