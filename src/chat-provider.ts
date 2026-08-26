@@ -780,6 +780,20 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
 
         flushAssistantSegment();
 
+        // Stamp the turn's usage onto its final assistant bubble so the
+        // reloaded view shows the same ↑/↓ token chip as the live view
+        // (which attaches usage to the last assistant message on
+        // turn.completed). Only the last segment carries it, matching the
+        // live path where messageComplete fires once per turn.
+        if (turn.usage) {
+          for (let mi = this.messages.length - 1; mi >= turnStartIdx; mi--) {
+            if (this.messages[mi].role === "assistant") {
+              this.messages[mi].usage = turn.usage;
+              break;
+            }
+          }
+        }
+
         // Preserve the legacy behavior for turns with no assistant output
         // at all: emit the fallback bubble (input summary preview) rather
         // than rendering nothing for the turn.
@@ -3574,13 +3588,23 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
             input_tokens: 0,
             output_tokens: 0,
             cached_tokens: 0,
+            cache_write_tokens: 0,
             reasoning_tokens: 0,
             cost_usd: 0,
             turns: 0,
           };
-      this.totalInputTokens = totals.input_tokens;
+      // `totals.input_tokens` from the TUI's usage endpoint is the *billable*
+      // (non-cached) input produced by `token_usage_for_pricing`, NOT the total
+      // prompt input. The per-turn `usage.input_tokens` shown in the transcript
+      // (and the TUI header "in") is the full prompt including cache hits and
+      // cache writes. Reconstruct that same total so the status bar matches the
+      // transcript instead of showing only the cache-miss slice.
+      const totalInput = totals.input_tokens
+        + totals.cached_tokens
+        + (totals.cache_write_tokens ?? 0);
+      this.totalInputTokens = totalInput;
       this.totalOutputTokens = totals.output_tokens;
-      this.totalTokens = totals.input_tokens + totals.output_tokens;
+      this.totalTokens = totalInput + totals.output_tokens;
       // CNY is the provider-published subtotal from the TUI pricing engine,
       // never an FX projection of the USD column. Absent (older runtime) or
       // zero (USD-only route) means "no native CNY coverage"; the display

@@ -374,6 +374,13 @@ export function getMessagesScript(tr: WebviewTranslations): string {
       }
     }
 
+    if (msg.usage) {
+      var usageEl = document.createElement('div');
+      usageEl.className = 'usage-info';
+      usageEl.textContent = '\u2191' + (msg.usage.input_tokens || 0) + ' \u2193' + (msg.usage.output_tokens || 0);
+      el.appendChild(usageEl);
+    }
+
     smartScrollToBottom();
     scheduleNavUpdate();
   }

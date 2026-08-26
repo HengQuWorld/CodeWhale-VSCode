@@ -55,6 +55,12 @@ export interface ChatMessage {
   timestamp: number;
   /** True when this user message was sent as mid-turn steering (TUI steer). */
   steered?: boolean;
+  /** Per-turn usage, stamped onto a turn's final assistant message so the
+   *  reloaded view shows the same ↑/↓ token chip as the live view. */
+  usage?: {
+    input_tokens: number;
+    output_tokens: number;
+  } | null;
 }
 
 export interface ChecklistItem {

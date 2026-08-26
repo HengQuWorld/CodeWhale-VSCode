@@ -408,6 +408,9 @@ export interface UsageTotals {
   input_tokens: number;
   output_tokens: number;
   cached_tokens: number;
+  /** Cache-creation (write) tokens, billed at the cache-write rate on
+   *  providers that publish one (Anthropic). Part of the prompt input. */
+  cache_write_tokens?: number;
   reasoning_tokens: number;
   cost_usd: number;
   /** Provider-published CNY subtotal (never an FX projection of
@@ -418,6 +421,7 @@ export interface UsageTotals {
 
 export interface UsageBucket {
   key: string;
+  cache_write_tokens?: number;
   input_tokens: number;
   output_tokens: number;
   cached_tokens: number;

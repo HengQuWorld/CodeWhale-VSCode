@@ -35,6 +35,14 @@ describe("webview-js-messages.ts", () => {
     expect(script).toContain("function addMessage");
   });
 
+  it("renders the per-turn usage chip from persisted messages", () => {
+    const script = getMessagesScript(makeTr());
+    expect(script).toContain("msg.usage");
+    expect(script).toContain("usage-info");
+    expect(script).toContain("msg.usage.input_tokens");
+    expect(script).toContain("msg.usage.output_tokens");
+  });
+
   it("contains renderToolCall function", () => {
     const script = getMessagesScript(makeTr());
     expect(script).toContain("function renderToolCall");

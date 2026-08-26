@@ -145,6 +145,102 @@ describe("ChatProvider thread history rendering", () => {
     ]);
   });
 
+  it("stamps turn usage onto the final assistant message so reload shows the token chip", async () => {
+    const detail = {
+      latest_seq: 12,
+      thread: { id: "thread-1", model: "deepseek-v4-pro" },
+      turns: [
+        {
+          id: "turn-1",
+          input_summary: "run the tests",
+          created_at: "2026-08-20T10:00:00Z",
+          ended_at: "2026-08-20T10:00:10Z",
+          status: "completed",
+          usage: { input_tokens: 100, output_tokens: 25, prompt_cache_hit_tokens: 40 },
+          item_ids: ["u1", "a1"],
+        },
+      ],
+      items: [
+        { id: "u1", kind: "user_message", summary: "run the tests", detail: "run the tests", status: "completed" },
+        { id: "a1", kind: "agent_message", summary: "Done", detail: "Done", status: "completed" },
+      ],
+    };
+
+    const { provider } = createProvider(detail);
+
+    await (provider as any).loadHistory("thread-1");
+
+    const assistantMsgs = provider.messages.filter((m) => m.role === "assistant");
+    expect(assistantMsgs).toHaveLength(1);
+    expect(assistantMsgs[0].usage).toEqual({
+      input_tokens: 100,
+      output_tokens: 25,
+      prompt_cache_hit_tokens: 40,
+    });
+  });
+
+  it("stamps turn usage only on the final segment of a steered turn", async () => {
+    const detail = {
+      latest_seq: 20,
+      thread: { id: "thread-1", model: "deepseek-v4-pro" },
+      turns: [
+        {
+          id: "turn-1",
+          input_summary: "run the tests",
+          created_at: "2026-08-20T10:00:00Z",
+          ended_at: "2026-08-20T10:00:10Z",
+          status: "completed",
+          usage: { input_tokens: 500, output_tokens: 60 },
+          item_ids: ["u1", "a1", "u2", "a2"],
+        },
+      ],
+      items: [
+        { id: "u1", kind: "user_message", summary: "run the tests", detail: "run the tests", status: "completed" },
+        { id: "a1", kind: "agent_message", summary: "Starting...", detail: "Starting...", status: "completed" },
+        { id: "u2", kind: "user_message", summary: "focus on vitest", detail: "focus on vitest", status: "completed" },
+        { id: "a2", kind: "agent_message", summary: "Done with vitest", detail: "Done with vitest", status: "completed" },
+      ],
+    };
+
+    const { provider } = createProvider(detail);
+
+    await (provider as any).loadHistory("thread-1");
+
+    const segments = provider.messages.filter((m) => m.role === "assistant");
+    expect(segments).toHaveLength(2);
+    expect(segments[0].usage).toBeUndefined();
+    expect(segments[1].usage).toEqual({ input_tokens: 500, output_tokens: 60 });
+  });
+
+  it("reconstructs the full prompt-input total from billable + cached + cache-write classes", async () => {
+    const detail = {
+      latest_seq: 0,
+      thread: { id: "thread-1", model: "deepseek-v4-pro" },
+      turns: [],
+      items: [],
+    };
+    const { provider, api } = createProvider(detail);
+    (api as any).getThreadUsage = vi.fn(async () => ({
+      input_tokens: 10,
+      output_tokens: 30,
+      cached_tokens: 20,
+      cache_write_tokens: 5,
+      reasoning_tokens: 0,
+      cost_usd: 0,
+      cost_cny: 0,
+      turns: 1,
+    }));
+    (provider as any).apiCapabilities.threadUsage = true;
+
+    await (provider as any).loadHistory("thread-1");
+
+    // totals.input_tokens is the billable (cache-miss) slice; the status
+    // bar must show the same full-prompt total as the transcript chips.
+    expect(provider.totalInputTokens).toBe(35);
+    expect(provider.totalOutputTokens).toBe(30);
+    expect(provider.totalTokens).toBe(65);
+  });
+
   it("applies tool results that arrive after a steer to the pre-steer segment's tool", async () => {
     const detail = {
       latest_seq: 30,
