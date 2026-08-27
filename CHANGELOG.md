@@ -1,5 +1,17 @@
 # Change Log
 
+## 0.4.5
+
+### New Features
+
+- **Inline Tool Arguments** — Each tool call now renders its inputs in the tool-call card so you can see exactly what the agent is about to run, most notably the shell command for `exec_shell` as a `$ …` block. Seed-path tool_use arguments are recovered from the TUI runtime (`metadata.tool_name` is authoritative, JSON input parsed from `detail`), seed `detail` is no longer double-rendered as output, and a shell-tool whitelist with whole-segment fallback prevents misclassification.
+
+### Bug Fixes
+
+- **File-Change Cards From TUI Mutation Metadata** — File-change cards are now detected from the authoritative `metadata.mutation` diff attached to tool results, so newer TUI file tools (write, edit, fim_edit, unified File action) render cards regardless of tool name; the legacy name-based heuristic remains as a fallback for old recordings and seed replay. The duplicated diff-extraction paths are centralized into a single `detectFileChange`, and a seed-built card is rebuilt when the real tool result arrives to backfill the actual diff and added/removed line counts.
+
+- **Diff Stat Counts** — `parseDiffStats` no longer miscounts code lines starting with `--` or `++` as file headers (only `---` / `+++` with a trailing space match), and `extractDiffForTool` reads the new `replace` array input while keeping the deprecated `changes` alias working. Write-style inputs synthesize a creation diff when the result embeds none, and edit tools count added/removed lines from the edits array.
+
 ## 0.4.4
 
 ### New Features
