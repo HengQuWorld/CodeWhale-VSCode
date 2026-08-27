@@ -1,5 +1,15 @@
 # Change Log
 
+## 0.4.4
+
+### New Features
+
+- **Runtime-Sourced Session Cost** — Replace the hardcoded client-side pricing table with thread-scoped usage totals fetched from the TUI runtime, so provider rate changes are picked up by updating the TUI rather than this extension. Adds a `costCurrency` setting (`auto` | `usd` | `cny`, default `auto`) that follows the interface language, and mirrors the TUI's `cost_display_currency` behavior: a CNY preference with no native-CNY spend falls back to USD, and unrecorded cost shows an honest em dash instead of a fabricated estimate.
+
+### Bug Fixes
+
+- **Per-Turn Usage Chips Persistence** — Turn usage is now stamped onto the final assistant message during history reload, so the reloaded transcript shows the same ↑/↓ token chip as the live view. Cache-write tokens are included in the full prompt-input total so the status bar matches the transcript.
+
 ## 0.4.3
 
 ### New Features
