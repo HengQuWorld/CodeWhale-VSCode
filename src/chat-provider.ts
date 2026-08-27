@@ -695,11 +695,43 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
                 break;
               }
               const tcIdx = toolCalls.length;
-              const rawName = extractToolNameFromSummary(item.summary || "");
+              // The TUI runtime persists seed-path tool_use items with summary
+              // `name(input_json)` and tags them with `metadata.tool_name`.
+              // `extractToolNameFromSummary` handles the live formats
+              // (`name: output`, `name started`) but not the seed `name(...)`
+              // form — so when the runtime supplies `tool_name`, it is the
+              // authoritative name and must win over summary parsing.
+              const rawName = typeof metadata.tool_name === "string"
+                ? metadata.tool_name
+                : extractToolNameFromSummary(item.summary || "");
+              // Seed-path tool_use items persist their full arguments as a JSON
+              // string in `detail` and tag themselves with `metadata.tool_name`.
+              // Live-executed items overwrite `detail` with output, so only the
+              // seed form carries recoverable input here. (The one live item
+              // that also sets `tool_name` — request_user_input — stores a
+              // non-JSON redaction marker in `detail`, so it never reaches the
+              // parse branch.)
+              let toolInput: Record<string, unknown> = metadata;
+              let toolOutput: string | undefined = item.detail || undefined;
+              if (typeof metadata.tool_name === "string" && item.detail) {
+                try {
+                  const parsed = JSON.parse(item.detail);
+                  if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+                    toolInput = parsed as Record<string, unknown>;
+                    // `detail` held the tool's *arguments*, not its output —
+                    // don't also surface it as `output`, or the same arguments
+                    // render twice (inline input block + a mislabeled output
+                    // chunk) whenever no tool result overwrites it.
+                    toolOutput = undefined;
+                  }
+                } catch {
+                  // detail is not JSON (e.g. plain output) — keep metadata.
+                }
+              }
               const tc: ToolCallInfo = {
                 name: rawName,
-                input: metadata,
-                output: item.detail || undefined,
+                input: toolInput,
+                output: toolOutput,
                 status: item.status === "completed" ? "complete" : "error",
                 itemId: typeof metadata.tool_use_id === "string" ? metadata.tool_use_id : item.id,
               };

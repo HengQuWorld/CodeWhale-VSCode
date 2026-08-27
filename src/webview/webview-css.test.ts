@@ -52,6 +52,14 @@ describe("webview-css.ts", () => {
     expect(css).toContain(".approval-bar");
   });
 
+  it("bounds the tool input command block so long scripts scroll instead of overflowing", () => {
+    const css = getWebviewCss();
+    const match = css.match(/\.tool-input-command\s*\{([^}]*)\}/);
+    expect(match).not.toBeNull();
+    expect(match![1]).toContain("max-height");
+    expect(match![1]).toContain("overflow-y: auto");
+  });
+
   it("contains welcome screen styles", () => {
     const css = getWebviewCss();
     expect(css).toContain(".welcome-screen");

@@ -768,6 +768,42 @@ export function getWebviewCss(): string {
       max-height: 200px;
       overflow-y: auto;
     }
+    .tool-call .tool-input {
+      margin-top: 6px;
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+    .tool-call .tool-input-command {
+      padding: 5px 8px;
+      background: var(--input-bg);
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      font-family: var(--vscode-editor-font-family, monospace);
+      font-size: 0.9em;
+      white-space: pre-wrap;
+      word-break: break-word;
+      color: var(--fg);
+      max-height: 200px;
+      overflow-y: auto;
+    }
+    .tool-call .tool-input-row {
+      display: flex;
+      gap: 6px;
+      align-items: baseline;
+      font-size: 0.88em;
+    }
+    .tool-call .tool-input-key {
+      flex: 0 0 auto;
+      color: var(--muted);
+      font-weight: 500;
+    }
+    .tool-call .tool-input-value {
+      font-family: var(--vscode-editor-font-family, monospace);
+      white-space: pre-wrap;
+      word-break: break-word;
+      color: var(--fg);
+    }
 
     .file-change-card {
       margin-top: 6px;

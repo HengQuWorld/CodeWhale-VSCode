@@ -188,6 +188,99 @@ export function getMessagesScript(tr: WebviewTranslations): string {
     return html;
   }
 
+  // ── Render Tool Input Details ──
+  // Surfaces the tool's arguments inline so the user can judge what the agent
+  // is about to do — most importantly the exact shell command for exec_shell.
+  // Metadata-only keys (tool_use_id, tool_result_for, …) are filtered out.
+  var TOOL_INPUT_META_KEYS = {
+    tool_use_id: true, tool_name: true, tool_call_id: true,
+    tool_result_for: true, input_provenance: true,
+    agent_mail_message_id: true, response_redacted: true,
+    task_updates: true
+  };
+
+  var SHELL_TOOL_NAMES = {
+    exec_shell: true, exec_shell_wait: true, exec_shell_interact: true,
+    task_shell_start: true, task_shell_wait: true,
+    code_execution: true, js_execution: true
+  };
+
+  var COMMAND_KEYS = ['command', 'cmd', 'script', 'code', 'javascript', 'python'];
+
+  function toolInputObject(tc) {
+    var input = tc.input;
+    if (!input) return {};
+    if (typeof input === 'string') {
+      try {
+        var parsed = JSON.parse(input);
+        return parsed && typeof parsed === 'object' ? parsed : {};
+      } catch (e) { return {}; }
+    }
+    return typeof input === 'object' ? input : {};
+  }
+
+  function isShellTool(name) {
+    if (SHELL_TOOL_NAMES[name]) return true;
+    // Fallback for MCP/dynamic tools: match shell-ish tokens as whole
+    // segments delimited by _ / - / . (e.g. mcp__shell, run_bash) rather
+    // than any substring, so names like db_command or command_parser are not
+    // treated as shell tools just for containing those letters. First-class
+    // exec_*/code_*/js_* tools live in SHELL_TOOL_NAMES, so the ambiguous
+    // command/cmd substring match is dropped.
+    return /(?:^|[_/.-])(shell|bash|sh|exec|cmd)(?:[_/.-]|$)/i.test(name || '');
+  }
+
+  function formatToolInputValue(value) {
+    if (value === null || value === undefined) return '';
+    if (typeof value === 'string') return value;
+    if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+    try {
+      var s = JSON.stringify(value);
+      return s === undefined ? '' : s;
+    } catch (e) { return String(value); }
+  }
+
+  function truncateToolInputValue(value, max) {
+    if (typeof value !== 'string') return value;
+    if (value.length <= max) return value;
+    return value.slice(0, max) + '\\u2026';
+  }
+
+  function renderToolInput(tc) {
+    var input = toolInputObject(tc);
+    var keys = Object.keys(input).filter(function(k) {
+      return !TOOL_INPUT_META_KEYS[k] && input[k] !== null && input[k] !== undefined && input[k] !== '';
+    });
+    if (keys.length === 0) return '';
+
+    var commandKey = null;
+    if (isShellTool(tc.name)) {
+      for (var ci = 0; ci < COMMAND_KEYS.length; ci++) {
+        if (input[COMMAND_KEYS[ci]] !== undefined && input[COMMAND_KEYS[ci]] !== null && input[COMMAND_KEYS[ci]] !== '') {
+          commandKey = COMMAND_KEYS[ci];
+          break;
+        }
+      }
+    }
+
+    var html = '<div class="tool-input">';
+    if (commandKey) {
+      html += '<div class="tool-input-command">$ ' + __wvEscapeHtml(formatToolInputValue(input[commandKey])) + '</div>';
+    }
+    for (var i = 0; i < keys.length; i++) {
+      var key = keys[i];
+      if (key === commandKey) continue;
+      var value = truncateToolInputValue(formatToolInputValue(input[key]), 240);
+      if (value === '') continue;
+      html += '<div class="tool-input-row">';
+      html += '<span class="tool-input-key">' + __wvEscapeHtml(key) + '</span>';
+      html += '<span class="tool-input-value">' + __wvEscapeHtml(value) + '</span>';
+      html += '</div>';
+    }
+    html += '</div>';
+    return html;
+  }
+
   // ── Render Tool Call ──
   function renderToolCall(msgId, tc, tcIdx) {
     // Delegate card for agent tools
@@ -219,6 +312,7 @@ export function getMessagesScript(tr: WebviewTranslations): string {
     var html = '<div class="tool-call" id="tc-' + msgId + '-' + tcIdx + '">';
     html += '<span class="tool-name">\\uD83D\\uDD27 ' + __wvEscapeHtml(tc.displayName || tc.name) + '</span>';
     html += ' <span class="tool-status status-muted">' + statusIcon + ' ' + statusText + '</span>';
+    html += renderToolInput(tc);
     if (tc.fileChange) {
       html += renderFileChangeCard(tc.fileChange);
     } else if (tc.output) {

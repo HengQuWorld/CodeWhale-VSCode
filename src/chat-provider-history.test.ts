@@ -354,4 +354,114 @@ describe("ChatProvider thread history rendering", () => {
       compactMode: true,
     });
   });
+
+  it("recovers seed tool args from detail JSON and prefers metadata.tool_name over the seed summary", async () => {
+    const detail = {
+      latest_seq: 3,
+      thread: { id: "thread-1", model: "deepseek-v4-pro" },
+      turns: [
+        {
+          id: "turn-1",
+          input_summary: "list files",
+          created_at: "2026-08-20T10:00:00Z",
+          ended_at: "2026-08-20T10:00:05Z",
+          status: "completed",
+          item_ids: ["u1", "t1", "a1"],
+        },
+      ],
+      items: [
+        { id: "u1", kind: "user_message", summary: "list files", detail: "list files", status: "completed" },
+        // Seed-path tool_use: summary is `name(input_json)`, detail is the JSON
+        // input, and metadata.tool_name names the tool. The summary format is
+        // NOT parseable by extractToolNameFromSummary, so tool_name must win.
+        { id: "t1", kind: "tool_call", summary: "exec_shell({\"command\":\"ls -la\"})", detail: JSON.stringify({ command: "ls -la", timeout: 30 }), status: "completed", metadata: { tool_use_id: "tool-1", tool_name: "exec_shell" } },
+        { id: "a1", kind: "agent_message", summary: "Done", detail: "Done", status: "completed", metadata: null },
+      ],
+    };
+
+    const { provider } = createProvider(detail);
+
+    await (provider as any).loadHistory("thread-1");
+
+    const assistant = provider.messages.find((m) => m.role === "assistant");
+    expect(assistant).toBeDefined();
+    expect(assistant?.toolCalls).toHaveLength(1);
+    const tc = assistant!.toolCalls![0];
+    expect(tc.name).toBe("exec_shell");
+    expect(tc.input).toEqual({ command: "ls -la", timeout: 30 });
+    // detail held the arguments, not output — must not surface as output.
+    expect(tc.output).toBeUndefined();
+  });
+
+  it("keeps the tool result as output when one follows a seeded tool call", async () => {
+    const detail = {
+      latest_seq: 4,
+      thread: { id: "thread-1", model: "deepseek-v4-pro" },
+      turns: [
+        {
+          id: "turn-1",
+          input_summary: "list files",
+          created_at: "2026-08-20T10:00:00Z",
+          ended_at: "2026-08-20T10:00:05Z",
+          status: "completed",
+          item_ids: ["u1", "t1", "t1r", "a1"],
+        },
+      ],
+      items: [
+        { id: "u1", kind: "user_message", summary: "list files", detail: "list files", status: "completed" },
+        { id: "t1", kind: "tool_call", summary: "exec_shell({\"command\":\"ls -la\"})", detail: JSON.stringify({ command: "ls -la", timeout: 30 }), status: "completed", metadata: { tool_use_id: "tool-1", tool_name: "exec_shell" } },
+        { id: "t1r", kind: "tool_call", summary: "exec_shell: total 0", detail: "total 0", status: "completed", metadata: { tool_result_for: "tool-1", is_error: false } },
+        { id: "a1", kind: "agent_message", summary: "Done", detail: "Done", status: "completed", metadata: null },
+      ],
+    };
+
+    const { provider } = createProvider(detail);
+
+    await (provider as any).loadHistory("thread-1");
+
+    const assistant = provider.messages.find((m) => m.role === "assistant");
+    expect(assistant).toBeDefined();
+    expect(assistant?.toolCalls).toHaveLength(1);
+    const tc = assistant!.toolCalls![0];
+    expect(tc.name).toBe("exec_shell");
+    expect(tc.input).toEqual({ command: "ls -la", timeout: 30 });
+    expect(tc.output).toBe("total 0");
+  });
+
+  it("falls back to summary parsing and keeps output for live tool items without tool_name", async () => {
+    const detail = {
+      latest_seq: 3,
+      thread: { id: "thread-1", model: "deepseek-v4-pro" },
+      turns: [
+        {
+          id: "turn-1",
+          input_summary: "list files",
+          created_at: "2026-08-20T10:00:00Z",
+          ended_at: "2026-08-20T10:00:05Z",
+          status: "completed",
+          item_ids: ["u1", "t1", "a1"],
+        },
+      ],
+      items: [
+        { id: "u1", kind: "user_message", summary: "list files", detail: "list files", status: "completed" },
+        // Live-executed item: summary `name: output`, detail is real output,
+        // and there is no metadata.tool_name marker.
+        { id: "t1", kind: "tool_call", summary: "exec_shell: total 0", detail: "total 0", status: "completed", metadata: { tool_use_id: "tool-1" } },
+        { id: "a1", kind: "agent_message", summary: "Done", detail: "Done", status: "completed", metadata: null },
+      ],
+    };
+
+    const { provider } = createProvider(detail);
+
+    await (provider as any).loadHistory("thread-1");
+
+    const assistant = provider.messages.find((m) => m.role === "assistant");
+    expect(assistant).toBeDefined();
+    expect(assistant?.toolCalls).toHaveLength(1);
+    const tc = assistant!.toolCalls![0];
+    expect(tc.name).toBe("exec_shell");
+    expect(tc.output).toBe("total 0");
+    // No tool_name marker, so input falls back to metadata (tool_use_id).
+    expect(tc.input).toEqual({ tool_use_id: "tool-1" });
+  });
 });

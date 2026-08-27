@@ -48,6 +48,28 @@ describe("webview-js-messages.ts", () => {
     expect(script).toContain("function renderToolCall");
   });
 
+  it("contains tool input rendering", () => {
+    const script = getMessagesScript(makeTr());
+    expect(script).toContain("function renderToolInput");
+    expect(script).toContain("tool-input");
+    expect(script).toContain("tool-input-command");
+    expect(script).toContain("TOOL_INPUT_META_KEYS");
+    expect(script).toContain("SHELL_TOOL_NAMES");
+    expect(script).toContain("COMMAND_KEYS");
+  });
+
+  it("filters runtime metadata keys out of tool input display", () => {
+    const script = getMessagesScript(makeTr());
+    for (const key of ["tool_use_id", "tool_name", "tool_call_id", "tool_result_for", "input_provenance", "agent_mail_message_id", "response_redacted", "task_updates"]) {
+      expect(script).toContain(`${key}: true`);
+    }
+  });
+
+  it("matches shell tools by whole name segment, not substring", () => {
+    const script = getMessagesScript(makeTr());
+    expect(script).toContain("(?:^|[_/.-])(shell|bash|sh|exec|cmd)(?:[_/.-]|$)");
+  });
+
   it("contains renderFileChangeCard function", () => {
     const script = getMessagesScript(makeTr());
     expect(script).toContain("function renderFileChangeCard");
