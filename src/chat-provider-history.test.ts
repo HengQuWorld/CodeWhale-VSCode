@@ -355,6 +355,192 @@ describe("ChatProvider thread history rendering", () => {
     });
   });
 
+  it("renders file-change cards for new TUI write tools via metadata.mutation", async () => {
+    // Current TUI `write` tool: the model-facing output carries no diff —
+    // the diff and per-file outcome only exist in metadata.mutation.
+    const detail = {
+      latest_seq: 5,
+      thread: { id: "thread-1", model: "deepseek-v4-pro" },
+      turns: [
+        {
+          id: "turn-1",
+          input_summary: "create a file",
+          created_at: "2026-08-20T10:00:00Z",
+          ended_at: "2026-08-20T10:00:05Z",
+          status: "completed",
+          item_ids: ["u1", "t1", "a1"],
+        },
+      ],
+      items: [
+        { id: "u1", kind: "user_message", summary: "create a file", detail: "create a file", status: "completed" },
+        {
+          id: "t1",
+          kind: "tool_call",
+          summary: "write: Successfully wrote 12 bytes to src/new.ts",
+          detail: "Successfully wrote 12 bytes to src/new.ts",
+          status: "completed",
+          metadata: {
+            tool_use_id: "tool-1",
+            tool_name: "write",
+            event: "file.mutation",
+            mutation: {
+              diff: [
+                "diff --git a/src/new.ts b/src/new.ts",
+                "--- /dev/null",
+                "+++ b/src/new.ts",
+                "@@ -0,0 +1,2 @@",
+                "+hello",
+                "+world",
+              ].join("\n"),
+              files: [{ path: "src/new.ts", outcome: "created" }],
+              renames: [],
+            },
+          },
+        },
+        { id: "a1", kind: "agent_message", summary: "Done", detail: "Done", status: "completed", metadata: null },
+      ],
+    };
+
+    const { provider } = createProvider(detail);
+
+    await (provider as any).loadHistory("thread-1");
+
+    const assistant = provider.messages.find((m) => m.role === "assistant");
+    expect(assistant?.toolCalls).toHaveLength(1);
+    const fc = assistant?.toolCalls?.[0].fileChange;
+    expect(fc).toMatchObject({
+      filePath: "src/new.ts",
+      changeType: "created",
+      addedLines: 2,
+      removedLines: 0,
+      toolName: "write",
+    });
+    expect(fc?.diff).toContain("+hello");
+  });
+
+  it("renders apply_patch preflight mutation metadata as a diff card", async () => {
+    const detail = {
+      latest_seq: 5,
+      thread: { id: "thread-1", model: "deepseek-v4-pro" },
+      turns: [
+        {
+          id: "turn-1",
+          input_summary: "patch two files",
+          created_at: "2026-08-20T10:00:00Z",
+          ended_at: "2026-08-20T10:00:05Z",
+          status: "completed",
+          item_ids: ["u1", "t1", "a1"],
+        },
+      ],
+      items: [
+        { id: "u1", kind: "user_message", summary: "patch two files", detail: "patch two files", status: "completed" },
+        {
+          id: "t1",
+          kind: "file_change",
+          summary: "apply_patch: applied 1/1 hunks",
+          detail: '{"success":true,"hunks_applied":1,"hunks_total":1}',
+          status: "completed",
+          metadata: {
+            event: "apply_patch.preflight",
+            mutation: {
+              diff: [
+                "diff --git a/src/app.ts b/src/app.ts",
+                "--- a/src/app.ts",
+                "+++ b/src/app.ts",
+                "@@ -1 +1 @@",
+                "-old",
+                "+new",
+              ].join("\n"),
+              files: [{ path: "src/app.ts", outcome: "updated" }],
+              renames: [],
+            },
+          },
+        },
+        { id: "a1", kind: "agent_message", summary: "Done", detail: "Done", status: "completed", metadata: null },
+      ],
+    };
+
+    const { provider } = createProvider(detail);
+
+    await (provider as any).loadHistory("thread-1");
+
+    const assistant = provider.messages.find((m) => m.role === "assistant");
+    expect(assistant?.toolCalls).toHaveLength(1);
+    const tc = assistant?.toolCalls?.[0];
+    expect(tc?.name).toBe("apply_patch");
+    expect(tc?.fileChange).toMatchObject({
+      filePath: "src/app.ts",
+      changeType: "modified",
+      addedLines: 1,
+      removedLines: 1,
+      toolName: "apply_patch",
+    });
+    expect(tc?.fileChange?.diff).toContain("diff --git a/src/app.ts b/src/app.ts");
+  });
+
+  it("upgrades the seed-path file-change card when the tool result with a diff arrives later", async () => {
+    const detail = {
+      latest_seq: 6,
+      thread: { id: "thread-1", model: "deepseek-v4-pro" },
+      turns: [
+        {
+          id: "turn-1",
+          input_summary: "edit the app",
+          created_at: "2026-08-20T10:00:00Z",
+          ended_at: "2026-08-20T10:00:05Z",
+          status: "completed",
+          item_ids: ["u1", "t1", "t1r", "a1"],
+        },
+      ],
+      items: [
+        { id: "u1", kind: "user_message", summary: "edit the app", detail: "edit the app", status: "completed" },
+        {
+          id: "t1",
+          kind: "tool_call",
+          summary: 'edit_file({"file_path":"src/app.ts","search":"old","replace":"new"})',
+          detail: JSON.stringify({ file_path: "src/app.ts", search: "old", replace: "new" }),
+          status: "completed",
+          metadata: { tool_use_id: "tool-1", tool_name: "edit_file" },
+        },
+        {
+          id: "t1r",
+          kind: "tool_call",
+          summary: "edit_file: replaced",
+          detail: [
+            "diff --git a/src/app.ts b/src/app.ts",
+            "--- a/src/app.ts",
+            "+++ b/src/app.ts",
+            "@@ -1 +1 @@",
+            "-old",
+            "+new",
+            "",
+            "Replaced 1 occurrence in src/app.ts",
+          ].join("\n"),
+          status: "completed",
+          metadata: { tool_result_for: "tool-1", is_error: false },
+        },
+        { id: "a1", kind: "agent_message", summary: "Done", detail: "Done", status: "completed", metadata: null },
+      ],
+    };
+
+    const { provider } = createProvider(detail);
+
+    await (provider as any).loadHistory("thread-1");
+
+    const assistant = provider.messages.find((m) => m.role === "assistant");
+    const fc = assistant?.toolCalls?.[0].fileChange;
+    // The card was first built from the input alone (no diff); the later
+    // tool result must upgrade it with the real embedded diff.
+    expect(fc).toMatchObject({
+      filePath: "src/app.ts",
+      changeType: "modified",
+      addedLines: 1,
+      removedLines: 1,
+      toolName: "edit_file",
+    });
+    expect(fc?.diff).toContain("diff --git a/src/app.ts b/src/app.ts");
+  });
+
   it("recovers seed tool args from detail JSON and prefers metadata.tool_name over the seed summary", async () => {
     const detail = {
       latest_seq: 3,

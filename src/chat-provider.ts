@@ -21,10 +21,6 @@ import { renderMarkdown } from "./utils/markdown";
 import { finalizeAssistantMessage } from "./utils/event-helpers";
 import { formatCostAmount, resolveCostCurrency } from "./utils/cost-calculator";
 import {
-  parseDiffStats,
-  extractDiffFromOutput,
-  extractDiffForTool,
-  extractFilePathFromDiff,
   parseDiffToSides,
   stripTurnMeta,
   reconstructOldContent,
@@ -45,9 +41,9 @@ import {
 import {
   friendlyToolName,
   isFileChangeTool,
-  extractFilePath,
   extractToolNameFromSummary,
   buildApprovalSummary,
+  detectFileChange,
 } from "./utils/tool-utils";
 
 /** Normalize file path for dedup comparison: backslashes to forward, strip trailing slashes. */
@@ -558,11 +554,27 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         // item persisted AFTER the steer item, so resolve by object
         // reference rather than a per-segment index.
         const toolCallById = new Map<string, ToolCallInfo>();
-        const applyToolResult = (toolUseId: string, output: string, isError: boolean): void => {
+        const applyToolResult = (
+          toolUseId: string,
+          output: string,
+          isError: boolean,
+          metadata?: Record<string, unknown>,
+        ): void => {
           const tc = toolCallById.get(toolUseId);
           if (!tc) return;
           tc.output = output;
           tc.status = isError ? "error" : "complete";
+          // Rebuild the file-change card now that the real result (and any
+          // mutation metadata) is available — seed-path tool items are first
+          // seen with only their input.
+          if (!isError) {
+            tc.fileChange = detectFileChange({
+              toolName: tc.name,
+              input: tc.input as Record<string, unknown> | undefined,
+              output,
+              metadata,
+            });
+          }
         };
 
         const flushAssistantSegment = (): void => {
@@ -691,6 +703,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
                   toolResultFor,
                   item.detail || item.summary || "",
                   !!metadata.is_error,
+                  metadata,
                 );
                 break;
               }
@@ -738,24 +751,17 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
               if (tc.itemId) {
                 toolCallById.set(tc.itemId, tc);
               }
-              if (isFileChangeTool(tc.name) && tc.input) {
-                const filePath = extractFilePath(tc.name, tc.input);
-                if (filePath) {
-                  const output = tc.output || "";
-                  const diff = extractDiffForTool(tc.name, tc.input as Record<string, unknown> | undefined, output);
-                  const stats = diff ? parseDiffStats(diff) : { added: 0, removed: 0 };
-                  const changeType: "created" | "modified" | "deleted" =
-                    tc.name === "delete_file" ? "deleted" :
-                    tc.name === "write_file" && !diff ? "created" : "modified";
-                  tc.fileChange = {
-                    filePath,
-                    changeType,
-                    addedLines: stats.added,
-                    removedLines: stats.removed,
-                    diff,
-                    toolName: tc.name,
-                  };
-                }
+              // Authoritative signal first: current TUI file tools carry
+              // `metadata.mutation` (diff + per-file outcome). The legacy
+              // name-based fallback covers old recordings and seed replay.
+              const fileChange = detectFileChange({
+                toolName: tc.name,
+                input: tc.input as Record<string, unknown> | undefined,
+                output: tc.output || "",
+                metadata,
+              });
+              if (fileChange) {
+                tc.fileChange = fileChange;
               }
               toolCalls.push(tc);
               blocks.push({ type: "tool_call", toolCallIdx: tcIdx });
@@ -768,28 +774,19 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
               const fcOutput = item.detail || "";
               const fcMeta = (item.metadata as Record<string, unknown>) || {};
               const fcToolName = extractToolNameFromSummary(item.summary || "");
-              const fcDiff = extractDiffForTool(fcToolName, fcMeta as Record<string, unknown> | undefined, fcOutput);
-              const fcStats = fcDiff ? parseDiffStats(fcDiff) : { added: 0, removed: 0 };
-              let fcFilePath = fcDiff ? extractFilePathFromDiff(fcDiff) : "";
-              if (!fcFilePath && fcMeta.file_path) fcFilePath = fcMeta.file_path as string;
-              if (!fcFilePath && fcMeta.path) fcFilePath = fcMeta.path as string;
-              const fcChangeType = (fcMeta.change_type as "created" | "modified" | "deleted") ||
-                (fcToolName === "delete_file" ? "deleted" :
-                 fcToolName === "write_file" && !fcDiff ? "created" : "modified");
+              const fileChange = detectFileChange({
+                toolName: fcToolName,
+                input: fcMeta,
+                output: fcOutput,
+                metadata: fcMeta,
+              });
               const fcTc: ToolCallInfo = {
                 name: fcToolName || "file_change",
                 displayName: friendlyToolName(fcToolName || "file_change"),
                 input: fcMeta,
                 output: fcOutput,
                 status: item.status === "completed" ? "complete" : "error",
-                fileChange: fcFilePath ? {
-                  filePath: fcFilePath,
-                  changeType: fcChangeType,
-                  addedLines: fcStats.added,
-                  removedLines: fcStats.removed,
-                  diff: fcDiff,
-                  toolName: fcToolName || "file_change",
-                } : undefined,
+                fileChange,
               };
               toolCalls.push(fcTc);
               blocks.push({ type: "tool_call", toolCallIdx: tcIdx2 });
@@ -950,22 +947,14 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     };
     const updateFileChangeCard = (toolCall: ToolCallInfo): void => {
       if (!isFileChangeTool(toolCall.name) || !toolCall.input) return;
-      const filePath = extractFilePath(toolCall.name, toolCall.input);
-      if (!filePath) return;
-      const output = toolCall.output || "";
-      const diff = extractDiffForTool(toolCall.name, toolCall.input as Record<string, unknown> | undefined, output);
-      const stats = diff ? parseDiffStats(diff) : { added: 0, removed: 0 };
-      const changeType: "created" | "modified" | "deleted" =
-        toolCall.name === "delete_file" ? "deleted" :
-        toolCall.name === "write_file" && !diff ? "created" : "modified";
-      toolCall.fileChange = {
-        filePath,
-        changeType,
-        addedLines: stats.added,
-        removedLines: stats.removed,
-        diff,
+      const fileChange = detectFileChange({
         toolName: toolCall.name,
-      };
+        input: toolCall.input as Record<string, unknown> | undefined,
+        output: toolCall.output || "",
+      });
+      if (fileChange) {
+        toolCall.fileChange = fileChange;
+      }
     };
 
     let i = 0;
@@ -3410,37 +3399,19 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
             });
           }
 
-          if (isFileChangeTool(toolName)) {
-            let filePath = "";
-            let diff: string | undefined;
-            if (tc?.input) {
-              filePath = extractFilePath(toolName, tc.input);
+          // Authoritative signal first: current TUI file tools attach
+          // `metadata.mutation` to item.completed, independent of naming.
+          const fcSignal = detectFileChange({
+            toolName,
+            input: tc?.input as Record<string, unknown> | undefined,
+            output: pl.item?.detail || tc?.output || "",
+            metadata: pl.item?.metadata as Record<string, unknown> | undefined,
+          });
+          if (fcSignal) {
+            const fc: FileChangeInfo = fcSignal;
+            if (tc) {
+              tc.fileChange = fc;
             }
-            const output = pl.item?.detail || tc?.output || "";
-            diff = extractDiffForTool(toolName, tc?.input as Record<string, unknown> | undefined, output);
-            if (!filePath && diff) {
-              filePath = extractFilePathFromDiff(diff);
-            }
-            if (!filePath && pl.item?.metadata) {
-              const meta = pl.item.metadata;
-              filePath = (meta.file_path || meta.path || "") as string;
-            }
-            if (filePath) {
-              const stats = diff ? parseDiffStats(diff) : { added: 0, removed: 0 };
-              const changeType: "created" | "modified" | "deleted" =
-                toolName === "delete_file" ? "deleted" :
-                toolName === "write_file" && !diff ? "created" : "modified";
-              const fc: FileChangeInfo = {
-                filePath,
-                changeType,
-                addedLines: stats.added,
-                removedLines: stats.removed,
-                diff,
-                toolName,
-              };
-              if (tc) {
-                tc.fileChange = fc;
-              }
               const normPath = normalizePath(fc.filePath);
               const existingIdx = this.turnFileChanges.findIndex(existing => normalizePath(existing.filePath) === normPath);
               // Set diffIndex on fc before merging (index in the diffs array this diff will occupy)
@@ -3481,7 +3452,6 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
                 });
               }
               this.refreshWorkPanel();
-            }
           }
           if (pl.item?.metadata?.task_updates) {
             const checklist = (pl.item.metadata.task_updates as Record<string, unknown>).checklist;

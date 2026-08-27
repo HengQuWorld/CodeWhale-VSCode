@@ -1,191 +1,247 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
+import { detectFileChange } from "./tool-utils";
 import {
-  friendlyToolName,
-  FRIENDLY_TOOL_NAMES,
-  isFileChangeTool,
-  extractFilePath,
-  extractToolNameFromSummary,
-  buildApprovalSummary,
-  shouldRefreshTaskList,
-  FILE_CHANGE_TOOLS,
-} from "./tool-utils";
+  extractDiffForTool,
+  extractMutationFromMetadata,
+  formatWriteInputAsDiff,
+  parseDiffStats,
+} from "./diff-utils";
 
-describe("friendlyToolName", () => {
-  it("maps known tool names to friendly names", () => {
-    expect(friendlyToolName("write_file")).toBe("Write file");
-    expect(friendlyToolName("read_file")).toBe("Read file");
-    expect(friendlyToolName("exec_shell")).toBe("Run command");
-    expect(friendlyToolName("delete_file")).toBe("Delete file");
-    expect(friendlyToolName("web_search")).toBe("Web search");
+const UPDATED_DIFF = [
+  "diff --git a/src/app.ts b/src/app.ts",
+  "--- a/src/app.ts",
+  "+++ b/src/app.ts",
+  "@@ -1 +1 @@",
+  "-old line",
+  "+new line",
+].join("\n");
+
+function mutationMetadata(overrides?: {
+  diff?: string;
+  files?: Array<{ path: string; outcome?: string }>;
+  renames?: Array<{ from: string; to: string }>;
+  event?: string;
+}) {
+  return {
+    event: overrides?.event ?? "file.mutation",
+    mutation: {
+      diff: overrides?.diff ?? UPDATED_DIFF,
+      files: overrides?.files ?? [{ path: "src/app.ts", outcome: "updated" }],
+      renames: overrides?.renames ?? [],
+    },
+  };
+}
+
+describe("extractMutationFromMetadata", () => {
+  it("extracts the mutation payload from file.mutation metadata", () => {
+    const mutation = extractMutationFromMetadata(mutationMetadata());
+    expect(mutation).toBeDefined();
+    expect(mutation?.diff).toBe(UPDATED_DIFF);
+    expect(mutation?.files).toEqual([{ path: "src/app.ts", outcome: "updated" }]);
+    expect(mutation?.renames).toEqual([]);
   });
 
-  it("formats MCP tool names", () => {
-    // mcp__ prefix stripped, __ replaced with /, but remaining _ not converted
-    expect(friendlyToolName("mcp__github__create_issue")).toBe("github / create_issue");
-    expect(friendlyToolName("mcp__fs__read")).toBe("fs / read");
+  it("accepts apply_patch.preflight events", () => {
+    const mutation = extractMutationFromMetadata(
+      mutationMetadata({ event: "apply_patch.preflight", files: [{ path: "a.txt", outcome: "created" }] }),
+    );
+    expect(mutation?.files[0]?.outcome).toBe("created");
   });
 
-  it("formats unknown tool names with title case", () => {
-    expect(friendlyToolName("some_custom_tool")).toBe("Some Custom Tool");
-    expect(friendlyToolName("search")).toBe("Search");
-  });
-});
-
-describe("isFileChangeTool", () => {
-  it("identifies file change tools", () => {
-    expect(isFileChangeTool("write_file")).toBe(true);
-    expect(isFileChangeTool("apply_patch")).toBe(true);
-    expect(isFileChangeTool("replace_text")).toBe(true);
-    expect(isFileChangeTool("delete_file")).toBe(true);
-    expect(isFileChangeTool("move_file")).toBe(true);
-    expect(isFileChangeTool("copy_file")).toBe(true);
-    expect(isFileChangeTool("create_directory")).toBe(true);
-    expect(isFileChangeTool("edit_file")).toBe(true);
-  });
-
-  it("rejects non-file-change tools", () => {
-    expect(isFileChangeTool("read_file")).toBe(false);
-    expect(isFileChangeTool("exec_shell")).toBe(false);
-    expect(isFileChangeTool("web_search")).toBe(false);
-  });
-
-  it("is case-insensitive", () => {
-    expect(isFileChangeTool("Write_File")).toBe(true);
-    expect(isFileChangeTool("APPLY_PATCH")).toBe(true);
-  });
-});
-
-describe("extractFilePath", () => {
-  it("extracts file_path", () => {
-    expect(extractFilePath("write_file", { file_path: "/src/main.ts" })).toBe("/src/main.ts");
-  });
-
-  it("extracts path when file_path is missing", () => {
-    expect(extractFilePath("read_file", { path: "/src/main.ts" })).toBe("/src/main.ts");
-  });
-
-  it("extracts destination for move/copy", () => {
-    expect(extractFilePath("move_file", { source: "/a.ts", destination: "/b.ts" })).toBe("/b.ts");
-  });
-
-  it("extracts source when only source present", () => {
-    expect(extractFilePath("move_file", { source: "/a.ts" })).toBe("/a.ts");
-  });
-
-  it("returns empty string when no path fields", () => {
-    expect(extractFilePath("exec_shell", { command: "ls" })).toBe("");
+  it("returns undefined for unrelated or missing metadata", () => {
+    expect(extractMutationFromMetadata(undefined)).toBeUndefined();
+    expect(extractMutationFromMetadata({ event: "tool.started" })).toBeUndefined();
+    expect(extractMutationFromMetadata({ event: "file.mutation", mutation: {} })).toBeUndefined();
   });
 });
 
-describe("extractToolNameFromSummary", () => {
-  it("extracts tool name before colon", () => {
-    expect(extractToolNameFromSummary("write_file: Created /src/main.ts")).toBe("write_file");
+describe("detectFileChange", () => {
+  it("builds a card from metadata.mutation regardless of tool name", () => {
+    // New TUI contract tool `write`: the output has no diff — the diff and
+    // outcome only exist in the mutation metadata.
+    const fc = detectFileChange({
+      toolName: "write",
+      input: { path: "src/app.ts", content: "new" },
+      output: "Successfully wrote 3 bytes to src/app.ts",
+      metadata: mutationMetadata(),
+    });
+    expect(fc).toMatchObject({
+      filePath: "src/app.ts",
+      changeType: "modified",
+      addedLines: 1,
+      removedLines: 1,
+      toolName: "write",
+    });
+    expect(fc?.diff).toBe(UPDATED_DIFF);
   });
 
-  it("extracts tool name before first space when no colon", () => {
-    expect(extractToolNameFromSummary("read_file /src/main.ts")).toBe("read_file");
+  it("covers the unified File action tool via mutation metadata only", () => {
+    // `File` is not in FILE_CHANGE_TOOLS — only the metadata signal finds it.
+    const fc = detectFileChange({
+      toolName: "File",
+      input: { action: "write", path: "docs/x.md", content: "# x" },
+      output: "Successfully wrote 3 bytes to docs/x.md",
+      metadata: mutationMetadata({ files: [{ path: "docs/x.md", outcome: "created" }] }),
+    });
+    expect(fc?.filePath).toBe("docs/x.md");
+    expect(fc?.changeType).toBe("created");
   });
 
-  it("returns full string when no separator", () => {
-    expect(extractToolNameFromSummary("unknown")).toBe("unknown");
+  it("maps created/deleted outcomes and prefers them over name heuristics", () => {
+    expect(
+      detectFileChange({
+        toolName: "write",
+        input: {},
+        metadata: mutationMetadata({ files: [{ path: "a.ts", outcome: "deleted" }] }),
+      })?.changeType,
+    ).toBe("deleted");
   });
 
-  it("handles empty string", () => {
-    expect(extractToolNameFromSummary("")).toBe("");
+  it("resolves the rename destination as the card path", () => {
+    const fc = detectFileChange({
+      toolName: "apply_patch",
+      input: {},
+      metadata: mutationMetadata({
+        files: [],
+        renames: [{ from: "old_name.rs", to: "new_name.rs" }],
+      }),
+    });
+    expect(fc?.filePath).toBe("new_name.rs");
+  });
+
+  it("falls back to the legacy output-embedded diff for write_file", () => {
+    const fc = detectFileChange({
+      toolName: "write_file",
+      input: { path: "src/app.ts" },
+      output: `Wrote 10 bytes to src/app.ts\n${UPDATED_DIFF}`,
+    });
+    expect(fc?.diff).toBe(UPDATED_DIFF);
+    expect(fc?.changeType).toBe("modified");
+    expect(fc?.addedLines).toBe(1);
+  });
+
+  it("synthesizes a creation diff for write inputs without an output diff", () => {
+    const fc = detectFileChange({
+      toolName: "write",
+      input: { path: "src/new.ts", content: "hello\nworld" },
+      output: "Successfully wrote 12 bytes to src/new.ts",
+    });
+    expect(fc?.diff).toContain("--- /dev/null");
+    expect(fc?.diff).toContain("+hello");
+    expect(fc?.addedLines).toBe(2);
+    expect(fc?.changeType).toBe("created");
+  });
+
+  it("counts edit stats from the edits array when no diff is available", () => {
+    const fc = detectFileChange({
+      toolName: "edit",
+      input: { path: "src/app.ts", edits: [{ oldText: "a\nb", newText: "x\ny\nz" }] },
+      output: "Successfully replaced 1 block(s) in src/app.ts.",
+    });
+    expect(fc?.diff).toBeUndefined();
+    expect(fc?.addedLines).toBe(3);
+    expect(fc?.removedLines).toBe(2);
+    expect(fc?.changeType).toBe("modified");
+  });
+
+  it("returns undefined for non-file tools without mutation metadata", () => {
+    expect(
+      detectFileChange({ toolName: "read", input: { path: "a.txt" }, output: "contents" }),
+    ).toBeUndefined();
+  });
+
+  it("honors the legacy flat change_type metadata on file_change items", () => {
+    const fc = detectFileChange({
+      toolName: "edit_file",
+      input: { file_path: "src/app.ts" },
+      output: "",
+      metadata: { file_path: "src/app.ts", change_type: "deleted" },
+    });
+    expect(fc?.changeType).toBe("deleted");
   });
 });
 
-describe("buildApprovalSummary", () => {
-  it("builds summary for write_file", () => {
-    // /src/main.ts is only 2 parts, not abbreviated
-    expect(buildApprovalSummary("write_file", { file_path: "/src/main.ts" })).toBe("Write to /src/main.ts");
-  });
-
-  it("builds summary for exec_shell", () => {
-    expect(buildApprovalSummary("exec_shell", { command: "npm test" })).toBe("Run: npm test");
-  });
-
-  it("builds summary for delete_file", () => {
-    // /tmp/old.ts is only 2 parts, not abbreviated
-    expect(buildApprovalSummary("delete_file", { file_path: "/tmp/old.ts" })).toBe("Delete /tmp/old.ts");
-  });
-
-  it("builds summary for move_file", () => {
-    // /a.ts and /b.ts are 1 part each, not abbreviated
-    expect(buildApprovalSummary("move_file", { source: "/a.ts", destination: "/b.ts" })).toBe("Move /a.ts → /b.ts");
-  });
-
-  it("falls back to friendlyToolName for unknown tools", () => {
-    expect(buildApprovalSummary("custom_tool", {})).toBe("Custom Tool");
-  });
-
-  it("handles web_search with no input", () => {
-    expect(buildApprovalSummary("web_search", {})).toBe("Search the web");
-  });
-
-  it("handles fetch_url with URL", () => {
-    expect(buildApprovalSummary("fetch_url", { url: "https://example.com/api" })).toContain("Fetch");
-  });
-
-  it("handles write_file with no path", () => {
-    expect(buildApprovalSummary("write_file", {})).toBe("Write a file");
-  });
-
-  it("truncates long shell commands", () => {
-    const longCmd = "a".repeat(100);
-    const summary = buildApprovalSummary("exec_shell", { command: longCmd });
-    expect(summary.length).toBeLessThan(100);
-    expect(summary).toContain("…");
+describe("apply_patch input aliases", () => {
+  it("reads the replace array like the deprecated changes alias", () => {
+    const fromReplace = extractDiffForTool(
+      "apply_patch",
+      { replace: [{ path: "a.txt", content: "hi" }] },
+      "applied",
+    );
+    const fromChanges = extractDiffForTool(
+      "apply_patch",
+      { changes: [{ path: "a.txt", content: "hi" }] },
+      "applied",
+    );
+    expect(fromReplace).toBe(fromChanges);
+    expect(fromReplace).toContain("a.txt");
   });
 });
 
-describe("shouldRefreshTaskList", () => {
-  it("triggers refresh for agent tools", () => {
-    expect(shouldRefreshTaskList("agent_open")).toBe(true);
-    expect(shouldRefreshTaskList("agent_spawn")).toBe(true);
-    expect(shouldRefreshTaskList("agent_close")).toBe(true);
-    expect(shouldRefreshTaskList("agent_cancel")).toBe(true);
+describe("parseDiffStats", () => {
+  it("counts removed and added lines in a replacement diff", () => {
+    const diff = [
+      "--- a/src/app.ts",
+      "+++ b/src/app.ts",
+      "@@ -1,3 +1,3 @@",
+      " alpha",
+      "-beta",
+      "+BETA",
+      " gamma",
+    ].join("\n");
+    expect(parseDiffStats(diff)).toEqual({ added: 1, removed: 1 });
   });
 
-  it("triggers refresh for todo tools", () => {
-    expect(shouldRefreshTaskList("todo_write")).toBe(true);
-    expect(shouldRefreshTaskList("todo_add")).toBe(true);
-    expect(shouldRefreshTaskList("todo_update")).toBe(true);
+  it("counts a pure deletion without any added lines", () => {
+    const diff = [
+      "--- a/src/app.ts",
+      "+++ b/src/app.ts",
+      "@@ -1,4 +1,3 @@",
+      " a",
+      "-b",
+      " c",
+      " d",
+    ].join("\n");
+    expect(parseDiffStats(diff)).toEqual({ added: 0, removed: 1 });
   });
 
-  it("triggers refresh for checklist tools", () => {
-    expect(shouldRefreshTaskList("checklist_write")).toBe(true);
-    expect(shouldRefreshTaskList("checklist_add")).toBe(true);
-    expect(shouldRefreshTaskList("checklist_update")).toBe(true);
+  it("does not miscount code lines starting with -- or ++ as file headers", () => {
+    const diff = [
+      "--- a/x.ts",
+      "+++ b/x.ts",
+      "@@ -1,2 +1,2 @@",
+      "---i",
+      "++i",
+    ].join("\n");
+    expect(parseDiffStats(diff)).toEqual({ added: 1, removed: 1 });
   });
 
-  it("triggers refresh for shell tools", () => {
-    expect(shouldRefreshTaskList("task_shell_start")).toBe(true);
-    expect(shouldRefreshTaskList("exec_shell")).toBe(true);
-  });
-
-  it("does not trigger for read-only tools", () => {
-    expect(shouldRefreshTaskList("read_file")).toBe(false);
-    expect(shouldRefreshTaskList("grep_files")).toBe(false);
-    expect(shouldRefreshTaskList("project_map")).toBe(false);
+  it("counts a synthesized /dev/null creation diff as added only", () => {
+    const diff = [
+      "diff --git a/y.ts b/y.ts",
+      "--- /dev/null",
+      "+++ b/y.ts",
+      "@@ -0,0 +1,1 @@",
+      "+hello",
+    ].join("\n");
+    expect(parseDiffStats(diff)).toEqual({ added: 1, removed: 0 });
   });
 });
 
-describe("FRIENDLY_TOOL_NAMES completeness", () => {
-  it("has entries for all common tools", () => {
-    const essential = ["write_file", "read_file", "exec_shell", "delete_file", "web_search"];
-    for (const name of essential) {
-      expect(FRIENDLY_TOOL_NAMES[name]).toBeDefined();
-      expect(FRIENDLY_TOOL_NAMES[name].length).toBeGreaterThan(0);
-    }
-  });
-});
-
-describe("FILE_CHANGE_TOOLS completeness", () => {
-  it("includes all file-modifying tools", () => {
-    const expected = ["write_file", "edit_file", "apply_patch", "replace_text", "delete_file", "move_file", "copy_file", "create_directory"];
-    for (const name of expected) {
-      expect(FILE_CHANGE_TOOLS.has(name)).toBe(true);
-    }
+describe("formatWriteInputAsDiff", () => {
+  it("renders a creation-style diff with the full content", () => {
+    const diff = formatWriteInputAsDiff("src/new.ts", "a\nb\nc\n");
+    expect(diff).toBe(
+      [
+        "diff --git a/src/new.ts b/src/new.ts",
+        "--- /dev/null",
+        "+++ b/src/new.ts",
+        "@@ -0,0 +1,3 @@",
+        "+a",
+        "+b",
+        "+c",
+        "",
+      ].join("\n"),
+    );
   });
 });

@@ -4,11 +4,23 @@
  * Extracted from chat-provider.ts for independent testing and reuse.
  */
 
-import { shortPath, truncate } from "./diff-utils";
+import {
+  extractDiffForTool,
+  extractFilePathFromDiff,
+  extractMutationFromMetadata,
+  formatWriteInputAsDiff,
+  outcomeToChangeType,
+  parseDiffStats,
+  shortPath,
+  truncate,
+} from "./diff-utils";
 
 // ── Tool name mappings ──
 
 const FRIENDLY_TOOL_NAMES: Record<string, string> = {
+  write: "Write file",
+  edit: "Edit file",
+  fim_edit: "FIM edit",
   write_file: "Write file",
   read_file: "Read file",
   apply_patch: "Apply patch",
@@ -51,6 +63,9 @@ export function friendlyToolName(raw: string): string {
 // ── File change detection ──
 
 export const FILE_CHANGE_TOOLS = new Set([
+  "write",
+  "edit",
+  "fim_edit",
   "write_file",
   "edit_file",
   "apply_patch",
@@ -67,6 +82,125 @@ export function isFileChangeTool(toolName: string): boolean {
 
 export function extractFilePath(_toolName: string, input: Record<string, unknown>): string {
   return (input.file_path || input.path || input.destination || input.source || "") as string;
+}
+
+export interface FileChangeSignal {
+  filePath: string;
+  changeType: "created" | "modified" | "deleted";
+  addedLines: number;
+  removedLines: number;
+  diff?: string;
+  toolName: string;
+}
+
+/**
+ * Detects a file change for a completed tool call.
+ *
+ * Priority 1 — `metadata.mutation` (authoritative): every current TUI file
+ * tool (`write` / `edit` / `apply_patch` / `File` actions / …) tags its
+ * result with `event: "file.mutation"` or `"apply_patch.preflight"` plus
+ * `mutation: { diff, files: [{ path, outcome }], renames }`. Detection works
+ * regardless of tool naming, so file tools added by newer TUI versions
+ * render cards without further GUI changes.
+ *
+ * Priority 2 — legacy name-based detection for payloads without mutation
+ * metadata (old TUI recordings, seed-path replay): the diff is either
+ * embedded in the tool output (write_file / edit_file) or carried by the
+ * apply_patch input.
+ */
+export function detectFileChange(params: {
+  toolName: string;
+  input?: Record<string, unknown> | null;
+  output?: string;
+  metadata?: Record<string, unknown> | null;
+}): FileChangeSignal | undefined {
+  const toolName = params.toolName || "";
+  const input = params.input || {};
+  const output = params.output || "";
+
+  const mutation = extractMutationFromMetadata(params.metadata);
+  if (mutation) {
+    const filePath =
+      mutation.files[0]?.path ||
+      mutation.renames[0]?.to ||
+      (mutation.diff ? extractFilePathFromDiff(mutation.diff) : "") ||
+      extractFilePath(toolName, input);
+    if (!filePath) return undefined;
+    const outcomes = mutation.files
+      .map((f) => outcomeToChangeType(f.outcome))
+      .filter((o): o is "created" | "modified" | "deleted" => o !== undefined);
+    let changeType: "created" | "modified" | "deleted";
+    if (outcomes.includes("created")) changeType = "created";
+    else if (outcomes.includes("deleted")) changeType = "deleted";
+    else if (outcomes.length > 0) changeType = outcomes[0];
+    else changeType = legacyChangeType(toolName, !!mutation.diff);
+    const stats = mutation.diff ? parseDiffStats(mutation.diff) : { added: 0, removed: 0 };
+    return {
+      filePath,
+      changeType,
+      addedLines: stats.added,
+      removedLines: stats.removed,
+      diff: mutation.diff,
+      toolName,
+    };
+  }
+
+  // Legacy fallback: closed tool-name set + diff embedded in output/input.
+  if (!isFileChangeTool(toolName)) return undefined;
+  const filePath = extractFilePath(toolName, input);
+  if (!filePath) return undefined;
+
+  let diff = extractDiffForTool(toolName, input, output);
+  let synthesized = false;
+  // `write`/`write_file` inputs carry the full content — synthesize a
+  // creation diff when the result didn't embed one (saved-session replay).
+  if (!diff && (toolName === "write" || toolName === "write_file") && typeof input.content === "string") {
+    diff = formatWriteInputAsDiff(filePath, input.content);
+    synthesized = true;
+  }
+  const stats = diff ? parseDiffStats(diff) : countEditStats(input);
+  let changeType = legacyChangeType(toolName, !!diff && !synthesized);
+  // Old TUI versions tagged `file_change` items with a flat change_type.
+  const metaChangeType = params.metadata
+    ? outcomeToChangeType(params.metadata.change_type as string | undefined)
+    : undefined;
+  if (metaChangeType) changeType = metaChangeType;
+  return {
+    filePath,
+    changeType,
+    addedLines: stats.added,
+    removedLines: stats.removed,
+    diff,
+    toolName,
+  };
+}
+
+function legacyChangeType(toolName: string, hasDiff: boolean): "created" | "modified" | "deleted" {
+  if (toolName === "delete_file") return "deleted";
+  if ((toolName === "write" || toolName === "write_file") && !hasDiff) return "created";
+  return "modified";
+}
+
+/** Counts +/- lines for edit tools when no diff is available. */
+function countEditStats(input: Record<string, unknown>): { added: number; removed: number } {
+  const countLines = (v: unknown): number =>
+    typeof v === "string" && v.length > 0 ? v.replace(/\n$/, "").split("\n").length : 0;
+  if (Array.isArray(input.edits)) {
+    let added = 0;
+    let removed = 0;
+    for (const e of input.edits) {
+      if (e && typeof e === "object") {
+        const edit = e as Record<string, unknown>;
+        added += countLines(edit.newText);
+        removed += countLines(edit.oldText);
+      }
+    }
+    return { added, removed };
+  }
+  return {
+    added: countLines(input.replace ?? input.newText),
+    removed: countLines(input.search ?? input.oldText),
+  };
 }
 
 export function extractToolNameFromSummary(summary: string): string {

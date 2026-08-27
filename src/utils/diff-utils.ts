@@ -8,8 +8,12 @@ export function parseDiffStats(diff: string): { added: number; removed: number }
   let added = 0;
   let removed = 0;
   for (const line of diff.split("\n")) {
-    if (line.startsWith("+") && !line.startsWith("+++")) added++;
-    else if (line.startsWith("-") && !line.startsWith("---")) removed++;
+    // File headers are `--- a/...` / `+++ b/...` (git) and `--- /dev/null`
+    // (our synthesized creation diffs) — always `--- ` / `+++ ` WITH a
+    // trailing space. Matching without the space would miscount code lines
+    // whose content begins with `--` / `++` (e.g. `--i`, `++count`).
+    if (line.startsWith("+") && !line.startsWith("+++ ")) added++;
+    else if (line.startsWith("-") && !line.startsWith("--- ")) removed++;
   }
   return { added, removed };
 }
@@ -67,14 +71,97 @@ export function extractDiffForTool(
     if (typeof patch === "string" && patch.trim()) {
       return patch;
     }
-    // `changes` parameter — array of { path, content } objects
-    const changes = input.changes;
+    // `replace` (current) / `changes` (deprecated alias) — arrays of
+    // { path, content } objects
+    const changes = input.replace ?? input.changes;
     if (Array.isArray(changes) && changes.length > 0) {
       return formatChangesAsDiff(changes as Array<{ path: string; content: string }>);
     }
   }
 
   return undefined;
+}
+
+// ── TUI mutation metadata (authoritative file-change signal) ──
+
+export interface MutationFileEntry {
+  path: string;
+  outcome?: string;
+}
+
+export interface MutationRenameEntry {
+  from: string;
+  to: string;
+}
+
+export interface ToolMutationInfo {
+  diff?: string;
+  files: MutationFileEntry[];
+  renames: MutationRenameEntry[];
+}
+
+/**
+ * Extracts the authoritative file-mutation payload from tool-result metadata.
+ *
+ * Every current TUI file tool tags its successful result with
+ * `event: "file.mutation"` (write / edit / write_file / edit_file / File
+ * actions) or `event: "apply_patch.preflight"` (apply_patch) and attaches
+ * `mutation: { diff, files: [{ path, outcome }], renames: [{ from, to }] }`.
+ * The `diff` there is the authoritative unified diff for the change.
+ */
+export function extractMutationFromMetadata(
+  metadata: Record<string, unknown> | null | undefined,
+): ToolMutationInfo | undefined {
+  if (!metadata || typeof metadata !== "object") return undefined;
+  const event = metadata.event;
+  if (event !== "file.mutation" && event !== "apply_patch.preflight") return undefined;
+  const raw = metadata.mutation;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const mutation = raw as Record<string, unknown>;
+  const diff = typeof mutation.diff === "string" && mutation.diff.trim() ? mutation.diff : undefined;
+  const files: MutationFileEntry[] = Array.isArray(mutation.files)
+    ? mutation.files.filter(
+        (f): f is MutationFileEntry =>
+          !!f && typeof f === "object" && typeof (f as Record<string, unknown>).path === "string",
+      )
+    : [];
+  const renames: MutationRenameEntry[] = Array.isArray(mutation.renames)
+    ? mutation.renames.filter(
+        (r): r is MutationRenameEntry =>
+          !!r && typeof r === "object" &&
+          typeof (r as Record<string, unknown>).from === "string" &&
+          typeof (r as Record<string, unknown>).to === "string",
+      )
+    : [];
+  if (!diff && files.length === 0 && renames.length === 0) return undefined;
+  return { diff, files, renames };
+}
+
+/**
+ * Maps a TUI mutation outcome ("created" | "updated" | "deleted") to the
+ * card change type. Also accepts the legacy `change_type` spellings.
+ */
+export function outcomeToChangeType(outcome: string | undefined): "created" | "modified" | "deleted" | undefined {
+  if (outcome === "created") return "created";
+  if (outcome === "deleted") return "deleted";
+  if (outcome === "updated" || outcome === "modified") return "modified";
+  return undefined;
+}
+
+/**
+ * Synthesizes a creation-style unified diff from a `write`-style tool input
+ * (`{ path, content }`). Used only when no authoritative diff is available,
+ * e.g. replaying saved sessions whose tool results do not embed a diff.
+ */
+export function formatWriteInputAsDiff(filePath: string, content: string): string {
+  const lines = content === "" ? [] : content.replace(/\n$/, "").split("\n");
+  let out = `diff --git a/${filePath} b/${filePath}\n`;
+  out += `--- /dev/null\n+++ b/${filePath}\n`;
+  out += `@@ -0,0 +1,${lines.length} @@\n`;
+  for (const line of lines) {
+    out += `+${line}\n`;
+  }
+  return out;
 }
 
 export function extractDiffFromOutput(output: string): string | undefined {
