@@ -1,6 +1,6 @@
 # CodeWhale for VS Code — CodeWhale AI 代理的图形化前端
 
-[![Version](https://img.shields.io/badge/version-0.4.5-blue)](https://github.com/HengQuWorld/CodeWhale-VSCode)
+[![Version](https://img.shields.io/badge/version-0.5.0-blue)](https://github.com/HengQuWorld/CodeWhale-VSCode)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![VS Code](https://img.shields.io/badge/VS%20Code-1.85+-informational)](https://code.visualstudio.com/)
 
@@ -184,7 +184,7 @@ npx @vscode/vsce package --no-dependencies
 
 ### 安装 VSIX
 ```bash
-code --install-extension /path/to/brotherwhale-vscode-0.4.5.vsix --force
+code --install-extension /path/to/brotherwhale-vscode-0.5.0.vsix --force
 ```
 
 > **Trae CN 用户**：如果 `code` 命令不可用，使用完整路径：

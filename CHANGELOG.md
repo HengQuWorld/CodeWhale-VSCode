@@ -1,5 +1,23 @@
 # Change Log
 
+## 0.5.0
+
+### New Features
+
+- **Fleet Multi-Agent Management** — A Fleet sidebar section and detail overlay list managed multi-agent runs (workers, tasks, receipts) with start/stop, worker interrupt/stop/restart, and a live SSE event timeline (severity-coded, filterable by issues / progress / all). Detail rows join creation-time task specs so names, roles, objectives and prompts render instead of bare ids; receipt cards show score notes and open the saved session reply. "New from this run" prefills the create dialog, which validates duplicate role names / task ids and ASCII token ids before submit.
+
+- **Thread Goal Control** — A Thread Goal section shows status, token budget usage (red when over budget), elapsed time and continuation count, with set / edit / complete / block / delete backed by the thread goal API.
+
+### Improvements
+
+- **Cross-Thread Attention Surfacing** — Background threads with pending approvals or inputs show a pulsing attention dot, and the thread list polls every 30s while a turn runs so approvals on other threads surface in the GUI.
+
+- **i18n Table Injection** — The full i18n table is injected as escaped JSON so new translation keys reach every webview module automatically.
+
+### Bug Fixes
+
+- **Relative Time Day Boundary** — Fixed a day-boundary rounding bug in relative time display.
+
 ## 0.4.5
 
 ### New Features
