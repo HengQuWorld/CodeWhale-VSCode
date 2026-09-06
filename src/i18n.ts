@@ -25,6 +25,7 @@ interface Translations {
   userInputRequired: string;
   userInputAwaiting: string;
   noConversations: string;
+  threadAttention: string;
   noTasks: string;
   taskCreate: string;
   taskCreateTitle: string;
@@ -258,6 +259,104 @@ interface Translations {
   agentSpawned: string;
   agentDelegating: string;
   agentFanout: string;
+  // Fleet panel
+  fleet: string;
+  noFleetRuns: string;
+  fleetWorkers: string;
+  fleetTasks: string;
+  fleetReceipts: string;
+  fleetStart: string;
+  fleetStop: string;
+  fleetRestart: string;
+  fleetStatus: string;
+  fleetAttempts: string;
+  fleetScore: string;
+  fleetViewReply: string;
+  fleetTaskInstructions: string;
+  fleetNewFromRun: string;
+  fleetNewFromRunHint: string;
+  fleetEvFilterIssues: string;
+  fleetEvFilterProgress: string;
+  fleetEvFilterAll: string;
+  fleetTaskFailure: string;
+  fleetEvRunCreated: string;
+  fleetEvRunStatus: string;
+  fleetEvEnqueued: string;
+  fleetEvLeased: string;
+  fleetEvTerminal: string;
+  fleetEvReceipt: string;
+  fleetEvHeartbeat: string;
+  fleetEvAlert: string;
+  fleetInterrupt: string;
+  fleetStEnqueued: string;
+  fleetStLeased: string;
+  fleetStCompleted: string;
+  fleetStFailed: string;
+  fleetStCancelled: string;
+  fleetStUnknown: string;
+  fleetStOnline: string;
+  fleetStBusy: string;
+  fleetStOffline: string;
+  fleetStUnhealthy: string;
+  fleetStDraining: string;
+  fleetStRetired: string;
+  fleetStQueued: string;
+  fleetStPending: string;
+  fleetStRunning: string;
+  fleetStPaused: string;
+  fleetStEnqueuedHint: string;
+  fleetLatestMessage: string;
+  fleetNoWorkers: string;
+  fleetNoTasks: string;
+  fleetNoReceipts: string;
+  fleetRunId: string;
+  fleetTaskCount: string;
+  fleetWorkerCount: string;
+  fleetCreate: string;
+  fleetCreateDesc: string;
+  fleetCreateName: string;
+  fleetCreateWorkflowId: string;
+  fleetCreateMaxWorkers: string;
+  fleetCreateRoles: string;
+  fleetCreateRolesHint: string;
+  fleetProfileNone: string;
+  fleetCreateStartNow: string;
+  fleetCreateBasics: string;
+  fleetCreateBasicsDesc: string;
+  fleetCreateRolesDesc: string;
+  fleetCreateTasksDesc: string;
+  fleetCreateTasks: string;
+  fleetCreateAddRole: string;
+  fleetCreateAddTask: string;
+  fleetCreateTaskId: string;
+  fleetCreateTaskName: string;
+  fleetCreateTaskRole: string;
+  fleetCreateTaskObjective: string;
+  fleetCreateTaskInstructions: string;
+  fleetCreateRemove: string;
+  fleetCreateSubmit: string;
+  fleetCreateTokenError: string;
+  fleetCreateDuplicate: string;
+  // Goal control plane
+  goalStatus: string;
+  goalBudget: string;
+  goalTokensUsed: string;
+  goalTimeUsed: string;
+  goalContinuations: string;
+  goalSet: string;
+  goalEdit: string;
+  goalComplete: string;
+  goalBlock: string;
+  goalDelete: string;
+  goalObjectivePlaceholder: string;
+  goalNoGoal: string;
+  goalTokenBudgetLabel: string;
+  goalCreatedAt: string;
+  goalBudgetTooltip: string;
+  goalTokensUsedTooltip: string;
+  goalTimeUsedTooltip: string;
+  goalContinuationsTooltip: string;
+  goalBudgetExceeded: string;
 }
 
 const en: Translations = {
@@ -271,7 +370,7 @@ const en: Translations = {
   error: "Error", approvalAwaiting: "⏳ Awaiting approval...",
   userInputRequired: "Input required",
   userInputAwaiting: "⏳ Awaiting your input...",
-  noConversations: "No conversations yet", noTasks: "No tasks",
+  noConversations: "No conversations yet", threadAttention: "Waiting for your approval or input — click to open", noTasks: "No tasks",
   taskCreate: "New Task", taskCreateTitle: "Create Task", taskCreatePlaceholder: "Describe the background task…", taskCreateSubmit: "Create", taskRefresh: "Refresh", taskDetails: "Details",
   taskOpenThread: "Open Thread", taskAttention: "Attention", taskNeedsAttention: "Needs attention", taskPendingApprovals: "Pending Approvals", taskPendingInputs: "Pending Inputs", taskContinueInThread: "Continue in thread",
   threadsCount: (n) => `${n} thread${n !== 1 ? "s" : ""}`,
@@ -481,6 +580,104 @@ const en: Translations = {
   agentSpawned: "Spawned",
   agentDelegating: "Delegating",
   agentFanout: "Fan-out",
+  // Fleet panel
+  fleet: "Fleet",
+  noFleetRuns: "No Fleet runs",
+  fleetWorkers: "Workers",
+  fleetTasks: "Tasks",
+  fleetReceipts: "Receipts",
+  fleetStart: "Start",
+  fleetStop: "Stop",
+  fleetRestart: "Restart",
+  fleetStatus: "Status",
+  fleetAttempts: "Attempts",
+  fleetScore: "Score",
+  fleetViewReply: "View reply",
+  fleetTaskInstructions: "Prompt",
+  fleetNewFromRun: "New from this run",
+  fleetNewFromRunHint: "Prefill the create dialog with this run's roles and tasks",
+  fleetEvFilterIssues: "Issues",
+  fleetEvFilterProgress: "Progress",
+  fleetEvFilterAll: "All",
+  fleetTaskFailure: "Failure",
+  fleetEvRunCreated: "Run created",
+  fleetEvRunStatus: "Run status",
+  fleetEvEnqueued: "Task enqueued",
+  fleetEvLeased: "Task leased",
+  fleetEvTerminal: "Task ended",
+  fleetEvReceipt: "Receipt",
+  fleetEvHeartbeat: "Heartbeat",
+  fleetEvAlert: "Alert",
+  fleetInterrupt: "Interrupt",
+  fleetStEnqueued: "Enqueued",
+  fleetStLeased: "Leased",
+  fleetStCompleted: "Completed",
+  fleetStFailed: "Failed",
+  fleetStCancelled: "Cancelled",
+  fleetStUnknown: "Unknown",
+  fleetStOnline: "Online",
+  fleetStBusy: "Busy",
+  fleetStOffline: "Offline",
+  fleetStUnhealthy: "Unhealthy",
+  fleetStDraining: "Draining",
+  fleetStRetired: "Retired",
+  fleetStQueued: "Queued",
+  fleetStPending: "Pending",
+  fleetStRunning: "Running",
+  fleetStPaused: "Paused",
+  fleetStEnqueuedHint: "Queued — waiting for a worker to pick it up",
+  fleetLatestMessage: "Latest message",
+  fleetNoWorkers: "No workers yet",
+  fleetNoTasks: "No tasks yet",
+  fleetNoReceipts: "No receipts yet",
+  fleetRunId: "Run",
+  fleetTaskCount: "Tasks",
+  fleetWorkerCount: "Workers",
+  fleetCreate: "Create Fleet run",
+  fleetCreateDesc: "Launch several agents in parallel. Step 1: fill in basics · Step 2: declare roles (who does it) · Step 3: add tasks and pick a role for each (what to do).",
+  fleetCreateName: "Name (optional)",
+  fleetCreateWorkflowId: "Workflow ID",
+  fleetCreateMaxWorkers: "Max workers (optional)",
+  fleetCreateRoles: "Roles",
+  fleetCreateRolesHint: "Optional: which agent profile this role uses",
+  fleetProfileNone: "Default (no profile)",
+  fleetCreateStartNow: "Start immediately after creation",
+  fleetCreateBasics: "Basics",
+  fleetCreateBasicsDesc: "Give this run an optional display name and a unique workflow ID.",
+  fleetCreateRolesDesc: "Each role becomes one worker. The optional agent_profile selects which agent configuration backs the role.",
+  fleetCreateTasksDesc: "Each task is assigned to one role. Every declared role must be used by at least one task.",
+  fleetCreateTasks: "Tasks",
+  fleetCreateAddRole: "Add role",
+  fleetCreateAddTask: "Add task",
+  fleetCreateTaskId: "Task ID",
+  fleetCreateTaskName: "Task name",
+  fleetCreateTaskRole: "Role",
+  fleetCreateTaskObjective: "Objective (optional)",
+  fleetCreateTaskInstructions: "Instructions",
+  fleetCreateRemove: "Remove",
+  fleetCreateSubmit: "Create run",
+  fleetCreateTokenError: "must be a simple ASCII token: letters, digits, '-', '_', '.' (max 128 bytes)",
+  fleetCreateDuplicate: "is used more than once in this run; ids must be unique within a run",
+  // Goal control plane
+  goalStatus: "Status",
+  goalBudget: "Budget",
+  goalTokensUsed: "Tokens used",
+  goalTimeUsed: "Time used",
+  goalContinuations: "Continuations",
+  goalSet: "Set goal",
+  goalEdit: "Edit",
+  goalComplete: "Complete",
+  goalBlock: "Block",
+  goalDelete: "Delete",
+  goalObjectivePlaceholder: "Describe the objective…",
+  goalNoGoal: "No goal set for this thread",
+  goalTokenBudgetLabel: "Token budget (optional)",
+  goalCreatedAt: "Created",
+  goalBudgetTooltip: "Tokens consumed vs. the goal's token budget",
+  goalTokensUsedTooltip: "Total tokens consumed while pursuing this goal",
+  goalTimeUsedTooltip: "Total active time spent pursuing this goal",
+  goalContinuationsTooltip: "How many times this goal has been continued",
+  goalBudgetExceeded: "over budget",
 };
 
 const zhCn: Translations = {
@@ -494,7 +691,7 @@ const zhCn: Translations = {
   error: "错误", approvalAwaiting: "⏳ 等待审批...",
   userInputRequired: "需要输入",
   userInputAwaiting: "⏳ 等待您的输入...",
-  noConversations: "暂无会话", noTasks: "暂无任务",
+  noConversations: "暂无会话", threadAttention: "等待你的审批或输入——点击打开", noTasks: "暂无任务",
   taskCreate: "新建任务", taskCreateTitle: "新建任务", taskCreatePlaceholder: "描述要后台执行的任务…", taskCreateSubmit: "创建", taskRefresh: "刷新", taskDetails: "详情",
   taskOpenThread: "打开线程", taskAttention: "待处理", taskNeedsAttention: "需要处理", taskPendingApprovals: "待授权", taskPendingInputs: "待输入", taskContinueInThread: "在线程中继续",
   threadsCount: (n) => `${n} 个会话`,
@@ -704,6 +901,104 @@ const zhCn: Translations = {
   agentSpawned: "已启动",
   agentDelegating: "委派中",
   agentFanout: "扇出",
+  // Fleet panel
+  fleet: "车队",
+  noFleetRuns: "暂无车队运行",
+  fleetWorkers: "工作者",
+  fleetTasks: "任务",
+  fleetReceipts: "回执",
+  fleetStart: "启动",
+  fleetStop: "停止",
+  fleetRestart: "重启",
+  fleetStatus: "状态",
+  fleetAttempts: "尝试",
+  fleetScore: "得分",
+  fleetViewReply: "查看最后回复",
+  fleetTaskInstructions: "提示词",
+  fleetNewFromRun: "从此创建新运行",
+  fleetNewFromRunHint: "用本运行的角色和任务预填创建对话框",
+  fleetEvFilterIssues: "异常",
+  fleetEvFilterProgress: "进展",
+  fleetEvFilterAll: "全部",
+  fleetTaskFailure: "失败原因",
+  fleetEvRunCreated: "运行创建",
+  fleetEvRunStatus: "状态变更",
+  fleetEvEnqueued: "任务入队",
+  fleetEvLeased: "任务领取",
+  fleetEvTerminal: "任务结束",
+  fleetEvReceipt: "任务回执",
+  fleetEvHeartbeat: "心跳",
+  fleetEvAlert: "告警",
+  fleetInterrupt: "中断",
+  fleetStEnqueued: "已入队",
+  fleetStLeased: "已领取",
+  fleetStCompleted: "已完成",
+  fleetStFailed: "失败",
+  fleetStCancelled: "已取消",
+  fleetStUnknown: "未知",
+  fleetStOnline: "在线",
+  fleetStBusy: "忙碌",
+  fleetStOffline: "离线",
+  fleetStUnhealthy: "异常",
+  fleetStDraining: "退出中",
+  fleetStRetired: "已退役",
+  fleetStQueued: "排队中",
+  fleetStPending: "等待中",
+  fleetStRunning: "运行中",
+  fleetStPaused: "已暂停",
+  fleetStEnqueuedHint: "排队中，等待 worker 领取执行",
+  fleetLatestMessage: "最新消息",
+  fleetNoWorkers: "暂无工作者",
+  fleetNoTasks: "暂无任务",
+  fleetNoReceipts: "暂无回执",
+  fleetRunId: "运行",
+  fleetTaskCount: "任务数",
+  fleetWorkerCount: "工作者数",
+  fleetCreate: "创建车队运行",
+  fleetCreateDesc: "并行启动多个 agent。第 1 步填写基本信息 · 第 2 步声明角色（谁来做）· 第 3 步添加任务并给每个任务指定角色（做什么）。",
+  fleetCreateName: "名称（可选）",
+  fleetCreateWorkflowId: "工作流 ID",
+  fleetCreateMaxWorkers: "最大并发数（可选）",
+  fleetCreateRoles: "角色",
+  fleetCreateRolesHint: "可选：该角色使用的代理配置",
+  fleetProfileNone: "默认（不指定 profile）",
+  fleetCreateStartNow: "创建后立即启动",
+  fleetCreateBasics: "基本信息",
+  fleetCreateBasicsDesc: "为本次运行起一个可选的显示名，并填一个唯一的工作流 ID。",
+  fleetCreateRolesDesc: "每个角色对应一类工作者。agent_profile 可选，用于指定该角色使用的代理配置。",
+  fleetCreateTasksDesc: "每个任务指定一个角色。所有声明的角色都必须至少被一个任务使用。",
+  fleetCreateTasks: "任务",
+  fleetCreateAddRole: "添加角色",
+  fleetCreateAddTask: "添加任务",
+  fleetCreateTaskId: "任务 ID",
+  fleetCreateTaskName: "任务名",
+  fleetCreateTaskRole: "角色",
+  fleetCreateTaskObjective: "目标（可选）",
+  fleetCreateTaskInstructions: "指令",
+  fleetCreateRemove: "移除",
+  fleetCreateSubmit: "创建运行",
+  fleetCreateTokenError: "必须是简单的 ASCII 标识：字母、数字、'-'、'_'、'.'（最长 128 字节）",
+  fleetCreateDuplicate: "在本运行中重复；ID 在同一运行内必须唯一",
+  // Goal control plane
+  goalStatus: "状态",
+  goalBudget: "预算",
+  goalTokensUsed: "已用 Token",
+  goalTimeUsed: "已用时长",
+  goalContinuations: "续接次数",
+  goalSet: "设定目标",
+  goalEdit: "编辑",
+  goalComplete: "完成",
+  goalBlock: "阻塞",
+  goalDelete: "删除",
+  goalObjectivePlaceholder: "描述目标…",
+  goalNoGoal: "该线程尚未设定目标",
+  goalTokenBudgetLabel: "Token 预算（可选）",
+  goalCreatedAt: "创建于",
+  goalBudgetTooltip: "已用 Token 与该目标 Token 预算的对比",
+  goalTokensUsedTooltip: "为达成此目标已消耗的 Token 总量",
+  goalTimeUsedTooltip: "为达成此目标已花费的有效时长",
+  goalContinuationsTooltip: "该目标被续接的次数",
+  goalBudgetExceeded: "已超预算",
 };
 
 const translations: Record<string, Translations> = {
@@ -754,6 +1049,7 @@ export function webviewTranslations(tr: Translations) {
     userInputRequired: tr.userInputRequired,
     userInputAwaiting: tr.userInputAwaiting,
     noConversations: tr.noConversations,
+    threadAttention: tr.threadAttention,
     noTasks: tr.noTasks,
     taskCreate: tr.taskCreate,
     taskCreateTitle: tr.taskCreateTitle,
@@ -975,5 +1271,103 @@ export function webviewTranslations(tr: Translations) {
     agentSpawned: tr.agentSpawned,
     agentDelegating: tr.agentDelegating,
     agentFanout: tr.agentFanout,
+    // Fleet panel
+    fleet: tr.fleet,
+    noFleetRuns: tr.noFleetRuns,
+    fleetWorkers: tr.fleetWorkers,
+    fleetTasks: tr.fleetTasks,
+    fleetReceipts: tr.fleetReceipts,
+    fleetStart: tr.fleetStart,
+    fleetStop: tr.fleetStop,
+    fleetRestart: tr.fleetRestart,
+    fleetStatus: tr.fleetStatus,
+    fleetAttempts: tr.fleetAttempts,
+    fleetScore: tr.fleetScore,
+    fleetViewReply: tr.fleetViewReply,
+    fleetTaskInstructions: tr.fleetTaskInstructions,
+    fleetNewFromRun: tr.fleetNewFromRun,
+    fleetNewFromRunHint: tr.fleetNewFromRunHint,
+    fleetEvFilterIssues: tr.fleetEvFilterIssues,
+    fleetEvFilterProgress: tr.fleetEvFilterProgress,
+    fleetEvFilterAll: tr.fleetEvFilterAll,
+    fleetTaskFailure: tr.fleetTaskFailure,
+    fleetEvRunCreated: tr.fleetEvRunCreated,
+    fleetEvRunStatus: tr.fleetEvRunStatus,
+    fleetEvEnqueued: tr.fleetEvEnqueued,
+    fleetEvLeased: tr.fleetEvLeased,
+    fleetEvTerminal: tr.fleetEvTerminal,
+    fleetEvReceipt: tr.fleetEvReceipt,
+    fleetEvHeartbeat: tr.fleetEvHeartbeat,
+    fleetEvAlert: tr.fleetEvAlert,
+    fleetInterrupt: tr.fleetInterrupt,
+    fleetStEnqueued: tr.fleetStEnqueued,
+    fleetStLeased: tr.fleetStLeased,
+    fleetStCompleted: tr.fleetStCompleted,
+    fleetStFailed: tr.fleetStFailed,
+    fleetStCancelled: tr.fleetStCancelled,
+    fleetStUnknown: tr.fleetStUnknown,
+    fleetStOnline: tr.fleetStOnline,
+    fleetStBusy: tr.fleetStBusy,
+    fleetStOffline: tr.fleetStOffline,
+    fleetStUnhealthy: tr.fleetStUnhealthy,
+    fleetStDraining: tr.fleetStDraining,
+    fleetStRetired: tr.fleetStRetired,
+    fleetStQueued: tr.fleetStQueued,
+    fleetStPending: tr.fleetStPending,
+    fleetStRunning: tr.fleetStRunning,
+    fleetStPaused: tr.fleetStPaused,
+    fleetStEnqueuedHint: tr.fleetStEnqueuedHint,
+    fleetLatestMessage: tr.fleetLatestMessage,
+    fleetNoWorkers: tr.fleetNoWorkers,
+    fleetNoTasks: tr.fleetNoTasks,
+    fleetNoReceipts: tr.fleetNoReceipts,
+    fleetRunId: tr.fleetRunId,
+    fleetTaskCount: tr.fleetTaskCount,
+    fleetWorkerCount: tr.fleetWorkerCount,
+    fleetCreate: tr.fleetCreate,
+    fleetCreateDesc: tr.fleetCreateDesc,
+    fleetCreateName: tr.fleetCreateName,
+    fleetCreateWorkflowId: tr.fleetCreateWorkflowId,
+    fleetCreateMaxWorkers: tr.fleetCreateMaxWorkers,
+    fleetCreateRoles: tr.fleetCreateRoles,
+    fleetCreateRolesHint: tr.fleetCreateRolesHint,
+    fleetProfileNone: tr.fleetProfileNone,
+    fleetCreateStartNow: tr.fleetCreateStartNow,
+    fleetCreateBasics: tr.fleetCreateBasics,
+    fleetCreateBasicsDesc: tr.fleetCreateBasicsDesc,
+    fleetCreateRolesDesc: tr.fleetCreateRolesDesc,
+    fleetCreateTasksDesc: tr.fleetCreateTasksDesc,
+    fleetCreateTasks: tr.fleetCreateTasks,
+    fleetCreateAddRole: tr.fleetCreateAddRole,
+    fleetCreateAddTask: tr.fleetCreateAddTask,
+    fleetCreateTaskId: tr.fleetCreateTaskId,
+    fleetCreateTaskName: tr.fleetCreateTaskName,
+    fleetCreateTaskRole: tr.fleetCreateTaskRole,
+    fleetCreateTaskObjective: tr.fleetCreateTaskObjective,
+    fleetCreateTaskInstructions: tr.fleetCreateTaskInstructions,
+    fleetCreateRemove: tr.fleetCreateRemove,
+    fleetCreateSubmit: tr.fleetCreateSubmit,
+    fleetCreateTokenError: tr.fleetCreateTokenError,
+    fleetCreateDuplicate: tr.fleetCreateDuplicate,
+    // Goal control plane
+    goalStatus: tr.goalStatus,
+    goalBudget: tr.goalBudget,
+    goalTokensUsed: tr.goalTokensUsed,
+    goalTimeUsed: tr.goalTimeUsed,
+    goalContinuations: tr.goalContinuations,
+    goalSet: tr.goalSet,
+    goalEdit: tr.goalEdit,
+    goalComplete: tr.goalComplete,
+    goalBlock: tr.goalBlock,
+    goalDelete: tr.goalDelete,
+    goalObjectivePlaceholder: tr.goalObjectivePlaceholder,
+    goalNoGoal: tr.goalNoGoal,
+    goalTokenBudgetLabel: tr.goalTokenBudgetLabel,
+    goalCreatedAt: tr.goalCreatedAt,
+    goalBudgetTooltip: tr.goalBudgetTooltip,
+    goalTokensUsedTooltip: tr.goalTokensUsedTooltip,
+    goalTimeUsedTooltip: tr.goalTimeUsedTooltip,
+    goalContinuationsTooltip: tr.goalContinuationsTooltip,
+    goalBudgetExceeded: tr.goalBudgetExceeded,
   };
 }

@@ -7,6 +7,8 @@ import { getSidebarScript } from "./webview-js-sidebar";
 import { getMessagesScript } from "./webview-js-messages";
 import { getInputScript } from "./webview-js-input";
 import { getEventHandlerScript } from "./webview-js-event-handler";
+import { getFleetScript } from "./webview-js-fleet";
+import { getGoalScript } from "./webview-js-goal";
 
 export interface WebviewTranslations {
   locale: string; // "en" or "zh-cn"
@@ -29,6 +31,7 @@ export interface WebviewTranslations {
   error: string;
   approvalAwaiting: string;
   noConversations: string;
+  threadAttention: string;
   noTasks: string;
   taskCreate: string;
   taskCreateTitle: string;
@@ -207,6 +210,104 @@ export interface WebviewTranslations {
   agentSpawned: string;
   agentDelegating: string;
   agentFanout: string;
+  // Fleet panel
+  fleet: string;
+  noFleetRuns: string;
+  fleetWorkers: string;
+  fleetTasks: string;
+  fleetReceipts: string;
+  fleetStart: string;
+  fleetStop: string;
+  fleetRestart: string;
+  fleetStatus: string;
+  fleetAttempts: string;
+  fleetScore: string;
+  fleetViewReply: string;
+  fleetTaskInstructions: string;
+  fleetNewFromRun: string;
+  fleetNewFromRunHint: string;
+  fleetEvFilterIssues: string;
+  fleetEvFilterProgress: string;
+  fleetEvFilterAll: string;
+  fleetTaskFailure: string;
+  fleetEvRunCreated: string;
+  fleetEvRunStatus: string;
+  fleetEvEnqueued: string;
+  fleetEvLeased: string;
+  fleetEvTerminal: string;
+  fleetEvReceipt: string;
+  fleetEvHeartbeat: string;
+  fleetEvAlert: string;
+  fleetInterrupt: string;
+  fleetStEnqueued: string;
+  fleetStLeased: string;
+  fleetStCompleted: string;
+  fleetStFailed: string;
+  fleetStCancelled: string;
+  fleetStUnknown: string;
+  fleetStOnline: string;
+  fleetStBusy: string;
+  fleetStOffline: string;
+  fleetStUnhealthy: string;
+  fleetStDraining: string;
+  fleetStRetired: string;
+  fleetStQueued: string;
+  fleetStPending: string;
+  fleetStRunning: string;
+  fleetStPaused: string;
+  fleetStEnqueuedHint: string;
+  fleetLatestMessage: string;
+  fleetNoWorkers: string;
+  fleetNoTasks: string;
+  fleetNoReceipts: string;
+  fleetRunId: string;
+  fleetTaskCount: string;
+  fleetWorkerCount: string;
+  fleetCreate: string;
+  fleetCreateDesc: string;
+  fleetCreateName: string;
+  fleetCreateWorkflowId: string;
+  fleetCreateMaxWorkers: string;
+  fleetCreateRoles: string;
+  fleetCreateRolesHint: string;
+  fleetProfileNone: string;
+  fleetCreateStartNow: string;
+  fleetCreateBasics: string;
+  fleetCreateBasicsDesc: string;
+  fleetCreateRolesDesc: string;
+  fleetCreateTasksDesc: string;
+  fleetCreateTasks: string;
+  fleetCreateAddRole: string;
+  fleetCreateAddTask: string;
+  fleetCreateTaskId: string;
+  fleetCreateTaskName: string;
+  fleetCreateTaskRole: string;
+  fleetCreateTaskObjective: string;
+  fleetCreateTaskInstructions: string;
+  fleetCreateRemove: string;
+  fleetCreateSubmit: string;
+  fleetCreateTokenError: string;
+  fleetCreateDuplicate: string;
+  // Goal control plane
+  goalStatus: string;
+  goalBudget: string;
+  goalTokensUsed: string;
+  goalTimeUsed: string;
+  goalContinuations: string;
+  goalSet: string;
+  goalEdit: string;
+  goalComplete: string;
+  goalBlock: string;
+  goalDelete: string;
+  goalObjectivePlaceholder: string;
+  goalNoGoal: string;
+  goalTokenBudgetLabel: string;
+  goalCreatedAt: string;
+  goalBudgetTooltip: string;
+  goalTokensUsedTooltip: string;
+  goalTimeUsedTooltip: string;
+  goalContinuationsTooltip: string;
+  goalBudgetExceeded: string;
 }
 
 export function getWebviewHtml(
@@ -232,6 +333,8 @@ ${css}
 <body>
   <div id="task-detail-overlay" class="task-detail-overlay"></div>
   <div id="agent-detail-overlay" class="task-detail-overlay"></div>
+  <div id="fleet-detail-overlay" class="task-detail-overlay"></div>
+  <div id="fleet-create-overlay" class="task-detail-overlay"></div>
   <div id="task-create-overlay" class="task-detail-overlay"></div>
   <div id="layout">
     <div id="threads-panel">
@@ -244,12 +347,26 @@ ${css}
         <div class="sidebar-section-body" id="tab-sessions"></div>
         <div class="sidebar-section-body" id="tab-threads-list"></div>
       </div>
+      <div class="sidebar-section" id="sidebar-goal">
+        <div class="sidebar-section-header" id="goal-section-toggle">
+          <span class="sidebar-section-title">🎯 ${tr.goal}</span>
+          <span class="sidebar-section-arrow">▼</span>
+        </div>
+        <div class="sidebar-section-body" id="tab-goal"></div>
+      </div>
       <div class="sidebar-section" id="sidebar-work">
         <div class="sidebar-section-header" id="work-section-toggle">
           <span class="sidebar-section-title">◆ ${tr.work}</span>
           <span class="sidebar-section-arrow">▼</span>
         </div>
         <div class="sidebar-section-body" id="tab-work"></div>
+      </div>
+      <div class="sidebar-section" id="sidebar-fleet">
+        <div class="sidebar-section-header" id="fleet-section-toggle">
+          <span class="sidebar-section-title">🚀 ${tr.fleet}</span>
+          <span class="sidebar-section-arrow">▼</span>
+        </div>
+        <div class="sidebar-section-body" id="tab-fleet"></div>
       </div>
       <div class="sidebar-section" id="sidebar-tasks">
         <div class="sidebar-section-header" id="tasks-section-toggle">
@@ -552,6 +669,12 @@ ${css}
   </script>
   <script nonce="${nonce}">
     ${getInputScript(tr)}
+  </script>
+  <script nonce="${nonce}">
+    ${getFleetScript(tr)}
+  </script>
+  <script nonce="${nonce}">
+    ${getGoalScript(tr)}
   </script>
   <script nonce="${nonce}">
     ${getEventHandlerScript(tr)}

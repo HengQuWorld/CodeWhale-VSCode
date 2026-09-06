@@ -53,6 +53,16 @@ import type {
   SwitchProviderResponse,
   EventListener,
   EngineRef,
+  FleetRunsResponse,
+  FleetProfilesResponse,
+  FleetRunSummary,
+  FleetWorkersResponse,
+  FleetReceiptsResponse,
+  FleetWorker,
+  FleetRuntimeEvent,
+  CreateFleetRunRequest,
+  CreateFleetRunResponse,
+  ThreadGoal,
 } from "../types";
 
 // Re-export types for backward compatibility
@@ -105,6 +115,15 @@ export type {
   ProvidersResponse,
   ProviderModelsResponse,
   SwitchProviderResponse,
+  FleetRunsResponse,
+  FleetRunSummary,
+  FleetWorkersResponse,
+  FleetReceiptsResponse,
+  FleetWorker,
+  FleetRuntimeEvent,
+  CreateFleetRunRequest,
+  CreateFleetRunResponse,
+  ThreadGoal,
 };
 
 const NOT_SYNCED: unique symbol = Symbol("NOT_SYNCED");
@@ -599,6 +618,181 @@ export class CodeWhaleApiClient {
 
   async getAgentRun(runId: string): Promise<AgentRunRecord> {
     return (await this.get(`/v1/agent-runs/${runId}`)) as AgentRunRecord;
+  }
+
+  // ── Fleet (managed multi-agent runs) ──
+
+  /** Roster members usable as `agent_profile` on roles. Older TUI builds
+   *  without `GET /v1/fleet/profiles` answer 404; callers treat that as
+   *  "no profile list" and fall back to free-text entry. */
+  async listFleetProfiles(): Promise<FleetProfilesResponse | null> {
+    try {
+      return (await this.get("/v1/fleet/profiles")) as FleetProfilesResponse;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "";
+      if (msg.startsWith("API error 404")) return null;
+      throw err;
+    }
+  }
+
+  async listFleetRuns(): Promise<FleetRunsResponse> {
+    return (await this.get("/v1/fleet/runs")) as FleetRunsResponse;
+  }
+
+  /** Create a managed Fleet run. Only `this_computer` target is executable
+   *  by the local runtime. Returns the created run summary + any warnings. */
+  async createFleetRun(req: CreateFleetRunRequest): Promise<CreateFleetRunResponse> {
+    const body: Record<string, unknown> = {
+      target: "this_computer",
+      roles: req.roles.map((r) => ({
+        name: r.name,
+        agent_profile: r.agent_profile ?? null,
+      })),
+      workflow: {
+        id: req.workflow_id,
+        kind: "parallel",
+        tasks: req.tasks.map((t) => {
+          const task: Record<string, unknown> = {
+            id: t.id,
+            name: t.name,
+            instructions: t.instructions,
+            worker: { role: t.role },
+          };
+          if (t.objective) task.objective = t.objective;
+          return task;
+        }),
+      },
+    };
+    if (req.name) body.name = req.name;
+    if (req.max_workers !== undefined) body.max_workers = req.max_workers;
+    return (await this.post("/v1/fleet/runs", body)) as CreateFleetRunResponse;
+  }
+
+  async getFleetRun(runId: string): Promise<FleetRunSummary> {
+    return (await this.get(`/v1/fleet/runs/${encodeURIComponent(runId)}`)) as FleetRunSummary;
+  }
+
+  async listFleetRunWorkers(runId: string): Promise<FleetWorkersResponse> {
+    return (await this.get(`/v1/fleet/runs/${encodeURIComponent(runId)}/workers`)) as FleetWorkersResponse;
+  }
+
+  async listFleetRunReceipts(runId: string): Promise<FleetReceiptsResponse> {
+    return (await this.get(`/v1/fleet/runs/${encodeURIComponent(runId)}/receipts`)) as FleetReceiptsResponse;
+  }
+
+  async startFleetRun(runId: string): Promise<Record<string, unknown>> {
+    return (await this.post(`/v1/fleet/runs/${encodeURIComponent(runId)}/start`, {})) as Record<string, unknown>;
+  }
+
+  async stopFleetRun(runId: string): Promise<Record<string, unknown>> {
+    return (await this.post(`/v1/fleet/runs/${encodeURIComponent(runId)}/stop`, {})) as Record<string, unknown>;
+  }
+
+  async getFleetWorker(workerId: string): Promise<FleetWorker> {
+    return (await this.get(`/v1/fleet/workers/${encodeURIComponent(workerId)}`)) as FleetWorker;
+  }
+
+  async interruptFleetWorker(workerId: string): Promise<Record<string, unknown>> {
+    return (await this.post(`/v1/fleet/workers/${encodeURIComponent(workerId)}/interrupt`, {})) as Record<string, unknown>;
+  }
+
+  async stopFleetWorker(workerId: string): Promise<Record<string, unknown>> {
+    return (await this.post(`/v1/fleet/workers/${encodeURIComponent(workerId)}/stop`, {})) as Record<string, unknown>;
+  }
+
+  async restartFleetWorker(workerId: string): Promise<Record<string, unknown>> {
+    return (await this.post(`/v1/fleet/workers/${encodeURIComponent(workerId)}/restart`, {})) as Record<string, unknown>;
+  }
+
+  /** Subscribe to a Fleet run's live event stream (SSE). Returns an
+   *  AbortController to close the stream. Each event is a FleetRuntimeEvent. */
+  streamFleetEvents(
+    runId: string,
+    onEvent: (event: FleetRuntimeEvent) => void,
+    onError?: (err: Error) => void
+  ): AbortController {
+    const controller = new AbortController();
+    const path = `/v1/fleet/runs/${encodeURIComponent(runId)}/events`;
+    const url = new URL(path, this.baseUrl);
+
+    const headers: Record<string, string> = { Accept: "text/event-stream" };
+    if (this.authToken) {
+      headers["Authorization"] = `Bearer ${this.authToken}`;
+    }
+
+    const req = http.get(url, { headers, signal: controller.signal }, (res) => {
+      if (res.statusCode && res.statusCode >= 400) {
+        let body = "";
+        res.on("data", (c: Buffer) => (body += c.toString()));
+        res.on("end", () => onError?.(new Error(`SSE error ${res.statusCode}: ${body}`)));
+        return;
+      }
+
+      let buffer = "";
+      let currentData: string | null = null;
+
+      res.on("data", (chunk: Buffer) => {
+        buffer += chunk.toString();
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          if (line.startsWith("data:")) {
+            currentData = line.slice(5).trim();
+          } else if (line === "" && currentData) {
+            try {
+              onEvent(JSON.parse(currentData) as FleetRuntimeEvent);
+            } catch {
+              // skip malformed events
+            }
+            currentData = null;
+          }
+          // ignore event:/id:/comment lines
+        }
+      });
+
+      res.on("error", (err: Error) => {
+        if (!controller.signal.aborted) onError?.(err);
+      });
+    });
+
+    req.on("error", (err: Error) => {
+      if (!controller.signal.aborted) onError?.(err);
+    });
+    return controller;
+  }
+
+  // ── Thread Goal (control plane) ──
+
+  /** Fetch the persistent goal for a thread. Returns null when the thread has
+   *  no goal (the endpoint answers 404). */
+  async getThreadGoal(threadId: string): Promise<ThreadGoal | null> {
+    try {
+      return (await this.get(`/v1/threads/${encodeURIComponent(threadId)}/goal`)) as ThreadGoal;
+    } catch (err) {
+      if (err instanceof Error && err.message.includes("404")) {
+        return null;
+      }
+      throw err;
+    }
+  }
+
+  async upsertThreadGoal(threadId: string, objective: string, tokenBudget?: number): Promise<ThreadGoal> {
+    const body: Record<string, unknown> = { objective };
+    if (tokenBudget !== undefined) body.token_budget = tokenBudget;
+    return (await this.put(`/v1/threads/${encodeURIComponent(threadId)}/goal`, body)) as ThreadGoal;
+  }
+
+  async deleteThreadGoal(threadId: string): Promise<void> {
+    await this.delete(`/v1/threads/${encodeURIComponent(threadId)}/goal`);
+  }
+
+  async completeThreadGoal(threadId: string): Promise<ThreadGoal> {
+    return (await this.post(`/v1/threads/${encodeURIComponent(threadId)}/goal/complete`, {})) as ThreadGoal;
+  }
+
+  async blockThreadGoal(threadId: string): Promise<ThreadGoal> {
+    return (await this.post(`/v1/threads/${encodeURIComponent(threadId)}/goal/block`, {})) as ThreadGoal;
   }
 
   // ── Config ──

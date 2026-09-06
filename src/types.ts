@@ -32,6 +32,10 @@ export interface ThreadSummary {
   updated_at: string;
   latest_turn_id: string | null;
   latest_turn_status: string | null;
+  /** Count of pending approvals / user inputs on the thread's latest turn.
+   *  Non-zero on a background thread (e.g. a goal loop waiting for a tool
+   *  approval) is surfaced as an attention badge in the sidebar. */
+  pending_attention_count?: number | null;
 }
 
 export interface TurnRecord {
@@ -680,6 +684,213 @@ export interface SwitchProviderResponse {
   model: string;
   message: string;
   persisted: boolean;
+}
+
+// ── Fleet (managed multi-agent runs) ──
+
+/** Aggregate counters returned by `GET /v1/fleet/runs` and each run detail.
+ *  `workers` maps worker id → status label for the whole fleet. */
+export interface FleetStatusCounters {
+  runs: number;
+  queued: number;
+  running: number;
+  completed: number;
+  partial: number;
+  failed: number;
+  restarted: number;
+  escalated: number;
+  transport_failed: number;
+  task_failed: number;
+  verifier_failed: number;
+  cancelled: number;
+  stale: number;
+  workers: Record<string, string>;
+}
+
+/** Per-task progress row inside a run summary. */
+export interface FleetRunTaskStatus {
+  task_id: string;
+  status: string;
+  leased_to: string | null;
+  attempts: number;
+}
+
+/** Durable workflow identity carried on a run. */
+export interface FleetWorkflowDescriptor {
+  id: string;
+  kind: string;
+}
+
+/** Task authoring spec (detail-only). Worker profile is narrowed to the
+ *  fields the GUI surfaces; the full spec is opaque otherwise. */
+export interface FleetTaskSpec {
+  id: string;
+  name: string;
+  description?: string | null;
+  objective?: string | null;
+  instructions: string;
+  worker?: { role?: string | null; agent_profile?: string | null; model?: string | null } | null;
+  [key: string]: unknown;
+}
+
+export interface FleetRunSummary {
+  id: string;
+  name: string;
+  lifecycle_status: string;
+  status: FleetStatusCounters;
+  target: string;
+  workflow: FleetWorkflowDescriptor | null;
+  roles: string[];
+  task_count: number;
+  worker_count: number;
+  tasks: FleetRunTaskStatus[];
+  labels: Record<string, string>;
+  created_at: string | null;
+  updated_at: string | null;
+  completed_at: string | null;
+  /** Present only on the detail endpoint (`GET /v1/fleet/runs/{id}`). */
+  task_specs?: FleetTaskSpec[];
+  worker_specs?: Array<Record<string, unknown>>;
+}
+
+export interface FleetWorkerRuntime {
+  agent_status: string | null;
+  steps_taken: number;
+  latest_message: string | null;
+  error: string | null;
+  result_summary: string | null;
+  has_session: boolean;
+}
+
+export interface FleetArtifactRef {
+  kind: string;
+  path: string;
+  checksum: string | null;
+  mime_type: string | null;
+  size_bytes: number | null;
+}
+
+export interface FleetWorker {
+  worker_id: string;
+  status: string;
+  run_id: string | null;
+  task_id: string | null;
+  objective: string | null;
+  role: string | null;
+  host: string | null;
+  latest_heartbeat_at: string | null;
+  latest_event: Record<string, unknown> | null;
+  artifacts: FleetArtifactRef[];
+  last_error: string | null;
+  alert_state: string | null;
+  runtime_state: FleetWorkerRuntime | null;
+}
+
+export interface FleetReceipt {
+  run_id: string;
+  task_id: string;
+  worker_id: string;
+  attempt: number;
+  terminal_seq: number | null;
+  completed_at: string | null;
+  result: string;
+  failure_kind: string | null;
+  failure_class: string | null;
+  retry_eligible: boolean;
+  score: { value: number; max: number; notes: string | null } | null;
+  artifacts: FleetArtifactRef[];
+  session_id: string | null;
+  evidence_available: boolean;
+}
+
+export interface FleetRunsResponse {
+  status: FleetStatusCounters;
+  runs: FleetRunSummary[];
+}
+
+export interface FleetWorkersResponse {
+  run_id: string;
+  workers: FleetWorker[];
+}
+
+export interface FleetReceiptsResponse {
+  run_id: string;
+  receipts: FleetReceipt[];
+}
+
+/** One privacy-bounded durable event streamed from `GET /v1/fleet/runs/{id}/events`. */
+export interface FleetRuntimeEvent {
+  cursor: string;
+  event: string;
+  run_id: string;
+  worker_id?: string | null;
+  task_id?: string | null;
+  timestamp?: string | null;
+  worker_seq?: number | null;
+  payload: Record<string, unknown>;
+}
+
+// ── Fleet run creation (managed, this_computer only) ──
+
+/** One roster member from `GET /v1/fleet/profiles`. `origin` is the roster
+ *  layer the profile was merged from (built-in / plugin / config / personal
+ *  / workspace). */
+export interface FleetProfile {
+  id: string;
+  display_name?: string | null;
+  description?: string | null;
+  origin?: string | null;
+}
+
+export interface FleetProfilesResponse {
+  profiles: FleetProfile[];
+  load_error?: string | null;
+}
+
+export interface FleetCreateRoleInput {
+  name: string;
+  agent_profile?: string | null;
+}
+
+export interface FleetCreateTaskInput {
+  id: string;
+  name: string;
+  objective?: string | null;
+  instructions: string;
+  /** Must reference a declared role name. */
+  role: string;
+}
+
+export interface CreateFleetRunRequest {
+  name?: string;
+  workflow_id: string;
+  max_workers?: number;
+  roles: FleetCreateRoleInput[];
+  tasks: FleetCreateTaskInput[];
+}
+
+export interface CreateFleetRunResponse {
+  execution: string;
+  run: FleetRunSummary;
+  warnings: string[];
+}
+
+// ── Thread Goal (control plane) ──
+
+export type ThreadGoalStatus =
+  | "active" | "paused" | "blocked" | "usage_limited" | "budget_limited" | "complete";
+
+export interface ThreadGoal {
+  thread_id: string;
+  goal_id: string;
+  objective: string;
+  status: ThreadGoalStatus;
+  token_budget: number | null;
+  tokens_used: number;
+  time_used_seconds: number;
+  continuation_count: number;
+  created_at: number;
+  updated_at: number;
 }
 
 // ── Re-exports from other modules ──

@@ -425,6 +425,15 @@ export function getSidebarScript(tr: WebviewTranslations): string {
       var el = document.createElement('div');
       el.className = 'thread-item' + (t.id === activeThreadId ? ' active' : '');
 
+      // Attention badge: a background thread (e.g. a goal loop) is waiting
+      // for an approval or user input. The active thread already shows its
+      // own approval card inline, so skip it there.
+      var attention = t.pending_attention_count;
+      if (attention && attention > 0 && t.id !== activeThreadId) {
+        el.classList.add('has-attention');
+        el.title = __i18n.threadAttention;
+      }
+
       var titleEl = document.createElement('div');
       titleEl.className = 'thread-title';
       titleEl.textContent = t.title || t.id.slice(0, 8);

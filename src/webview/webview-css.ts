@@ -63,7 +63,8 @@ export function getWebviewCss(): string {
       min-width: 160px;
       max-width: 600px;
       border-right: 1px solid var(--border);
-      overflow: hidden;
+      overflow-y: auto;
+      overflow-x: hidden;
       padding: 0;
       display: none;
       flex-direction: column;
@@ -126,7 +127,7 @@ export function getWebviewCss(): string {
     }
     #sidebar-threads {
       flex: 1;
-      min-height: 0;
+      min-height: 120px;
       overflow: hidden;
     }
     .sidebar-section-header {
@@ -221,6 +222,22 @@ export function getWebviewCss(): string {
     .thread-item + .thread-item { border-top: 1px solid rgba(128,128,128,0.1); }
     .thread-item:hover { background: var(--card-bg); color: var(--fg); }
     .thread-item.active { background: var(--brand-primary); color: white; }
+    .thread-item.has-attention::after {
+      content: '';
+      position: absolute;
+      top: 7px;
+      right: 8px;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--status-warn, #e2b93d);
+      box-shadow: 0 0 0 2px var(--bg, #1e1e1e);
+      animation: thread-attention-pulse 2s ease-in-out infinite;
+    }
+    @keyframes thread-attention-pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.45; }
+    }
     .thread-item .thread-title {
       font-weight: 600;
       color: var(--fg);
@@ -1915,6 +1932,7 @@ export function getWebviewCss(): string {
     .work-progress-bar-fill.completed { background: linear-gradient(90deg, #4caf50, #66bb6a); }
     .work-progress-bar-fill.in-progress { background: linear-gradient(90deg, var(--brand-primary), var(--brand-primary-light)); }
     .work-progress-bar-fill.partial { background: linear-gradient(90deg, #f0a030, #ffb74d); }
+    .work-progress-bar-fill.over-budget { background: linear-gradient(90deg, #e05555, #ef7a6d); }
 
     /* ── Checklist / Strategy Items ── */
     .work-checklist-item,
@@ -2431,6 +2449,711 @@ export function getWebviewCss(): string {
     }
     .task-detail-panel .close-btn:hover {
       color: var(--fg);
+    }
+
+    /* ── Fleet (sidebar list) ── */
+
+    .fleet-card {
+      padding: 7px 10px;
+      border-bottom: 1px solid rgba(128,128,128,0.07);
+      cursor: pointer;
+      transition: background 0.15s, border-color 0.15s;
+    }
+    .fleet-card:last-child { border-bottom: none; }
+    .fleet-card:hover { background: var(--card-bg); }
+    .fleet-card:active { opacity: 0.9; }
+    .fleet-card.fleet-active {
+      border-left: 3px solid #ff9800;
+      background: rgba(255, 152, 0, 0.02);
+    }
+    .fleet-header {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 0.85em;
+    }
+    .fleet-status-icon { font-size: 0.9em; flex-shrink: 0; }
+    .fleet-title {
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-weight: 500;
+    }
+    .fleet-meta {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      flex-wrap: wrap;
+      margin-top: 2px;
+      font-size: 0.75em;
+      color: var(--muted);
+    }
+    .fleet-status-badge { font-weight: 500; }
+    .fleet-badge {
+      background: rgba(128,128,128,0.1);
+      padding: 0 4px;
+      border-radius: 3px;
+      font-size: 0.9em;
+      color: var(--muted);
+    }
+    .fleet-roles { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 3px; }
+    .fleet-role-chip {
+      font-size: 0.7em;
+      padding: 0 4px;
+      border-radius: 3px;
+      background: rgba(156, 39, 176, 0.12);
+      color: #9c27b0;
+    }
+    .fleet-role-more { font-size: 0.7em; color: var(--muted); }
+
+    /* ── Fleet Detail Overlay ── */
+
+    .fleet-detail-panel {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      width: 92%;
+      max-width: 980px;
+      max-height: 90vh;
+      overflow-y: auto;
+      padding: 16px;
+      font-size: 0.85em;
+      position: relative;
+      box-shadow: 0 16px 48px rgba(0, 0, 0, 0.35);
+    }
+    .fleet-detail-panel .close-btn {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      background: none;
+      border: none;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 1.2em;
+      padding: 0 4px;
+    }
+    .fleet-detail-panel .close-btn:hover { color: var(--fg); }
+    .fleet-detail-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+    .fleet-detail-header h3 { margin: 0; font-size: 1em; color: var(--fg); }
+    .fleet-detail-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+    .fleet-detail-panel .detail-action-btn {
+      border: 1px solid var(--border);
+      background: rgba(128, 128, 128, 0.08);
+      color: var(--fg);
+      border-radius: 6px;
+      padding: 4px 10px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    .fleet-detail-panel .detail-action-btn:hover { background: rgba(128, 128, 128, 0.16); }
+    .fleet-detail-meta {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      margin-bottom: 12px;
+    }
+    .fleet-detail-row { display: flex; gap: 8px; font-size: 0.82em; }
+    .fleet-detail-label { color: var(--muted); min-width: 76px; flex-shrink: 0; }
+    .fleet-detail-value { color: var(--fg); word-break: break-word; }
+    .fleet-counters { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
+    .fleet-counter {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: rgba(128, 128, 128, 0.08);
+      border: 1px solid rgba(128, 128, 128, 0.14);
+      font-size: 0.75em;
+      color: var(--muted);
+    }
+    .fleet-counter-icon { font-size: 0.85em; }
+    .fleet-counter-completed { color: #4caf50; border-color: rgba(76,175,80,0.3); background: rgba(76,175,80,0.08); }
+    .fleet-counter-running { color: #ff9800; }
+    .fleet-counter-failed, .fleet-counter-transport_failed, .fleet-counter-task_failed, .fleet-counter-verifier_failed { color: #f44336; }
+    .fleet-counter-queued { color: #888; }
+    .fleet-detail-section { margin-bottom: 16px; }
+    .fleet-detail-section-title {
+      font-size: 0.85em;
+      font-weight: 600;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 6px;
+    }
+
+    .fleet-worker-card {
+      border: 1px solid rgba(128,128,128,0.14);
+      border-radius: 6px;
+      padding: 8px 10px;
+      margin-bottom: 8px;
+    }
+    .fleet-worker-header { display: flex; align-items: center; gap: 4px; font-size: 0.82em; flex-wrap: wrap; }
+    .fleet-worker-id { font-family: var(--vscode-editor-font-family, monospace); font-weight: 600; }
+    .fleet-worker-objective { font-size: 0.85em; margin-top: 4px; color: var(--fg); }
+    .fleet-worker-meta {
+      font-size: 0.75em;
+      color: var(--muted);
+      margin-top: 3px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 2px;
+    }
+    .fleet-worker-message {
+      font-size: 0.78em;
+      color: var(--muted);
+      margin-top: 4px;
+      padding: 3px 6px;
+      background: rgba(128,128,128,0.05);
+      border-radius: 3px;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .fleet-worker-result { font-size: 0.78em; color: #4caf50; margin-top: 3px; }
+    .fleet-worker-error {
+      font-size: 0.78em;
+      color: #f44336;
+      margin-top: 3px;
+      padding: 2px 6px;
+      background: rgba(244, 67, 54, 0.06);
+      border-radius: 3px;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .fleet-worker-artifacts { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 4px; }
+    .fleet-artifact-chip {
+      font-size: 0.7em;
+      padding: 0 4px;
+      border-radius: 3px;
+      background: rgba(128,128,128,0.08);
+      color: var(--muted);
+      font-family: var(--vscode-editor-font-family, monospace);
+    }
+    .fleet-artifact-more { font-size: 0.7em; color: var(--muted); }
+    .fleet-worker-actions { display: flex; gap: 6px; margin-top: 6px; }
+    .fleet-action-btn {
+      border: 1px solid var(--border);
+      background: rgba(128,128,128,0.06);
+      color: var(--muted);
+      border-radius: 4px;
+      padding: 2px 8px;
+      font-size: 11px;
+      cursor: pointer;
+    }
+    .fleet-action-btn:hover { color: var(--fg); border-color: var(--fg); }
+
+    .fleet-task-row {
+      padding: 6px 0;
+      border-top: 1px solid rgba(128,128,128,0.08);
+      font-size: 0.8em;
+    }
+    .fleet-task-row:first-child { border-top: none; }
+    .fleet-task-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+    .fleet-task-name { font-weight: 600; }
+    .fleet-task-objective { margin-top: 2px; color: var(--muted); }
+    .fleet-task-wait-hint { margin-top: 2px; color: var(--muted); font-size: 0.85em; font-style: italic; }
+    .fleet-task-details { margin-top: 2px; }
+    .fleet-task-details summary {
+      cursor: pointer;
+      color: var(--muted);
+      font-size: 0.9em;
+      user-select: none;
+    }
+    .fleet-task-details summary:hover { color: var(--fg); }
+    .fleet-task-instructions {
+      margin: 4px 0 0;
+      padding: 6px 8px;
+      background: rgba(128,128,128,0.05);
+      border-radius: 4px;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-size: 0.9em;
+      max-height: 220px;
+      overflow: auto;
+    }
+    .fleet-task-id { font-family: var(--vscode-editor-font-family, monospace); }
+    .fleet-task-meta { color: var(--muted); font-size: 0.85em; }
+
+    .fleet-receipt-card {
+      border: 1px solid rgba(128,128,128,0.12);
+      border-radius: 6px;
+      padding: 6px 10px;
+      margin-bottom: 6px;
+    }
+    .fleet-receipt-header { display: flex; align-items: center; gap: 6px; font-size: 0.8em; }
+    .fleet-receipt-meta { font-size: 0.75em; color: var(--muted); margin-top: 2px; }
+    .fleet-receipt-failure { font-size: 0.75em; color: #f44336; margin-top: 2px; }
+    .fleet-receipt-notes { font-size: 0.75em; color: var(--vscode-descriptionForeground); margin-top: 4px; white-space: pre-wrap; }
+    .fleet-receipt-notes summary { cursor: pointer; color: var(--muted); }
+    .fleet-receipt-notes pre { margin: 4px 0 0; white-space: pre-wrap; word-break: break-word; }
+    .fleet-session-btn { margin-top: 4px; }
+    .fleet-receipt-reply { font-size: 0.8em; margin-top: 6px; }
+    .fleet-receipt-reply summary { cursor: pointer; color: var(--accent); }
+    .fleet-receipt-reply pre { margin: 4px 0 0; padding: 6px 8px; white-space: pre-wrap; word-break: break-word; background: rgba(128,128,128,0.08); border-radius: 4px; max-height: 320px; overflow: auto; }
+
+    /* ── Goal control plane ── */
+
+    .goal-empty {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      padding: 16px 10px;
+    }
+    .goal-set-btn {
+      border: 1px solid var(--accent);
+      background: var(--accent);
+      color: var(--vscode-button-foreground);
+      border-radius: 6px;
+      padding: 5px 14px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    .goal-set-btn:hover { background: var(--accent-hover); }
+    .goal-card { padding: 8px 10px; }
+    .goal-header { display: flex; align-items: center; gap: 4px; margin-bottom: 6px; }
+    .goal-objective {
+      font-size: 0.85em;
+      color: var(--fg);
+      white-space: pre-wrap;
+      word-break: break-word;
+      margin-bottom: 8px;
+    }
+    .goal-budget-row {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.75em;
+      color: var(--muted);
+      margin-bottom: 3px;
+    }
+    .goal-budget-value { font-variant-numeric: tabular-nums; }
+    .goal-budget-value.goal-budget-over { color: #e05555; font-weight: 600; }
+    .goal-stats { display: flex; gap: 14px; margin-top: 8px; }
+    .goal-stat { display: flex; flex-direction: column; }
+    .goal-stat-label {
+      font-size: 0.68em;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+    }
+    .goal-stat-value { font-size: 0.8em; color: var(--fg); font-variant-numeric: tabular-nums; }
+    .goal-meta { font-size: 0.72em; color: var(--muted); margin-top: 8px; }
+    .goal-thread-meta { margin-top: 4px; }
+    .goal-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+    .goal-action-btn {
+      border: 1px solid var(--border);
+      background: rgba(128,128,128,0.06);
+      color: var(--muted);
+      border-radius: 4px;
+      padding: 3px 9px;
+      font-size: 11px;
+      cursor: pointer;
+    }
+    .goal-action-btn:hover { color: var(--fg); border-color: var(--fg); }
+    .goal-action-btn.primary {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: var(--vscode-button-foreground);
+    }
+    .goal-action-btn.danger:hover {
+      color: #f44336;
+      border-color: rgba(244,67,54,0.4);
+      background: rgba(244,67,54,0.08);
+    }
+    .goal-editor { padding: 8px 10px; display: flex; flex-direction: column; gap: 8px; }
+    .goal-editor-title { font-weight: 600; font-size: 0.85em; }
+    .goal-editor-textarea {
+      width: 100%;
+      min-height: 80px;
+      resize: vertical;
+      border: 1px solid rgba(128,128,128,0.2);
+      border-radius: 6px;
+      background: var(--input-bg);
+      color: var(--fg);
+      padding: 8px 10px;
+      font: inherit;
+      box-sizing: border-box;
+    }
+    .goal-editor-textarea:focus { outline: none; border-color: var(--accent); }
+    .goal-editor-budget {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      font-size: 0.75em;
+      color: var(--muted);
+    }
+    .goal-editor-input {
+      width: 100%;
+      border: 1px solid rgba(128,128,128,0.2);
+      border-radius: 6px;
+      background: var(--input-bg);
+      color: var(--fg);
+      padding: 6px 8px;
+      font: inherit;
+      box-sizing: border-box;
+    }
+    .goal-editor-input:focus { outline: none; border-color: var(--accent); }
+    .goal-editor-actions { display: flex; justify-content: flex-end; gap: 6px; }
+    .goal-btn-icon { margin-right: 4px; }
+
+    /* ── Fleet run creation dialog ── */
+
+    .fleet-create-panel {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      width: min(680px, calc(100vw - 32px));
+      max-height: 90vh;
+      overflow-y: auto;
+      position: relative;
+      box-shadow: 0 22px 56px rgba(0, 0, 0, 0.32);
+    }
+    .fleet-create-body {
+      padding: 14px 16px 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .fleet-create-row {
+      display: flex;
+      gap: 10px;
+      align-items: flex-end;
+    }
+    .fleet-create-field {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      font-size: 0.75em;
+      color: var(--muted);
+      flex: 1;
+    }
+    .fleet-create-field span {
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+      font-size: 0.9em;
+    }
+    .fleet-create-field input,
+    .fleet-create-field textarea,
+    .fleet-create-task-card input,
+    .fleet-create-task-card textarea {
+      border: 1px solid rgba(128,128,128,0.2);
+      border-radius: 6px;
+      background: var(--input-bg);
+      color: var(--fg);
+      padding: 7px 9px;
+      font: inherit;
+      box-sizing: border-box;
+    }
+    .fleet-create-field textarea {
+      min-height: 60px;
+      resize: vertical;
+      font-family: var(--vscode-editor-font-family, monospace);
+    }
+    .fleet-create-field input:focus,
+    .fleet-create-field textarea:focus,
+    .fleet-create-task-card input:focus,
+    .fleet-create-task-card textarea:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+    .fleet-create-desc {
+      padding: 10px 16px 0;
+      font-size: 0.78em;
+      line-height: 1.45;
+      color: var(--muted);
+    }
+    .fleet-create-step-head {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      margin-top: 4px;
+    }
+    .fleet-create-step-num {
+      flex: none;
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      background: var(--accent);
+      color: var(--vscode-editor-background, #1e1e1e);
+      font-size: 0.72em;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-top: 1px;
+    }
+    .fleet-create-step-text {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .fleet-create-step-title {
+      font-size: 0.8em;
+      font-weight: 700;
+      color: var(--fg);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .fleet-create-section-desc {
+      font-size: 0.75em;
+      line-height: 1.4;
+      color: var(--muted);
+    }
+    .fleet-create-tasks {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .fleet-create-task-card {
+      border: 1px solid rgba(128,128,128,0.16);
+      border-radius: 8px;
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .fleet-create-task-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .fleet-create-task-title {
+      font-size: 0.75em;
+      font-weight: 600;
+      color: var(--muted);
+    }
+    .fleet-create-remove {
+      background: none;
+      border: none;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 0.9em;
+      padding: 0 2px;
+    }
+    .fleet-create-remove:hover { color: #f44336; }
+    .fleet-create-task-card input {
+      flex: 1;
+      min-width: 0;
+    }
+    .fleet-create-task-card textarea {
+      min-height: 56px;
+      resize: vertical;
+      width: 100%;
+    }
+    .fleet-create-add-task {
+      align-self: flex-start;
+      border: 1px dashed rgba(128,128,128,0.35);
+      background: transparent;
+      color: var(--muted);
+      border-radius: 6px;
+      padding: 5px 12px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    .fleet-create-add-task:hover { color: var(--fg); border-color: var(--fg); }
+    .fleet-create-error {
+      color: #f44336;
+      font-size: 12px;
+      min-height: 16px;
+    }
+    .fleet-create-panel .detail-action-btn {
+      min-width: 84px;
+      padding: 7px 14px;
+      border-radius: 9px;
+      font-weight: 500;
+      border: 1px solid var(--border);
+      background: rgba(128,128,128,0.08);
+      color: var(--fg);
+      cursor: pointer;
+      font-size: 12px;
+    }
+    .fleet-create-panel .fleet-create-submit {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: var(--vscode-button-foreground);
+    }
+    .fleet-create-panel .fleet-create-submit:hover { background: var(--accent-hover); }
+
+    /* ── Fleet event timeline ── */
+
+    .fleet-event-filters {
+      display: flex;
+      gap: 6px;
+      margin: 4px 0 6px;
+    }
+    .fleet-event-filter {
+      border: 1px solid rgba(128,128,128,0.3);
+      background: transparent;
+      color: var(--muted);
+      border-radius: 10px;
+      padding: 1px 10px;
+      font-size: 0.75em;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .fleet-event-filter:hover { color: var(--fg); }
+    .fleet-event-filter.active {
+      color: var(--fg);
+      border-color: var(--vscode-focusBorder, #007fd4);
+      background: rgba(128,128,128,0.1);
+    }
+    .fleet-event-issue-count {
+      background: var(--vscode-errorForeground, #f44336);
+      color: #fff;
+      border-radius: 8px;
+      padding: 0 5px;
+      font-size: 0.85em;
+      min-width: 10px;
+      text-align: center;
+    }
+    .fleet-event-list {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      max-height: 260px;
+      overflow-y: auto;
+      font-family: var(--vscode-editor-font-family, monospace);
+      font-size: 0.78em;
+    }
+    .fleet-event-row {
+      display: flex;
+      align-items: baseline;
+      gap: 6px;
+      padding: 2px 6px;
+      border-bottom: 1px solid rgba(128,128,128,0.06);
+      border-left: 2px solid transparent;
+      flex-wrap: wrap;
+    }
+    .fleet-event-row:last-child { border-bottom: none; }
+    .fleet-event-row.sev-error {
+      border-left-color: var(--vscode-errorForeground, #f44336);
+      background: rgba(244,67,54,0.09);
+    }
+    .fleet-event-row.sev-warn {
+      border-left-color: var(--vscode-editorWarning-foreground, #ffcc00);
+      background: rgba(255,204,0,0.06);
+    }
+    .fleet-event-row.sev-ok { border-left-color: var(--vscode-testing-iconPassed, #73c991); }
+    .fleet-event-row.sev-dim { opacity: 0.45; }
+    .fleet-event-time { color: var(--muted); flex-shrink: 0; }
+    .fleet-event-chip {
+      font-weight: 600;
+      flex-shrink: 0;
+      color: var(--muted);
+    }
+    .fleet-event-chip.sev-error { color: var(--vscode-errorForeground, #f44336); }
+    .fleet-event-chip.sev-warn { color: var(--vscode-editorWarning-foreground, #ffcc00); }
+    .fleet-event-chip.sev-ok { color: var(--vscode-testing-iconPassed, #73c991); }
+    .fleet-event-meta { color: var(--muted); font-size: 0.9em; flex-shrink: 0; }
+    .fleet-event-msg {
+      flex: 1;
+      min-width: 160px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .fleet-event-row.sev-error .fleet-event-msg { color: var(--vscode-errorForeground, #f44336); }
+    .fleet-event-detail { flex-basis: 100%; }
+    .fleet-event-detail summary {
+      cursor: pointer;
+      color: var(--muted);
+      font-size: 0.85em;
+      user-select: none;
+    }
+    .fleet-event-detail summary:hover { color: var(--fg); }
+    .fleet-event-detail pre {
+      margin: 4px 0 2px;
+      padding: 6px 8px;
+      background: rgba(128,128,128,0.06);
+      border-radius: 4px;
+      white-space: pre-wrap;
+      word-break: break-word;
+      max-height: 200px;
+      overflow: auto;
+    }
+
+    /* ── Fleet create: dynamic role rows ── */
+
+    .fleet-create-roles {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .fleet-create-role-row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+    .fleet-create-role-row input {
+      border: 1px solid rgba(128,128,128,0.2);
+      border-radius: 6px;
+      background: var(--input-bg);
+      color: var(--fg);
+      padding: 7px 9px;
+      font: inherit;
+      box-sizing: border-box;
+      min-width: 0;
+    }
+    .fleet-create-role-name { flex: 1; }
+    .fleet-create-role-profile { flex: 1; }
+    .fleet-create-role-row select {
+      border: 1px solid rgba(128,128,128,0.2);
+      border-radius: 6px;
+      background: var(--input-bg);
+      color: var(--fg);
+      padding: 7px 9px;
+      font: inherit;
+      box-sizing: border-box;
+      min-width: 0;
+      flex: 1;
+    }
+    .fleet-create-role-row select:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+    .fleet-create-startnow {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      font-size: 0.78em;
+      color: var(--fg);
+      margin-top: 2px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .fleet-create-startnow input {
+      accent-color: var(--accent);
+      width: 14px;
+      height: 14px;
+      cursor: pointer;
+    }
+    .fleet-create-role-row input:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+    .fleet-create-task-role {
+      border: 1px solid rgba(128,128,128,0.2);
+      border-radius: 6px;
+      background: var(--input-bg);
+      color: var(--fg);
+      padding: 7px 9px;
+      font: inherit;
+      box-sizing: border-box;
+      flex: 1;
+      min-width: 0;
+    }
+    .fleet-create-task-role:focus {
+      outline: none;
+      border-color: var(--accent);
     }
 `;
 }

@@ -253,6 +253,7 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
       case 'ready':
         window.__wvSidebar.closeTaskDetail();
         window.__wvSidebar.closeAgentDetail();
+        if (window.__wvFleet) window.__wvFleet.closeFleetDetail();
         setStreamingState(false, '${tr.ready} (' + (msg.model || 'deepseek-v4-pro') + ')');
         if (msg.mode) currentModeEl.textContent = msg.mode;
         if (msg.model) currentModelEl.textContent = msg.model;
@@ -352,6 +353,7 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
         // Close any open detail overlay from the previous thread
         window.__wvSidebar.closeTaskDetail();
         window.__wvSidebar.closeAgentDetail();
+        if (window.__wvFleet) window.__wvFleet.closeFleetDetail();
         // Clear stale work/changes state from previous thread
         window.__wvSidebar.setWorkState({ goal: null, checklist: [], checklistCompletionPct: 0, strategy: [], cycleCount: 0, coherenceState: 'healthy', coherenceLabel: '' });
         window.__wvSidebar.setChangesState([]);
@@ -370,6 +372,48 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
       case 'agentRunList':
         window.__wvSidebar.setAgentRuns(msg.runs || []);
         window.__wvSidebar.renderAgents(msg.runs || []);
+        break;
+
+      case 'fleetRunList':
+        if (window.__wvFleet) {
+          window.__wvFleet.setFleetRuns(msg.runs || []);
+          window.__wvFleet.setFleetStatus(msg.status || null);
+          window.__wvFleet.renderFleet();
+        }
+        break;
+
+      case 'fleetProfiles':
+        if (window.__wvFleet) {
+          window.__wvFleet.setFleetProfiles(msg.profiles || []);
+        }
+        break;
+
+      case 'fleetRunDetail':
+        if (window.__wvFleet) {
+          window.__wvSidebar.closeTaskDetail();
+          window.__wvSidebar.closeAgentDetail();
+          window.__wvFleet.showFleetDetail(msg);
+        }
+        break;
+
+      case 'fleetEvent':
+        if (window.__wvFleet) {
+          window.__wvFleet.handleFleetEvent(msg.event);
+        }
+        break;
+
+      case 'fleetSessionReply':
+        if (window.__wvFleet) {
+          window.__wvFleet.showFleetReply(msg.sessionId, msg.reply);
+        }
+        break;
+
+      case 'goalState':
+        if (window.__wvGoal) {
+          window.__wvGoal.setGoal(msg.goal || null);
+          window.__wvGoal.setEditing(false);
+          window.__wvGoal.renderGoal();
+        }
         break;
 
       case 'workState':
@@ -410,6 +454,7 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
       case 'loadHistory':
         window.__wvSidebar.closeTaskDetail();
         window.__wvSidebar.closeAgentDetail();
+        if (window.__wvFleet) window.__wvFleet.closeFleetDetail();
         // Clear shared diff store when switching sessions so stale entries
         // from the previous session don't leak into the new one.
         _diffStore.clear();
@@ -810,6 +855,7 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
       case 'clearChat':
         window.__wvSidebar.closeTaskDetail();
         window.__wvSidebar.closeAgentDetail();
+        if (window.__wvFleet) window.__wvFleet.closeFleetDetail();
         // Clear shared diff store when starting a new chat.
         _diffStore.clear();
         _diffIdCounter.value = 0;

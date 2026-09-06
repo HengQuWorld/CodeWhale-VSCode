@@ -48,9 +48,22 @@ describe("webview-js-utilities.ts", () => {
   it("injects steer translations into __wvI18n (input placeholder relies on them)", () => {
     const tr = makeTr({ steerPlaceholder: "Steer the running turn...", steerBadge: "steer", steerBadgeTitle: "Sent as mid-turn steering" });
     const script = getUtilitiesScript(tr);
-    expect(script).toContain("steerPlaceholder: 'Steer the running turn...'");
-    expect(script).toContain("steerBadge: 'steer'");
-    expect(script).toContain("steerBadgeTitle: 'Sent as mid-turn steering'");
+    expect(script).toContain("Steer the running turn...");
+    expect(script).toContain("steerPlaceholder");
+    expect(script).toContain("Sent as mid-turn steering");
+  });
+
+  it("injects the full translation table as JSON (new keys stay in sync automatically)", () => {
+    const tr = makeTr({ fleetCreate: "Create Fleet run", goalNoGoal: "No goal yet" });
+    const script = getUtilitiesScript(tr);
+    expect(script).toContain('"fleetCreate":"Create Fleet run"');
+    expect(script).toContain('"goalNoGoal":"No goal yet"');
+  });
+
+  it("escapes < in the injected JSON so the inline script block stays valid", () => {
+    const tr = makeTr({ note: "a<b" });
+    const script = getUtilitiesScript(tr);
+    expect(script).toContain("\\u003cb");
   });
 
   it("escapeHtml function handles special characters", () => {
