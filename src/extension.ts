@@ -63,6 +63,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   outputChannel.appendLine("CodeWhale extension activated");
 }
 
-export function deactivate(): void {
-  // cleanup handled by disposables
+export async function deactivate(): Promise<void> {
+  await engine?.stop();
 }

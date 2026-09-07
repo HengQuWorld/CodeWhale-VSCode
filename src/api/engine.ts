@@ -1,10 +1,11 @@
 import * as vscode from "vscode";
-import { spawn, exec, ChildProcess } from "child_process";
+import { spawn, ChildProcess } from "child_process";
 import * as http from "http";
-import * as net from "net";
+import { createInterface } from "readline";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
+import { randomBytes } from "crypto";
 
 const HEALTH_TIMEOUT_MS = 3000;
 const STARTUP_TIMEOUT_MS = 10000;
@@ -13,36 +14,6 @@ const isWindows = process.platform === "win32";
 
 function homeDir(): string {
   return os.homedir();
-}
-
-function killProcessOnPort(port: number): Promise<void> {
-  return new Promise((resolve) => {
-    if (isWindows) {
-      exec(
-        `netstat -ano | findstr :${port} | findstr LISTENING`,
-        { timeout: 5000, windowsHide: true },
-        (err, stdout) => {
-          if (err || !stdout) { resolve(); return; }
-          const lines = stdout.trim().split(/\r?\n/);
-          const pids = new Set<string>();
-          for (const line of lines) {
-            const parts = line.trim().split(/\s+/);
-            const pid = parts[parts.length - 1];
-            if (pid && /^\d+$/.test(pid)) pids.add(pid);
-          }
-          if (pids.size === 0) { resolve(); return; }
-          const pidList = Array.from(pids).join(",");
-          exec(`taskkill /PID ${pidList} /T /F`, { timeout: 5000, windowsHide: true }, () => resolve());
-        },
-      );
-    } else {
-      exec(
-        `lsof -ti:${port} | xargs kill -9 2>/dev/null`,
-        { timeout: 3000 },
-        () => resolve(),
-      );
-    }
-  });
 }
 
 function resolveEnginePath(configuredPath: string): string {
@@ -83,328 +54,233 @@ function resolveEnginePath(configuredPath: string): string {
   return isWindows ? "codewhale.exe" : "codewhale";
 }
 
-/** Find a free TCP port by binding to port 0 */
-function findFreePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const srv = net.createServer();
-    srv.listen(0, "127.0.0.1", () => {
-      const port = (srv.address() as net.AddressInfo).port;
-      srv.close(() => resolve(port));
-    });
-    srv.on("error", reject);
-  });
-}
-
 export class CodeWhaleEngine {
   private process: ChildProcess | null = null;
-  private _port: number = 7878;
-  private _host: string = "127.0.0.1";
+  private _port = 7878;
+  private readonly _host = "127.0.0.1";
+  private _token: string | null = null;
   private _running = false;
-  private _disposables: vscode.Disposable[] = [];
+  private _starting: Promise<void> | null = null;
+  private _stopping: Promise<void> | null = null;
+  private _workspaceKey = "";
+  private generation = 0;
+  private disposed = false;
 
   constructor(
     private outputChannel: vscode.OutputChannel,
     private context: vscode.ExtensionContext
   ) {}
 
-  get port(): number {
-    return this._port;
-  }
-
-  get host(): string {
-    return this._host;
-  }
-
-  get baseUrl(): string {
-    return `http://${this._host}:${this._port}`;
-  }
-
-  get token(): string | null {
-    return null;
-  }
-
-  get isRunning(): boolean {
-    return this._running;
-  }
-
-  private _starting: Promise<void> | null = null;
-  private _workspaceKey: string = "";
+  get port(): number { return this._port; }
+  get host(): string { return this._host; }
+  get baseUrl(): string { return `http://${this._host}:${this._port}`; }
+  get token(): string | null { return this._token; }
+  get isRunning(): boolean { return this._running; }
 
   private getWorkspaceKey(): string {
-    const ws = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-    if (!ws) return "global";
-    const hash = ws.replace(/[^a-zA-Z0-9]/g, "_").slice(0, 32);
-    return `ws_${hash}`;
-  }
-
-  private getPortFile(): string {
-    const key = this.getWorkspaceKey();
-    return path.join(this.context.globalStorageUri.fsPath, `serve.${key}.port`);
-  }
-
-  private getLegacyPortFile(): string {
-    return path.join(this.context.globalStorageUri.fsPath, "serve.port");
+    return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? "";
   }
 
   async ensureRunning(): Promise<void> {
-    if (this._running && this.process && this._workspaceKey === this.getWorkspaceKey()) {
-      return;
-    }
+    if (this.disposed) throw new Error("Engine has been disposed");
+    if (!vscode.workspace.isTrusted) throw new Error("Trust this workspace before starting CodeWhale");
+    const workspace = this.getWorkspaceKey();
+    if (this._running && this.process && this._workspaceKey === workspace) return;
     if (this._starting) {
-      return this._starting;
-    }
-    this._starting = this._doEnsureRunning();
-    try {
       await this._starting;
-    } finally {
-      this._starting = null;
+      return this.ensureRunning();
     }
+    const starting = this.launch(workspace);
+    this._starting = starting;
+    try { await starting; }
+    finally { if (this._starting === starting) this._starting = null; }
   }
 
-  private async _doEnsureRunning(): Promise<void> {
-    const currentKey = this.getWorkspaceKey();
-    if (this._running && this.process && this._workspaceKey === currentKey) {
-      return;
-    }
+  async start(): Promise<void> { await this.ensureRunning(); }
 
-    const portFile = this.getPortFile();
-    const legacyPortFile = this.getLegacyPortFile();
-
-    const savedPort = this.tryReadPort(portFile) ?? this.tryReadPort(legacyPortFile);
-    if (savedPort !== null) {
-      this._port = savedPort;
-      this.log(`Found saved port ${this._port}, checking health...`);
-      if (await this.checkHealth()) {
-        this._running = true;
-        this._workspaceKey = currentKey;
-        this.log(`Reusing existing engine on port ${this._port}`);
-        return;
-      }
-      this.log(`Saved port ${this._port} not responding, starting new instance`);
-    }
-
-    await this.start();
-
-    try {
-      fs.mkdirSync(this.context.globalStorageUri.fsPath, { recursive: true });
-      fs.writeFileSync(portFile, String(this._port));
-      this._workspaceKey = currentKey;
-    } catch { /* ignore */ }
-  }
-
-  private tryReadPort(file: string): number | null {
-    try {
-      const port = parseInt(fs.readFileSync(file, "utf8").trim(), 10);
-      if (port > 0 && port < 65536) {
-        return port;
-      }
-    } catch { /* no file or invalid */ }
-    return null;
-  }
-
-  async start(): Promise<void> {
-    await this.stop();
-
-    const portFile = this.getPortFile();
-    try {
-      const savedPort = parseInt(fs.readFileSync(portFile, "utf8").trim(), 10);
-      if (savedPort > 0) {
-        this.log(`Killing any orphan process on port ${savedPort}...`);
-        await killProcessOnPort(savedPort);
-        await new Promise(resolve => setTimeout(resolve, 300));
-      }
-    } catch { /* no port file */ }
-
-    // 1. Pick a random free port so we never conflict with old serve instances
-    this._port = await findFreePort();
-    this.log(`Selected free port: ${this._port}`);
-
-    // 2. Use a dedicated tasks directory under the extension's storage
+  private async launch(workspace: string): Promise<void> {
+    const stopping = this.stop();
+    const generation = this.generation;
+    await stopping;
+    this.assertCurrent(generation);
+    this._port = 0;
+    let port: number | undefined;
+    const token = randomBytes(32).toString("hex");
+    this._token = token;
     const tasksDir = path.join(this.context.globalStorageUri.fsPath, "tasks");
-    this.log(`Tasks dir: ${tasksDir}`);
-
-    // 3. Start fresh engine
-    const cfg = vscode.workspace.getConfiguration("brotherwhale");
-    const configuredPath = cfg.get<string>("enginePath", "codewhale");
-    const enginePath = resolveEnginePath(configuredPath);
-    const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-
-    const baseArgs: string[] = [];
-    if (workspacePath) {
-      baseArgs.push("--workspace", workspacePath);
-    }
-    baseArgs.push(
-      "serve",
-      "--http",
-      "--host",
-      this._host,
-      "--port",
-      String(this._port),
-      "--insecure"
-    );
-
-    this.log(
-      `Starting: ${enginePath} ${baseArgs.join(" ")}`
-    );
-    this.log(`With DEEPSEEK_TASKS_DIR=${tasksDir}`);
-
+    const config = vscode.workspace.getConfiguration("brotherwhale");
+    const enginePath = resolveEnginePath(config.get<string>("enginePath", "codewhale"));
+    const args = workspace ? ["--workspace", workspace] : [];
+    args.push("serve", "--http", "--host", this._host, "--port", "0");
     const extraPaths = isWindows
-      ? [
-          path.join(process.env.APPDATA || path.join(homeDir(), "AppData", "Roaming"), "npm"),
-        ]
+      ? [path.join(process.env.APPDATA || path.join(homeDir(), "AppData", "Roaming"), "npm")]
       : ["/opt/homebrew/bin", "/usr/local/bin", "/home/linuxbrew/.linuxbrew/bin"];
-
     const pathSep = isWindows ? ";" : ":";
     const pathKey = isWindows ? "Path" : "PATH";
     const existingPath = process.env.PATH || process.env.Path || "";
-    const extendedEnv: Record<string, string> = {
-      ...process.env as Record<string, string>,
+    const env: NodeJS.ProcessEnv = {
+      ...process.env,
       DEEPSEEK_TASKS_DIR: tasksDir,
-      [pathKey]: [
-        ...existingPath.split(pathSep),
-        ...extraPaths.filter((p) => !existingPath.split(pathSep).includes(p)),
-      ].join(pathSep),
+      CODEWHALE_RUNTIME_TOKEN: token,
+      [pathKey]: [...existingPath.split(pathSep), ...extraPaths.filter(p => !existingPath.split(pathSep).includes(p))].join(pathSep),
     };
-    if (isWindows && pathKey === "Path" && process.env.PATH) {
-      delete extendedEnv.PATH;
+    delete env[isWindows ? "PATH" : "Path"];
+    // Never inherit an alternate token or pass the generated secret in argv.
+    delete env.DEEPSEEK_RUNTIME_TOKEN;
+    this.log(`Starting: ${enginePath} ${args.join(" ")}`);
+    let child: ChildProcess;
+    try {
+      child = spawn(enginePath, args, { stdio: ["ignore", "pipe", "pipe"], env, windowsHide: true });
+    } catch (error) {
+      this._token = null;
+      throw error;
     }
-    if (!isWindows && process.env.Path) {
-      delete extendedEnv.Path;
-    }
-
-    const spawnOptions: import("child_process").SpawnOptions = {
-      stdio: ["ignore", "pipe", "pipe"],
-      env: extendedEnv,
-      windowsHide: true,
+    this.process = child;
+    let spawnError: Error | undefined;
+    // Read the address from this child after bind succeeds. Reserving and then
+    // releasing a port before spawn would let another listener win the gap.
+    const outputLines = child.stdout ? createInterface({ input: child.stdout }) : undefined;
+    outputLines?.on("line", (line: string) => {
+      if (!line.startsWith("Runtime API listening on ")) return;
+      const match = /^Runtime API listening on http:\/\/127\.0\.0\.1:(\d+)$/.exec(line);
+      const announced = match ? Number(match[1]) : 0;
+      if (!announced || announced > 65535 || (port !== undefined && port !== announced)) {
+        spawnError = new Error("Runtime announced an invalid local listener");
+        return;
+      }
+      port = announced;
+    });
+    const clear = () => {
+      if (this.process === child) {
+        this.process = null;
+        this._running = false;
+        this._token = null;
+      }
     };
-    if (!isWindows) {
-      spawnOptions.detached = true;
-    }
-
-    this.process = spawn(enginePath, baseArgs, spawnOptions);
-
-    this.process.stdout?.on("data", (data: Buffer) => {
-      this.log(`[stdout] ${data.toString().trim()}`);
-    });
-
-    this.process.stderr?.on("data", (data: Buffer) => {
-      this.log(`[stderr] ${data.toString().trim()}`);
-    });
-
-    let spawnError: string | null = null;
-    let exited = false;
-
-    this.process.on("exit", (code, signal) => {
+    child.stdout?.on("data", (data: Buffer) => this.log(`[stdout] ${data.toString().trim()}`, token));
+    child.stderr?.on("data", (data: Buffer) => this.log(`[stderr] ${data.toString().trim()}`, token));
+    child.once("exit", (code, signal) => {
+      outputLines?.close();
       this.log(`Engine exited (code=${code}, signal=${signal})`);
-      this._running = false;
-      this.process = null;
-      exited = true;
+      clear();
     });
-
-    this.process.on("error", (err) => {
-      this.log(`Engine error: ${err.message}`);
-      this._running = false;
-      this.process = null;
-      spawnError = err.message;
-    });
-
-    if (!isWindows) {
-      this.process.unref?.();
+    child.once("error", (error) => { outputLines?.close(); spawnError = error; clear(); });
+    try {
+      const deadline = Date.now() + STARTUP_TIMEOUT_MS;
+      while (true) {
+        this.assertCurrent(generation);
+        if (spawnError) throw spawnError;
+        if (this.process !== child) throw new Error("Engine exited before becoming ready");
+        // Public health is insufficient: the owned child must enforce its token.
+        if (port !== undefined) {
+          const anonymous = await this.probe(port);
+          if (anonymous?.status === 200) throw new Error("Runtime authentication is unavailable; update CodeWhale");
+          if (anonymous?.status === 401) {
+            const authenticated = await this.probe(port, token);
+            if (authenticated?.status === 200 && Array.isArray(authenticated.body)) break;
+          }
+        }
+        if (Date.now() >= deadline) throw new Error("Engine failed to start within timeout");
+        await new Promise(resolve => setTimeout(resolve, HEALTH_RETRY_INTERVAL_MS));
+      }
+      this.assertCurrent(generation);
+      if (this.process !== child) throw new Error("Engine exited before becoming ready");
+      this._port = port!;
+      this._workspaceKey = workspace;
+      this._running = true;
+      this.log(`Engine ready on port ${port}`);
+    } catch (error) {
+      if (this.process === child) await this.stop();
+      throw error;
     }
+  }
 
-    await this.waitForHealth();
-
-    if (spawnError) {
-      throw new Error(`Failed to start engine: ${spawnError}. Is 'codewhale' installed and in PATH?`);
-    }
-
-    if (exited || !this.process) {
-      throw new Error("Engine process exited immediately. Is 'codewhale' installed and in PATH?");
-    }
-
-    this._running = true;
-    this.log(`Engine ready on port ${this._port}`);
+  private assertCurrent(generation: number): void {
+    if (this.disposed || generation !== this.generation) throw new Error("Engine startup cancelled");
   }
 
   async stop(): Promise<void> {
-    if (this.process) {
-      this.log("Stopping engine...");
+    this.generation++;
+    const child = this.process;
+    this.process = null;
+    this._running = false;
+    this._token = null;
+    if (!child || child.exitCode !== null || child.signalCode !== null || !child.pid) {
+      await this._stopping;
+      return;
+    }
+    this.log("Stopping the engine started by this window...");
+    const stopping = new Promise<void>((resolve) => {
+      let settled = false;
+      const done = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve();
+      };
+      const timer = setTimeout(() => {
+        // Only the captured owned child may be terminated. Never discover a
+        // process from a port file, which can outlive or refer to another app.
+        try {
+          if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+        } catch { /* already exited */ }
+        done();
+      }, 3000);
+      child.once("exit", done);
       try {
         if (isWindows) {
-          spawn("taskkill", ["/PID", String(this.process.pid), "/T", "/F"], {
-            stdio: "ignore",
-            windowsHide: true,
-          });
-        } else {
-          this.process.kill("SIGTERM");
-        }
-      } catch { /* already dead */ }
-      this.process = null;
-      this._running = false;
-    }
-    try {
-      const portFile = path.join(this.context.globalStorageUri.fsPath, "serve.port");
-      fs.unlinkSync(portFile);
-    } catch { /* ignore */ }
+          const killer = spawn("taskkill", ["/PID", String(child.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
+          killer.once("error", () => { try { child.kill(); } catch { /* already exited */ } });
+        } else child.kill("SIGTERM");
+      } catch { done(); }
+    });
+    this._stopping = stopping;
+    try { await stopping; } finally { if (this._stopping === stopping) this._stopping = null; }
   }
 
   async restart(): Promise<void> {
-    await this.stop();
-    await this.start();
+    const starting = this._starting;
+    const stopping = this.stop();
+    const generation = this.generation;
+    await stopping;
+    if (starting) { try { await starting; } catch { /* cancelled start */ } }
+    this.assertCurrent(generation);
+    await this.ensureRunning();
   }
 
-  private async checkHealth(): Promise<boolean> {
-    return new Promise((resolve) => {
-      const req = http.get(
-        `${this.baseUrl}/health`,
-        { timeout: HEALTH_TIMEOUT_MS },
-        (res) => {
-          let body = "";
-          res.on("data", (chunk) => (body += chunk));
-          res.on("end", () => {
-            try {
-              resolve(JSON.parse(body).status === "ok");
-            } catch {
-              resolve(false);
-            }
-          });
-        }
-      );
-      req.on("error", () => resolve(false));
-      req.on("timeout", () => {
-        req.destroy();
-        resolve(false);
-      });
-    });
-  }
-
-  private waitForHealth(): Promise<void> {
-    return new Promise((resolve, reject) => {
-      const deadline = Date.now() + STARTUP_TIMEOUT_MS;
-      const tryCheck = () => {
-        if (Date.now() > deadline) {
-          reject(new Error("Engine failed to start within timeout"));
-          return;
-        }
-        this.checkHealth().then((ok) => {
-          if (ok) resolve();
-          else setTimeout(tryCheck, HEALTH_RETRY_INTERVAL_MS);
+  private probe(port: number, token?: string): Promise<{ status: number; body: unknown } | null> {
+    return new Promise(resolve => {
+      const req = http.get(`http://${this._host}:${port}/v1/threads?limit=1`, {
+        timeout: HEALTH_TIMEOUT_MS,
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      }, res => {
+        let body = "";
+        res.on("data", chunk => {
+          body += chunk;
+          if (body.length > 65536) { req.destroy(); resolve(null); }
         });
-      };
-      tryCheck();
+        res.on("error", () => resolve(null));
+        res.on("end", () => {
+          try { resolve({ status: res.statusCode ?? 0, body: JSON.parse(body) }); }
+          catch { resolve({ status: res.statusCode ?? 0, body: null }); }
+        });
+      });
+      req.on("error", () => resolve(null));
+      req.on("timeout", () => { req.destroy(); resolve(null); });
     });
   }
 
-  private log(msg: string): void {
-    const line = `[CodeWhale Engine] ${msg}`;
+  private log(msg: string, token = this._token): void {
+    const safe = token ? msg.split(token).join("[REDACTED]") : msg;
+    const line = `[CodeWhale Engine] ${safe}`;
     this.outputChannel.appendLine(line);
     try {
-      const logFile = path.join(this.context.globalStorageUri.fsPath, "engine.log");
-      fs.appendFileSync(logFile, `${new Date().toISOString()} ${line}\n`);
-    } catch { /* ignore */ }
+      fs.appendFileSync(path.join(this.context.globalStorageUri.fsPath, "engine.log"), `${new Date().toISOString()} ${line}\n`);
+    } catch { /* logging must not block shutdown */ }
   }
 
   dispose(): void {
-    for (const d of this._disposables) d.dispose();
+    this.disposed = true;
+    void this.stop().catch(() => { /* best effort on synchronous disposal; deactivate awaits stop */ });
   }
 }

@@ -113,3 +113,28 @@ describe("ChatProvider undo/retry server flow", () => {
     expect(postMessage).toHaveBeenCalledWith({ type: "historyUpdated" });
   });
 });
+
+describe("single-file revert boundary", () => {
+  it("keeps per-file restore unavailable even when whole-workspace snapshots exist", () => {
+    const { provider } = createProvider();
+    (provider as any).apiCapabilities.snapshotList = true;
+    (provider as any).apiCapabilities.snapshotRestore = true;
+    const capabilities = (provider as any).getWebviewCapabilities();
+    expect(capabilities.revertFileChange).toBe(false);
+    expect(capabilities.undoLastTurn).toBe(true);
+  });
+
+  it("rejects old webview revert messages without restoring files or changing displayed changes", async () => {
+    const { provider, api, postMessage } = createProvider();
+    const snapshotApi = api as any;
+    snapshotApi.listSnapshots = vi.fn(); snapshotApi.restoreSnapshot = vi.fn();
+    (provider as any).apiCapabilities.snapshotList = true;
+    (provider as any).apiCapabilities.snapshotRestore = true;
+    const changes = structuredClone((provider as any).sessionState.data.turnFileChanges);
+    await (provider as any).handleRevertFileChange("a.ts", "modified", "untrusted diff");
+    expect(snapshotApi.listSnapshots).not.toHaveBeenCalled();
+    expect(snapshotApi.restoreSnapshot).not.toHaveBeenCalled();
+    expect((provider as any).sessionState.data.turnFileChanges).toEqual(changes);
+    expect(postMessage).toHaveBeenCalledWith({ type: "info", message: expect.stringContaining("Single-file revert is unavailable") });
+  });
+});

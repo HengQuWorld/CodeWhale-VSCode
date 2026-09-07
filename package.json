@@ -79,12 +79,8 @@
         "brotherwhale.enginePath": {
           "type": "string",
           "default": "codewhale",
-          "description": "%config.enginePath.description%"
-        },
-        "brotherwhale.enginePort": {
-          "type": "number",
-          "default": 7878,
-          "description": "%config.enginePort.description%"
+          "description": "%config.enginePath.description%",
+          "scope": "machine"
         },
         "brotherwhale.defaultModel": {
           "type": "string",
@@ -99,7 +95,8 @@
             "yolo"
           ],
           "default": "agent",
-          "description": "%config.defaultMode.description%"
+          "description": "%config.defaultMode.description%",
+          "scope": "machine"
         },
         "brotherwhale.reasoningEffort": {
           "type": "string",
@@ -117,12 +114,14 @@
         "brotherwhale.autoStartEngine": {
           "type": "boolean",
           "default": true,
-          "description": "%config.autoStartEngine.description%"
+          "description": "%config.autoStartEngine.description%",
+          "scope": "machine"
         },
         "brotherwhale.autoApprove": {
           "type": "boolean",
           "default": false,
-          "description": "%config.autoApprove.description%"
+          "description": "%config.autoApprove.description%",
+          "scope": "machine"
         },
         "brotherwhale.showThreadList": {
           "type": "boolean",
@@ -161,5 +160,10 @@
     "vitest": "^4.1.7",
     "webpack": "^5.90.0",
     "webpack-cli": "^5.1.0"
+  },
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false
+    }
   }
 }

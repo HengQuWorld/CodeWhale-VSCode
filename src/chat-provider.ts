@@ -2482,8 +2482,8 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       saveSession: this.apiCapabilities.saveSession,
       undoLastTurn: this.apiCapabilities.threadPatchUndo,
       retryLastTurn: this.apiCapabilities.threadRetry,
-      revertFileChange:
-        this.apiCapabilities.snapshotList && this.apiCapabilities.snapshotRestore,
+      // Workspace snapshot restore cannot implement a per-file action.
+      revertFileChange: false,
       turnSteer: this.apiCapabilities.turnSteer,
     };
   }
@@ -2943,53 +2943,14 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     }
   }
 
-  /**
-   * Revert a file change by restoring the most recent pre-turn snapshot
-   * via the server-side SnapshotRepo API. This matches TUI's `patch_undo`
-   * behavior — using git-based snapshots instead of client-side diff
-   * reconstruction, which is more reliable and supports multiple undos.
-   */
+  /** A workspace snapshot must never be used to implement a single-file action. */
   private async handleRevertFileChange(
-    filePath: string,
+    _filePath: string,
     _changeType: string,
     _diff: string | undefined
   ): Promise<void> {
-    if (
-      !this.apiCapabilities.snapshotList ||
-      !this.apiCapabilities.snapshotRestore
-    ) {
-      this.postMessage({ type: "info", message: t().revertNotSupported });
-      return;
-    }
-
-    try {
-      await this.api.ensureReady();
-
-      // Find the most recent pre-turn snapshot.
-      const snapshots = await this.api.listSnapshots({ limit: 20 });
-      const preTurn = snapshots.find((s) => s.label.startsWith("pre-turn:"));
-
-      if (!preTurn) {
-        this.postMessage({ type: "info", message: t().revertNotAvailable });
-        return;
-      }
-
-      // Restore the snapshot on the server side.
-      await this.api.restoreSnapshot(preTurn.id);
-
-      // Remove the change from the in-memory turn record.
-      this.turnFileChanges = this.turnFileChanges.filter(
-        (fc) => fc.filePath !== filePath
-      );
-      this.refreshWorkPanel();
-
-      this.postMessage({ type: "info", message: t().revertSuccess(filePath) });
-    } catch (err) {
-      this.postMessage({
-        type: "error",
-        message: t().revertFailure(filePath, getErrorMessage(err)),
-      });
-    }
+    // Reject old/replayed webview messages as well as hiding the button.
+    this.postMessage({ type: "info", message: t().revertNotSupported });
   }
 
   public async handleCompact(): Promise<void> {

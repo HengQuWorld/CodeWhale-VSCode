@@ -63,7 +63,7 @@ The extension will attempt to locate the `codewhale` binary automatically from s
 ### Engine Management
 - **Auto-start** — the CodeWhale engine starts automatically when the extension activates.
 - **Restart on demand** — use the `CodeWhale: Restart Engine` command or `/restart` if something goes wrong.
-- **Port persistence** — the engine reuses its last known port across sessions for faster startup.
+- **Window-owned Runtime** — each trusted window starts an authenticated Runtime on a fresh local port; saved sessions can be resumed after a restart.
 
 ### Built for VS Code
 - **Activity bar integration** — dedicated CodeWhale icon in the activity bar.
@@ -158,7 +158,6 @@ CodeWhale is configurable via VS Code settings (`Cmd+,` → search "brotherwhale
 | Setting | Default | Description |
 |---|---|---|
 | `brotherwhale.enginePath` | `"codewhale"` | Path to the codewhale binary |
-| `brotherwhale.enginePort` | `7878` | Port for the CodeWhale runtime API |
 | `brotherwhale.defaultModel` | `"deepseek-v4-pro"` | Default model for new threads |
 | `brotherwhale.defaultMode` | `"agent"` | Default mode (agent / plan / yolo) |
 | `brotherwhale.reasoningEffort` | `"auto"` | Reasoning effort level |
@@ -223,3 +222,15 @@ npx @vscode/vsce package --no-dependencies  # build VSIX
 ## License
 
 [MIT](LICENSE)
+
+### Runtime ownership and recovery
+
+Each trusted VS Code window starts its own authenticated local Runtime. Old port
+files are ignored; restarting never kills an unrelated service. The Runtime token
+is generated for that process and kept out of command arguments, settings, and logs.
+
+Reloading or closing the extension stops that window's Runtime and interrupts active
+work. Completed, saved sessions remain available through Sessions. Save or finish
+active work before reloading; active-turn continuity across reload is not supported.
+The per-file revert button is disabled until the Runtime offers file-scoped restore;
+Undo last turn remains available through the existing thread API.

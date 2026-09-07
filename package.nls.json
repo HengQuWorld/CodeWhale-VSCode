@@ -8,7 +8,6 @@
   "commands.compactContext.title": "CodeWhale: Compact Context",
   "commands.restartEngine.title": "CodeWhale: Restart Engine",
   "config.enginePath.description": "Path to the codewhale binary",
-  "config.enginePort.description": "Port for the CodeWhale runtime API server",
   "config.defaultModel.description": "Default model for new threads",
   "config.defaultMode.description": "Default mode for new threads (agent, plan, or yolo)",
   "config.reasoningEffort.description": "Reasoning effort level (auto, off, low, medium, high, max)",

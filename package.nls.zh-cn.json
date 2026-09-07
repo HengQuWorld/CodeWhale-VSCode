@@ -8,7 +8,6 @@
   "commands.compactContext.title": "CodeWhale: 压缩上下文",
   "commands.restartEngine.title": "CodeWhale: 重启引擎",
   "config.enginePath.description": "codewhale 可执行文件路径",
-  "config.enginePort.description": "CodeWhale 运行时 API 服务器端口",
   "config.defaultModel.description": "新会话的默认模型",
   "config.defaultMode.description": "新会话的默认模式（agent、plan 或 yolo）",
   "config.reasoningEffort.description": "思考深度级别（auto、off、low、medium、high、max）",

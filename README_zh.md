@@ -63,7 +63,7 @@ CodeWhale for VS Code 是 [CodeWhale](https://github.com/Hmbown/CodeWhale.git) �
 ### 引擎管理
 - **自动启动** — 扩展激活时 CodeWhale 引擎自动启动。
 - **按需重启** — 遇到问题时使用 `CodeWhale: 重启引擎` 命令或 `/restart`。
-- **端口持久化** — 引擎跨会话复用上次的端口，加快启动速度。
+- **窗口独立的 Runtime** — 每个受信任的窗口启动自己的认证 Runtime，由操作系统分配本地端口；重启后可以恢复已保存的会话。
 
 ### 为 VS Code 打造
 - **活动栏集成** — 活动栏中专属 CodeWhale 图标。
@@ -158,7 +158,6 @@ npx @vscode/vsce package --no-dependencies
 | 设置项 | 默认值 | 说明 |
 |---|---|---|
 | `brotherwhale.enginePath` | `"codewhale"` | codewhale 程序路径 |
-| `brotherwhale.enginePort` | `7878` | CodeWhale 运行时 API 端口 |
 | `brotherwhale.defaultModel` | `"deepseek-v4-pro"` | 新线程的默认模型 |
 | `brotherwhale.defaultMode` | `"agent"` | 默认模式（agent / plan / yolo） |
 | `brotherwhale.reasoningEffort` | `"auto"` | 推理深度级别 |
@@ -223,3 +222,13 @@ npx @vscode/vsce package --no-dependencies  # 打包 VSIX
 ## 许可证
 
 [MIT](LICENSE)
+
+### Runtime 生命周期与撤销
+
+扩展只使用当前窗口启动的 Runtime，不连接旧端口文件指向的进程，
+也不会按端口终止其他程序。关闭或重新加载窗口会停止该 Runtime，
+并中断正在运行的任务；已保存的会话可在重新打开后恢复。
+重新加载前请等待任务完成或取消任务，目前不支持运行中的任务跨窗口重载继续执行。
+
+单文件恢复暂不可用，因为 Runtime 快照恢复会影响整个工作区。
+完整轮次的撤销和重试继续使用 Runtime 的线程级补丁接口。
