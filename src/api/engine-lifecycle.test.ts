@@ -5,7 +5,7 @@ import * as path from "path";
 import * as http from "http";
 import { ChildProcess } from "child_process";
 
-const state = vi.hoisted(() => ({ fixture: "", storage: "", workspace: "", trusted: true, mode: "normal", launches: [] as any[], children: [] as any[] }));
+const state = vi.hoisted(() => ({ fixture: "", storage: "", workspace: "", trusted: true, mode: "normal", launches: [] as any[], children: [] as any[], competing: [] as any[], competingRequests: 0 }));
 vi.mock("vscode", () => ({ workspace: {
   get isTrusted() { return state.trusted; },
   get workspaceFolders() { return [{ uri: { fsPath: state.workspace } }]; },
@@ -13,9 +13,20 @@ vi.mock("vscode", () => ({ workspace: {
 } }));
 vi.mock("child_process", async (importOriginal) => {
   const real = await importOriginal<typeof import("child_process")>();
+  const network = await import("node:http");
   return { ...real, spawn: (command: string, args: string[], options: any) => {
     if (command !== "fixture-engine") return real.spawn(command, args, options);
     state.launches.push({ command, args, options });
+    if (state.mode === "occupied") {
+      // Occupy the selected port before the owned child can bind it.
+      const competing = network.createServer((req, res) => {
+        state.competingRequests++;
+        res.writeHead(req.headers.authorization ? 200 : 401);
+        res.end(req.headers.authorization ? "[]" : "{}");
+      });
+      competing.listen(Number(args.at(-1)), "127.0.0.1");
+      state.competing.push(competing);
+    }
     const child = real.spawn(process.execPath, [state.fixture, ...args], { ...options, env: { ...options.env, FIXTURE_MODE: state.mode, FIXTURE_STORAGE: state.storage } });
     state.children.push(child);
     return child;
@@ -62,7 +73,10 @@ else {
    const announce = () => {
      process.stdout.write('Runtime API listening on http://127.0.0.1:');
      setTimeout(() => console.log(server.address().port), 5);
-     setTimeout(() => console.log(token), 10);
+     setTimeout(() => {
+       process.stdout.write(token.slice(0, 32));
+       setTimeout(() => console.log(token.slice(32)), 5);
+     }, 10);
    };
    if (process.env.FIXTURE_MODE === 'delayed') {
      fs.writeFileSync(path.join(storage, 'bound'), String(server.address().port));
@@ -73,13 +87,14 @@ else {
  });
 }
 `);
-  state.trusted = true; state.mode = "normal"; state.launches = []; state.children = []; engines = [];
+  state.trusted = true; state.mode = "normal"; state.launches = []; state.children = []; state.competing = []; state.competingRequests = 0; engines = [];
 });
 afterEach(async () => {
   await Promise.all(engines.map(item => item.stop()));
   for (const child of state.children as ChildProcess[]) {
     if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
   }
+  await Promise.all(state.competing.map(server => new Promise<void>(resolve => server.close(() => resolve()))));
   fs.rmSync(root, { recursive: true, force: true });
 });
 
@@ -90,11 +105,13 @@ describe("owned Runtime lifecycle", () => {
     expect(state.launches).toHaveLength(1);
     expect(item.token).toMatch(/^[0-9a-f]{64}$/);
     expect(state.launches[0].args).not.toContain("--insecure");
-    expect(state.launches[0].args.at(-1)).toBe("0");
+    expect(Number(state.launches[0].args.at(-1))).toBeGreaterThan(0);
     expect(state.launches[0].args.join(" ")).not.toContain(item.token);
     expect(await getStatus(item.port)).toBe(401);
     expect(await getStatus(item.port, item.token!)).toBe(200);
     expect(logs.join("\n")).not.toContain(item.token);
+    expect(logs.join("\n")).not.toContain(item.token!.slice(0, 32));
+    expect(logs.join("\n")).not.toContain(item.token!.slice(32));
     expect(fs.readFileSync(path.join(state.storage, "engine.log"), "utf8")).not.toContain(item.token);
   });
 
@@ -133,6 +150,16 @@ describe("owned Runtime lifecycle", () => {
       await item.stop();
       expect(unrelated.listening).toBe(true);
     } finally { await new Promise<void>(resolve => unrelated.close(() => resolve())); }
+  });
+
+  it("never contacts another listener that wins the selected port", async () => {
+    state.mode = "occupied";
+    const { item } = engine();
+    await expect(item.ensureRunning()).rejects.toThrow("exited");
+    expect(state.competingRequests).toBe(0);
+    expect(item.isRunning).toBe(false);
+    expect(item.token).toBeNull();
+    expect(state.competing[0].listening).toBe(true);
   });
 
   it("rejects a runtime that ignores authentication and cleans up that child", async () => {

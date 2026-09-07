@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import { spawn, ChildProcess } from "child_process";
 import * as http from "http";
 import { createInterface } from "readline";
+import * as net from "net";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -54,6 +55,19 @@ function resolveEnginePath(configuredPath: string): string {
   return isWindows ? "codewhale.exe" : "codewhale";
 }
 
+// Older Runtimes reject --port 0. Select a candidate here, then require the
+// owned child's post-bind receipt before contacting it: availability is not ownership.
+function findFreePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const listener = net.createServer();
+    listener.once("error", reject);
+    listener.listen(0, "127.0.0.1", () => {
+      const port = (listener.address() as net.AddressInfo).port;
+      listener.close(error => error ? reject(error) : resolve(port));
+    });
+  });
+}
+
 export class CodeWhaleEngine {
   private process: ChildProcess | null = null;
   private _port = 7878;
@@ -103,6 +117,8 @@ export class CodeWhaleEngine {
     const generation = this.generation;
     await stopping;
     this.assertCurrent(generation);
+    const requestedPort = await findFreePort();
+    this.assertCurrent(generation);
     this._port = 0;
     let port: number | undefined;
     const token = randomBytes(32).toString("hex");
@@ -111,7 +127,7 @@ export class CodeWhaleEngine {
     const config = vscode.workspace.getConfiguration("brotherwhale");
     const enginePath = resolveEnginePath(config.get<string>("enginePath", "codewhale"));
     const args = workspace ? ["--workspace", workspace] : [];
-    args.push("serve", "--http", "--host", this._host, "--port", "0");
+    args.push("serve", "--http", "--host", this._host, "--port", String(requestedPort));
     const extraPaths = isWindows
       ? [path.join(process.env.APPDATA || path.join(homeDir(), "AppData", "Roaming"), "npm")]
       : ["/opt/homebrew/bin", "/usr/local/bin", "/home/linuxbrew/.linuxbrew/bin"];
@@ -137,14 +153,15 @@ export class CodeWhaleEngine {
     }
     this.process = child;
     let spawnError: Error | undefined;
-    // Read the address from this child after bind succeeds. Reserving and then
-    // releasing a port before spawn would let another listener win the gap.
+    // Another listener can win the port-selection gap. Do not send any request
+    // until this child confirms its own bind succeeded.
     const outputLines = child.stdout ? createInterface({ input: child.stdout }) : undefined;
     outputLines?.on("line", (line: string) => {
+      this.log(`[stdout] ${line}`, token);
       if (!line.startsWith("Runtime API listening on ")) return;
       const match = /^Runtime API listening on http:\/\/127\.0\.0\.1:(\d+)$/.exec(line);
       const announced = match ? Number(match[1]) : 0;
-      if (!announced || announced > 65535 || (port !== undefined && port !== announced)) {
+      if (announced !== requestedPort || (port !== undefined && port !== announced)) {
         spawnError = new Error("Runtime announced an invalid local listener");
         return;
       }
@@ -157,14 +174,15 @@ export class CodeWhaleEngine {
         this._token = null;
       }
     };
-    child.stdout?.on("data", (data: Buffer) => this.log(`[stdout] ${data.toString().trim()}`, token));
-    child.stderr?.on("data", (data: Buffer) => this.log(`[stderr] ${data.toString().trim()}`, token));
+    const errorLines = child.stderr ? createInterface({ input: child.stderr }) : undefined;
+    errorLines?.on("line", (line: string) => this.log(`[stderr] ${line}`, token));
     child.once("exit", (code, signal) => {
       outputLines?.close();
+      errorLines?.close();
       this.log(`Engine exited (code=${code}, signal=${signal})`);
       clear();
     });
-    child.once("error", (error) => { outputLines?.close(); spawnError = error; clear(); });
+    child.once("error", (error) => { outputLines?.close(); errorLines?.close(); spawnError = error; clear(); });
     try {
       const deadline = Date.now() + STARTUP_TIMEOUT_MS;
       while (true) {
