@@ -94,8 +94,8 @@ describe("Slash command parsing", () => {
 
   it("parses mode with number shortcuts", () => {
     const shortcuts = ["1", "2", "3"];
-    const expected = ["agent", "plan", "yolo"];
-    const modeMap: Record<string, string> = { "1": "agent", "2": "plan", "3": "yolo" };
+    const expected = ["agent", "plan", "operate"];
+    const modeMap: Record<string, string> = { "1": "agent", "2": "plan", "3": "operate" };
     for (let i = 0; i < shortcuts.length; i++) {
       const result = parseSlashCommand(`/mode ${shortcuts[i]}`);
       expect(result?.args).toBe(shortcuts[i]);
@@ -109,11 +109,13 @@ describe("Settings update message format", () => {
     const msg = {
       type: "settingsUpdated",
       mode: "agent",
+      posture: "ask",
       model: "deepseek-v4-pro",
       reasoningEffort: "auto",
     };
     expect(msg.type).toBe("settingsUpdated");
     expect(msg.mode).toBe("agent");
+    expect(msg.posture).toBe("ask");
     expect(msg.model).toBe("deepseek-v4-pro");
     expect(msg.reasoningEffort).toBe("auto");
   });
@@ -123,10 +125,12 @@ describe("Settings update message format", () => {
       type: "ready",
       model: "deepseek-v4-pro",
       mode: "agent",
+      posture: "ask",
       reasoningEffort: "auto",
     };
     expect(msg.type).toBe("ready");
     expect(msg).toHaveProperty("mode");
+    expect(msg).toHaveProperty("posture");
     expect(msg).toHaveProperty("model");
     expect(msg).toHaveProperty("reasoningEffort");
   });

@@ -1,11 +1,5 @@
 import { describe, it, expect } from "vitest";
 
-interface TranslationEntry {
-  key: string;
-  enValue: string;
-  zhCnValue: string;
-}
-
 const COMMAND_KEYS = [
   "commandMode", "commandModel", "commandModels", "commandReasoning",
   "commandConfig", "commandSettings", "commandClear", "commandHelp",
@@ -27,7 +21,7 @@ const COMMAND_KEYS = [
 
 describe("i18n command translations", () => {
   const enTranslations: Record<string, string> = {
-    commandMode: "/mode - Switch mode (agent/plan/yolo)",
+    commandMode: "/mode - Switch mode (act/plan/operate)",
     commandModel: "/model - Switch model",
     commandModels: "/models - List available models",
     commandReasoning: "/reasoning - Set reasoning effort",
@@ -94,7 +88,7 @@ describe("i18n command translations", () => {
   };
 
   const zhCnTranslations: Record<string, string> = {
-    commandMode: "/mode - 切换模式 (agent/plan/yolo)",
+    commandMode: "/mode - 切换模式 (act/plan/operate)",
     commandModel: "/model - 切换模型",
     commandModels: "/models - 列出可用模型",
     commandReasoning: "/reasoning - 设置思考深度",
@@ -219,6 +213,7 @@ describe("i18n UI string translations", () => {
     { key: "eventStreamError", en: "Event stream error", zhCn: "事件流错误" },
     { key: "engineNotRunning", en: "DeepSeek engine is not running", zhCn: "DeepSeek 引擎未运行" },
     { key: "approvalRequired", en: "Approval required", zhCn: "需要审批" },
+    { key: "permissionLabel", en: "Permission", zhCn: "权限" },
     { key: "allow", en: "Allow", zhCn: "允许" },
     { key: "deny", en: "Deny", zhCn: "拒绝" },
   ];
@@ -236,7 +231,7 @@ describe("i18n UI string translations", () => {
   });
 
   it("English and Chinese translations are different for all keys", () => {
-    for (const { key, en, zhCn } of UI_KEYS) {
+    for (const { en, zhCn } of UI_KEYS) {
       expect(en).not.toBe(zhCn);
     }
   });

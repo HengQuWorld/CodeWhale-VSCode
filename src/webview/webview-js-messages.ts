@@ -5,7 +5,7 @@
  */
 import type { WebviewTranslations } from "./webview-html";
 
-export function getMessagesScript(tr: WebviewTranslations): string {
+export function getMessagesScript(_tr: WebviewTranslations): string {
   return `(function(){
   'use strict';
   var __i18n = window.__wvI18n;

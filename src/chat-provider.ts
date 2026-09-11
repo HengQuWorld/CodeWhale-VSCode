@@ -25,8 +25,18 @@ import { renderMarkdown } from "./utils/markdown";
 import { finalizeAssistantMessage } from "./utils/event-helpers";
 import { formatCostAmount, resolveCostCurrency } from "./utils/cost-calculator";
 import {
+  POSTURE_LABELS,
+  POSTURE_WIRE,
+  isYoloAlias,
+  normalizeMode,
+  normalizePosture,
+  postureFromThread,
+  type PermissionPosture,
+} from "./utils/modes";
+import {
   parseDiffToSides,
   stripTurnMeta,
+  isInternalRuntimeHandoff,
   reconstructOldContent,
   reconstructOriginalContent,
   getDiffStateForIndex,
@@ -290,6 +300,9 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
           msg.args as string
         );
         break;
+      case "setPosture":
+        await this.handleSetPosture(msg.posture as string);
+        break;
       case "switchProvider":
         await this.handleSwitchProvider(msg.provider as string, msg.model as string | undefined);
         break;
@@ -495,6 +508,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         type: "ready",
         model: this.getCurrentModel(),
         mode: this.getCurrentMode(),
+        posture: this.getEffectivePosture(),
         reasoningEffort: this.getCurrentReasoningEffort(),
         provider: this.currentProvider || undefined,
         runtimeVersion: this.runtimeVersion,
@@ -551,11 +565,12 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       // even on first load. Don't await — this is best-effort and must not
       // block the ready signal.
       void this.refreshProviders();
-      var initCfg = vscode.workspace.getConfiguration("brotherwhale");
+      const initCfg = vscode.workspace.getConfiguration("brotherwhale");
       this.postMessage({ 
         type: "ready", 
         model: this.currentThread?.model || this.getCurrentModel(),
-        mode: this.currentThread?.mode || this.getCurrentMode(),
+        mode: normalizeMode(this.currentThread?.mode || this.getCurrentMode()),
+        posture: this.getEffectivePosture(),
         reasoningEffort: this.getCurrentReasoningEffort(),
         provider: this.currentProvider || undefined,
         runtimeVersion: this.runtimeVersion,
@@ -563,7 +578,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       });
     } catch (err) {
       this.debugLog(`initializeThread ERROR: ${getErrorMessage(err)}\n${(err as Error).stack}`);
-      var errCfg = vscode.workspace.getConfiguration("brotherwhale");
+      const errCfg = vscode.workspace.getConfiguration("brotherwhale");
       this.postMessage({
         type: "error",
         message: formatError("Failed to initialize", err),
@@ -571,7 +586,8 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       this.postMessage({
         type: "ready",
         model: this.currentThread?.model || this.getCurrentModel(),
-        mode: this.currentThread?.mode || this.getCurrentMode(),
+        mode: normalizeMode(this.currentThread?.mode || this.getCurrentMode()),
+        posture: this.getEffectivePosture(),
         reasoningEffort: this.getCurrentReasoningEffort(),
         provider: this.currentProvider || undefined,
         runtimeVersion: this.runtimeVersion,
@@ -940,13 +956,14 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       // moves on to a different task (e.g. a plan-mode session would lock
       // the extension into plan mode forever).
       const sessionModel = session.metadata.model;
-      const sessionMode = session.metadata.mode || "agent";
+      const sessionMode = normalizeMode(session.metadata.mode || "agent");
       const cfg = vscode.workspace.getConfiguration("brotherwhale");
       const currentModel = cfg.get<string>("defaultModel", "deepseek-v4-pro");
       this.postMessage({
         type: "settingsUpdated",
         model: sessionModel || currentModel,
         mode: sessionMode,
+        posture: this.getCurrentPosture(),
         reasoningEffort: cfg.get<string>("reasoningEffort", "auto"),
       });
 
@@ -1049,6 +1066,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
 
           const combined = stripTurnMeta(textBlocks.join("\n"));
           if (!combined.trim()) continue;
+          if (isInternalRuntimeHandoff(textBlocks)) continue;
 
           this.messages.push({
             id: `user-turn-${this.messages.length}`,
@@ -1486,16 +1504,17 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       if (!this.currentThread) {
         const cfg = vscode.workspace.getConfiguration("brotherwhale");
         const model = cfg.get<string>("defaultModel", "deepseek-v4-pro");
-        const mode = cfg.get<string>("defaultMode", "agent");
+        const mode = normalizeMode(cfg.get<string>("defaultMode", "agent"));
+        const posture = this.getCurrentPosture();
         const workspace = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-        const isYolo = mode === "yolo";
-        const autoApprove = isYolo || cfg.get<boolean>("autoApprove", false);
+        const autoApprove = posture === "full_access" || cfg.get<boolean>("autoApprove", false);
         this.currentThread = await this.api.createThread({
           model,
           mode,
           workspace,
+          permission_posture: POSTURE_WIRE[posture],
           auto_approve: autoApprove,
-          trust_mode: isYolo,
+          trust_mode: posture === "full_access",
         });
         this.subscribeToEvents();
         this.refreshSessionList();
@@ -1533,14 +1552,16 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       try { await this.api.getThread(this.currentThread.id); } catch { threadOk = false; }
       if (!threadOk) {
         const cfg = vscode.workspace.getConfiguration("brotherwhale");
-        const mode = cfg.get<string>("defaultMode", "agent");
-        const autoApprove = cfg.get<boolean>("autoApprove", false);
+        const mode = normalizeMode(cfg.get<string>("defaultMode", "agent"));
+        const posture = this.getCurrentPosture();
+        const autoApprove = posture === "full_access" || cfg.get<boolean>("autoApprove", false);
         this.currentThread = await this.api.createThread({
           model: this.getCurrentModel(),
           mode,
           workspace: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
+          permission_posture: POSTURE_WIRE[posture],
           auto_approve: autoApprove,
-          trust_mode: mode === "yolo",
+          trust_mode: posture === "full_access",
         });
         this.subscribeToEvents();
         this.refreshSessionList();
@@ -1561,21 +1582,24 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
 
       const cfg = vscode.workspace.getConfiguration("brotherwhale");
       const reasoningEffort = cfg.get<string>("reasoningEffort", "auto");
-      const mode = this.currentThread.mode;
+      const mode = normalizeMode(this.currentThread.mode);
       const model = this.currentThread.model;
-      // Use the thread's persisted auto_approve / trust_mode instead of the
-      // config defaults.  When the user approves with "remember", the TUI
-      // flips thread.auto_approve to true (remember_thread_auto_approve) and
-      // the GUI mirrors that in handleApprovalDecision.  Sending the config
-      // value (typically false) here would override the thread's persisted
-      // state on every new turn, causing "remember" to silently revert and
-      // re-prompting for approvals the user already granted — which then
-      // surface as "Request cancelled while awaiting approval" when the turn
-      // is interrupted.
+      // Use the thread's persisted permission posture / auto_approve /
+      // trust_mode instead of the config defaults.  When the user approves with
+      // "remember", the TUI flips thread.auto_approve to true
+      // (remember_thread_auto_approve) and the GUI mirrors that in
+      // handleApprovalDecision.  Sending the config value (typically false)
+      // here would override the thread's persisted state on every new turn,
+      // causing "remember" to silently revert and re-prompting for approvals
+      // the user already granted — which then surface as "Request cancelled
+      // while awaiting approval" when the turn is interrupted.  The explicit
+      // posture is what keeps a non-full-access posture (e.g. Auto-Review) from
+      // being re-derived to Ask by the auto_approve compatibility input.
       const result = await this.api.startTurn(this.currentThread.id, fullText, {
         mode,
         model,
         reasoning_effort: reasoningEffort,
+        permission_posture: POSTURE_WIRE[postureFromThread(this.currentThread)],
         auto_approve: this.currentThread.auto_approve,
         trust_mode: this.currentThread.trust_mode,
       });
@@ -1753,7 +1777,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     };
     try {
       await fetchAndSend();
-    } catch (err) {
+    } catch {
       setTimeout(async () => {
         try { await fetchAndSend(); } catch { /* silent */ }
       }, 2000);
@@ -2600,6 +2624,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         type: "settingsUpdated",
         model: resolvedModel,
         mode: this.getCurrentMode(),
+        posture: this.getEffectivePosture(),
         reasoningEffort: this.getCurrentReasoningEffort(),
         provider: resp.provider || trimmed,
       });
@@ -3010,6 +3035,49 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     await this.slashHandler.handle(command, args);
   }
 
+  /** Switch the permission posture (Shift+Tab equivalent). Patches only
+   *  `permission_posture` so the runtime derives `auto_approve` / `trust_mode`
+   *  from the posture instead of the GUI sending stale cached booleans. */
+  private async handleSetPosture(posture: string): Promise<void> {
+    const normalized = normalizePosture(posture);
+    const wire = POSTURE_WIRE[normalized];
+    await vscode.workspace.getConfiguration("brotherwhale").update(
+      "defaultPermissionPosture",
+      wire,
+      vscode.ConfigurationTarget.Global,
+    );
+
+    let effective: PermissionPosture = normalized;
+    if (this.currentThread) {
+      try {
+        const updated = await this.api.updateThread(this.currentThread.id, {
+          permission_posture: wire,
+        });
+        this.currentThread = mergeThreadRecord(this.currentThread, updated, {
+          permission_posture: wire,
+        });
+        effective = postureFromThread(this.currentThread);
+      } catch (err) {
+        this.postMessage({
+          type: "error",
+          message: formatError("Failed to update permission posture", err),
+        });
+        effective = postureFromThread(this.currentThread);
+      }
+    }
+    this.postMessage({
+      type: "settingsUpdated",
+      mode: normalizeMode(this.currentThread?.mode || this.getCurrentMode()),
+      posture: effective,
+      model: this.currentThread?.model || this.getCurrentModel(),
+      reasoningEffort: this.getCurrentReasoningEffort(),
+    });
+    this.postMessage({
+      type: "info",
+      message: `Permission posture changed to ${POSTURE_LABELS[effective]}`,
+    });
+  }
+
   private async handleApprovalDecision(
     approvalId: string,
     decision: "allow" | "deny",
@@ -3026,7 +3094,23 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       // leading to a frozen UI (no approval.decided event arrives for
       // auto-approved calls, so the dialog never clears).
       if (remember && decision === "allow" && this.currentThread) {
-        this.currentThread = { ...this.currentThread, auto_approve: true };
+        // The runtime persists Full Access for the thread (see
+        // runtime_threads.rs remember_thread_auto_approve); mirror both the
+        // legacy boolean and the canonical posture so the status bar agrees
+        // with the engine. Report the *thread's* mode, not the global default:
+        // a loaded session may run in a mode the startup default does not name.
+        this.currentThread = {
+          ...this.currentThread,
+          auto_approve: true,
+          permission_posture: POSTURE_WIRE.full_access,
+        };
+        this.postMessage({
+          type: "settingsUpdated",
+          mode: normalizeMode(this.currentThread.mode),
+          posture: POSTURE_WIRE.full_access,
+          model: this.currentThread.model || this.getCurrentModel(),
+          reasoningEffort: this.getCurrentReasoningEffort(),
+        });
       }
       const tc = this.pendingApprovals.get(approvalId);
       if (tc) {
@@ -3157,7 +3241,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
             const currentUri = vscode.Uri.file(absPath);
             const doc = await vscode.workspace.openTextDocument(currentUri);
             newContent = doc.getText();
-          } catch (err) {
+          } catch {
             const parsed = parseDiffToSides(diffs![0]);
             newContent = parsed.newContent;
           }
@@ -3185,7 +3269,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
               oldContent = parsed.oldContent;
               newContent = parsed.newContent;
             }
-          } catch (err) {
+          } catch {
             const parsed = parseDiffToSides(diff!);
             oldContent = parsed.oldContent;
             newContent = parsed.newContent;
@@ -3198,7 +3282,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
             newContent = doc.getText();
             const reconstructed = reconstructOldContent(newContent, diff!);
             oldContent = reconstructed !== null ? reconstructed : parseDiffToSides(diff!).oldContent;
-          } catch (err) {
+          } catch {
             const parsed = parseDiffToSides(diff!);
             oldContent = parsed.oldContent;
             newContent = parsed.newContent;
@@ -4108,7 +4192,21 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
 
   private getCurrentMode(): string {
     const cfg = vscode.workspace.getConfiguration("brotherwhale");
-    return cfg.get<string>("defaultMode", "agent");
+    return normalizeMode(cfg.get<string>("defaultMode", "agent"));
+  }
+
+  /** Startup default permission posture. Legacy `defaultMode: "yolo"` is a
+   *  one-way shorthand for Act + Full Access and still wins when set. */
+  private getCurrentPosture(): PermissionPosture {
+    const cfg = vscode.workspace.getConfiguration("brotherwhale");
+    if (isYoloAlias(cfg.get<string>("defaultMode", "agent"))) return "full_access";
+    return normalizePosture(cfg.get<string>("defaultPermissionPosture", "ask"));
+  }
+
+  /** Effective posture for the active thread, falling back to the startup default. */
+  private getEffectivePosture(): PermissionPosture {
+    if (this.currentThread) return postureFromThread(this.currentThread);
+    return this.getCurrentPosture();
   }
 
   private getCurrentReasoningEffort(): string {

@@ -1218,7 +1218,8 @@ export function getWebviewCss(): string {
       padding: 4px 8px;
       border-bottom: 1px solid var(--border);
       display: flex;
-      gap: 12px;
+      flex-wrap: wrap;
+      gap: 4px 12px;
       align-items: center;
       font-size: 0.75em;
       color: var(--muted);

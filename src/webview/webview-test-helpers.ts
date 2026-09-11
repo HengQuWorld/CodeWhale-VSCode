@@ -65,6 +65,7 @@ export function makeTr(overrides?: Partial<WebviewTranslations>): WebviewTransla
     steerBadge: "steer",
     steerBadgeTitle: "Sent as mid-turn steering",
     modeLabel: "Mode",
+    permissionLabel: "Permission",
     reasoningEffortLabel: "Reasoning",
     welcomeTitle: "CodeWhale",
     welcomeSubtitle: "Your AI coding partner",

@@ -61,7 +61,7 @@ export function extractDiffForTool(
   output: string,
 ): string | undefined {
   // Standard path: diff is in the tool output (edit_file, write_file, etc.)
-  let diff = extractDiffFromOutput(output);
+  const diff = extractDiffFromOutput(output);
   if (diff) return diff;
 
   // apply_patch: diff lives in the input, not the output
@@ -265,6 +265,34 @@ export function stripTurnMeta(text: string): string {
     }
   }
   return trimmed;
+}
+
+/**
+ * True when a user-role message is a runtime-owned handoff rather than real
+ * user input, so it must not be rendered as a user bubble.
+ *
+ * Mirrors the TUI's `runtime_handoff::is_internal_runtime_handoff`: the
+ * trailing `<turn_meta>` block is engine-owned, and recognition stays
+ * structural so a person quoting the envelope cannot hide their own turn.
+ *
+ * Two families match:
+ *   - sub-agent / shell handoffs, whose provenance line is authoritative;
+ *   - `runtime` provenance, but *only* when the payload is one of the
+ *     runtime-owned envelopes (Operate contract, agent-topology checkpoint),
+ *     which is exactly what the TUI recognizes structurally.
+ */
+export function isInternalRuntimeHandoff(blocks: string[]): boolean {
+  if (blocks.length === 0) return false;
+  const last = (blocks[blocks.length - 1] || "").trim();
+  if (!last.startsWith("<turn_meta>")) return false;
+  if (/Input provenance:\s*(subagent_handoff|shell_completion)\b/i.test(last)) return true;
+  const first = (blocks[0] || "").trim();
+  return (
+    /Input provenance:\s*runtime\b/i.test(last) &&
+    /^<codewhale:(runtime_event kind="operate_contract"|runtime_state kind="agent_topology")/.test(
+      first
+    )
+  );
 }
 
 /**

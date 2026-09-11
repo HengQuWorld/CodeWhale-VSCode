@@ -51,7 +51,16 @@ class FakeElement {
     this.listeners.set(name, handler);
   }
 
+  dispatch(name: string, event: unknown): void {
+    const handler = this.listeners.get(name);
+    if (handler) handler(event);
+  }
+
   querySelector(): FakeElement | null {
+    return null;
+  }
+
+  closest(): FakeElement | null {
     return null;
   }
 
@@ -198,24 +207,29 @@ describe("webview-js-event-handler runtime", () => {
     harness.dispatchMessage({
       type: "ready",
       mode: "plan",
+      posture: "ask",
       model: "deepseek-v4-pro",
       reasoningEffort: "auto",
       runtimeVersion: "0.9.0",
       showThreadList: false,
     });
 
-    expect(harness.getElement("current-mode").textContent).toBe("plan");
+    expect(harness.getElement("current-mode").textContent).toBe("Plan");
+    expect(harness.getElement("current-mode").getAttribute("data-value")).toBe("plan");
+    expect(harness.getElement("current-posture").textContent).toBe("Ask");
     expect(harness.getElement("current-model").textContent).toBe("deepseek-v4-pro");
     expect(harness.getElement("current-reasoning").textContent).toBe("auto");
 
     harness.dispatchMessage({
       type: "settingsUpdated",
-      mode: "agent",
+      mode: "operate",
+      posture: "full_access",
       model: "deepseek-v4-pro",
       reasoningEffort: "high",
     });
 
-    expect(harness.getElement("current-mode").textContent).toBe("agent");
+    expect(harness.getElement("current-mode").textContent).toBe("Operate");
+    expect(harness.getElement("current-posture").textContent).toBe("Full Access");
     expect(harness.getElement("current-model").textContent).toBe("deepseek-v4-pro");
     expect(harness.getElement("current-reasoning").textContent).toBe("high");
     expect(harness.getElement("status-text").textContent).toBe("Ready (deepseek-v4-pro)");
@@ -285,5 +299,48 @@ describe("webview-js-event-handler runtime", () => {
 
     expect(harness.taskDetailCalls).toEqual([task]);
     expect(harness.agentDetailCalls).toEqual([run]);
+  });
+
+  it("posts setPosture when the permission dropdown selects a posture", () => {
+    const harness = createRuntimeHarness();
+    const settingsBar = harness.getElement("settings-bar");
+
+    const item = new FakeElement();
+    item.classList.add("dropdown-item");
+    item.setAttribute("data-value", "full_access");
+    const menu = new FakeElement();
+    const wrapper = new FakeElement();
+    wrapper.setAttribute("data-setting", "posture");
+    menu.parentElement = wrapper;
+    item.parentElement = menu;
+
+    settingsBar.dispatch("click", { target: item, stopPropagation: () => {} });
+
+    expect(harness.postMessages).toContainEqual({
+      type: "setPosture",
+      posture: "full_access",
+    });
+  });
+
+  it("routes mode dropdown selections through /mode with the canonical value", () => {
+    const harness = createRuntimeHarness();
+    const settingsBar = harness.getElement("settings-bar");
+
+    const item = new FakeElement();
+    item.classList.add("dropdown-item");
+    item.setAttribute("data-value", "operate");
+    const menu = new FakeElement();
+    const wrapper = new FakeElement();
+    wrapper.setAttribute("data-setting", "mode");
+    menu.parentElement = wrapper;
+    item.parentElement = menu;
+
+    settingsBar.dispatch("click", { target: item, stopPropagation: () => {} });
+
+    expect(harness.postMessages).toContainEqual({
+      type: "slashCommand",
+      command: "/mode",
+      args: "operate",
+    });
   });
 });

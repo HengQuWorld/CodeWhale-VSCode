@@ -242,8 +242,11 @@ describe("getCommandHelpText", () => {
   it("returns help text for available commands", () => {
     const help = getCommandHelpText("/mode");
     expect(help).toContain("/mode");
-    expect(help).toContain("agent");
+    expect(help).toContain("act");
     expect(help).toContain("plan");
+    expect(help).toContain("operate");
+    // The legacy alias stays documented, but as a permission shorthand rather
+    // than a mode.
     expect(help).toContain("yolo");
   });
 

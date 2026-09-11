@@ -7,6 +7,7 @@ import {
   shortPath,
   truncate,
   stripTurnMeta,
+  isInternalRuntimeHandoff,
   reconstructOldContent,
   reconstructOriginalContent,
   getDiffStateForIndex,
@@ -243,6 +244,65 @@ describe("stripTurnMeta", () => {
   it("handles unclosed turn_meta tag", () => {
     const text = "<turn_meta>unclosed content";
     expect(stripTurnMeta(text)).toBe("<turn_meta>unclosed content");
+  });
+});
+
+describe("isInternalRuntimeHandoff", () => {
+  const runtimeMeta =
+    "<turn_meta>\nInput provenance: runtime (non-authoritative)\n</turn_meta>";
+
+  it("detects the Operate contract runtime message", () => {
+    const blocks = [
+      '<codewhale:runtime_event kind="operate_contract" visibility="internal">…</codewhale:runtime_event>',
+      runtimeMeta,
+    ];
+    expect(isInternalRuntimeHandoff(blocks)).toBe(true);
+  });
+
+  it("detects sub-agent and shell completion handoffs", () => {
+    expect(
+      isInternalRuntimeHandoff([
+        "…",
+        "<turn_meta>\nInput provenance: subagent_handoff (non-authoritative)\n</turn_meta>",
+      ])
+    ).toBe(true);
+    expect(
+      isInternalRuntimeHandoff([
+        "…",
+        "<turn_meta>\nInput provenance: shell_completion (non-authoritative)\n</turn_meta>",
+      ])
+    ).toBe(true);
+  });
+
+  it("never hides a real external user turn", () => {
+    expect(
+      isInternalRuntimeHandoff([
+        "hello",
+        "<turn_meta>\nInput provenance: external_user\nInput authority: external_current_turn\n</turn_meta>",
+      ])
+    ).toBe(false);
+    expect(isInternalRuntimeHandoff(["<codewhale:runtime_event>", "quoted by a person"])).toBe(
+      false
+    );
+    expect(isInternalRuntimeHandoff([])).toBe(false);
+    // A user turn that merely quotes the provenance line without a
+    // runtime-owned envelope must not be hidden.
+    expect(isInternalRuntimeHandoff(["look at this:", runtimeMeta])).toBe(false);
+    expect(
+      isInternalRuntimeHandoff([
+        "quoted by a person",
+        "<turn_meta>\nInput provenance: assistant_generated (non-authoritative)\n</turn_meta>",
+      ])
+    ).toBe(false);
+  });
+
+  it("still hides the agent-topology runtime checkpoint", () => {
+    expect(
+      isInternalRuntimeHandoff([
+        '<codewhale:runtime_state kind="agent_topology" schema="v1" visibility="internal">…</codewhale:runtime_state>',
+        runtimeMeta,
+      ])
+    ).toBe(true);
   });
 });
 

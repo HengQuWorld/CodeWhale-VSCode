@@ -248,6 +248,25 @@ GUI 是 TUI 的图形前端，用户在两种界面下的操作应该产生相�
 
 **绝不**在 GUI 中用 hack/变通方式模拟一个 TUI 已有但 GUI 没有对接的功能。
 
+### 模式与权限姿态契约（2026-09 起与 TUI 对齐）
+
+TUI 把「对话模式」和「权限姿态」当作**两个独立维度**，GUI 必须同样处理，不要再用 `yolo` 当作模式：
+
+| 维度 | 取值 | 显示名 | 切换方式 |
+|------|------|--------|----------|
+| TUI mode | `agent` / `plan` / `operate` | Act / Plan / Operate | 状态栏模式下拉；`/mode`；数字 `1`/`2`/`3` |
+| Permission posture | `ask` / `auto_review` / `full_access` | Ask / Auto-Review / Full Access | 状态栏 Permission 下拉；`/auto` |
+
+- `yolo`（及 `4` / `bypass` / `bypass-permissions` / `bypasspermissions`）是 **Act + Full Access 的单向兼容别名**，不是模式，也不出现在下拉里。
+- 单一事实来源：`src/utils/modes.ts`（镜像 `crates/config/src/app_mode.rs`、`crates/execpolicy/src/approval_mode.rs` 与 `crates/tui/src/runtime_policy.rs`）。状态栏下拉与配置面板的选项都由它生成，**不要在任何新代码里硬编码模式/姿态字符串**。
+- 三套拼法不要混用：`POSTURE_WIRE`（线程/Runtime 请求体，snake_case）、`POSTURE_CONFIG`（引擎配置 `approval_mode`，hyphenated）、`POSTURE_LABELS`（UI 显示名）。配置面板的姿态下拉只提供 `ask`/`auto-review`/`full-access`：`use-tui-default` 属于另一个 key `approval_policy`，`never` 是托管策略值，两者都不是 `approval_mode` 的合法取值。
+- 改模式时只 PATCH `{ mode }`，改姿态时只 PATCH `{ permission_posture }`；运行时会自行推导 `auto_approve` / `trust_mode`（`runtime_policy_with_overrides`）。把 GUI 缓存的 `auto_approve: false` 一起发出去（且不带显式姿态）会把 Auto-Review 姿态重新推导成 Ask。
+- 兼容旧记录的姿态推导必须与引擎的 `RuntimePolicyProjection::from_persisted` 一致：`permission_posture` 优先，其次看 mode 的 `yolo` 别名与 `auto_approve`；**不要**参考 `trust_mode`（引擎会忽略它）。
+- 启动默认值：`brotherwhale.defaultMode`（`agent|plan|operate`）与 `brotherwhale.defaultPermissionPosture`（`ask|auto_review|full_access`）。
+- `resume-thread` 请求体只有 `model`/`mode`（`runtime_api/sessions.rs`），**不支持** `permission_posture`；恢复的线程姿态由引擎从会话本身推导。
+
+> 注意：模式可选 `operate` 与 `/v1/operate` 编排面（operate run / plan / keepalive）是两回事；后者仍未对接。
+
 ### 当前已知差异（2026-09 对齐检查结果）
 
 undo / retry / patch-undo / 快照恢复这条链路**已完成对齐**：
@@ -267,7 +286,8 @@ undo / retry / patch-undo / 快照恢复这条链路**已完成对齐**：
 | 市场管理 | `/v1/apps/marketplaces` + install | 完全缺失 |
 | Skills 管理增强 | `/v1/skills/install`、`/{name}/update`、`/{name}/trust`、`/{name}/audit` | 只有 list + enable/disable |
 | Agent mail | `/v1/agent-mail`、`/v1/threads/{id}/agent-mail` | 完全缺失 |
-| Operate | `/v1/operate` 全套 | 完全缺失 |
+| Operate（模式） | 线程 `mode: "operate"` | 状态栏模式下拉 / `/mode operate`，已对齐 |
+| Operate（编排 API） | `/v1/operate` 全套（run/plan/keepalive/auto-merge） | 完全缺失 |
 | Memory | `/v1/memory` 全套 | **违反复用原则**：`slash-command-handler.ts` 的 `/memory` 直接读写 `~/.deepseek/memory.md` 本地文件，应改走 API |
 
 > 本表是对齐检查的**快照**，会过时。做新功能前先重新核对源码：TUI 端点查 `runtime_api.rs` 的 `build_router()`，GUI 对接查 `src/api/api-client.ts`，命令查 `commands/mod.rs` 的 `execute()` 与 `src/commands/slash-commands.ts`。不要把此表当全量清单。

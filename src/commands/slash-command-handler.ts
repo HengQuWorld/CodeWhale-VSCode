@@ -13,6 +13,20 @@ import { exec } from "child_process";
 import { t, currentLocale } from "../i18n";
 import { formatCostAmount, resolveCostCurrency } from "../utils/cost-calculator";
 import { isCommandAvailableInGui, getCommand } from "./slash-commands";
+import {
+  MODE_LABELS,
+  POSTURE_LABELS,
+  POSTURE_WIRE,
+  isYoloAlias,
+  modeLabel,
+  normalizeMode,
+  normalizePosture,
+  postureFromThread,
+  postureLabel,
+  resolveModeArg,
+  type PermissionPosture,
+  type TuiMode,
+} from "../utils/modes";
 import { formatError, getErrorMessage } from "../utils/error-handler";
 import type { CodeWhaleApiClient, CodeWhaleEngine, ThreadRecord, TaskSummary, ProviderEntry } from "../types";
 
@@ -89,75 +103,154 @@ function mergeThreadUpdate(
 // ── Individual command handlers ──
 
 async function handleMode(ctx: SlashCommandContext, args: string): Promise<void> {
-  const mode = args.trim().toLowerCase();
-  if (["agent", "plan", "yolo", "1", "2", "3"].includes(mode)) {
-    const modeMap: Record<string, string> = { "1": "agent", "2": "plan", "3": "yolo" };
-    const actualMode = modeMap[mode] || mode;
-    const isYolo = actualMode === "yolo";
-    const defaultModel = cfg().get<string>("defaultModel", "deepseek-v4-pro");
-    const reasoningEffort = cfg().get<string>("reasoningEffort", "auto");
-    const autoApprove = isYolo || cfg().get<boolean>("autoApprove", false);
-    await cfg().update("defaultMode", actualMode, vscode.ConfigurationTarget.Global);
-    let modeForUi = actualMode;
-    let modelForUi = defaultModel;
-    let infoMessage = `Mode changed to ${actualMode}`;
-    if (ctx.currentThread) {
-      try {
-        const updatedThread = await ctx.api.updateThread(ctx.currentThread.id, {
-          mode: actualMode,
-          trust_mode: isYolo,
-          auto_approve: autoApprove,
-        });
-        mergeThreadUpdate(ctx, updatedThread, {
-          mode: actualMode,
-          trust_mode: isYolo,
-          auto_approve: autoApprove,
-        });
-        modeForUi = ctx.currentThread.mode;
-        modelForUi = ctx.currentThread.model;
-      } catch (err) {
-        ctx.postMessage({
-          type: "error",
-          message: `Mode changed in settings but failed to update current thread: ${getErrorMessage(err)}`,
-        });
-        modeForUi = ctx.currentThread.mode;
-        modelForUi = ctx.currentThread.model;
-        infoMessage = `Default mode changed to ${actualMode}; current thread remains ${ctx.currentThread.mode}`;
-      }
-    }
-    ctx.postMessage({ type: "settingsUpdated", mode: modeForUi, model: modelForUi, reasoningEffort });
-    ctx.postMessage({ type: "info", message: infoMessage });
-  } else {
-    ctx.postMessage({ type: "info", message: `Current mode: ${cfg().get<string>("defaultMode", "agent")}\nUsage: /mode [agent|plan|yolo|1|2|3]` });
+  const arg = args.trim();
+  if (!arg) {
+    ctx.postMessage({
+      type: "info",
+      message: `Current mode: ${modeLabel(ctx.currentThread?.mode || cfg().get<string>("defaultMode", "agent"))} | Permission: ${POSTURE_LABELS[effectivePosture(ctx)]}\nUsage: /mode [act|plan|operate|1|2|3]`,
+    });
+    return;
   }
+
+  // Legacy YOLO spellings are a one-way permission shorthand for Act + Full
+  // Access, never a visible mode (mirrors TUI's `commands::mode`).
+  if (isYoloAlias(arg)) {
+    await applyMode(ctx, "agent", { posture: "full_access" });
+    return;
+  }
+
+  const resolved = resolveModeArg(arg);
+  if (!resolved) {
+    ctx.postMessage({
+      type: "info",
+      message: `Current mode: ${modeLabel(ctx.currentThread?.mode || cfg().get<string>("defaultMode", "agent"))} | Permission: ${POSTURE_LABELS[effectivePosture(ctx)]}\nUsage: /mode [act|plan|operate|1|2|3]`,
+    });
+    return;
+  }
+  await applyMode(ctx, resolved);
+}
+
+/** `/auto` — TUI parity: switch the permission posture to Auto-Review so the
+ *  agent just works, without changing the mode. */
+async function handleAuto(ctx: SlashCommandContext, args: string): Promise<void> {
+  if (args.trim()) {
+    ctx.postMessage({ type: "info", message: "Usage: /auto" });
+    return;
+  }
+  await applyPosture(ctx, "auto_review");
+}
+
+/** Apply a TUI mode to the current thread and the startup default.
+ *
+ * Patch only `mode` unless a posture is explicitly requested: the runtime
+ * preserves the thread's effective posture when `auto_approve` is absent
+ * (`runtime_policy_with_overrides`), and sending our stale cached posture
+ * would silently overwrite the engine's. */
+async function applyMode(
+  ctx: SlashCommandContext,
+  mode: TuiMode,
+  opts?: { posture?: PermissionPosture }
+): Promise<void> {
+  const model = ctx.currentThread?.model || cfg().get<string>("defaultModel", "deepseek-v4-pro");
+  const reasoningEffort = cfg().get<string>("reasoningEffort", "auto");
+  const posture = opts?.posture;
+  await cfg().update("defaultMode", mode, vscode.ConfigurationTarget.Global);
+  if (posture) {
+    await cfg().update("defaultPermissionPosture", POSTURE_WIRE[posture], vscode.ConfigurationTarget.Global);
+  }
+
+  let modeForUi = mode;
+  let postureForUi = posture ?? effectivePosture(ctx);
+  let modelForUi = model;
+  let infoMessage = `Mode changed to ${MODE_LABELS[mode]}`;
+
+  if (ctx.currentThread) {
+    try {
+      const updates: { mode: string; permission_posture?: string } = { mode };
+      if (posture) updates.permission_posture = POSTURE_WIRE[posture];
+      const updatedThread = await ctx.api.updateThread(ctx.currentThread.id, updates);
+      mergeThreadUpdate(ctx, updatedThread, updates);
+      modeForUi = normalizeMode(ctx.currentThread.mode);
+      postureForUi = effectivePosture(ctx);
+      modelForUi = ctx.currentThread.model;
+    } catch (err) {
+      ctx.postMessage({
+        type: "error",
+        message: `Mode changed in settings but failed to update current thread: ${getErrorMessage(err)}`,
+      });
+      modeForUi = normalizeMode(ctx.currentThread.mode);
+      postureForUi = effectivePosture(ctx);
+      modelForUi = ctx.currentThread.model;
+      infoMessage = `Default mode changed to ${MODE_LABELS[mode]}; current thread remains ${modeLabel(ctx.currentThread.mode)}`;
+    }
+  }
+  ctx.postMessage({ type: "settingsUpdated", mode: modeForUi, posture: postureForUi, model: modelForUi, reasoningEffort });
+  ctx.postMessage({ type: "info", message: infoMessage });
+}
+
+/** Apply a permission posture to the current thread and the startup default. */
+async function applyPosture(ctx: SlashCommandContext, posture: PermissionPosture): Promise<void> {
+  const model = ctx.currentThread?.model || cfg().get<string>("defaultModel", "deepseek-v4-pro");
+  const reasoningEffort = cfg().get<string>("reasoningEffort", "auto");
+  const mode = normalizeMode(ctx.currentThread?.mode || cfg().get<string>("defaultMode", "agent"));
+  const wire = POSTURE_WIRE[posture];
+  await cfg().update("defaultPermissionPosture", wire, vscode.ConfigurationTarget.Global);
+
+  let postureForUi = posture;
+  let infoMessage = `Permission posture changed to ${POSTURE_LABELS[posture]}`;
+  if (ctx.currentThread) {
+    try {
+      const updatedThread = await ctx.api.updateThread(ctx.currentThread.id, {
+        permission_posture: wire,
+      });
+      mergeThreadUpdate(ctx, updatedThread, { permission_posture: wire });
+      postureForUi = effectivePosture(ctx);
+    } catch (err) {
+      ctx.postMessage({
+        type: "error",
+        message: `Permission posture changed in settings but failed to update current thread: ${getErrorMessage(err)}`,
+      });
+      postureForUi = effectivePosture(ctx);
+      infoMessage = `Default permission posture changed to ${POSTURE_LABELS[posture]}; current thread remains ${postureLabel(postureForUi)}`;
+    }
+  }
+  ctx.postMessage({ type: "settingsUpdated", mode, posture: postureForUi, model, reasoningEffort });
+  ctx.postMessage({ type: "info", message: infoMessage });
+}
+
+/** The current thread's effective posture, falling back to the startup default. */
+function effectivePosture(ctx: SlashCommandContext): PermissionPosture {
+  if (ctx.currentThread) return postureFromThread(ctx.currentThread);
+  return normalizePosture(cfg().get<string>("defaultPermissionPosture", "ask"));
 }
 
 async function handleModel(ctx: SlashCommandContext, args: string): Promise<void> {
   const model = args.trim();
   if (model) {
     await cfg().update("defaultModel", model, vscode.ConfigurationTarget.Global);
-    const defaultMode = cfg().get<string>("defaultMode", "agent");
+    const defaultMode = normalizeMode(cfg().get<string>("defaultMode", "agent"));
     const reasoningEffort = cfg().get<string>("reasoningEffort", "auto");
-    let modeForUi = defaultMode;
+    const posture = effectivePosture(ctx);
+    let modeForUi: string = defaultMode;
     let modelForUi = model;
     let infoMessage = `Model changed to ${model}`;
     if (ctx.currentThread) {
       try {
         const updatedThread = await ctx.api.updateThread(ctx.currentThread.id, { model });
         mergeThreadUpdate(ctx, updatedThread, { model });
-        modeForUi = ctx.currentThread.mode;
+        modeForUi = normalizeMode(ctx.currentThread.mode);
         modelForUi = ctx.currentThread.model;
       } catch (err) {
         ctx.postMessage({
           type: "error",
           message: `Model changed in settings but failed to update current thread: ${getErrorMessage(err)}`,
         });
-        modeForUi = ctx.currentThread.mode;
+        modeForUi = normalizeMode(ctx.currentThread.mode);
         modelForUi = ctx.currentThread.model;
         infoMessage = `Default model changed to ${model}; current thread remains ${ctx.currentThread.model}`;
       }
     }
-    ctx.postMessage({ type: "settingsUpdated", mode: modeForUi, model: modelForUi, reasoningEffort });
+    ctx.postMessage({ type: "settingsUpdated", mode: modeForUi, posture, model: modelForUi, reasoningEffort });
     ctx.postMessage({ type: "info", message: infoMessage });
   } else {
     ctx.postMessage({ type: "info", message: `Current model: ${cfg().get<string>("defaultModel", "deepseek-v4-pro")}` });
@@ -199,7 +292,7 @@ async function handleReasoning(ctx: SlashCommandContext, args: string): Promise<
   const effort = args.trim().toLowerCase();
   if (["auto", "off", "low", "medium", "high", "max"].includes(effort)) {
     await cfg().update("reasoningEffort", effort, vscode.ConfigurationTarget.Global);
-    ctx.postMessage({ type: "settingsUpdated", mode: cfg().get<string>("defaultMode", "agent"), model: cfg().get<string>("defaultModel", "deepseek-v4-pro"), reasoningEffort: effort });
+    ctx.postMessage({ type: "settingsUpdated", mode: normalizeMode(ctx.currentThread?.mode || cfg().get<string>("defaultMode", "agent")), posture: effectivePosture(ctx), model: cfg().get<string>("defaultModel", "deepseek-v4-pro"), reasoningEffort: effort });
     ctx.postMessage({ type: "info", message: `Reasoning effort changed to ${effort}` });
   } else {
     ctx.postMessage({ type: "info", message: `Current reasoning effort: ${cfg().get<string>("reasoningEffort", "auto")}\nUsage: /reasoning [auto|off|low|medium|high|max]` });
@@ -248,7 +341,7 @@ async function handleConfig(ctx: SlashCommandContext, args: string): Promise<voi
 }
 
 async function handleSettings(ctx: SlashCommandContext, _args: string): Promise<void> {
-  ctx.postMessage({ type: "info", message: `Current settings:\n- Mode: ${cfg().get<string>("defaultMode", "agent")}\n- Model: ${cfg().get<string>("defaultModel", "deepseek-v4-pro")}\n- Reasoning Effort: ${cfg().get<string>("reasoningEffort", "auto")}\n- Engine Path: ${cfg().get<string>("enginePath", "codewhale")}\n- Auto Start Engine: ${cfg().get<boolean>("autoStartEngine", true)}` });
+  ctx.postMessage({ type: "info", message: `Current settings:\n- Mode: ${modeLabel(ctx.currentThread?.mode || cfg().get<string>("defaultMode", "agent"))}\n- Permission: ${POSTURE_LABELS[effectivePosture(ctx)]}\n- Model: ${cfg().get<string>("defaultModel", "deepseek-v4-pro")}\n- Reasoning Effort: ${cfg().get<string>("reasoningEffort", "auto")}\n- Engine Path: ${cfg().get<string>("enginePath", "codewhale")}\n- Auto Start Engine: ${cfg().get<boolean>("autoStartEngine", true)}` });
 }
 
 async function handleInterrupt(ctx: SlashCommandContext, _args: string): Promise<void> {
@@ -487,20 +580,21 @@ async function handleStatus(ctx: SlashCommandContext, _args: string): Promise<vo
   Version: ${runtimeInfo.version}
   Auth: ${authInfo}
   Thread: ${ctx.currentThread ? ctx.currentThread.id.slice(0, 12) + "..." : "None"}
-  Mode: ${cfg().get<string>("defaultMode", "agent")}
+  Mode: ${modeLabel(ctx.currentThread?.mode || cfg().get<string>("defaultMode", "agent"))}
+  Permission: ${POSTURE_LABELS[effectivePosture(ctx)]}
   Model: ${cfg().get<string>("defaultModel", "deepseek-v4-pro")}`
     });
   } catch (err) {
     const running = ctx.engine.isRunning;
     ctx.postMessage({
       type: "info",
-      message: `Engine: ${running ? "Running" : "Stopped"}\nPort: ${ctx.engine.port}\nThread: ${ctx.currentThread ? ctx.currentThread.id.slice(0, 12) + "..." : "None"}\nMode: ${cfg().get<string>("defaultMode", "agent")}\nModel: ${cfg().get<string>("defaultModel", "deepseek-v4-pro")}\n(${formatError("Runtime info unavailable", err)})`
+      message: `Engine: ${running ? "Running" : "Stopped"}\nPort: ${ctx.engine.port}\nThread: ${ctx.currentThread ? ctx.currentThread.id.slice(0, 12) + "..." : "None"}\nMode: ${modeLabel(ctx.currentThread?.mode || cfg().get<string>("defaultMode", "agent"))}\nPermission: ${POSTURE_LABELS[effectivePosture(ctx)]}\nModel: ${cfg().get<string>("defaultModel", "deepseek-v4-pro")}\n(${formatError("Runtime info unavailable", err)})`
     });
   }
 }
 
 async function handleHome(ctx: SlashCommandContext, _args: string): Promise<void> {
-  ctx.postMessage({ type: "info", message: `Dashboard:\n- Threads: see sidebar\n- Mode: ${cfg().get<string>("defaultMode", "agent")}\n- Model: ${cfg().get<string>("defaultModel", "deepseek-v4-pro")}\n- Reasoning: ${cfg().get<string>("reasoningEffort", "auto")}` });
+  ctx.postMessage({ type: "info", message: `Dashboard:\n- Threads: see sidebar\n- Mode: ${modeLabel(ctx.currentThread?.mode || cfg().get<string>("defaultMode", "agent"))}\n- Permission: ${POSTURE_LABELS[effectivePosture(ctx)]}\n- Model: ${cfg().get<string>("defaultModel", "deepseek-v4-pro")}\n- Reasoning: ${cfg().get<string>("reasoningEffort", "auto")}` });
 }
 
 async function handleWorkspace(ctx: SlashCommandContext, _args: string): Promise<void> {
@@ -568,24 +662,60 @@ async function handleTrust(ctx: SlashCommandContext, args: string): Promise<void
   const sub = args.trim().toLowerCase();
   if (sub === "on") {
     await cfg().update("autoApprove", true, vscode.ConfigurationTarget.Global);
+    await cfg().update(
+      "defaultPermissionPosture",
+      POSTURE_WIRE.full_access,
+      vscode.ConfigurationTarget.Global
+    );
     if (ctx.currentThread) {
       try {
-        await ctx.api.updateThread(ctx.currentThread.id, { auto_approve: true, trust_mode: true });
+        const updated = await ctx.api.updateThread(ctx.currentThread.id, {
+          permission_posture: POSTURE_WIRE.full_access,
+        });
+        mergeThreadUpdate(ctx, updated, {
+          permission_posture: POSTURE_WIRE.full_access,
+          auto_approve: true,
+          trust_mode: true,
+        });
       } catch { /* non-critical */ }
     }
-    ctx.postMessage({ type: "info", message: "Trust mode enabled (auto-approve)" });
+    postCurrentSettings(ctx);
+    ctx.postMessage({ type: "info", message: "Trust mode enabled (Full Access)" });
   } else if (sub === "off") {
-    const isYolo = cfg().get<string>("defaultMode", "agent") === "yolo";
-    await cfg().update("autoApprove", false, vscode.ConfigurationTarget.Global);
+    // A legacy startup default of `yolo` is Act + Full Access, so turning
+    // trust off must not silently downgrade it.
+    const isYolo = isYoloAlias(cfg().get<string>("defaultMode", "agent"));
+    const posture: PermissionPosture = isYolo ? "full_access" : "ask";
+    await cfg().update("autoApprove", isYolo, vscode.ConfigurationTarget.Global);
+    await cfg().update(
+      "defaultPermissionPosture",
+      POSTURE_WIRE[posture],
+      vscode.ConfigurationTarget.Global
+    );
     if (ctx.currentThread) {
       try {
-        await ctx.api.updateThread(ctx.currentThread.id, { auto_approve: isYolo, trust_mode: isYolo });
+        const updated = await ctx.api.updateThread(ctx.currentThread.id, {
+          permission_posture: POSTURE_WIRE[posture],
+        });
+        mergeThreadUpdate(ctx, updated, { permission_posture: POSTURE_WIRE[posture] });
       } catch { /* non-critical */ }
     }
+    postCurrentSettings(ctx);
     ctx.postMessage({ type: "info", message: "Trust mode disabled" });
   } else {
     ctx.postMessage({ type: "info", message: `Usage: /trust [on|off]\nAuto-approve is currently: ${cfg().get<boolean>("autoApprove", false) ? "on" : "off"}` });
   }
+}
+
+/** Push the current mode / posture / model / reasoning to the webview status bar. */
+function postCurrentSettings(ctx: SlashCommandContext): void {
+  ctx.postMessage({
+    type: "settingsUpdated",
+    mode: normalizeMode(ctx.currentThread?.mode || cfg().get<string>("defaultMode", "agent")),
+    posture: effectivePosture(ctx),
+    model: ctx.currentThread?.model || cfg().get<string>("defaultModel", "deepseek-v4-pro"),
+    reasoningEffort: cfg().get<string>("reasoningEffort", "auto"),
+  });
 }
 
 async function handleVerbose(ctx: SlashCommandContext, args: string): Promise<void> {
@@ -667,7 +797,8 @@ async function handleFeedback(_ctx: SlashCommandContext, _args: string): Promise
 
 async function handleHelp(ctx: SlashCommandContext, _args: string): Promise<void> {
   ctx.postMessage({ type: "info", message: `Available commands:
-/mode [agent|plan|yolo|1|2|3] - Switch mode
+/mode [act|plan|operate|1|2|3] - Switch mode (legacy yolo = Act + Full Access)
+/auto - Switch the permission posture to Auto-Review
 /model [name] - Switch model
 /models - List available models
 /reasoning [auto|off|low|medium|high|max] - Set reasoning effort
@@ -1524,6 +1655,7 @@ async function handleRestore(ctx: SlashCommandContext, args: string): Promise<vo
 
 const HANDLERS: Record<string, CommandHandler> = {
   "/mode": handleMode,
+  "/auto": handleAuto,
   "/model": handleModel,
   "/models": handleModels,
   "/reasoning": handleReasoning,

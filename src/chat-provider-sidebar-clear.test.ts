@@ -185,7 +185,7 @@ describe("Sidebar clearing on thread switch", () => {
     });
 
     it("posts threadLoaded before the refreshed task/agent lists", async () => {
-      const { provider, api, postMessage } = createProvider();
+      const { provider, postMessage } = createProvider();
       await (provider as any).loadThread("thread-3");
 
       const types = postMessage.mock.calls.map((c: unknown[]) => (c[0] as { type: string }).type);

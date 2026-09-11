@@ -7,7 +7,8 @@ export interface SlashCommand {
 }
 
 const COMMANDS: SlashCommand[] = [
-  { name: "/mode", desc: "Switch mode (agent/plan/yolo)", category: "config", availability: "full", helpText: "/mode [agent|plan|yolo|1|2|3] - Switch mode" },
+  { name: "/mode", desc: "Switch mode (act/plan/operate)", category: "config", availability: "full", helpText: "/mode [act|plan|operate|1|2|3] - Switch mode (legacy /mode yolo = Act + Full Access)" },
+  { name: "/auto", desc: "Work with Auto-Review", category: "config", availability: "full", helpText: "/auto - Switch the permission posture to Auto-Review so the agent just works" },
   { name: "/model", desc: "Switch model", category: "config", availability: "full", helpText: "/model [name] - Switch model" },
   { name: "/models", desc: "List available models", category: "config", availability: "full", helpText: "/models - List available models" },
   { name: "/reasoning", desc: "Set reasoning effort", category: "config", availability: "full", helpText: "/reasoning [auto|off|low|medium|high|max] - Set reasoning effort" },

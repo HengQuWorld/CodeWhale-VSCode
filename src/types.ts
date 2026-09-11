@@ -10,6 +10,10 @@ export interface ThreadRecord {
   model: string;
   workspace: string;
   mode: string;
+  /** Named default permission posture for new turns: `ask` | `auto_review` |
+   *  `full_access`. Absent on legacy records, whose effective posture is
+   *  derived from `auto_approve` / `trust_mode`. */
+  permission_posture?: string | null;
   allow_shell: boolean;
   trust_mode: boolean;
   auto_approve: boolean;

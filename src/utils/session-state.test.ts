@@ -5,14 +5,7 @@
  * with a single reset() method, replacing scattered manual resets.
  */
 import { describe, it, expect } from "vitest";
-import {
-  SessionStateStore,
-  type SessionStateData,
-  type ChatMessage,
-  type FileChangeInfo,
-  type ToolCallInfo,
-  type ActiveItem,
-} from "./session-state";
+import { SessionStateStore } from "./session-state";
 
 // ── Tests ──
 

@@ -5,8 +5,25 @@
  */
 
 import * as vscode from "vscode";
-import type { CodeWhaleApiClient, GuiConfigResponse, ProviderEntry } from "./types";
+import type { CodeWhaleApiClient, ProviderEntry } from "./types";
 import { getErrorMessage } from "./utils/error-handler";
+import {
+  MODE_LABELS,
+  MODE_VALUES,
+  POSTURE_CONFIG,
+  POSTURE_LABELS,
+  POSTURE_VALUES,
+} from "./utils/modes";
+
+/** Options generated from the single source of truth in `utils/modes.ts`.
+ *  `cfg-default_mode` stores canonical mode settings; `cfg-approval_mode`
+ *  stores the engine's hyphenated config spellings. */
+const MODE_OPTIONS = MODE_VALUES.map(
+  (value) => `<option value="${value}">${MODE_LABELS[value]}</option>`,
+).join("\n            ");
+const POSTURE_OPTIONS = POSTURE_VALUES.map(
+  (value) => `<option value="${POSTURE_CONFIG[value]}">${POSTURE_LABELS[value]}</option>`,
+).join("\n            ");
 
 export class ConfigPanel {
   public static currentPanel: ConfigPanel | undefined;
@@ -378,9 +395,7 @@ export class ConfigPanel {
         <span class="field-label">Default Mode</span>
         <div class="field-value">
           <select id="cfg-default_mode">
-            <option value="agent">agent</option>
-            <option value="plan">plan</option>
-            <option value="yolo">yolo</option>
+            ${MODE_OPTIONS}
           </select>
         </div>
       </div>
@@ -398,14 +413,10 @@ export class ConfigPanel {
         </div>
       </div>
       <div class="field">
-        <span class="field-label">Approval Mode</span>
+        <span class="field-label">Permission Posture</span>
         <div class="field-value">
           <select id="cfg-approval_mode">
-            <option value="suggest">suggest</option>
-            <option value="auto">auto</option>
-            <option value="on-request">on-request</option>
-            <option value="untrusted">untrusted</option>
-            <option value="never">never</option>
+            ${POSTURE_OPTIONS}
           </select>
         </div>
       </div>

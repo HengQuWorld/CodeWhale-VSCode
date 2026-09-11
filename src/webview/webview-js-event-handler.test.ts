@@ -256,4 +256,22 @@ describe("webview-js-event-handler.ts", () => {
     const script = getEventHandlerScript(makeTr());
     expect(script).toContain("type: 'webviewReady'");
   });
+
+  it("routes the permission-posture dropdown through setPosture", () => {
+    const script = getEventHandlerScript(makeTr());
+    expect(script).toContain("setting === 'posture'");
+    expect(script).toContain("type: 'setPosture'");
+  });
+
+  it("renders friendly TUI mode and posture labels while keeping canonical values", () => {
+    const script = getEventHandlerScript(makeTr());
+    // Injected display maps mirror AppMode::display_name() and
+    // ApprovalMode::permission_chip_label().
+    expect(script).toContain('"agent":"Act"');
+    expect(script).toContain('"operate":"Operate"');
+    expect(script).toContain('"auto_review":"Auto-Review"');
+    expect(script).toContain('"full_access":"Full Access"');
+    expect(script).toContain("applyModeDisplay(msg.mode)");
+    expect(script).toContain("applyPostureDisplay(msg.posture)");
+  });
 });

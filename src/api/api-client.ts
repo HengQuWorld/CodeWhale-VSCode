@@ -199,6 +199,7 @@ export class CodeWhaleApiClient {
     allow_shell?: boolean;
     trust_mode?: boolean;
     auto_approve?: boolean;
+    permission_posture?: string;
     system_prompt?: string;
     title?: string;
   }): Promise<ThreadRecord> {
@@ -209,6 +210,7 @@ export class CodeWhaleApiClient {
     if (opts?.allow_shell !== undefined) body.allow_shell = opts.allow_shell;
     if (opts?.trust_mode !== undefined) body.trust_mode = opts.trust_mode;
     if (opts?.auto_approve !== undefined) body.auto_approve = opts.auto_approve;
+    if (opts?.permission_posture) body.permission_posture = opts.permission_posture;
     if (opts?.system_prompt) body.system_prompt = opts.system_prompt;
     if (opts?.title) body.title = opts.title;
     return (await this.post("/v1/threads", body)) as ThreadRecord;
@@ -237,13 +239,15 @@ export class CodeWhaleApiClient {
   }
 
   async getThread(threadId: string): Promise<ThreadRecord> {
-    const resp = (await this.get(`/v1/threads/${threadId}`)) as any;
+    const resp = (await this.get(`/v1/threads/${threadId}`)) as ThreadRecord & {
+      thread?: ThreadRecord;
+    };
     // The server returns ThreadDetail { thread, turns, items, latest_seq }
     // so we must extract the inner ThreadRecord.
-    if (resp && typeof resp === 'object' && resp.thread) {
-      return resp.thread as ThreadRecord;
+    if (resp && typeof resp === "object" && resp.thread) {
+      return resp.thread;
     }
-    return resp as ThreadRecord;
+    return resp;
   }
 
   async updateThread(threadId: string, updates: {
@@ -252,6 +256,7 @@ export class CodeWhaleApiClient {
     trust_mode?: boolean;
     auto_approve?: boolean;
     mode?: string;
+    permission_posture?: string;
     model?: string;
     title?: string;
     workspace?: string;
@@ -264,7 +269,7 @@ export class CodeWhaleApiClient {
   async startTurn(
     threadId: string,
     prompt: string,
-    opts?: { model?: string; mode?: string; reasoning_effort?: string; auto_approve?: boolean; trust_mode?: boolean }
+    opts?: { model?: string; mode?: string; reasoning_effort?: string; auto_approve?: boolean; trust_mode?: boolean; permission_posture?: string }
   ): Promise<StartTurnResponse> {
     const body: Record<string, unknown> = { prompt };
     if (opts?.model) body.model = opts.model;
@@ -272,6 +277,7 @@ export class CodeWhaleApiClient {
     if (opts?.reasoning_effort) body.reasoning_effort = opts.reasoning_effort;
     if (opts?.auto_approve !== undefined) body.auto_approve = opts.auto_approve;
     if (opts?.trust_mode !== undefined) body.trust_mode = opts.trust_mode;
+    if (opts?.permission_posture) body.permission_posture = opts.permission_posture;
     return (await this.post(
       `/v1/threads/${threadId}/turns`,
       body
@@ -485,6 +491,10 @@ export class CodeWhaleApiClient {
     await this.delete(`/v1/sessions/${sessionId}`);
   }
 
+  // NOTE: the runtime's `ResumeSessionRequest` carries only model/mode
+  // (see runtime_api/sessions.rs); a `permission_posture` sent here would be
+  // silently dropped, so the resumed thread derives its posture from the
+  // persisted session instead.
   async resumeSessionThread(sessionId: string, opts?: { model?: string; mode?: string }): Promise<ResumeSessionResponse> {
     const body: Record<string, unknown> = {};
     if (opts?.model) body.model = opts.model;

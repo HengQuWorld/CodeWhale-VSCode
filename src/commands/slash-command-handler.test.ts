@@ -8,6 +8,7 @@ import * as fs from "fs";
 const vscodeState = vi.hoisted(() => {
   const configValues = new Map<string, unknown>([
     ["defaultMode", "agent"],
+    ["defaultPermissionPosture", "ask"],
     ["defaultModel", "deepseek-v4-pro"],
     ["reasoningEffort", "auto"],
     ["autoApprove", false],
@@ -334,19 +335,17 @@ describe("SlashCommandHandler - Dispatcher Pattern", () => {
   // ── /mode ──
 
   describe("/mode", () => {
-    it("switches to yolo mode and updates the active thread state", async () => {
+    it("applies Act and patches only the mode so the runtime keeps the posture", async () => {
       const currentThread = {
         id: "thread-1",
-        mode: "agent",
+        mode: "plan",
         model: "deepseek-v4-pro",
         trust_mode: false,
         auto_approve: false,
       } as any;
       const updateThread = vi.fn(async () => ({
         ...currentThread,
-        mode: "yolo",
-        trust_mode: true,
-        auto_approve: true,
+        mode: "agent",
       }));
       const postMessage = vi.fn();
       const ctx = createContext({
@@ -356,23 +355,20 @@ describe("SlashCommandHandler - Dispatcher Pattern", () => {
       });
       const handler = new SlashCommandHandler(ctx);
 
-      await handler.handle("/mode", "yolo");
+      await handler.handle("/mode", "agent");
 
-      expect(vscodeState.updateMock).toHaveBeenCalledWith("defaultMode", "yolo", "global");
-      expect(updateThread).toHaveBeenCalledWith("thread-1", {
-        mode: "yolo",
-        trust_mode: true,
-        auto_approve: true,
-      });
+      expect(vscodeState.updateMock).toHaveBeenCalledWith("defaultMode", "agent", "global");
+      // Mode-only patch: sending auto_approve would let the runtime re-derive
+      // (and possibly downgrade) the thread's permission posture.
+      expect(updateThread).toHaveBeenCalledWith("thread-1", { mode: "agent" });
       expect(postMessage).toHaveBeenCalledWith({
         type: "settingsUpdated",
-        mode: "yolo",
+        mode: "agent",
+        posture: "ask",
         model: "deepseek-v4-pro",
         reasoningEffort: "auto",
       });
-      expect(currentThread.mode).toBe("yolo");
-      expect(currentThread.trust_mode).toBe(true);
-      expect(currentThread.auto_approve).toBe(true);
+      expect(currentThread.mode).toBe("agent");
     });
 
     it("keeps the local thread mode in sync even when updateThread returns no body", async () => {
@@ -394,17 +390,12 @@ describe("SlashCommandHandler - Dispatcher Pattern", () => {
 
       await handler.handle("/mode", "agent");
 
-      expect(updateThread).toHaveBeenCalledWith("thread-1", {
-        mode: "agent",
-        trust_mode: false,
-        auto_approve: false,
-      });
+      expect(updateThread).toHaveBeenCalledWith("thread-1", { mode: "agent" });
       expect(currentThread.mode).toBe("agent");
-      expect(currentThread.trust_mode).toBe(false);
-      expect(currentThread.auto_approve).toBe(false);
       expect(postMessage).toHaveBeenCalledWith({
         type: "settingsUpdated",
         mode: "agent",
+        posture: "ask",
         model: "deepseek-v4-pro",
         reasoningEffort: "auto",
       });
@@ -420,14 +411,50 @@ describe("SlashCommandHandler - Dispatcher Pattern", () => {
       expect(vscodeState.updateMock).toHaveBeenCalledWith("defaultMode", "plan", "global");
     });
 
-    it("accepts numeric aliases (1=agent, 2=plan, 3=yolo)", async () => {
+    it("maps numeric shortcuts to Act / Plan / Operate", async () => {
       const postMessage = vi.fn();
       const ctx = createContext({ postMessage });
 
       const handler = new SlashCommandHandler(ctx);
       await handler.handle("/mode", "3");
 
-      expect(vscodeState.updateMock).toHaveBeenCalledWith("defaultMode", "yolo", "global");
+      expect(vscodeState.updateMock).toHaveBeenCalledWith("defaultMode", "operate", "global");
+    });
+
+    it("treats yolo as the Act + Full Access compatibility alias", async () => {
+      const currentThread = {
+        id: "thread-1",
+        mode: "plan",
+        model: "deepseek-v4-pro",
+        trust_mode: false,
+        auto_approve: false,
+      } as any;
+      const updateThread = vi.fn(async () => ({
+        ...currentThread,
+        mode: "agent",
+        permission_posture: "full_access",
+      }));
+      const postMessage = vi.fn();
+      const ctx = createContext({
+        api: { ...createContext().api, updateThread } as any,
+        currentThread,
+        postMessage,
+      });
+      const handler = new SlashCommandHandler(ctx);
+
+      await handler.handle("/mode", "yolo");
+
+      expect(vscodeState.updateMock).toHaveBeenCalledWith("defaultMode", "agent", "global");
+      expect(vscodeState.updateMock).toHaveBeenCalledWith(
+        "defaultPermissionPosture",
+        "full_access",
+        "global"
+      );
+      expect(updateThread).toHaveBeenCalledWith("thread-1", {
+        mode: "agent",
+        permission_posture: "full_access",
+      });
+      expect(currentThread.permission_posture).toBe("full_access");
     });
 
     it("shows current mode when no valid arg given", async () => {
@@ -444,6 +471,66 @@ describe("SlashCommandHandler - Dispatcher Pattern", () => {
         (c: any) => c[0].type === "info" && c[0].message.includes("Current mode")
       );
       expect(infoMsg).toBeDefined();
+    });
+  });
+
+  // ── /auto ──
+
+  describe("/auto", () => {
+    it("switches the permission posture to Auto-Review without touching the mode", async () => {
+      const currentThread = {
+        id: "thread-1",
+        mode: "plan",
+        model: "deepseek-v4-pro",
+        auto_approve: false,
+      } as any;
+      const updateThread = vi.fn(async () => ({
+        ...currentThread,
+        permission_posture: "auto_review",
+      }));
+      const postMessage = vi.fn();
+      const ctx = createContext({
+        api: { ...createContext().api, updateThread } as any,
+        currentThread,
+        postMessage,
+      });
+      const handler = new SlashCommandHandler(ctx);
+
+      await handler.handle("/auto", "");
+
+      expect(vscodeState.updateMock).toHaveBeenCalledWith(
+        "defaultPermissionPosture",
+        "auto_review",
+        "global"
+      );
+      // Posture-only patch: the mode (and therefore the thread's mode) is untouched.
+      expect(updateThread).toHaveBeenCalledWith("thread-1", {
+        permission_posture: "auto_review",
+      });
+      expect(vscodeState.updateMock).not.toHaveBeenCalledWith(
+        "defaultMode",
+        expect.anything(),
+        expect.anything()
+      );
+      expect(currentThread.mode).toBe("plan");
+      expect(postMessage).toHaveBeenCalledWith({
+        type: "settingsUpdated",
+        mode: "plan",
+        posture: "auto_review",
+        model: "deepseek-v4-pro",
+        reasoningEffort: "auto",
+      });
+    });
+
+    it("rejects arguments with a usage hint", async () => {
+      const postMessage = vi.fn();
+      const ctx = createContext({ postMessage });
+      const handler = new SlashCommandHandler(ctx);
+
+      await handler.handle("/auto", "on");
+
+      expect(vscodeState.updateMock).not.toHaveBeenCalled();
+      expect(postMessage).toHaveBeenCalledWith({ type: "info", message: "Usage: /auto" });
     });
   });
 
@@ -475,6 +562,7 @@ describe("SlashCommandHandler - Dispatcher Pattern", () => {
       expect(postMessage).toHaveBeenCalledWith({
         type: "settingsUpdated",
         mode: "agent",
+        posture: "ask",
         model: "deepseek-v4-flash",
         reasoningEffort: "auto",
       });
