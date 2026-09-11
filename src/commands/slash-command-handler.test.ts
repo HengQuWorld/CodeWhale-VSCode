@@ -99,13 +99,21 @@ vi.mock("../utils/cost-calculator", () => ({
 
 // ── Mock slash-commands ──
 
+const mockCommandRegistry = vi.hoisted(() => [
+  { name: "/theme", desc: "Change theme", category: "unavailable", availability: "unavailable", helpText: "Not available: GUI uses VSCode's theme system." },
+  { name: "/restore", desc: "Restore from snapshot", category: "session", availability: "full", helpText: "/restore [N|list [N]]" },
+]);
+
 vi.mock("./slash-commands", () => ({
   isCommandAvailableInGui: vi.fn((name: string) => {
     // Default: most commands are available
-    const unavailable = ["/theme", "/share", "/network", "/queue", "/stash", "/hooks", "/subagents", "/agent", "/statusline", "/cycles", "/cycle", "/recall", "/relay", "/lsp", "/review", "/restore", "/rlm"];
+    const unavailable = ["/theme", "/share", "/network", "/queue", "/stash", "/hooks", "/subagents", "/agent", "/statusline", "/cycles", "/cycle", "/recall", "/relay", "/lsp", "/review", "/rlm"];
     if (unavailable.includes(name)) return "unavailable";
     return "full";
   }),
+  getCommand: vi.fn((name: string) =>
+    mockCommandRegistry.find((c) => c.name === name)
+  ),
 }));
 
 // ── Helper: create context ──
@@ -193,6 +201,16 @@ function createContext(overrides: Partial<SlashCommandContext> = {}): SlashComma
         next_run_at: null,
       })),
       listAutomationRuns: vi.fn(async () => []),
+      listMemory: vi.fn(async () => ({ entries: [], total: 0 })),
+      getMemoryEntry: vi.fn(async () => ({
+        entry: { id: 1, scope: "global", workspace_id: null, summary: "alpha note", stale: false, line_start: 1, line_end: 1, status: "active" },
+      })),
+      createMemoryEntry: vi.fn(async () => ({
+        entry: { id: 3, scope: "global", workspace_id: null, summary: "new note", stale: false, line_start: 3, line_end: 3, status: "active" },
+      })),
+      clearMemory: vi.fn(async () => ({ cleared: true })),
+      listSnapshots: vi.fn(async () => []),
+      restoreSnapshot: vi.fn(async () => ({ restored: "snap" })),
     } as any,
     engine: {
       isRunning: true,
@@ -280,13 +298,13 @@ describe("SlashCommandHandler - Dispatcher Pattern", () => {
       });
     });
 
-    it("routes unknown (not-in-HANDLERS) commands to error message", async () => {
+    it("routes known-but-unavailable (not-in-HANDLERS) commands to their helpText", async () => {
       const ctx = createContext();
       const handler = new SlashCommandHandler(ctx);
       await handler.handle("/theme", "");
       expect(ctx.postMessage).toHaveBeenCalledWith({
-        type: "error",
-        message: "Unknown command: /theme. Type /help for available commands.",
+        type: "info",
+        message: "/theme: Not available: GUI uses VSCode's theme system.",
       });
     });
 
@@ -1565,6 +1583,217 @@ describe("SlashCommandHandler - Dispatcher Pattern", () => {
         "workbench.action.openSettings",
         "brotherwhale"
       );
+    });
+  });
+
+  // ── /memory (native store via runtime API — never touches local files) ──
+
+  describe("/memory", () => {
+    it("lists native memory entries via the API on show", async () => {
+      const postMessage = vi.fn();
+      const ctx = createContext({
+        postMessage,
+        api: {
+          ...createContext().api,
+          listMemory: vi.fn(async () => ({
+            entries: [
+              { id: 1, scope: "global", workspace_id: null, summary: "alpha note", stale: false, line_start: 1, line_end: 1, status: "active" },
+            ],
+            total: 1,
+          })),
+        } as any,
+      });
+      const handler = new SlashCommandHandler(ctx);
+
+      await handler.handle("/memory", "");
+
+      expect(ctx.api.listMemory).toHaveBeenCalledWith({ limit: 20 });
+      expect(postMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ type: "info", message: expect.stringContaining("#1 [global] alpha note") })
+      );
+    });
+
+    it("reports empty memory without touching the filesystem", async () => {
+      const postMessage = vi.fn();
+      vi.mocked(fs.readFileSync).mockClear();
+      vi.mocked(fs.writeFileSync).mockClear();
+      const ctx = createContext({ postMessage });
+      const handler = new SlashCommandHandler(ctx);
+
+      await handler.handle("/memory", "show");
+
+      expect(ctx.api.listMemory).toHaveBeenCalled();
+      expect(fs.readFileSync).not.toHaveBeenCalled();
+      expect(fs.writeFileSync).not.toHaveBeenCalled();
+      expect(postMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ type: "info", message: expect.stringContaining("Memory is empty") })
+      );
+    });
+
+    it("search passes the query to the API", async () => {
+      const postMessage = vi.fn();
+      const ctx = createContext({ postMessage });
+      const handler = new SlashCommandHandler(ctx);
+
+      await handler.handle("/memory", "search alpha");
+
+      expect(ctx.api.listMemory).toHaveBeenCalledWith({ q: "alpha", limit: 20 });
+    });
+
+    it("remember posts a new entry through the API", async () => {
+      const postMessage = vi.fn();
+      const ctx = createContext({ postMessage });
+      const handler = new SlashCommandHandler(ctx);
+
+      await handler.handle("/memory", "remember workspace likes tea");
+
+      expect(ctx.api.createMemoryEntry).toHaveBeenCalledWith("likes tea", "workspace");
+      expect(postMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ type: "info", message: expect.stringContaining("#3") })
+      );
+    });
+
+    it("clear defaults to the all scope", async () => {
+      const postMessage = vi.fn();
+      const ctx = createContext({ postMessage });
+      const handler = new SlashCommandHandler(ctx);
+
+      await handler.handle("/memory", "clear");
+
+      expect(ctx.api.clearMemory).toHaveBeenCalledWith("all");
+      expect(postMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ type: "info", message: expect.stringContaining("Memory cleared (all)") })
+      );
+    });
+
+    it("rejects an unknown subcommand with usage", async () => {
+      const postMessage = vi.fn();
+      const ctx = createContext({ postMessage });
+      const handler = new SlashCommandHandler(ctx);
+
+      await handler.handle("/memory", "bogus");
+
+      expect(postMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ type: "error", message: expect.stringContaining("Unknown subcommand 'bogus'") })
+      );
+    });
+  });
+
+  // ── /restore (snapshot list + trust-gated revert, mirrors TUI) ──
+
+  describe("/restore", () => {
+    const SNAPSHOTS = [
+      { id: "aaaaaaaa11111111", label: "pre-turn:2", timestamp: 1_700_000_000 },
+      { id: "bbbbbbbb22222222", label: "pre-turn:1", timestamp: 1_699_000_000 },
+    ];
+
+    it("lists snapshots when no arg given", async () => {
+      const postMessage = vi.fn();
+      const ctx = createContext({
+        postMessage,
+        api: {
+          ...createContext().api,
+          listSnapshots: vi.fn(async () => SNAPSHOTS),
+        } as any,
+      });
+      const handler = new SlashCommandHandler(ctx);
+
+      await handler.handle("/restore", "");
+
+      expect(ctx.api.listSnapshots).toHaveBeenCalledWith({ limit: 20 });
+      const msg = postMessage.mock.calls[0][0].message;
+      expect(msg).toContain("#1");
+      expect(msg).toContain("pre-turn:2");
+      expect(msg).toContain("aaaaaaaa");
+    });
+
+    it("shows the empty message when there are no snapshots", async () => {
+      const postMessage = vi.fn();
+      const ctx = createContext({ postMessage });
+      const handler = new SlashCommandHandler(ctx);
+
+      await handler.handle("/restore", "");
+
+      expect(postMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ type: "info", message: expect.stringContaining("No snapshots yet") })
+      );
+    });
+
+    it("refuses to restore outside trusted mode (mirrors TUI trust gate)", async () => {
+      const postMessage = vi.fn();
+      const ctx = createContext({
+        postMessage,
+        currentThread: { id: "thread-1", trust_mode: false, auto_approve: false } as any,
+        api: {
+          ...createContext().api,
+          listSnapshots: vi.fn(async () => SNAPSHOTS),
+        } as any,
+      });
+      const handler = new SlashCommandHandler(ctx);
+
+      await handler.handle("/restore", "2");
+
+      expect(ctx.api.restoreSnapshot).not.toHaveBeenCalled();
+      expect(postMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ type: "info", message: expect.stringContaining("Refusing to restore snapshot #2") })
+      );
+    });
+
+    it("restores the Nth snapshot when the thread is trusted", async () => {
+      const postMessage = vi.fn();
+      const ctx = createContext({
+        postMessage,
+        currentThread: { id: "thread-1", trust_mode: true, auto_approve: false } as any,
+        api: {
+          ...createContext().api,
+          listSnapshots: vi.fn(async () => SNAPSHOTS),
+          restoreSnapshot: vi.fn(async () => ({ restored: "ok" })),
+        } as any,
+      });
+      const handler = new SlashCommandHandler(ctx);
+
+      await handler.handle("/restore", "2");
+
+      expect(ctx.api.restoreSnapshot).toHaveBeenCalledWith("bbbbbbbb22222222");
+      expect(postMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ type: "info", message: expect.stringContaining("Restored snapshot #2 ('pre-turn:1', bbbbbbbb)") })
+      );
+    });
+
+    it("errors when the requested index exceeds the available snapshots", async () => {
+      const postMessage = vi.fn();
+      const ctx = createContext({
+        postMessage,
+        currentThread: { id: "thread-1", trust_mode: true, auto_approve: true } as any,
+        api: {
+          ...createContext().api,
+          listSnapshots: vi.fn(async () => SNAPSHOTS),
+        } as any,
+      });
+      const handler = new SlashCommandHandler(ctx);
+
+      await handler.handle("/restore", "9");
+
+      expect(ctx.api.restoreSnapshot).not.toHaveBeenCalled();
+      expect(postMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ type: "error", message: expect.stringContaining("Only 2 snapshot(s) available") })
+      );
+    });
+
+    it("list [N] passes the explicit limit", async () => {
+      const postMessage = vi.fn();
+      const ctx = createContext({
+        postMessage,
+        api: {
+          ...createContext().api,
+          listSnapshots: vi.fn(async () => SNAPSHOTS),
+        } as any,
+      });
+      const handler = new SlashCommandHandler(ctx);
+
+      await handler.handle("/restore", "list 50");
+
+      expect(ctx.api.listSnapshots).toHaveBeenCalledWith({ limit: 50 });
     });
   });
 });

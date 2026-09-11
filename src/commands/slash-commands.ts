@@ -29,7 +29,7 @@ const COMMANDS: SlashCommand[] = [
   { name: "/task", desc: "Manage tasks", category: "core", availability: "full", helpText: "/task add <prompt> | /task list | /task show <id> | /task cancel <id> — Create and manage background tasks" },
   { name: "/jobs", desc: "Manage automations", category: "core", availability: "full", helpText: "/jobs list | /jobs show <id> | /jobs run <id> | /jobs pause <id> | /jobs resume <id> | /jobs history <id> - Manage scheduled automations" },
   { name: "/note", desc: "Manage notes", category: "core", availability: "full", helpText: "/note <text> | /note add <text> | /note list | /note show <n> | /note remove <n> | /note clear | /note path" },
-  { name: "/memory", desc: "Manage memory", category: "core", availability: "full", helpText: "/memory [show|path|clear|edit] - Inspect or manage persistent user-memory file" },
+  { name: "/memory", desc: "Manage memory", category: "core", availability: "full", helpText: "/memory [show|search <query>|get <id>|remember [global|workspace] <note>|clear [all|global|workspace]] - Manage the native memory store via the runtime API" },
   { name: "/trust", desc: "Manage trust settings", category: "config", availability: "full", helpText: "/trust [on|off] - Toggle trust mode" },
   { name: "/verbose", desc: "Toggle verbose mode", category: "config", availability: "full", helpText: "/verbose [on|off] - Toggle verbose mode" },
   { name: "/theme", desc: "Change theme", category: "unavailable", availability: "unavailable", helpText: "Not available: GUI uses VSCode's theme system. Change theme via VSCode settings instead." },
@@ -60,7 +60,7 @@ const COMMANDS: SlashCommand[] = [
   { name: "/init", desc: "Initialize project config", category: "config", availability: "full", helpText: "/init - Open settings for initialization" },
   { name: "/lsp", desc: "LSP settings", category: "config", availability: "unavailable", helpText: "Not available: LSP is managed by VSCode itself. Configure via VSCode Settings > Language Servers." },
   { name: "/review", desc: "Review code", category: "skills", availability: "unavailable", helpText: "Not available: Code review requires TUI's PR review workflow." },
-  { name: "/restore", desc: "Restore from snapshot", category: "session", availability: "unavailable", helpText: "Not available: Snapshot restore requires TUI's internal storage system." },
+  { name: "/restore", desc: "Restore from snapshot", category: "session", availability: "full", helpText: "/restore [N|list [N]] - List snapshots or revert workspace files to the Nth-most-recent snapshot (requires trust mode)" },
   { name: "/rlm", desc: "Recursive language model", category: "core", availability: "unavailable", helpText: "Not available: RLM sessions require TUI's Python runtime and bounded analysis environment." },
   { name: "/change", desc: "View changelog", category: "core", availability: "partial", helpText: "Changelog: See the extension's CHANGELOG or visit the repository." },
   { name: "/cache", desc: "Cache telemetry", category: "debug", availability: "full", helpText: "/cache - Show per-turn prefix-cache telemetry for the last 10 turns" },
@@ -91,6 +91,12 @@ export class SlashCommandRegistry {
         c.desc.toLowerCase().includes(prefix.slice(1))
     );
   }
+}
+
+/** Look up a command in the static registry (known-but-unavailable
+ *  commands still resolve here; they are not "unknown"). */
+export function getCommand(name: string): SlashCommand | undefined {
+  return COMMANDS.find((c) => c.name === name);
 }
 
 export function categorizeCommand(name: string): string {

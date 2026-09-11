@@ -11,6 +11,9 @@ import type {
   PatchUndoResponse,
   RetryTurnResponse,
   SnapshotEntry,
+  MemoryListResponse,
+  MemoryEntryResponse,
+  ClearMemoryResponse,
   ThreadDetailResponse,
   ApprovalRequest,
   PendingApprovalRequest,
@@ -78,6 +81,9 @@ export type {
   PatchUndoResponse,
   RetryTurnResponse,
   SnapshotEntry,
+  MemoryListResponse,
+  MemoryEntryResponse,
+  ClearMemoryResponse,
   ThreadDetailResponse,
   ApprovalRequest,
   PendingApprovalRequest,
@@ -348,6 +354,45 @@ export class CodeWhaleApiClient {
       `/v1/snapshots/${snapshotId}/restore`,
       {}
     )) as { restored: string };
+  }
+
+  // ── Memory (native store, mirrors TUI's /v1/memory) ──
+
+  /** List native memory entries. `q` filters by full-text search;
+   *  `scope` filters to "global" or "workspace". */
+  async listMemory(opts?: {
+    limit?: number;
+    q?: string;
+    scope?: "global" | "workspace";
+  }): Promise<MemoryListResponse> {
+    const params = new URLSearchParams();
+    if (opts?.limit !== undefined) params.set("limit", String(opts.limit));
+    if (opts?.q) params.set("q", opts.q);
+    if (opts?.scope) params.set("scope", opts.scope);
+    const qs = params.toString();
+    const path = `/v1/memory${qs ? "?" + qs : ""}`;
+    return (await this.get(path)) as MemoryListResponse;
+  }
+
+  async getMemoryEntry(id: number): Promise<MemoryEntryResponse> {
+    return (await this.get(`/v1/memory/${id}`)) as MemoryEntryResponse;
+  }
+
+  /** Append a memory note. Scope defaults to "global" on the server. */
+  async createMemoryEntry(
+    text: string,
+    scope?: "global" | "workspace"
+  ): Promise<MemoryEntryResponse> {
+    const body: Record<string, unknown> = { text };
+    if (scope) body.scope = scope;
+    return (await this.post("/v1/memory", body)) as MemoryEntryResponse;
+  }
+
+  /** Clear memory entries for the given scope (destructive). */
+  async clearMemory(scope: "global" | "workspace" | "all"): Promise<ClearMemoryResponse> {
+    return (await this.delete(
+      `/v1/memory?scope=${encodeURIComponent(scope)}`
+    )) as ClearMemoryResponse;
   }
 
   // ── Approvals ──

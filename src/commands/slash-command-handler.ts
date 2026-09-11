@@ -9,11 +9,10 @@
 import * as vscode from "vscode";
 import * as fs from "fs";
 import * as path from "path";
-import * as os from "os";
 import { exec } from "child_process";
 import { t, currentLocale } from "../i18n";
 import { formatCostAmount, resolveCostCurrency } from "../utils/cost-calculator";
-import { isCommandAvailableInGui } from "./slash-commands";
+import { isCommandAvailableInGui, getCommand } from "./slash-commands";
 import { formatError, getErrorMessage } from "../utils/error-handler";
 import type { CodeWhaleApiClient, CodeWhaleEngine, ThreadRecord, TaskSummary, ProviderEntry } from "../types";
 
@@ -687,6 +686,8 @@ async function handleHelp(ctx: SlashCommandContext, _args: string): Promise<void
 /verbose [on|off] - Toggle verbose mode
 /skills - List all available skills with status
 /skill <name> [on|off] - Enable or disable a skill
+/memory - Manage native memory (show/search/get/remember/clear)
+/restore [N] - List snapshots or revert workspace files (requires trust mode)
 /init - Open settings for initialization
 /mcp - Open MCP settings
 /provider - Show provider info
@@ -695,12 +696,12 @@ async function handleHelp(ctx: SlashCommandContext, _args: string): Promise<void
 /exit - Close sidebar
 
 Commands with limited support in GUI:
-/task, /jobs, /note, /memory, /undo, /retry, /share,
+/task, /jobs, /note, /undo, /retry, /share,
 /goal, /network, /queue, /stash, /hooks, /subagents,
 /agent, /attach, /anchor, /sessions, /load, /cycles,
-/cycle, /recall, /relay, /lsp, /review, /restore, /rlm,
-/change, /cache, /profile, /translate, /system, /edit,
-/diff, /logout, /tokens, /cost, /home
+/cycle, /recall, /relay, /lsp, /review,
+/rlm, /change, /cache, /profile, /translate, /system,
+/edit, /diff, /logout, /tokens, /cost, /home
 
 Use the TUI for full command support.` });
 }
@@ -1314,62 +1315,212 @@ async function handleNote(ctx: SlashCommandContext, args: string): Promise<void>
   }
 }
 
+const MEMORY_USAGE = "Usage: /memory [show|search <query>|get <id>|remember [global|workspace] <note>|clear [all|global|workspace]]";
+
+function formatMemoryEntryLine(entry: { id: number; scope: string; stale: boolean; summary: string }): string {
+  const staleMark = entry.stale ? " (stale)" : "";
+  return `  #${entry.id} [${entry.scope}]${staleMark} ${entry.summary}`;
+}
+
+/**
+ * `/memory` — manage the native memory store via the runtime API
+ * (`/v1/memory`), the same store the TUI's `/memory native` subcommands
+ * and the model's `remember` tool use. Never touches local files directly.
+ */
 async function handleMemory(ctx: SlashCommandContext, args: string): Promise<void> {
-  const memoryDir = path.join(os.homedir(), ".deepseek");
-  const memoryPath = path.join(memoryDir, "memory.md");
-  const memArg = args.trim().toLowerCase();
-
-  if (memArg === "help") {
-    ctx.postMessage({ type: "info", message: `Usage: /memory [show|path|clear|edit]\nCurrent path: ${memoryPath}` });
-    return;
-  }
-
-  if (memArg === "path") {
-    ctx.postMessage({ type: "info", message: `Memory path: ${memoryPath}` });
-    return;
-  }
+  const memArg = args.trim();
+  const firstWord = memArg.split(/\s+/)[0] ?? "";
+  const sub = firstWord.toLowerCase() || "show";
+  const rest = memArg.slice(firstWord.length).trim();
 
   try {
-    if (memArg === "clear") {
-      if (fs.existsSync(memoryPath)) {
-        fs.writeFileSync(memoryPath, "(empty)\n");
-        ctx.postMessage({ type: "info", message: "Memory cleared." });
+    await ctx.api.ensureReady();
+
+    if (sub === "help") {
+      ctx.postMessage({ type: "info", message: `${MEMORY_USAGE}\n\nManage the native memory store via the runtime API — the same store the TUI's /memory native subcommands and the model's \`remember\` tool use.` });
+      return;
+    }
+
+    if (sub === "show") {
+      const result = await ctx.api.listMemory({ limit: 20 });
+      if (!result.entries.length) {
+        ctx.postMessage({ type: "info", message: `Memory is empty.\nAdd via /memory remember <note> or let the model use the \`remember\` tool.\n\n${MEMORY_USAGE}` });
       } else {
-        ctx.postMessage({ type: "info", message: "No memory file to clear." });
+        const lines = result.entries.map(formatMemoryEntryLine);
+        ctx.postMessage({ type: "info", message: `Native memory (${result.total}):\n${lines.join("\n")}\n\n${MEMORY_USAGE}` });
       }
       return;
     }
 
-    if (memArg === "edit") {
+    if (sub === "search") {
+      if (!rest) {
+        ctx.postMessage({ type: "error", message: "Usage: /memory search <query>" });
+        return;
+      }
+      const result = await ctx.api.listMemory({ q: rest, limit: 20 });
+      if (!result.entries.length) {
+        ctx.postMessage({ type: "info", message: "No memory matches." });
+      } else {
+        const lines = result.entries.map(formatMemoryEntryLine);
+        ctx.postMessage({ type: "info", message: `Memory matches (${result.total}):\n${lines.join("\n")}` });
+      }
+      return;
+    }
+
+    if (sub === "get") {
+      const id = parseInt(rest, 10);
+      if (isNaN(id) || id < 1) {
+        ctx.postMessage({ type: "error", message: "Usage: /memory get <id>" });
+        return;
+      }
       try {
-        const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(memoryPath));
-        vscode.window.showTextDocument(doc);
-        ctx.postMessage({ type: "info", message: `Opening memory file: ${memoryPath}` });
-      } catch {
-        ctx.postMessage({ type: "info", message: `Memory file not found. Create it at: ${memoryPath}` });
+        const { entry } = await ctx.api.getMemoryEntry(id);
+        ctx.postMessage({ type: "info", message: formatMemoryEntryLine(entry) });
+      } catch (err) {
+        if (getErrorMessage(err).includes("not found")) {
+          ctx.postMessage({ type: "error", message: `memory entry ${id} not found` });
+        } else {
+          throw err;
+        }
       }
       return;
     }
 
-    if (!fs.existsSync(memoryPath)) {
-      ctx.postMessage({ type: "info", message: `Memory file not found.\nPath: ${memoryPath}\nCreate it to start using memory, or use /memory edit to open it.` });
-    } else {
-      const content = fs.readFileSync(memoryPath, "utf-8").trim();
-      if (!content || content === "(empty)") {
-        ctx.postMessage({ type: "info", message: `Memory path: ${memoryPath}\n(empty — add content to the file or use /memory edit)` });
-      } else {
-        const display = content.length > 500
-          ? content.slice(0, 500) + `...\n(truncated, ${content.length} chars total)`
-          : content;
-        ctx.postMessage({ type: "info", message: `Memory path: ${memoryPath}\n─────────────────────────────\n${display}` });
+    if (sub === "remember" || sub === "add") {
+      let scope: "global" | "workspace" | undefined;
+      let note = rest;
+      const scopeMatch = note.match(/^(global|workspace)\s+(.+)$/i);
+      if (scopeMatch) {
+        scope = scopeMatch[1].toLowerCase() as "global" | "workspace";
+        note = scopeMatch[2];
       }
+      if (!note) {
+        ctx.postMessage({ type: "error", message: "Usage: /memory remember [global|workspace] <note>" });
+        return;
+      }
+      const { entry } = await ctx.api.createMemoryEntry(note, scope);
+      ctx.postMessage({ type: "info", message: `Memory remembered as #${entry.id} (${entry.scope}): ${entry.summary}` });
+      return;
     }
+
+    if (sub === "clear") {
+      const scope = (rest || "all").toLowerCase();
+      if (!["all", "global", "workspace"].includes(scope)) {
+        ctx.postMessage({ type: "error", message: "Usage: /memory clear [all|global|workspace]" });
+        return;
+      }
+      await ctx.api.clearMemory(scope as "all" | "global" | "workspace");
+      ctx.postMessage({ type: "info", message: `Memory cleared (${scope}). This cannot be undone.` });
+      return;
+    }
+
+    ctx.postMessage({ type: "error", message: `Unknown subcommand '${sub}'.\n${MEMORY_USAGE}` });
   } catch (err) {
     ctx.postMessage({ type: "error", message: formatError("Memory error", err) });
   }
 }
 
 // ── Command registry (dispatcher map) ──
+
+const RESTORE_DEFAULT_LIST_LIMIT = 20;
+const RESTORE_MAX_LIST_LIMIT = 100;
+const RESTORE_MAX_INDEX = 1000;
+
+function formatSnapshotTime(timestampSec: number): string {
+  const d = new Date(timestampSec * 1000);
+  if (isNaN(d.getTime())) return "unknown time";
+  return d.toISOString().slice(0, 16).replace("T", " ") + " UTC";
+}
+
+/**
+ * `/restore` — list snapshots or revert workspace files to the Nth-most-
+ * recent snapshot, mirroring TUI's `/restore` (commands/groups/skills/
+ * restore.rs): no arg lists 20 snapshots, `list [N]` lists more, `<N>`
+ * restores. File mutation is gated on trust mode, same as the TUI.
+ */
+async function handleRestore(ctx: SlashCommandContext, args: string): Promise<void> {
+  const trimmed = args.trim();
+  const lower = trimmed.toLowerCase();
+
+  try {
+    await ctx.api.ensureReady();
+
+    // Listing forms: no arg or "list [N]"
+    if (!trimmed || lower.startsWith("list")) {
+      let limit = RESTORE_DEFAULT_LIST_LIMIT;
+      if (lower.startsWith("list")) {
+        const extra = trimmed.slice(4).trim();
+        if (extra) {
+          const n = parseInt(extra, 10);
+          if (isNaN(n) || n < 1) {
+            ctx.postMessage({ type: "error", message: `Usage: /restore list [N]  (N must be >= 1; got '${extra}')` });
+            return;
+          }
+          if (n > RESTORE_MAX_LIST_LIMIT) {
+            ctx.postMessage({ type: "error", message: `Restore list limit must be <= ${RESTORE_MAX_LIST_LIMIT}; got ${n}.` });
+            return;
+          }
+          limit = n;
+        }
+      }
+      const snapshots = await ctx.api.listSnapshots({ limit });
+      if (!snapshots.length) {
+        ctx.postMessage({ type: "info", message: "No snapshots yet. Send a message to create the first pre-turn snapshot." });
+        return;
+      }
+      const lines = snapshots.map((s, i) =>
+        `  #${String(i + 1).padEnd(2)}  ${formatSnapshotTime(s.timestamp)}  ${s.id.slice(0, 8)}  ${s.label}`
+      );
+      ctx.postMessage({
+        type: "info",
+        message: `Recent snapshots (newest first; pass /restore <N> to revert; /restore list 50 shows more):\n${lines.join("\n")}`,
+      });
+      return;
+    }
+
+    // Restore form: /restore <N> (1-based, newest first)
+    const n = parseInt(trimmed, 10);
+    if (isNaN(n) || n < 1) {
+      ctx.postMessage({ type: "error", message: `Usage: /restore <N> or /restore list [N]  (N is 1-based; got '${trimmed}')` });
+      return;
+    }
+    if (n > RESTORE_MAX_INDEX) {
+      ctx.postMessage({ type: "error", message: `Restore index must be <= ${RESTORE_MAX_INDEX}; got ${n}. Use /restore list [N] to inspect snapshots first.` });
+      return;
+    }
+
+    const snapshots = await ctx.api.listSnapshots({ limit: Math.max(n, RESTORE_DEFAULT_LIST_LIMIT) });
+    if (!snapshots.length) {
+      ctx.postMessage({ type: "info", message: "No snapshots yet. Send a message to create the first pre-turn snapshot." });
+      return;
+    }
+    if (n > snapshots.length) {
+      ctx.postMessage({ type: "error", message: `Only ${snapshots.length} snapshot(s) available; asked for #${n}.` });
+      return;
+    }
+
+    // Trust gate — mirrors TUI: refuse to mutate files outside trusted/full
+    // access (TUI checks yolo || trust_mode; GUI's counterparts are
+    // auto_approve || trust_mode on the current thread).
+    const trusted = ctx.currentThread?.trust_mode || ctx.currentThread?.auto_approve;
+    if (!trusted) {
+      ctx.postMessage({
+        type: "info",
+        message: `Refusing to restore snapshot #${n} ('${snapshots[n - 1].label}') outside trusted mode.\nRun /trust on, then re-run /restore ${n}.`,
+      });
+      return;
+    }
+
+    const target = snapshots[n - 1];
+    await ctx.api.restoreSnapshot(target.id);
+    ctx.postMessage({
+      type: "info",
+      message: `Restored snapshot #${n} ('${target.label}', ${target.id.slice(0, 8)}). Workspace files have been reverted; conversation history is unchanged.`,
+    });
+  } catch (err) {
+    ctx.postMessage({ type: "error", message: formatError("Restore failed", err) });
+  }
+}
 
 const HANDLERS: Record<string, CommandHandler> = {
   "/mode": handleMode,
@@ -1420,6 +1571,7 @@ const HANDLERS: Record<string, CommandHandler> = {
   "/logout": handleLogout,
   "/note": handleNote,
   "/memory": handleMemory,
+  "/restore": handleRestore,
 };
 
 // ── Handler class ──
@@ -1439,7 +1591,15 @@ export class SlashCommandHandler {
       }
       await handler(this.ctx, args);
     } else {
-      this.ctx.postMessage({ type: "error", message: `Unknown command: ${command}. Type /help for available commands.` });
+      const known = getCommand(command);
+      if (known) {
+        // Known to the registry but no GUI handler → unavailable in GUI.
+        // Surface the registry's helpText (which explains why) instead of
+        // the misleading "Unknown command".
+        this.ctx.postMessage({ type: "info", message: `${known.name}: ${known.helpText}` });
+      } else {
+        this.ctx.postMessage({ type: "error", message: `Unknown command: ${command}. Type /help for available commands.` });
+      }
     }
   }
 }
