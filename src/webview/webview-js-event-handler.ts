@@ -79,6 +79,16 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
     }
   }
 
+  // Informational engine prose ("<kind> started", "Turn: in_progress",
+  // "Loaded N turns") arrives interleaved with stream deltas and says nothing
+  // about whether the turn is still running. It may only repaint the
+  // status-bar text: routing it through setStreamingState() cleared the
+  // streaming flag on every one of those messages, so the send/stop button
+  // flickered between send and stop throughout a turn.
+  function setStatusText(text) {
+    if (statusTextEl) statusTextEl.textContent = text;
+  }
+
   function showThinkingActivity(messageId, label) {
     var bodyEl = document.getElementById('body-' + messageId);
     if (!bodyEl) return;
@@ -499,6 +509,17 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
         // from the previous session don't leak into the new one.
         _diffStore.clear();
         _diffIdCounter.value = 0;
+        // A history load replaces the whole conversation (thread/session
+        // switch, or a webview reload), so end any running-turn display here.
+        // This used to happen as a side effect of the trailing status
+        // message, which no longer touches the streaming state.
+        window.__wvMessages.setStreaming(false);
+        var loadHistoryTimeout = window.__wvMessages.getStreamingTimeout();
+        if (loadHistoryTimeout) {
+          clearTimeout(loadHistoryTimeout);
+          window.__wvMessages.setStreamingTimeout(null);
+        }
+        setStreamingState(false, __i18n.ready);
         messagesEl.innerHTML = '';
         for (var i = 0; i < msg.messages.length; i++) {
           var m = msg.messages[i];
@@ -876,7 +897,7 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
       }
 
       case 'status':
-        setStreamingState(false, msg.text);
+        setStatusText(msg.text);
         break;
 
       case 'setInputText':

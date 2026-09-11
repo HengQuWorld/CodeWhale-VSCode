@@ -99,6 +99,7 @@ function createRuntimeHarness() {
   };
 
   const postMessages: Array<Record<string, unknown>> = [];
+  const sendStopCalls: boolean[] = [];
   const windowListeners = new Map<string, (event: any) => void>();
   const documentListeners = new Map<string, (event: any) => void>();
   const taskDetailCalls: unknown[] = [];
@@ -155,7 +156,9 @@ function createRuntimeHarness() {
       renderWelcome: () => {},
     },
     __wvInput: {
-      updateSendStopButton: () => {},
+      updateSendStopButton: (streaming: boolean) => {
+        sendStopCalls.push(streaming);
+      },
       applyApiCapabilities: () => {},
       setCurrentAttachments: () => {},
       renderAttachments: () => {},
@@ -192,6 +195,7 @@ function createRuntimeHarness() {
     },
     getElement: getEl,
     postMessages,
+    sendStopCalls,
     documentListeners,
     taskDetailCalls,
     agentDetailCalls,
@@ -286,6 +290,64 @@ describe("webview-js-event-handler runtime", () => {
 
     expect(harness.getElement("current-model").textContent).toBe("DeepSeek-V4-Flash");
     expect(harness.getElement("status-text").textContent).toBe("Ready (DeepSeek-V4-Flash)");
+  });
+
+  it("keeps the send/stop button in the streaming state across informational status messages", () => {
+    const harness = createRuntimeHarness();
+
+    harness.dispatchMessage({ type: "turnStarted", turnId: "turn-1" });
+    expect(harness.sendStopCalls).toEqual([true]);
+    expect(harness.getElement("status").classList.contains("is-streaming")).toBe(true);
+
+    // A reasoning turn restarts its reasoning item several times, and every
+    // item start emits a status message. Those must not flip the button back
+    // to "send" while the turn is still running.
+    harness.dispatchMessage({ type: "status", text: "agent_reasoning started" });
+    harness.dispatchMessage({ type: "status", text: "Turn: in_progress" });
+
+    expect(harness.getElement("status-text").textContent).toBe("Turn: in_progress");
+    expect(harness.getElement("status").classList.contains("is-streaming")).toBe(true);
+    expect(harness.sendStopCalls).toEqual([true]);
+
+    // A real turn end still flips it back.
+    harness.dispatchMessage({ type: "turnInterrupted" });
+
+    expect(harness.sendStopCalls).toEqual([true, false]);
+    expect(harness.getElement("status").classList.contains("is-streaming")).toBe(false);
+  });
+
+  it("never returns the button to send while reasoning deltas and item-start statuses interleave", () => {
+    const harness = createRuntimeHarness();
+
+    // Mirrors one recorded turn's ordering: turn.lifecycle -> item.started
+    // (agent_reasoning, restarted once per reasoning round) -> thinking
+    // deltas -> item.started (tool_call) -> more reasoning, repeated.
+    harness.dispatchMessage({ type: "turnStarted", turnId: "turn-1" });
+    for (let round = 0; round < 3; round++) {
+      harness.dispatchMessage({ type: "status", text: "Turn: in_progress" });
+      harness.dispatchMessage({ type: "status", text: "agent_reasoning started" });
+      harness.dispatchMessage({ type: "updateThinking", messageId: "msg-1", blockIdx: 0, thinking: "..." });
+      harness.dispatchMessage({ type: "status", text: "tool_call started" });
+      harness.dispatchMessage({ type: "updateMessage", messageId: "msg-1", blockIdx: 0, content: "hi" });
+    }
+
+    expect(harness.sendStopCalls.every(Boolean)).toBe(true);
+
+    harness.dispatchMessage({ type: "messageComplete", messageId: "msg-1" });
+
+    expect(harness.sendStopCalls[harness.sendStopCalls.length - 1]).toBe(false);
+  });
+
+  it("clears the running-turn button state when a history load replaces the conversation", () => {
+    const harness = createRuntimeHarness();
+
+    harness.dispatchMessage({ type: "turnStarted", turnId: "turn-1" });
+    expect(harness.sendStopCalls).toEqual([true]);
+
+    harness.dispatchMessage({ type: "loadHistory", messages: [] });
+
+    expect(harness.sendStopCalls).toEqual([true, false]);
+    expect(harness.getElement("status").classList.contains("is-streaming")).toBe(false);
   });
 
   it("routes taskDetail and agentDetail messages to the sidebar detail views", () => {
