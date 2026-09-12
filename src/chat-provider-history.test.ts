@@ -1080,7 +1080,9 @@ describe("ChatProvider thread history rendering", () => {
 
       const chains = (provider as any).turnFileChanges as Array<{ diffs?: string[]; diff?: string }>;
       expect(chains[0].diffs).toHaveLength(2);
-      expect(reconstructOldContent("ONE\nTWO\n", chains[0].diffs?.[1]!)).toBe("ONE\ntwo\n");
+      const secondDiff = chains[0].diffs?.[1];
+      expect(secondDiff).toBeDefined();
+      expect(reconstructOldContent("ONE\nTWO\n", secondDiff!)).toBe("ONE\ntwo\n");
       expect(reconstructOriginalContent(chains[0].diffs!, "ONE\nTWO\n")).toBe("one\ntwo\n");
       expect(chains[0].diff).toBe(chains[0].diffs?.[1]);
     } finally {
