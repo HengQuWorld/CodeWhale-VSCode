@@ -40,7 +40,12 @@ import {
   reconstructOldContent,
   reconstructOriginalContent,
   getDiffStateForIndex,
+  extractRecordedEdits,
+  reverseApplyRecordedEdits,
+  formatRecordedEditsAsDiff,
+  type RecordedEdit,
 } from "./utils/diff-utils";
+import { resolveRecordedFilePath } from "./utils/file-paths";
 import { t, webviewTranslations, currentLocale } from "./i18n";
 import { ConfigPanel } from "./config-panel";
 import {
@@ -55,6 +60,7 @@ import {
 import {
   friendlyToolName,
   isFileChangeTool,
+  extractFilePath,
   extractToolNameFromSummary,
   buildApprovalSummary,
   detectFileChange,
@@ -167,6 +173,8 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
   public set currentThread(v: ThreadRecord | null) { this.sessionState.data.currentThread = v; }
   private get viewingSessionId(): string | null { return this.sessionState.data.viewingSessionId; }
   private set viewingSessionId(v: string | null) { this.sessionState.data.viewingSessionId = v; }
+  private get viewingSessionWorkspace(): string | null { return this.sessionState.data.viewingSessionWorkspace; }
+  private set viewingSessionWorkspace(v: string | null) { this.sessionState.data.viewingSessionWorkspace = v; }
   private get currentSessionId(): string | null { return this.sessionState.data.currentSessionId; }
   private set currentSessionId(v: string | null) { this.sessionState.data.currentSessionId = v; }
   private get pendingSessionCost(): SessionCostSnapshot | null { return this.sessionState.data.pendingSessionCost; }
@@ -635,17 +643,22 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
           if (!tc) return;
           tc.output = output;
           tc.status = isError ? "error" : "complete";
+          if (isError) {
+            // A failed file tool never produced a mutation item live; keep the
+            // replay aligned by dropping the provisional card we built from the
+            // seed tool_use input.
+            tc.fileChange = undefined;
+            return;
+          }
           // Rebuild the file-change card now that the real result (and any
           // mutation metadata) is available — seed-path tool items are first
           // seen with only their input.
-          if (!isError) {
-            tc.fileChange = detectFileChange({
-              toolName: tc.name,
-              input: tc.input as Record<string, unknown> | undefined,
-              output,
-              metadata,
-            });
-          }
+          tc.fileChange = detectFileChange({
+            toolName: tc.name,
+            input: tc.input as Record<string, unknown> | undefined,
+            output,
+            metadata,
+          });
         };
 
         const flushAssistantSegment = (): void => {
@@ -947,6 +960,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       this.cleanup();
       this.sessionState.reset();
       this.viewingSessionId = sessionId;
+      this.viewingSessionWorkspace = session.metadata.workspace || null;
 
       // Tell the webview which model/mode this session uses so the status
       // bar reflects the loaded session (not the user's global default).
@@ -1017,7 +1031,15 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       }
       return "";
     };
-    const updateFileChangeCard = (toolCall: ToolCallInfo): void => {
+    const updateFileChangeCard = (toolCall: ToolCallInfo, failed: boolean): void => {
+      if (failed) {
+        // An unsuccessful file tool changed nothing, and the live view shows
+        // no card for it either: the runtime reports it as `item.failed`,
+        // which never reaches the change-card path. Drop the card the
+        // tool_use block provisionally created so a replay matches.
+        toolCall.fileChange = undefined;
+        return;
+      }
       if (!isFileChangeTool(toolCall.name) || !toolCall.input) return;
       const fileChange = detectFileChange({
         toolName: toolCall.name,
@@ -1041,7 +1063,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
               const outputText = getToolResultText(block);
               globalToolCalls[idx].output = outputText;
               globalToolCalls[idx].status = block.is_error ? "error" : "complete";
-              updateFileChangeCard(globalToolCalls[idx]);
+              updateFileChangeCard(globalToolCalls[idx], !!block.is_error);
             }
           }
         }
@@ -1099,7 +1121,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
                 status: "pending",
                 itemId: block.id,
               };
-              updateFileChangeCard(toolCall);
+              updateFileChangeCard(toolCall, false);
               globalToolCalls.push(toolCall);
               blocks.push({ type: "tool_call", toolCallIdx: idx });
               turnToolCallIndices.push(idx);
@@ -1109,7 +1131,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
                 const outputText = getToolResultText(block);
                 globalToolCalls[idx].output = outputText;
                 globalToolCalls[idx].status = block.is_error ? "error" : "complete";
-                updateFileChangeCard(globalToolCalls[idx]);
+                updateFileChangeCard(globalToolCalls[idx], !!block.is_error);
               }
             }
           }
@@ -1125,7 +1147,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
                 const outputText = getToolResultText(block);
                 globalToolCalls[idx].output = outputText;
                 globalToolCalls[idx].status = block.is_error ? "error" : "complete";
-                updateFileChangeCard(globalToolCalls[idx]);
+                updateFileChangeCard(globalToolCalls[idx], !!block.is_error);
               }
             }
           }
@@ -1198,6 +1220,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         }
       }
     }
+    this.backfillSessionFileDiffs(globalToolCalls);
     this.refreshChangesPanel();
 
     // ── Restore Work state from tool calls (checklist + strategy) ──
@@ -2480,6 +2503,98 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     this.refreshChangesPanel();
   }
 
+  /**
+   * Rebuilds the diffs a replayed session cannot recover from its own log.
+   *
+   * Session recordings keep no `file.mutation` receipt — the runtime stores the
+   * authoritative diff on turn items, which belong to a thread the session log
+   * does not name — and the contract `edit` tool answers with a one-line
+   * summary rather than a diff. A reloaded Changes panel therefore had no diff
+   * to offer for any file edited through `edit`, and its Diff action vanished.
+   *
+   * Each call's input still records the exact replacements it made, so the
+   * diffs are reconstructed from those: walk a file's calls backwards from the
+   * content on disk, emitting one hunk per recorded replacement. A chain that
+   * does not line up (the file moved on since the session) is left without a
+   * diff rather than given a fabricated one.
+   */
+  private backfillSessionFileDiffs(toolCalls: ToolCallInfo[]): void {
+    const callsByPath = new Map<string, ToolCallInfo[]>();
+    const editsByCall = new Map<ToolCallInfo, RecordedEdit[]>();
+    for (const tc of toolCalls) {
+      if (!tc.input || !isFileChangeTool(tc.name)) continue;
+      const filePath = extractFilePath(tc.name, tc.input);
+      if (!filePath) continue;
+      const key = normalizePath(filePath);
+      const calls = callsByPath.get(key) ?? [];
+      calls.push(tc);
+      callsByPath.set(key, calls);
+
+      const edits = extractRecordedEdits(tc.input);
+      if (edits.length > 0) {
+        editsByCall.set(tc, edits);
+      }
+    }
+
+    for (const [key, calls] of callsByPath) {
+      const aggregate = this.turnFileChanges.find((fc) => normalizePath(fc.filePath) === key);
+      if (!aggregate) continue;
+
+      const recordedEditCalls = calls.filter((call) => editsByCall.has(call));
+      if (recordedEditCalls.length === 0) continue;
+
+      const missingCallDiff = recordedEditCalls.some((call) => !call.fileChange?.diff);
+      const reconstructedByCall = new Map<ToolCallInfo, string>();
+
+      if (missingCallDiff) {
+        const absPath = resolveRecordedFilePath(aggregate.filePath, this.recordedPathRoots(), defaultTasksDir());
+        let content: string;
+        try {
+          content = fs.readFileSync(absPath, "utf8");
+        } catch {
+          continue;
+        }
+
+        for (let i = recordedEditCalls.length - 1; i >= 0; i--) {
+          const call = recordedEditCalls[i];
+          const edits = editsByCall.get(call)!;
+          const patch = formatRecordedEditsAsDiff(aggregate.filePath, content, edits);
+          const before = patch === null ? null : reverseApplyRecordedEdits(content, edits);
+          if (patch === null || before === null) {
+            reconstructedByCall.clear();
+            break;
+          }
+          reconstructedByCall.set(call, patch);
+          content = before;
+        }
+      }
+
+      if (!missingCallDiff || reconstructedByCall.size === recordedEditCalls.length) {
+        const diffs: string[] = [];
+        for (const call of calls) {
+          const fileChange = call.fileChange;
+          if (!fileChange) continue;
+          const diff = fileChange.diff ?? reconstructedByCall.get(call);
+          if (!diff) continue;
+          fileChange.diff = diff;
+          fileChange.diffIndex = diffs.length;
+          diffs.push(diff);
+        }
+        aggregate.diffs = diffs;
+        if (diffs.length > 0) {
+          aggregate.diff = diffs[diffs.length - 1];
+        }
+      } else {
+        // A cumulative Changes-panel diff is only trustworthy when we can walk
+        // the whole edit chain back from the current file. If any recorded
+        // edit no longer lines up, do not keep an earlier diff here: that
+        // would open the wrong patch for the file's latest recorded state.
+        aggregate.diff = undefined;
+        aggregate.diffs = [];
+      }
+    }
+  }
+
   /** Push file changes to the webview Changes panel */
   private refreshChangesPanel(): void {
     this.postMessage({
@@ -3215,12 +3330,25 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     this.diffProviderDisposable = vscode.workspace.registerTextDocumentContentProvider("brotherwhale-diff", provider);
   }
 
+  /** Workspace folders of the open VSCode window, in VSCode's order. */
+  private workspaceRoots(): string[] {
+    return (vscode.workspace.workspaceFolders ?? [])
+      .map((folder) => folder.uri.fsPath)
+      .filter((root): root is string => !!root);
+  }
+
+  /**
+   * Roots to try when resolving a path the runtime recorded, most specific
+   * first: a viewed session's own workspace, then the open window's folders.
+   */
+  private recordedPathRoots(): string[] {
+    const roots = [this.viewingSessionWorkspace, ...this.workspaceRoots()];
+    return roots.filter((root, index): root is string => !!root && roots.indexOf(root) === index);
+  }
+
   private async handleOpenDiff(filePath: string, diff?: string, useCumulative?: boolean, diffIndex?: number): Promise<void> {
     try {
-      const workspace = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-      if (!workspace) return;
-
-      const absPath = path.isAbsolute(filePath) ? filePath : path.join(workspace, filePath);
+      const absPath = resolveRecordedFilePath(filePath, this.recordedPathRoots(), defaultTasksDir());
 
       // Look up the full diffs array from turnFileChanges for multi-edit files
       const normPath = normalizePath(filePath);
@@ -3310,9 +3438,14 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
 
   private async handleOpenFile(filePath: string): Promise<void> {
     try {
-      // Try task artifact path first, then fallback to workspace relative
-      const absPath = resolveTaskArtifactPath(filePath);
-      const normalizedAbsPath = path.normalize(absPath);
+      // The card carries the path the runtime recorded, which for file tools is
+      // workspace-relative — resolving that against the task artifacts dir
+      // alone reported every ordinary edit as "no longer available".
+      const normalizedAbsPath = resolveRecordedFilePath(
+        filePath,
+        this.recordedPathRoots(),
+        defaultTasksDir(),
+      );
       const preview = this.textArtifactPreviewStore.get(filePath) || this.textArtifactPreviewStore.get(normalizedAbsPath);
 
       if (!fs.existsSync(normalizedAbsPath)) {

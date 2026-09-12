@@ -16,6 +16,7 @@ describe("SessionStateStore - initial state", () => {
 
     expect(s.currentThread).toBeNull();
     expect(s.viewingSessionId).toBeNull();
+    expect(s.viewingSessionWorkspace).toBeNull();
     expect(s.messages).toEqual([]);
     expect(s.lastEventSeq).toBe(0);
     expect(s.currentTurnId).toBeNull();
@@ -109,6 +110,7 @@ describe("SessionStateStore - reset()", () => {
     const s = store.data;
     expect(s.currentThread).toBeNull();
     expect(s.viewingSessionId).toBeNull();
+    expect(s.viewingSessionWorkspace).toBeNull();
     expect(s.messages).toEqual([]);
     expect(s.lastEventSeq).toBe(0);
     expect(s.currentTurnId).toBeNull();
@@ -285,14 +287,16 @@ describe("SessionStateStore - matches current chat-provider reset patterns", () 
 
     const s = store.data;
     expect(s.viewingSessionId).toBeNull();
+    expect(s.viewingSessionWorkspace).toBeNull();
     expect(s.activeItems.size).toBe(0);
   });
 
-  it("reset() covers cleanup() fields (viewingSessionId)", () => {
+  it("reset() covers cleanup() fields (viewingSessionId, viewingSessionWorkspace)", () => {
     const store = new SessionStateStore();
-    store.update({ viewingSessionId: "session-1" });
+    store.update({ viewingSessionId: "session-1", viewingSessionWorkspace: "/other/ws" });
     store.reset();
     expect(store.data.viewingSessionId).toBeNull();
+    expect(store.data.viewingSessionWorkspace).toBeNull();
   });
 
   it("reset() covers pendingApprovals and pendingUserInputs", () => {
