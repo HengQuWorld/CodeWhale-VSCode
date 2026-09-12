@@ -79,18 +79,21 @@ code --install-extension ./brotherwhale-vscode-0.1.0.vsix --force
 DeepSeek-GUI/
 ├── src/
 │   ├── extension.ts          # 扩展入口点
-│   ├── chat-provider.ts      # 主聊天界面逻辑
-│   ├── webview-html.ts       # WebView HTML 模板
-│   ├── api-client.ts         # CodeWhale API 客户端
-│   ├── engine.ts             # TUI 引擎管理
-│   ├── i18n.ts               # 国际化支持
-│   ├── slash-commands.ts     # 斜杠命令定义
-│   └── *.test.ts             # 单元测试
+│   ├── chat-provider.ts      # 主聊天界面逻辑（业务编排）
+│   ├── config-panel.ts       # 配置面板
+│   ├── i18n.ts               # 国际化支持（en/zh/tr 三语映射）
+│   ├── types.ts              # 共享类型定义
+│   ├── api/                  # api-client.ts（Runtime API 客户端）、engine.ts（TUI 引擎管理）
+│   ├── commands/             # slash-commands.ts（命令注册表）、slash-command-handler.ts（dispatcher）
+│   ├── utils/                # cost-calculator、diff-utils、error-handler、session-state 等
+│   └── webview/              # webview-html.ts（HTML 模板）、webview-css.ts、webview-js-*.ts（按域拆分的脚本模块）
 ├── dist/                     # 编译输出
 ├── media/                    # 图标等资源
 ├── package.json              # 扩展配置
 └── webpack.config.js         # Webpack 配置
 ```
+
+> 注意：webview 前端脚本已按域拆分到 `src/webview/webview-js-*.ts`（fleet / goal / input / messages / sidebar / tooltip / utilities / debug / event-handler 等），不再是单个巨型内联块；但「一损俱损」的教训仍然适用（见下文「编码注意的坑」）。
 
 ## 关键功能模块
 
@@ -100,9 +103,10 @@ DeepSeek-GUI/
 - 使用 `postMessage` API 发送消息
 
 ### 2. 斜杠命令处理
-- `slash-commands.ts` 定义可用命令及其可用性
-- `handleSlashCommand()` 处理命令逻辑
+- `src/commands/slash-commands.ts` 定义命令注册表（`COMMANDS` 数组 + availability 标记）
+- `src/commands/slash-command-handler.ts` 用 dispatcher Map（`HANDLERS`）分发命令逻辑，不再是巨型 switch
 - 命令格式：`command` + `args`（例如：`/task` + `show task_id`）
+- 标记为 `unavailable` 的命令必须有兜底提示；注意 HANDLERS 与 slash-commands.ts 的 COMMANDS 数组要保持同步
 
 ### 3. 任务管理
 - 任务列表显示在侧边栏的 "Tasks" 标签页
@@ -110,7 +114,7 @@ DeepSeek-GUI/
 - 点击任务卡片触发 `/task show <id>` 命令
 
 ### 4. 侧边栏状态
-- 侧边栏包含三个标签页：Threads、Work、Tasks
+- 侧边栏区块：Sessions（默认激活）、Threads、Goal、Work、Fleet、Tasks、Agents、Changes
 - 打开后保持打开状态，除非用户明确关闭
 - 点击线程项不会自动关闭侧边栏
 
@@ -244,45 +248,76 @@ GUI 是 TUI 的图形前端，用户在两种界面下的操作应该产生相�
 
 **绝不**在 GUI 中用 hack/变通方式模拟一个 TUI 已有但 GUI 没有对接的功能。
 
-### 当前已知差异（undo / retry / revert）
+### 模式与权限姿态契约（2026-09 起与 TUI 对齐）
 
-| 功能 | TUI 实现 | GUI 当前实现 | 差距 |
-|------|----------|-------------|------|
-| `/undo` | 从 `app.history` + `app.api_messages` 双向删除，清空 tool_cells | 从 `this.messages` 删除并 `loadHistory` 重渲染 | GUI 只删显示层，不删 API 侧消息；undo 后再发消息会带上旧上下文 |
-| `/retry` | `undo_conversation()` + `SendMessage(input)` | `handleUndoLastTurn()` + `handleSendMessage()` | 同上，undo 不彻底 |
-| `/patch_undo` | 通过 `SnapshotRepo` 恢复 `pre-turn:*` 快照，支持多次回退 | 用 `parseDiffToSides` 的 `oldContent` + `WorkspaceEdit` 回滚 | GUI 方式不可靠：diff 可能不完整、不支持多次回退 |
-| `revert_turn` 工具 | AI 主动调用的 `revert_turn` 工具，基于快照回滚 | GUI 的 revert 按钮用 diff 回滚 | 应该对接 TUI 的快照机制 |
+TUI 把「对话模式」和「权限姿态」当作**两个独立维度**，GUI 必须同样处理，不要再用 `yolo` 当作模式：
 
-### 需要的 TUI API 端点（待添加）
+| 维度 | 取值 | 显示名 | 切换方式 |
+|------|------|--------|----------|
+| TUI mode | `agent` / `plan` / `operate` | Act / Plan / Operate | 状态栏模式下拉；`/mode`；数字 `1`/`2`/`3` |
+| Permission posture | `ask` / `auto_review` / `full_access` | Ask / Auto-Review / Full Access | 状态栏 Permission 下拉；`/auto` |
 
-以下端点目前在 TUI Runtime API 中**不存在**，需要添加后 GUI 才能正确实现：
+- `yolo`（及 `4` / `bypass` / `bypass-permissions` / `bypasspermissions`）是 **Act + Full Access 的单向兼容别名**，不是模式，也不出现在下拉里。
+- 单一事实来源：`src/utils/modes.ts`（镜像 `crates/config/src/app_mode.rs`、`crates/execpolicy/src/approval_mode.rs` 与 `crates/tui/src/runtime_policy.rs`）。状态栏下拉与配置面板的选项都由它生成，**不要在任何新代码里硬编码模式/姿态字符串**。
+- 三套拼法不要混用：`POSTURE_WIRE`（线程/Runtime 请求体，snake_case）、`POSTURE_CONFIG`（引擎配置 `approval_mode`，hyphenated）、`POSTURE_LABELS`（UI 显示名）。配置面板的姿态下拉只提供 `ask`/`auto-review`/`full-access`：`use-tui-default` 属于另一个 key `approval_policy`，`never` 是托管策略值，两者都不是 `approval_mode` 的合法取值。
+- 改模式时只 PATCH `{ mode }`，改姿态时只 PATCH `{ permission_posture }`；运行时会自行推导 `auto_approve` / `trust_mode`（`runtime_policy_with_overrides`）。把 GUI 缓存的 `auto_approve: false` 一起发出去（且不带显式姿态）会把 Auto-Review 姿态重新推导成 Ask。
+- 兼容旧记录的姿态推导必须与引擎的 `RuntimePolicyProjection::from_persisted` 一致：`permission_posture` 优先，其次看 mode 的 `yolo` 别名与 `auto_approve`；**不要**参考 `trust_mode`（引擎会忽略它）。
+- 启动默认值：`brotherwhale.defaultMode`（`agent|plan|operate`）与 `brotherwhale.defaultPermissionPosture`（`ask|auto_review|full_access`）。
+- `resume-thread` 请求体只有 `model`/`mode`（`runtime_api/sessions.rs`），**不支持** `permission_posture`；恢复的线程姿态由引擎从会话本身推导。
 
-1. **`POST /v1/threads/{id}/undo`** — 服务端删除最后一轮的 API 消息 + 历史，返回被删除的内容摘要
-2. **`POST /v1/threads/{id}/retry`** — 服务端执行 undo + 重发最后一条用户消息
-3. **`GET /v1/snapshots`** — 列出当前 workspace 的快照（对应 TUI 的 `SnapshotRepo.list()`）
-4. **`POST /v1/snapshots/{id}/restore`** — 恢复指定快照（对应 TUI 的 `patch_undo` / `restore` 命令）
+> 注意：模式可选 `operate` 与 `/v1/operate` 编排面（operate run / plan / keepalive）是两回事；后者仍未对接。
+
+### 当前已知差异（2026-09 对齐检查结果）
+
+undo / retry / patch-undo / 快照恢复这条链路**已完成对齐**：
+
+| 功能 | TUI 端点 | GUI 实现 | 状态 |
+|------|----------|----------|------|
+| `/undo` | `POST /v1/threads/{id}/patch-undo` | `chat-provider.ts` `handleUndoLastTurn()` 调 `patchUndoThreadTurn()`，先快照回滚文件再删对话轮 | 已对齐 |
+| `/retry` | `POST /v1/threads/{id}/retry` | `handleRetryLastTurn()` 调 `retryThreadTurn()`（服务端 undo + 重发） | 已对齐 |
+| `/restore` | `GET /v1/snapshots` + `POST /v1/snapshots/{id}/restore` | `api-client.ts` 已有 `listSnapshots()` / `restoreSnapshot()`；`chat-provider.ts` 用 pre-turn 快照做恢复 | API 已对接，**`/restore` 斜杠命令入口缺失**（slash-commands.ts 仍标 unavailable） |
+
+当前真实缺口集中在「平台管理面」（TUI 有 API，GUI 未对接）：
+
+| TUI 功能面 | 端点 | GUI 现状 |
+|------------|------|----------|
+| MCP 服务器管理 | `/v1/apps/mcp/servers` 全套 CRUD + enable/disable/reconnect + `/v1/apps/mcp/tools` | `/mcp` 只打开 VSCode settings（hack，待改 API 面板） |
+| 插件管理 | `/v1/apps/plugins` + install/update/trust/enable/disable/revoke | 完全缺失 |
+| 市场管理 | `/v1/apps/marketplaces` + install | 完全缺失 |
+| Skills 管理增强 | `/v1/skills/install`、`/{name}/update`、`/{name}/trust`、`/{name}/audit` | 只有 list + enable/disable |
+| Agent mail | `/v1/agent-mail`、`/v1/threads/{id}/agent-mail` | 完全缺失 |
+| Operate（模式） | 线程 `mode: "operate"` | 状态栏模式下拉 / `/mode operate`，已对齐 |
+| Operate（编排 API） | `/v1/operate` 全套（run/plan/keepalive/auto-merge） | 完全缺失 |
+| Memory | `/v1/memory` 全套 | **违反复用原则**：`slash-command-handler.ts` 的 `/memory` 直接读写 `~/.deepseek/memory.md` 本地文件，应改走 API |
+
+> 本表是对齐检查的**快照**，会过时。做新功能前先重新核对源码：TUI 端点查 `runtime_api.rs` 的 `build_router()`，GUI 对接查 `src/api/api-client.ts`，命令查 `commands/mod.rs` 的 `execute()` 与 `src/commands/slash-commands.ts`。不要把此表当全量清单。
 
 ### TUI 关键源码位置
 
 | 功能 | 文件 | 函数/结构 |
 |------|------|-----------|
-| undo 对话 | `crates/tui/src/commands/debug.rs` | `undo_conversation()` |
-| retry 重试 | `crates/tui/src/commands/debug.rs` | `retry()` |
-| patch_undo 文件回滚 | `crates/tui/src/commands/debug.rs` | `patch_undo()` |
+| undo 对话 | `crates/tui/src/commands/groups/debug/undo.rs` | `undo_conversation()` |
+| retry 重试 | `crates/tui/src/commands/groups/debug/undo.rs` | `retry()` |
+| patch_undo 文件回滚 | `crates/tui/src/commands/groups/debug/undo.rs` | `patch_undo()` |
 | 快照仓库 | `crates/tui/src/snapshot/repo.rs` | `SnapshotRepo` |
 | pre-turn 快照 | `crates/tui/src/core/turn.rs` | `pre_turn_snapshot()` |
+| 唯一 turn loop | `crates/tui/src/core/engine/turn_loop.rs` | `Engine::run_turn` |
 | revert_turn 工具 | `crates/tui/src/tools/revert_turn.rs` | `RevertTurnTool` |
-| Runtime API 路由 | `crates/tui/src/runtime_api.rs` | `build_router()` |
-| /restore 命令 | `crates/tui/src/commands/restore.rs` | `restore()` |
+| 工具注册 builder 链 | `crates/tui/src/tools/registry.rs` + `crates/tui/src/core/engine/tool_setup.rs` | `with_agent_runtime_surface()` 等 `with_*_tool()` |
+| Runtime API 路由 | `crates/tui/src/runtime_api.rs` | `build_router()`（新增端点的唯一落点） |
+| /restore 命令 | `crates/tui/src/commands/groups/skills/restore.rs` | `restore()` |
+| 内置命令分发 | `crates/tui/src/commands/mod.rs` | `execute()` |
+
+> TUI 的 `commands/` 已按组重组（`groups/core|config|session|debug|skills|plugins|utility|project|memory/`），旧的单文件路径（如 `commands/debug.rs`）不再存在。
 
 ### 实现新功能的检查流程
 
 1. 在 TUI 源码中找到对应功能的实现
-2. 确认 TUI Runtime API 是否已暴露该功能
-3. 如果没有 API → 先在 `runtime_api.rs` 添加端点
-4. 在 GUI 的 `api-client.ts` 中添加调用方法
+2. 确认 TUI Runtime API 是否已暴露该功能（查 `runtime_api.rs` 的 `build_router()`）
+3. 如果没有 API → 先在 `runtime_api.rs` 添加端点（薄适配层，复用 Engine 已有能力）
+4. 在 GUI 的 `src/api/api-client.ts` 中添加调用方法
 5. 在 `chat-provider.ts` 中实现业务逻辑
-6. 在 `webview-html.ts` 中添加 UI（遵循 WebView 编码原则）
+6. 在 `src/webview/` 中添加 UI（新脚本放对应的 `webview-js-*.ts` 模块，遵循 WebView 编码原则）
 7. 对比 TUI 和 GUI 的行为是否一致
 
 ---

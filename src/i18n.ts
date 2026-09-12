@@ -43,6 +43,7 @@ interface Translations {
   modelLabel: string;
   workspaceLabel: string;
   modeLabel: string;
+  permissionLabel: string;
   reasoningEffortLabel: string;
   welcomeTitle: string;
   welcomeSubtitle: string;
@@ -375,7 +376,7 @@ const en: Translations = {
   taskOpenThread: "Open Thread", taskAttention: "Attention", taskNeedsAttention: "Needs attention", taskPendingApprovals: "Pending Approvals", taskPendingInputs: "Pending Inputs", taskContinueInThread: "Continue in thread",
   threadsCount: (n) => `${n} thread${n !== 1 ? "s" : ""}`,
   modelLabel: "Model", workspaceLabel: "Workspace",
-  modeLabel: "Mode", reasoningEffortLabel: "Reasoning Effort",
+  modeLabel: "Mode", permissionLabel: "Permission", reasoningEffortLabel: "Reasoning Effort",
   welcomeTitle: "CodeWhale",
   welcomeSubtitle: "Technology serves the enduring mission of civilization",
   welcomeQuote: "To establish the heart for heaven and earth, to secure life for the people, to continue the lost learning of past sages, and to establish peace for all generations.",
@@ -423,7 +424,7 @@ const en: Translations = {
   loadedThreadPattern: "Loaded: {0}",
   showAllWorkspaces: "Show all workspaces",
   filterCurrentWorkspace: "Current workspace only",
-  commandMode: "/mode - Switch mode (agent/plan/yolo)",
+  commandMode: "/mode - Switch mode (act/plan/operate)",
   commandModel: "/model - Switch model",
   commandModels: "/models - List available models",
   commandReasoning: "/reasoning - Set reasoning effort",
@@ -696,7 +697,7 @@ const zhCn: Translations = {
   taskOpenThread: "打开线程", taskAttention: "待处理", taskNeedsAttention: "需要处理", taskPendingApprovals: "待授权", taskPendingInputs: "待输入", taskContinueInThread: "在线程中继续",
   threadsCount: (n) => `${n} 个会话`,
   modelLabel: "模型", workspaceLabel: "工作区",
-  modeLabel: "模式", reasoningEffortLabel: "思考深度",
+  modeLabel: "模式", permissionLabel: "权限", reasoningEffortLabel: "思考深度",
   welcomeTitle: "CodeWhale",
   welcomeSubtitle: "科技服务文明传承的长线使命",
   welcomeQuote: "为天地立心，为生民立命，为往圣继绝学，为万世开太平。",
@@ -744,7 +745,7 @@ const zhCn: Translations = {
   loadedThreadPattern: "已加载: {0}",
   showAllWorkspaces: "显示所有工作区",
   filterCurrentWorkspace: "仅当前工作区",
-  commandMode: "/mode - 切换模式 (agent/plan/yolo)",
+  commandMode: "/mode - 切换模式 (act/plan/operate)",
   commandModel: "/model - 切换模型",
   commandModels: "/models - 列出可用模型",
   commandReasoning: "/reasoning - 设置思考深度",
@@ -1087,6 +1088,7 @@ export function webviewTranslations(tr: Translations) {
     engineRestartFailed: tr.engineRestartFailed,
     engineNotRunning: tr.engineNotRunning,
     modeLabel: tr.modeLabel,
+    permissionLabel: tr.permissionLabel,
     reasoningEffortLabel: tr.reasoningEffortLabel,
     welcomeTitle: tr.welcomeTitle,
     welcomeSubtitle: tr.welcomeSubtitle,

@@ -216,7 +216,6 @@ describe("isCommandAvailableInGui", () => {
     expect(isCommandAvailableInGui("/relay")).toBe("unavailable");
     expect(isCommandAvailableInGui("/rlm")).toBe("unavailable");
     expect(isCommandAvailableInGui("/lsp")).toBe("unavailable");
-    expect(isCommandAvailableInGui("/restore")).toBe("unavailable");
     expect(isCommandAvailableInGui("/statusline")).toBe("unavailable");
   });
 
@@ -231,6 +230,7 @@ describe("isCommandAvailableInGui", () => {
     expect(isCommandAvailableInGui("/diff")).toBe("full");
     expect(isCommandAvailableInGui("/note")).toBe("full");
     expect(isCommandAvailableInGui("/memory")).toBe("full");
+    expect(isCommandAvailableInGui("/restore")).toBe("full");
   });
 
   it("marks partial commands", () => {
@@ -242,8 +242,11 @@ describe("getCommandHelpText", () => {
   it("returns help text for available commands", () => {
     const help = getCommandHelpText("/mode");
     expect(help).toContain("/mode");
-    expect(help).toContain("agent");
+    expect(help).toContain("act");
     expect(help).toContain("plan");
+    expect(help).toContain("operate");
+    // The legacy alias stays documented, but as a permission shorthand rather
+    // than a mode.
     expect(help).toContain("yolo");
   });
 
@@ -324,8 +327,10 @@ describe("Unavailable command reasons", () => {
     expect(getCommandHelpText("/lsp")).toContain("Not available");
   });
 
-  it("restore: snapshot restore is TUI-specific", () => {
-    expect(getCommandHelpText("/restore")).toContain("Not available");
+  it("restore: snapshot list + trust-gated revert via runtime API", () => {
+    const help = getCommandHelpText("/restore");
+    expect(help).toContain("/restore");
+    expect(help).toContain("trust mode");
   });
 
   it("statusline: status line is TUI-specific", () => {

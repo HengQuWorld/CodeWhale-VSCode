@@ -5,7 +5,7 @@
  */
 import type { WebviewTranslations } from "./webview-html";
 
-export function getFleetScript(tr: WebviewTranslations): string {
+export function getFleetScript(_tr: WebviewTranslations): string {
   return `(function(){
   'use strict';
   var __i18n = window.__wvI18n;
@@ -701,7 +701,7 @@ export function getFleetScript(tr: WebviewTranslations): string {
       'fleet.alert.sent': __i18n.fleetEvAlert,
     };
     if (map[kind]) return map[kind];
-    return titleCase(String(kind || 'event').replace(/^fleet\./, ''));
+    return titleCase(String(kind || 'event').replace(/^fleet\\./, ''));
   }
 
   function eventPassesFilter(ev) {

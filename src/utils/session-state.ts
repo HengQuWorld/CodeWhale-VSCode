@@ -122,6 +122,10 @@ export interface SessionStats {
 export interface SessionStateData {
   currentThread: ThreadRecord | null;
   viewingSessionId: string | null;
+  /** Workspace a viewed session was recorded in. Its file tools recorded
+   *  workspace-relative paths against *that* root, which is not necessarily
+   *  the workspace currently open in VSCode. */
+  viewingSessionWorkspace: string | null;
   /** Session ID for auto-save — same thread always saves to the same session */
   currentSessionId: string | null;
   messages: ChatMessage[];
@@ -164,6 +168,7 @@ function createEmptyState(): SessionStateData {
   return {
     currentThread: null,
     viewingSessionId: null,
+    viewingSessionWorkspace: null,
     currentSessionId: null,
     messages: [],
     lastEventSeq: 0,

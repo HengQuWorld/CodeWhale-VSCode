@@ -95,6 +95,30 @@ describe("ConfigPanel provider preview", () => {
     }));
   });
 
+  it("renders the canonical mode and permission-posture options", () => {
+    const api = {
+      getConfig: vi.fn(async () => ({ model: "deepseek-v4-pro", provider: "deepseek" })),
+      listProviders: vi.fn(async () => ({ current: "deepseek", providers: [] })),
+      listProviderModels: vi.fn(async () => ({ provider: "deepseek", models: [] })),
+      setConfig: vi.fn(),
+      reloadConfig: vi.fn(),
+    };
+
+    ConfigPanel.createOrShow({} as any, api as any);
+    const html = vscodeState.panel.webview.html;
+
+    expect(html).toContain('<option value="agent">Act</option>');
+    expect(html).toContain('<option value="plan">Plan</option>');
+    expect(html).toContain('<option value="operate">Operate</option>');
+    expect(html).toContain('<option value="ask">Ask</option>');
+    expect(html).toContain('<option value="auto-review">Auto-Review</option>');
+    expect(html).toContain('<option value="full-access">Full Access</option>');
+    // `use-tui-default` is an approval_policy choice and `never` is a
+    // managed-policy value; neither is part of the approval_mode enum.
+    expect(html).not.toContain('use-tui-default');
+    expect(html).not.toContain('value="never"');
+  });
+
   it("renders inline script that updates preview base URL and avoids preserving stale models when currentModel is explicit", () => {
     const api = {
       getConfig: vi.fn(async () => ({

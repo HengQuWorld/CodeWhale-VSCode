@@ -1,5 +1,33 @@
 # Change Log
 
+## 0.5.1
+
+### New Features
+
+- **TUI Mode Surface Parity (Act / Plan / Operate)** — The status bar's mode picker now mirrors the TUI's roster instead of the retired `agent / plan / yolo` triple. `agent` displays as **Act** (its `AppMode::display_name()`), `operate` is selectable, and numeric shortcuts follow `/mode`: `1` = Act, `2` = Plan, `3` = Operate. `/mode yolo` (and `4` / `bypass`) stays a one-way compatibility alias that installs **Act + Full Access**, exactly like the TUI — it is never a visible mode.
+
+- **Permission Posture as a Separate Dimension** — A new status-bar dropdown switches the thread's `permission_posture` independently of the mode (**Ask / Auto-Review / Full Access**, mirroring `Shift+Tab`), and `/auto` switches to Auto-Review. `ThreadRecord.permission_posture` is now modeled and sent on thread create/update/start-turn, so a non-full-access posture (e.g. Auto-Review) is no longer re-derived to Ask by the auto-approve compatibility input. "Remember" on an approval now also flips the local posture to Full Access.
+
+- **`/memory` and `/restore` via the Runtime API** — `/memory` now reads and writes memory through the TUI runtime API instead of touching `~/.deepseek/memory.md` directly, and `/restore` lists snapshots and restores a chosen one via `GET /v1/snapshots` + `POST /v1/snapshots/{id}/restore`.
+
+### Improvements
+
+- **Config panel** — Default Mode offers Act / Plan / Operate, and the old Approval Mode list (`suggest / auto / on-request / untrusted`) is replaced by the canonical **Permission Posture** values `ask / auto-review / full-access` (exactly the engine's `approval_mode` enum; `use-tui-default` belongs to `approval_policy` and `never` is managed-policy-only).
+
+- **Operate runtime handoff filtering** — Runtime-owned user-role messages (the one-time Operate contract, sub-agent and shell-completion handoffs) are no longer rendered as user bubbles when loading a saved session; the filter is structural (trailing `<turn_meta>` provenance), so a person quoting the envelope is unaffected.
+
+### Configuration
+
+- `brotherwhale.defaultMode` enum is now `agent | plan | operate` (a legacy `yolo` value still resolves to Act + Full Access). New setting `brotherwhale.defaultPermissionPosture` (`ask | auto_review | full_access`) supplies the starting posture for new threads.
+
+- Removed the `brotherwhale.autoStartEngine` setting and its related code; the engine lifecycle is now managed by the runtime API.
+
+### Bug Fixes
+
+- **Send/Stop button no longer flickers during a turn** — Engine status prose (`<kind> started`, `Turn: in_progress`, history-load notices) is informational and arrives interleaved with stream deltas; it was routed through the streaming-state setter, so every reasoning-item start flipped the composer button back to **Send** until the next delta returned it to **Stop**. Status messages now repaint only the status-bar text, and a history load clears the running-turn state explicitly instead of as a side effect of that message.
+
+- **Open and Diff on a reloaded session's changed files** — A recorded file path is the one the model requested, i.e. workspace-relative; resolving it against the TUI task data dir alone made every `Open` report "Artifact file is no longer available". Paths now resolve against the workspace the session was recorded in (then the open window's folders), with the task dir kept as the artifact fallback. The same replay also lost the `Diff` action: a saved session keeps no `file.mutation` receipt and the contract `edit` tool answers with a one-line summary, so there was no diff text to extract. Diffs are now rebuilt from the exact replacements recorded in each call's input, walking the file back from its content on disk; a chain that no longer lines up is left without a diff rather than given a fabricated one. Replayed change cards also stop reporting a file tool that failed — the live view shows no card for it either.
+
 ## 0.5.0
 
 ### New Features

@@ -7,10 +7,14 @@ import {
   shortPath,
   truncate,
   stripTurnMeta,
+  isInternalRuntimeHandoff,
   reconstructOldContent,
   reconstructOriginalContent,
   getDiffStateForIndex,
   mergeFileChanges,
+  extractRecordedEdits,
+  reverseApplyRecordedEdits,
+  formatRecordedEditsAsDiff,
 } from "./diff-utils";
 
 describe("parseDiffStats", () => {
@@ -243,6 +247,65 @@ describe("stripTurnMeta", () => {
   it("handles unclosed turn_meta tag", () => {
     const text = "<turn_meta>unclosed content";
     expect(stripTurnMeta(text)).toBe("<turn_meta>unclosed content");
+  });
+});
+
+describe("isInternalRuntimeHandoff", () => {
+  const runtimeMeta =
+    "<turn_meta>\nInput provenance: runtime (non-authoritative)\n</turn_meta>";
+
+  it("detects the Operate contract runtime message", () => {
+    const blocks = [
+      '<codewhale:runtime_event kind="operate_contract" visibility="internal">…</codewhale:runtime_event>',
+      runtimeMeta,
+    ];
+    expect(isInternalRuntimeHandoff(blocks)).toBe(true);
+  });
+
+  it("detects sub-agent and shell completion handoffs", () => {
+    expect(
+      isInternalRuntimeHandoff([
+        "…",
+        "<turn_meta>\nInput provenance: subagent_handoff (non-authoritative)\n</turn_meta>",
+      ])
+    ).toBe(true);
+    expect(
+      isInternalRuntimeHandoff([
+        "…",
+        "<turn_meta>\nInput provenance: shell_completion (non-authoritative)\n</turn_meta>",
+      ])
+    ).toBe(true);
+  });
+
+  it("never hides a real external user turn", () => {
+    expect(
+      isInternalRuntimeHandoff([
+        "hello",
+        "<turn_meta>\nInput provenance: external_user\nInput authority: external_current_turn\n</turn_meta>",
+      ])
+    ).toBe(false);
+    expect(isInternalRuntimeHandoff(["<codewhale:runtime_event>", "quoted by a person"])).toBe(
+      false
+    );
+    expect(isInternalRuntimeHandoff([])).toBe(false);
+    // A user turn that merely quotes the provenance line without a
+    // runtime-owned envelope must not be hidden.
+    expect(isInternalRuntimeHandoff(["look at this:", runtimeMeta])).toBe(false);
+    expect(
+      isInternalRuntimeHandoff([
+        "quoted by a person",
+        "<turn_meta>\nInput provenance: assistant_generated (non-authoritative)\n</turn_meta>",
+      ])
+    ).toBe(false);
+  });
+
+  it("still hides the agent-topology runtime checkpoint", () => {
+    expect(
+      isInternalRuntimeHandoff([
+        '<codewhale:runtime_state kind="agent_topology" schema="v1" visibility="internal">…</codewhale:runtime_state>',
+        runtimeMeta,
+      ])
+    ).toBe(true);
   });
 });
 
@@ -769,5 +832,82 @@ describe("getDiffStateForIndex", () => {
     expect(result!.newContent).toContain("modified line 50");
     // newContent should NOT have the original line 50 as a standalone line
     expect(result!.newContent).not.toMatch(/^line 50$/m);
+  });
+});
+
+describe("extractRecordedEdits", () => {
+  it("reads the contract edit form used by the runtime `edit` tool", () => {
+    expect(
+      extractRecordedEdits({ path: "a.ts", edits: [{ oldText: "one", newText: "two" }] }),
+    ).toEqual([{ oldText: "one", newText: "two" }]);
+  });
+
+  it("reads the single search/replace form and its aliases", () => {
+    expect(extractRecordedEdits({ path: "a.ts", search: "one", replace: "two" })).toEqual([
+      { oldText: "one", newText: "two" },
+    ]);
+    expect(extractRecordedEdits({ old_string: "one", new_string: "two" })).toEqual([
+      { oldText: "one", newText: "two" },
+    ]);
+  });
+
+  it("returns nothing for inputs that record no exact-text edit", () => {
+    expect(extractRecordedEdits({ file_path: "a.ts", content: "whole file" })).toEqual([]);
+    expect(extractRecordedEdits({ edits: [{ oldText: "same", newText: "same" }] })).toEqual([]);
+    expect(extractRecordedEdits(undefined)).toEqual([]);
+  });
+});
+
+describe("reverseApplyRecordedEdits", () => {
+  it("puts the replaced text back", () => {
+    expect(
+      reverseApplyRecordedEdits("a\nB\nc\n", [{ oldText: "b", newText: "B" }]),
+    ).toBe("a\nb\nc\n");
+  });
+
+  it("refuses deletion-style edits whose insertion point is unknowable", () => {
+    expect(reverseApplyRecordedEdits("ac\n", [{ oldText: "b", newText: "" }])).toBeNull();
+  });
+
+  it("returns null when the replacement text is no longer present", () => {
+    expect(reverseApplyRecordedEdits("a\nB\nc\n", [{ oldText: "x", newText: "y" }])).toBeNull();
+  });
+});
+
+describe("formatRecordedEditsAsDiff", () => {
+  // `after` is the file as it looked once the call finished; the diffs are
+  // addressed in it precisely because the recorded input only knows the file
+  // after the edit.
+  const after = ["one", "TWO", "THREE", "four", "five"].join("\n") + "\n";
+  const before = ["one", "two", "three", "four", "five"].join("\n") + "\n";
+
+  it("emits a hunk that reconstructs the pre-edit content exactly", () => {
+    const edits = [{ oldText: "two\nthree", newText: "TWO\nTHREE" }];
+    const diff = formatRecordedEditsAsDiff("src/app.ts", after, edits);
+    expect(diff).toBeTruthy();
+    expect(diff).toContain("diff --git a/src/app.ts b/src/app.ts");
+    expect(reverseApplyRecordedEdits(after, edits)).toBe(before);
+    expect(reconstructOldContent(after, diff!)).toBe(before);
+    expect(parseDiffStats(diff!)).toEqual({ added: 2, removed: 2 });
+  });
+
+  it("handles an edit inside a line and several edits in one call", () => {
+    const edited = ["1", "two", "three", "5"].join("\n") + "\n";
+    const edits = [
+      { oldText: "one", newText: "1" },
+      { oldText: "four\nfive", newText: "5" },
+    ];
+    const diff = formatRecordedEditsAsDiff("src/app.ts", edited, edits);
+    expect(diff).toBeTruthy();
+    expect(diff!.match(/^@@ /gm)).toHaveLength(2);
+    expect(reconstructOldContent(edited, diff!)).toBe(reverseApplyRecordedEdits(edited, edits));
+    expect(reconstructOldContent(edited, diff!)).toBe("one\ntwo\nthree\nfour\nfive\n");
+  });
+
+  it("refuses to guess when the replacement is ambiguous or absent", () => {
+    expect(formatRecordedEditsAsDiff("a.ts", "x\nx\n", [{ oldText: "y", newText: "x" }])).toBeNull();
+    expect(formatRecordedEditsAsDiff("a.ts", after, [{ oldText: "y", newText: "zzz" }])).toBeNull();
+    expect(formatRecordedEditsAsDiff("a.ts", "ac\n", [{ oldText: "b", newText: "" }])).toBeNull();
+    expect(formatRecordedEditsAsDiff("a.ts", after, [])).toBeNull();
   });
 });

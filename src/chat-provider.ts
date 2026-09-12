@@ -25,12 +25,27 @@ import { renderMarkdown } from "./utils/markdown";
 import { finalizeAssistantMessage } from "./utils/event-helpers";
 import { formatCostAmount, resolveCostCurrency } from "./utils/cost-calculator";
 import {
+  POSTURE_LABELS,
+  POSTURE_WIRE,
+  isYoloAlias,
+  normalizeMode,
+  normalizePosture,
+  postureFromThread,
+  type PermissionPosture,
+} from "./utils/modes";
+import {
   parseDiffToSides,
   stripTurnMeta,
+  isInternalRuntimeHandoff,
   reconstructOldContent,
   reconstructOriginalContent,
   getDiffStateForIndex,
+  extractRecordedEdits,
+  reverseApplyRecordedEdits,
+  formatRecordedEditsAsDiff,
+  type RecordedEdit,
 } from "./utils/diff-utils";
+import { resolveRecordedFilePath } from "./utils/file-paths";
 import { t, webviewTranslations, currentLocale } from "./i18n";
 import { ConfigPanel } from "./config-panel";
 import {
@@ -45,6 +60,7 @@ import {
 import {
   friendlyToolName,
   isFileChangeTool,
+  extractFilePath,
   extractToolNameFromSummary,
   buildApprovalSummary,
   detectFileChange,
@@ -157,6 +173,8 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
   public set currentThread(v: ThreadRecord | null) { this.sessionState.data.currentThread = v; }
   private get viewingSessionId(): string | null { return this.sessionState.data.viewingSessionId; }
   private set viewingSessionId(v: string | null) { this.sessionState.data.viewingSessionId = v; }
+  private get viewingSessionWorkspace(): string | null { return this.sessionState.data.viewingSessionWorkspace; }
+  private set viewingSessionWorkspace(v: string | null) { this.sessionState.data.viewingSessionWorkspace = v; }
   private get currentSessionId(): string | null { return this.sessionState.data.currentSessionId; }
   private set currentSessionId(v: string | null) { this.sessionState.data.currentSessionId = v; }
   private get pendingSessionCost(): SessionCostSnapshot | null { return this.sessionState.data.pendingSessionCost; }
@@ -289,6 +307,9 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
           msg.command as string,
           msg.args as string
         );
+        break;
+      case "setPosture":
+        await this.handleSetPosture(msg.posture as string);
         break;
       case "switchProvider":
         await this.handleSwitchProvider(msg.provider as string, msg.model as string | undefined);
@@ -495,6 +516,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         type: "ready",
         model: this.getCurrentModel(),
         mode: this.getCurrentMode(),
+        posture: this.getEffectivePosture(),
         reasoningEffort: this.getCurrentReasoningEffort(),
         provider: this.currentProvider || undefined,
         runtimeVersion: this.runtimeVersion,
@@ -551,11 +573,12 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       // even on first load. Don't await — this is best-effort and must not
       // block the ready signal.
       void this.refreshProviders();
-      var initCfg = vscode.workspace.getConfiguration("brotherwhale");
+      const initCfg = vscode.workspace.getConfiguration("brotherwhale");
       this.postMessage({ 
         type: "ready", 
         model: this.currentThread?.model || this.getCurrentModel(),
-        mode: this.currentThread?.mode || this.getCurrentMode(),
+        mode: normalizeMode(this.currentThread?.mode || this.getCurrentMode()),
+        posture: this.getEffectivePosture(),
         reasoningEffort: this.getCurrentReasoningEffort(),
         provider: this.currentProvider || undefined,
         runtimeVersion: this.runtimeVersion,
@@ -563,7 +586,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       });
     } catch (err) {
       this.debugLog(`initializeThread ERROR: ${getErrorMessage(err)}\n${(err as Error).stack}`);
-      var errCfg = vscode.workspace.getConfiguration("brotherwhale");
+      const errCfg = vscode.workspace.getConfiguration("brotherwhale");
       this.postMessage({
         type: "error",
         message: formatError("Failed to initialize", err),
@@ -571,7 +594,8 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       this.postMessage({
         type: "ready",
         model: this.currentThread?.model || this.getCurrentModel(),
-        mode: this.currentThread?.mode || this.getCurrentMode(),
+        mode: normalizeMode(this.currentThread?.mode || this.getCurrentMode()),
+        posture: this.getEffectivePosture(),
         reasoningEffort: this.getCurrentReasoningEffort(),
         provider: this.currentProvider || undefined,
         runtimeVersion: this.runtimeVersion,
@@ -619,17 +643,22 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
           if (!tc) return;
           tc.output = output;
           tc.status = isError ? "error" : "complete";
+          if (isError) {
+            // A failed file tool never produced a mutation item live; keep the
+            // replay aligned by dropping the provisional card we built from the
+            // seed tool_use input.
+            tc.fileChange = undefined;
+            return;
+          }
           // Rebuild the file-change card now that the real result (and any
           // mutation metadata) is available — seed-path tool items are first
           // seen with only their input.
-          if (!isError) {
-            tc.fileChange = detectFileChange({
-              toolName: tc.name,
-              input: tc.input as Record<string, unknown> | undefined,
-              output,
-              metadata,
-            });
-          }
+          tc.fileChange = detectFileChange({
+            toolName: tc.name,
+            input: tc.input as Record<string, unknown> | undefined,
+            output,
+            metadata,
+          });
         };
 
         const flushAssistantSegment = (): void => {
@@ -931,6 +960,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       this.cleanup();
       this.sessionState.reset();
       this.viewingSessionId = sessionId;
+      this.viewingSessionWorkspace = session.metadata.workspace || null;
 
       // Tell the webview which model/mode this session uses so the status
       // bar reflects the loaded session (not the user's global default).
@@ -940,13 +970,14 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       // moves on to a different task (e.g. a plan-mode session would lock
       // the extension into plan mode forever).
       const sessionModel = session.metadata.model;
-      const sessionMode = session.metadata.mode || "agent";
+      const sessionMode = normalizeMode(session.metadata.mode || "agent");
       const cfg = vscode.workspace.getConfiguration("brotherwhale");
       const currentModel = cfg.get<string>("defaultModel", "deepseek-v4-pro");
       this.postMessage({
         type: "settingsUpdated",
         model: sessionModel || currentModel,
         mode: sessionMode,
+        posture: this.getCurrentPosture(),
         reasoningEffort: cfg.get<string>("reasoningEffort", "auto"),
       });
 
@@ -1000,7 +1031,15 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       }
       return "";
     };
-    const updateFileChangeCard = (toolCall: ToolCallInfo): void => {
+    const updateFileChangeCard = (toolCall: ToolCallInfo, failed: boolean): void => {
+      if (failed) {
+        // An unsuccessful file tool changed nothing, and the live view shows
+        // no card for it either: the runtime reports it as `item.failed`,
+        // which never reaches the change-card path. Drop the card the
+        // tool_use block provisionally created so a replay matches.
+        toolCall.fileChange = undefined;
+        return;
+      }
       if (!isFileChangeTool(toolCall.name) || !toolCall.input) return;
       const fileChange = detectFileChange({
         toolName: toolCall.name,
@@ -1024,7 +1063,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
               const outputText = getToolResultText(block);
               globalToolCalls[idx].output = outputText;
               globalToolCalls[idx].status = block.is_error ? "error" : "complete";
-              updateFileChangeCard(globalToolCalls[idx]);
+              updateFileChangeCard(globalToolCalls[idx], !!block.is_error);
             }
           }
         }
@@ -1049,6 +1088,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
 
           const combined = stripTurnMeta(textBlocks.join("\n"));
           if (!combined.trim()) continue;
+          if (isInternalRuntimeHandoff(textBlocks)) continue;
 
           this.messages.push({
             id: `user-turn-${this.messages.length}`,
@@ -1081,7 +1121,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
                 status: "pending",
                 itemId: block.id,
               };
-              updateFileChangeCard(toolCall);
+              updateFileChangeCard(toolCall, false);
               globalToolCalls.push(toolCall);
               blocks.push({ type: "tool_call", toolCallIdx: idx });
               turnToolCallIndices.push(idx);
@@ -1091,7 +1131,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
                 const outputText = getToolResultText(block);
                 globalToolCalls[idx].output = outputText;
                 globalToolCalls[idx].status = block.is_error ? "error" : "complete";
-                updateFileChangeCard(globalToolCalls[idx]);
+                updateFileChangeCard(globalToolCalls[idx], !!block.is_error);
               }
             }
           }
@@ -1107,7 +1147,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
                 const outputText = getToolResultText(block);
                 globalToolCalls[idx].output = outputText;
                 globalToolCalls[idx].status = block.is_error ? "error" : "complete";
-                updateFileChangeCard(globalToolCalls[idx]);
+                updateFileChangeCard(globalToolCalls[idx], !!block.is_error);
               }
             }
           }
@@ -1180,6 +1220,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         }
       }
     }
+    this.backfillSessionFileDiffs(globalToolCalls);
     this.refreshChangesPanel();
 
     // ── Restore Work state from tool calls (checklist + strategy) ──
@@ -1486,16 +1527,17 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       if (!this.currentThread) {
         const cfg = vscode.workspace.getConfiguration("brotherwhale");
         const model = cfg.get<string>("defaultModel", "deepseek-v4-pro");
-        const mode = cfg.get<string>("defaultMode", "agent");
+        const mode = normalizeMode(cfg.get<string>("defaultMode", "agent"));
+        const posture = this.getCurrentPosture();
         const workspace = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-        const isYolo = mode === "yolo";
-        const autoApprove = isYolo || cfg.get<boolean>("autoApprove", false);
+        const autoApprove = posture === "full_access" || cfg.get<boolean>("autoApprove", false);
         this.currentThread = await this.api.createThread({
           model,
           mode,
           workspace,
+          permission_posture: POSTURE_WIRE[posture],
           auto_approve: autoApprove,
-          trust_mode: isYolo,
+          trust_mode: posture === "full_access",
         });
         this.subscribeToEvents();
         this.refreshSessionList();
@@ -1533,14 +1575,16 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       try { await this.api.getThread(this.currentThread.id); } catch { threadOk = false; }
       if (!threadOk) {
         const cfg = vscode.workspace.getConfiguration("brotherwhale");
-        const mode = cfg.get<string>("defaultMode", "agent");
-        const autoApprove = cfg.get<boolean>("autoApprove", false);
+        const mode = normalizeMode(cfg.get<string>("defaultMode", "agent"));
+        const posture = this.getCurrentPosture();
+        const autoApprove = posture === "full_access" || cfg.get<boolean>("autoApprove", false);
         this.currentThread = await this.api.createThread({
           model: this.getCurrentModel(),
           mode,
           workspace: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
+          permission_posture: POSTURE_WIRE[posture],
           auto_approve: autoApprove,
-          trust_mode: mode === "yolo",
+          trust_mode: posture === "full_access",
         });
         this.subscribeToEvents();
         this.refreshSessionList();
@@ -1561,21 +1605,24 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
 
       const cfg = vscode.workspace.getConfiguration("brotherwhale");
       const reasoningEffort = cfg.get<string>("reasoningEffort", "auto");
-      const mode = this.currentThread.mode;
+      const mode = normalizeMode(this.currentThread.mode);
       const model = this.currentThread.model;
-      // Use the thread's persisted auto_approve / trust_mode instead of the
-      // config defaults.  When the user approves with "remember", the TUI
-      // flips thread.auto_approve to true (remember_thread_auto_approve) and
-      // the GUI mirrors that in handleApprovalDecision.  Sending the config
-      // value (typically false) here would override the thread's persisted
-      // state on every new turn, causing "remember" to silently revert and
-      // re-prompting for approvals the user already granted — which then
-      // surface as "Request cancelled while awaiting approval" when the turn
-      // is interrupted.
+      // Use the thread's persisted permission posture / auto_approve /
+      // trust_mode instead of the config defaults.  When the user approves with
+      // "remember", the TUI flips thread.auto_approve to true
+      // (remember_thread_auto_approve) and the GUI mirrors that in
+      // handleApprovalDecision.  Sending the config value (typically false)
+      // here would override the thread's persisted state on every new turn,
+      // causing "remember" to silently revert and re-prompting for approvals
+      // the user already granted — which then surface as "Request cancelled
+      // while awaiting approval" when the turn is interrupted.  The explicit
+      // posture is what keeps a non-full-access posture (e.g. Auto-Review) from
+      // being re-derived to Ask by the auto_approve compatibility input.
       const result = await this.api.startTurn(this.currentThread.id, fullText, {
         mode,
         model,
         reasoning_effort: reasoningEffort,
+        permission_posture: POSTURE_WIRE[postureFromThread(this.currentThread)],
         auto_approve: this.currentThread.auto_approve,
         trust_mode: this.currentThread.trust_mode,
       });
@@ -1753,7 +1800,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     };
     try {
       await fetchAndSend();
-    } catch (err) {
+    } catch {
       setTimeout(async () => {
         try { await fetchAndSend(); } catch { /* silent */ }
       }, 2000);
@@ -2456,6 +2503,98 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     this.refreshChangesPanel();
   }
 
+  /**
+   * Rebuilds the diffs a replayed session cannot recover from its own log.
+   *
+   * Session recordings keep no `file.mutation` receipt — the runtime stores the
+   * authoritative diff on turn items, which belong to a thread the session log
+   * does not name — and the contract `edit` tool answers with a one-line
+   * summary rather than a diff. A reloaded Changes panel therefore had no diff
+   * to offer for any file edited through `edit`, and its Diff action vanished.
+   *
+   * Each call's input still records the exact replacements it made, so the
+   * diffs are reconstructed from those: walk a file's calls backwards from the
+   * content on disk, emitting one hunk per recorded replacement. A chain that
+   * does not line up (the file moved on since the session) is left without a
+   * diff rather than given a fabricated one.
+   */
+  private backfillSessionFileDiffs(toolCalls: ToolCallInfo[]): void {
+    const callsByPath = new Map<string, ToolCallInfo[]>();
+    const editsByCall = new Map<ToolCallInfo, RecordedEdit[]>();
+    for (const tc of toolCalls) {
+      if (!tc.input || !isFileChangeTool(tc.name)) continue;
+      const filePath = extractFilePath(tc.name, tc.input);
+      if (!filePath) continue;
+      const key = normalizePath(filePath);
+      const calls = callsByPath.get(key) ?? [];
+      calls.push(tc);
+      callsByPath.set(key, calls);
+
+      const edits = extractRecordedEdits(tc.input);
+      if (edits.length > 0) {
+        editsByCall.set(tc, edits);
+      }
+    }
+
+    for (const [key, calls] of callsByPath) {
+      const aggregate = this.turnFileChanges.find((fc) => normalizePath(fc.filePath) === key);
+      if (!aggregate) continue;
+
+      const recordedEditCalls = calls.filter((call) => editsByCall.has(call));
+      if (recordedEditCalls.length === 0) continue;
+
+      const missingCallDiff = recordedEditCalls.some((call) => !call.fileChange?.diff);
+      const reconstructedByCall = new Map<ToolCallInfo, string>();
+
+      if (missingCallDiff) {
+        const absPath = resolveRecordedFilePath(aggregate.filePath, this.recordedPathRoots(), defaultTasksDir());
+        let content: string;
+        try {
+          content = fs.readFileSync(absPath, "utf8");
+        } catch {
+          continue;
+        }
+
+        for (let i = recordedEditCalls.length - 1; i >= 0; i--) {
+          const call = recordedEditCalls[i];
+          const edits = editsByCall.get(call)!;
+          const patch = formatRecordedEditsAsDiff(aggregate.filePath, content, edits);
+          const before = patch === null ? null : reverseApplyRecordedEdits(content, edits);
+          if (patch === null || before === null) {
+            reconstructedByCall.clear();
+            break;
+          }
+          reconstructedByCall.set(call, patch);
+          content = before;
+        }
+      }
+
+      if (!missingCallDiff || reconstructedByCall.size === recordedEditCalls.length) {
+        const diffs: string[] = [];
+        for (const call of calls) {
+          const fileChange = call.fileChange;
+          if (!fileChange) continue;
+          const diff = fileChange.diff ?? reconstructedByCall.get(call);
+          if (!diff) continue;
+          fileChange.diff = diff;
+          fileChange.diffIndex = diffs.length;
+          diffs.push(diff);
+        }
+        aggregate.diffs = diffs;
+        if (diffs.length > 0) {
+          aggregate.diff = diffs[diffs.length - 1];
+        }
+      } else {
+        // A cumulative Changes-panel diff is only trustworthy when we can walk
+        // the whole edit chain back from the current file. If any recorded
+        // edit no longer lines up, do not keep an earlier diff here: that
+        // would open the wrong patch for the file's latest recorded state.
+        aggregate.diff = undefined;
+        aggregate.diffs = [];
+      }
+    }
+  }
+
   /** Push file changes to the webview Changes panel */
   private refreshChangesPanel(): void {
     this.postMessage({
@@ -2600,6 +2739,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         type: "settingsUpdated",
         model: resolvedModel,
         mode: this.getCurrentMode(),
+        posture: this.getEffectivePosture(),
         reasoningEffort: this.getCurrentReasoningEffort(),
         provider: resp.provider || trimmed,
       });
@@ -2971,6 +3111,49 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     await this.slashHandler.handle(command, args);
   }
 
+  /** Switch the permission posture (Shift+Tab equivalent). Patches only
+   *  `permission_posture` so the runtime derives `auto_approve` / `trust_mode`
+   *  from the posture instead of the GUI sending stale cached booleans. */
+  private async handleSetPosture(posture: string): Promise<void> {
+    const normalized = normalizePosture(posture);
+    const wire = POSTURE_WIRE[normalized];
+    await vscode.workspace.getConfiguration("brotherwhale").update(
+      "defaultPermissionPosture",
+      wire,
+      vscode.ConfigurationTarget.Global,
+    );
+
+    let effective: PermissionPosture = normalized;
+    if (this.currentThread) {
+      try {
+        const updated = await this.api.updateThread(this.currentThread.id, {
+          permission_posture: wire,
+        });
+        this.currentThread = mergeThreadRecord(this.currentThread, updated, {
+          permission_posture: wire,
+        });
+        effective = postureFromThread(this.currentThread);
+      } catch (err) {
+        this.postMessage({
+          type: "error",
+          message: formatError("Failed to update permission posture", err),
+        });
+        effective = postureFromThread(this.currentThread);
+      }
+    }
+    this.postMessage({
+      type: "settingsUpdated",
+      mode: normalizeMode(this.currentThread?.mode || this.getCurrentMode()),
+      posture: effective,
+      model: this.currentThread?.model || this.getCurrentModel(),
+      reasoningEffort: this.getCurrentReasoningEffort(),
+    });
+    this.postMessage({
+      type: "info",
+      message: `Permission posture changed to ${POSTURE_LABELS[effective]}`,
+    });
+  }
+
   private async handleApprovalDecision(
     approvalId: string,
     decision: "allow" | "deny",
@@ -2987,7 +3170,23 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       // leading to a frozen UI (no approval.decided event arrives for
       // auto-approved calls, so the dialog never clears).
       if (remember && decision === "allow" && this.currentThread) {
-        this.currentThread = { ...this.currentThread, auto_approve: true };
+        // The runtime persists Full Access for the thread (see
+        // runtime_threads.rs remember_thread_auto_approve); mirror both the
+        // legacy boolean and the canonical posture so the status bar agrees
+        // with the engine. Report the *thread's* mode, not the global default:
+        // a loaded session may run in a mode the startup default does not name.
+        this.currentThread = {
+          ...this.currentThread,
+          auto_approve: true,
+          permission_posture: POSTURE_WIRE.full_access,
+        };
+        this.postMessage({
+          type: "settingsUpdated",
+          mode: normalizeMode(this.currentThread.mode),
+          posture: POSTURE_WIRE.full_access,
+          model: this.currentThread.model || this.getCurrentModel(),
+          reasoningEffort: this.getCurrentReasoningEffort(),
+        });
       }
       const tc = this.pendingApprovals.get(approvalId);
       if (tc) {
@@ -3092,12 +3291,25 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     this.diffProviderDisposable = vscode.workspace.registerTextDocumentContentProvider("brotherwhale-diff", provider);
   }
 
+  /** Workspace folders of the open VSCode window, in VSCode's order. */
+  private workspaceRoots(): string[] {
+    return (vscode.workspace.workspaceFolders ?? [])
+      .map((folder) => folder.uri.fsPath)
+      .filter((root): root is string => !!root);
+  }
+
+  /**
+   * Roots to try when resolving a path the runtime recorded, most specific
+   * first: a viewed session's own workspace, then the open window's folders.
+   */
+  private recordedPathRoots(): string[] {
+    const roots = [this.viewingSessionWorkspace, ...this.workspaceRoots()];
+    return roots.filter((root, index): root is string => !!root && roots.indexOf(root) === index);
+  }
+
   private async handleOpenDiff(filePath: string, diff?: string, useCumulative?: boolean, diffIndex?: number): Promise<void> {
     try {
-      const workspace = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-      if (!workspace) return;
-
-      const absPath = path.isAbsolute(filePath) ? filePath : path.join(workspace, filePath);
+      const absPath = resolveRecordedFilePath(filePath, this.recordedPathRoots(), defaultTasksDir());
 
       // Look up the full diffs array from turnFileChanges for multi-edit files
       const normPath = normalizePath(filePath);
@@ -3118,7 +3330,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
             const currentUri = vscode.Uri.file(absPath);
             const doc = await vscode.workspace.openTextDocument(currentUri);
             newContent = doc.getText();
-          } catch (err) {
+          } catch {
             const parsed = parseDiffToSides(diffs![0]);
             newContent = parsed.newContent;
           }
@@ -3146,7 +3358,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
               oldContent = parsed.oldContent;
               newContent = parsed.newContent;
             }
-          } catch (err) {
+          } catch {
             const parsed = parseDiffToSides(diff!);
             oldContent = parsed.oldContent;
             newContent = parsed.newContent;
@@ -3159,7 +3371,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
             newContent = doc.getText();
             const reconstructed = reconstructOldContent(newContent, diff!);
             oldContent = reconstructed !== null ? reconstructed : parseDiffToSides(diff!).oldContent;
-          } catch (err) {
+          } catch {
             const parsed = parseDiffToSides(diff!);
             oldContent = parsed.oldContent;
             newContent = parsed.newContent;
@@ -3187,9 +3399,14 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
 
   private async handleOpenFile(filePath: string): Promise<void> {
     try {
-      // Try task artifact path first, then fallback to workspace relative
-      const absPath = resolveTaskArtifactPath(filePath);
-      const normalizedAbsPath = path.normalize(absPath);
+      // The card carries the path the runtime recorded, which for file tools is
+      // workspace-relative — resolving that against the task artifacts dir
+      // alone reported every ordinary edit as "no longer available".
+      const normalizedAbsPath = resolveRecordedFilePath(
+        filePath,
+        this.recordedPathRoots(),
+        defaultTasksDir(),
+      );
       const preview = this.textArtifactPreviewStore.get(filePath) || this.textArtifactPreviewStore.get(normalizedAbsPath);
 
       if (!fs.existsSync(normalizedAbsPath)) {
@@ -4069,7 +4286,21 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
 
   private getCurrentMode(): string {
     const cfg = vscode.workspace.getConfiguration("brotherwhale");
-    return cfg.get<string>("defaultMode", "agent");
+    return normalizeMode(cfg.get<string>("defaultMode", "agent"));
+  }
+
+  /** Startup default permission posture. Legacy `defaultMode: "yolo"` is a
+   *  one-way shorthand for Act + Full Access and still wins when set. */
+  private getCurrentPosture(): PermissionPosture {
+    const cfg = vscode.workspace.getConfiguration("brotherwhale");
+    if (isYoloAlias(cfg.get<string>("defaultMode", "agent"))) return "full_access";
+    return normalizePosture(cfg.get<string>("defaultPermissionPosture", "ask"));
+  }
+
+  /** Effective posture for the active thread, falling back to the startup default. */
+  private getEffectivePosture(): PermissionPosture {
+    if (this.currentThread) return postureFromThread(this.currentThread);
+    return this.getCurrentPosture();
   }
 
   private getCurrentReasoningEffort(): string {

@@ -10,6 +10,10 @@ export interface ThreadRecord {
   model: string;
   workspace: string;
   mode: string;
+  /** Named default permission posture for new turns: `ask` | `auto_review` |
+   *  `full_access`. Absent on legacy records, whose effective posture is
+   *  derived from `auto_approve` / `trust_mode`. */
+  permission_posture?: string | null;
   allow_shell: boolean;
   trust_mode: boolean;
   auto_approve: boolean;
@@ -116,6 +120,34 @@ export interface SnapshotEntry {
   label: string;
   timestamp: number;
 }
+
+/** Native memory entry from `GET /v1/memory` / `POST /v1/memory`.
+ *  Field names mirror the TUI's `MemoryEntryRecord`
+ *  (runtime_api.rs `memory_hit_to_record`). */
+export interface MemoryEntryRecord {
+  id: number;
+  scope: string;
+  workspace_id: string | null;
+  summary: string;
+  stale: boolean;
+  line_start: number;
+  line_end: number;
+  status: string;
+}
+
+export interface MemoryListResponse {
+  entries: MemoryEntryRecord[];
+  total: number;
+}
+
+export interface MemoryEntryResponse {
+  entry: MemoryEntryRecord;
+}
+
+export interface ClearMemoryResponse {
+  cleared: boolean;
+}
+
 
 export interface ThreadDetailResponse {
   thread: ThreadRecord;

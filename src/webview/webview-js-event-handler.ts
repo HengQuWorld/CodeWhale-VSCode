@@ -3,6 +3,7 @@
  * Handles the window 'message' event listener with the main switch statement.
  */
 import type { WebviewTranslations } from "./webview-html";
+import { MODE_LABELS, POSTURE_LABELS } from "../utils/modes";
 
 export function getEventHandlerScript(tr: WebviewTranslations): string {
   return `(function(){
@@ -16,6 +17,7 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
   var statusTextEl = document.getElementById('status-text');
   var statusStatsEl = document.getElementById('status-stats');
   var currentModeEl = document.getElementById('current-mode');
+  var currentPostureEl = document.getElementById('current-posture');
   var currentModelEl = document.getElementById('current-model');
   var currentReasoningEl = document.getElementById('current-reasoning');
   var currentProviderEl = document.getElementById('current-provider');
@@ -27,6 +29,35 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
   var apiCapabilities = window.__wvApiCapabilities || {};
   var runtimeVersion = '';
   var sessionStats = null;
+
+  // Mode / permission-posture display maps, mirroring the TUI's
+  // AppMode::display_name() and ApprovalMode::permission_chip_label().
+  var __wvModeLabels = ${JSON.stringify(MODE_LABELS)};
+  var __wvPostureLabels = ${JSON.stringify(POSTURE_LABELS)};
+
+  function modeDisplay(value) {
+    var key = String(value || '').trim().toLowerCase();
+    return __wvModeLabels[key] || value || '';
+  }
+
+  function postureDisplay(value) {
+    var key = String(value || '').trim().toLowerCase();
+    return __wvPostureLabels[key] || value || '';
+  }
+
+  function applyModeDisplay(value) {
+    if (!currentModeEl) return;
+    var key = String(value || '').trim().toLowerCase();
+    currentModeEl.setAttribute('data-value', key || 'agent');
+    currentModeEl.textContent = modeDisplay(key || 'agent');
+  }
+
+  function applyPostureDisplay(value) {
+    if (!currentPostureEl) return;
+    var key = String(value || '').trim().toLowerCase();
+    currentPostureEl.setAttribute('data-value', key || 'ask');
+    currentPostureEl.textContent = postureDisplay(key || 'ask');
+  }
 
   // ── Streaming state helpers ──
   var statusBarEl = document.getElementById('status');
@@ -46,6 +77,16 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
     if (window.__wvInput && window.__wvInput.updateSendStopButton) {
       window.__wvInput.updateSendStopButton(streaming);
     }
+  }
+
+  // Informational engine prose ("<kind> started", "Turn: in_progress",
+  // "Loaded N turns") arrives interleaved with stream deltas and says nothing
+  // about whether the turn is still running. It may only repaint the
+  // status-bar text: routing it through setStreamingState() cleared the
+  // streaming flag on every one of those messages, so the send/stop button
+  // flickered between send and stop throughout a turn.
+  function setStatusText(text) {
+    if (statusTextEl) statusTextEl.textContent = text;
   }
 
   function showThinkingActivity(messageId, label) {
@@ -166,7 +207,12 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
     }
 
     function highlightCurrent(dropdown) {
-      var currentVal = dropdown.parentElement.querySelector('.setting-value').textContent.trim();
+      var valueEl = dropdown.parentElement.querySelector('.setting-value');
+      // Prefer the canonical data-value (mode/posture show friendly labels);
+      // fall back to the visible text for dropdowns whose value is its label.
+      var currentVal = valueEl
+        ? (valueEl.getAttribute('data-value') || valueEl.textContent).trim()
+        : '';
       var items = dropdown.querySelectorAll('.dropdown-item');
       for (var i = 0; i < items.length; i++) {
         items[i].classList.toggle('selected', items[i].getAttribute('data-value') === currentVal);
@@ -200,6 +246,8 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
           // Map setting to slash command
           if (setting === 'mode') {
             vscode.postMessage({ type: 'slashCommand', command: '/mode', args: val });
+          } else if (setting === 'posture') {
+            vscode.postMessage({ type: 'setPosture', posture: val });
           } else if (setting === 'model') {
             vscode.postMessage({ type: 'slashCommand', command: '/model', args: val });
           } else if (setting === 'reasoning') {
@@ -255,7 +303,8 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
         window.__wvSidebar.closeAgentDetail();
         if (window.__wvFleet) window.__wvFleet.closeFleetDetail();
         setStreamingState(false, '${tr.ready} (' + (msg.model || 'deepseek-v4-pro') + ')');
-        if (msg.mode) currentModeEl.textContent = msg.mode;
+        if (msg.mode) applyModeDisplay(msg.mode);
+        if (msg.posture) applyPostureDisplay(msg.posture);
         if (msg.model) currentModelEl.textContent = msg.model;
         if (msg.reasoningEffort) currentReasoningEl.textContent = msg.reasoningEffort;
         if (msg.provider && currentProviderEl) currentProviderEl.textContent = msg.provider;
@@ -268,7 +317,8 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
         if (msg.model) {
           setStreamingState(false, '${tr.ready} (' + msg.model + ')');
         }
-        if (msg.mode) currentModeEl.textContent = msg.mode;
+        if (msg.mode) applyModeDisplay(msg.mode);
+        if (msg.posture) applyPostureDisplay(msg.posture);
         if (msg.model) currentModelEl.textContent = msg.model;
         if (msg.reasoningEffort) currentReasoningEl.textContent = msg.reasoningEffort;
         if (msg.provider && currentProviderEl) {
@@ -459,6 +509,17 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
         // from the previous session don't leak into the new one.
         _diffStore.clear();
         _diffIdCounter.value = 0;
+        // A history load replaces the whole conversation (thread/session
+        // switch, or a webview reload), so end any running-turn display here.
+        // This used to happen as a side effect of the trailing status
+        // message, which no longer touches the streaming state.
+        window.__wvMessages.setStreaming(false);
+        var loadHistoryTimeout = window.__wvMessages.getStreamingTimeout();
+        if (loadHistoryTimeout) {
+          clearTimeout(loadHistoryTimeout);
+          window.__wvMessages.setStreamingTimeout(null);
+        }
+        setStreamingState(false, __i18n.ready);
         messagesEl.innerHTML = '';
         for (var i = 0; i < msg.messages.length; i++) {
           var m = msg.messages[i];
@@ -836,7 +897,7 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
       }
 
       case 'status':
-        setStreamingState(false, msg.text);
+        setStatusText(msg.text);
         break;
 
       case 'setInputText':

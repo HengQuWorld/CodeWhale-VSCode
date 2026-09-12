@@ -633,7 +633,7 @@ describe("Event sequence tracking", () => {
   });
 
   it("uses sequence number for SSE reconnection", () => {
-    let lastEventSeq = 42;
+    const lastEventSeq = 42;
     const sinceSeq = lastEventSeq;
     const params = new URLSearchParams();
     params.set("since_seq", String(sinceSeq ?? 0));
@@ -641,7 +641,7 @@ describe("Event sequence tracking", () => {
   });
 
   it("defaults to 0 for initial connection", () => {
-    let lastEventSeq = 0;
+    const lastEventSeq = 0;
     const sinceSeq = lastEventSeq;
     const params = new URLSearchParams();
     params.set("since_seq", String(sinceSeq ?? 0));

@@ -4,7 +4,7 @@
  * to reduce code duplication and improve testability.
  */
 
-import type { ChatMessage, ContentBlock } from "./session-state";
+import type { ChatMessage } from "./session-state";
 import { renderMarkdown } from "./markdown";
 
 /** Safely render markdown, falling back to raw text on error. */

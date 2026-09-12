@@ -61,6 +61,7 @@ function makeTr(): WebviewTranslations {
     steerBadge: "steer",
     steerBadgeTitle: "Sent as mid-turn steering",
     modeLabel: "Mode",
+    permissionLabel: "Permission",
     reasoningEffortLabel: "Reasoning",
     welcomeTitle: "CodeWhale",
     welcomeSubtitle: "Your AI coding partner",
@@ -524,6 +525,27 @@ describe("webview-html.ts assembler", () => {
     expect(html).toContain('id="current-mode"');
     expect(html).toContain('id="current-model"');
     expect(html).toContain('id="current-reasoning"');
+  });
+
+  it("renders the TUI mode roster (Act / Plan / Operate) and the permission posture", () => {
+    const html = getWebviewHtml(makeMockWebview(), makeMockExtensionUri(), makeTr());
+    expect(html).toContain('id="dropdown-mode"');
+    expect(html).toContain('data-value="agent"');
+    expect(html).toContain('data-value="plan"');
+    expect(html).toContain('data-value="operate"');
+    expect(html).toContain('>Act<');
+    expect(html).toContain('>Plan<');
+    expect(html).toContain('>Operate<');
+    // `yolo` is a compatibility alias, never a visible mode.
+    expect(html).not.toContain('data-value="yolo"');
+
+    expect(html).toContain('id="current-posture"');
+    expect(html).toContain('id="dropdown-posture"');
+    expect(html).toContain('data-value="ask"');
+    expect(html).toContain('data-value="auto_review"');
+    expect(html).toContain('data-value="full_access"');
+    expect(html).toContain('>Auto-Review<');
+    expect(html).toContain('>Full Access<');
   });
 
   it("contains status bar with status text and stats", () => {

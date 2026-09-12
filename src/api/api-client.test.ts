@@ -468,7 +468,6 @@ vi.mock("http", () => {
 import * as http from "http";
 
 function mockHttpRequest(statusCode: number, responseData: string) {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (http.request as any).mockImplementation(
     (_url: unknown, _opts: unknown, callback: (res: { statusCode: number; on: (evt: string, fn: (chunk?: Buffer) => void) => void }) => void) => {
       const res = {

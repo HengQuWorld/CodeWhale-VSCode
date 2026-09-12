@@ -9,6 +9,21 @@ import { getInputScript } from "./webview-js-input";
 import { getEventHandlerScript } from "./webview-js-event-handler";
 import { getFleetScript } from "./webview-js-fleet";
 import { getGoalScript } from "./webview-js-goal";
+import {
+  MODE_LABELS,
+  MODE_VALUES,
+  POSTURE_LABELS,
+  POSTURE_VALUES,
+} from "../utils/modes";
+
+/** Status-bar dropdown options, generated from the single source of truth in
+ *  `utils/modes.ts` so a roster change cannot drift between engine and UI. */
+const MODE_DROPDOWN_ITEMS = MODE_VALUES.map(
+  (value) => `<div class="dropdown-item" data-value="${value}">${MODE_LABELS[value]}</div>`,
+).join("\n              ");
+const POSTURE_DROPDOWN_ITEMS = POSTURE_VALUES.map(
+  (value) => `<div class="dropdown-item" data-value="${value}">${POSTURE_LABELS[value]}</div>`,
+).join("\n              ");
 
 export interface WebviewTranslations {
   locale: string; // "en" or "zh-cn"
@@ -61,6 +76,7 @@ export interface WebviewTranslations {
   steerBadge: string;
   steerBadgeTitle: string;
   modeLabel: string;
+  permissionLabel: string;
   reasoningEffortLabel: string;
   welcomeTitle: string;
   welcomeSubtitle: string;
@@ -397,11 +413,18 @@ ${css}
         <div class="setting-item">
           <span class="setting-label">${tr.modeLabel}:</span>
           <div class="setting-dropdown" data-setting="mode">
-            <span class="setting-value" id="current-mode">agent</span>
+            <span class="setting-value" id="current-mode" data-value="${MODE_VALUES[0]}">${MODE_LABELS[MODE_VALUES[0]]}</span>
             <div class="dropdown-menu" id="dropdown-mode">
-              <div class="dropdown-item" data-value="agent">agent</div>
-              <div class="dropdown-item" data-value="plan">plan</div>
-              <div class="dropdown-item" data-value="yolo">yolo</div>
+              ${MODE_DROPDOWN_ITEMS}
+            </div>
+          </div>
+        </div>
+        <div class="setting-item">
+          <span class="setting-label">${tr.permissionLabel}:</span>
+          <div class="setting-dropdown" data-setting="posture">
+            <span class="setting-value" id="current-posture" data-value="${POSTURE_VALUES[0]}">${POSTURE_LABELS[POSTURE_VALUES[0]]}</span>
+            <div class="dropdown-menu" id="dropdown-posture">
+              ${POSTURE_DROPDOWN_ITEMS}
             </div>
           </div>
         </div>

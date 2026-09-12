@@ -9,11 +9,24 @@
 import * as vscode from "vscode";
 import * as fs from "fs";
 import * as path from "path";
-import * as os from "os";
 import { exec } from "child_process";
 import { t, currentLocale } from "../i18n";
 import { formatCostAmount, resolveCostCurrency } from "../utils/cost-calculator";
-import { isCommandAvailableInGui } from "./slash-commands";
+import { isCommandAvailableInGui, getCommand } from "./slash-commands";
+import {
+  MODE_LABELS,
+  POSTURE_LABELS,
+  POSTURE_WIRE,
+  isYoloAlias,
+  modeLabel,
+  normalizeMode,
+  normalizePosture,
+  postureFromThread,
+  postureLabel,
+  resolveModeArg,
+  type PermissionPosture,
+  type TuiMode,
+} from "../utils/modes";
 import { formatError, getErrorMessage } from "../utils/error-handler";
 import type { CodeWhaleApiClient, CodeWhaleEngine, ThreadRecord, TaskSummary, ProviderEntry } from "../types";
 
@@ -90,75 +103,154 @@ function mergeThreadUpdate(
 // ── Individual command handlers ──
 
 async function handleMode(ctx: SlashCommandContext, args: string): Promise<void> {
-  const mode = args.trim().toLowerCase();
-  if (["agent", "plan", "yolo", "1", "2", "3"].includes(mode)) {
-    const modeMap: Record<string, string> = { "1": "agent", "2": "plan", "3": "yolo" };
-    const actualMode = modeMap[mode] || mode;
-    const isYolo = actualMode === "yolo";
-    const defaultModel = cfg().get<string>("defaultModel", "deepseek-v4-pro");
-    const reasoningEffort = cfg().get<string>("reasoningEffort", "auto");
-    const autoApprove = isYolo || cfg().get<boolean>("autoApprove", false);
-    await cfg().update("defaultMode", actualMode, vscode.ConfigurationTarget.Global);
-    let modeForUi = actualMode;
-    let modelForUi = defaultModel;
-    let infoMessage = `Mode changed to ${actualMode}`;
-    if (ctx.currentThread) {
-      try {
-        const updatedThread = await ctx.api.updateThread(ctx.currentThread.id, {
-          mode: actualMode,
-          trust_mode: isYolo,
-          auto_approve: autoApprove,
-        });
-        mergeThreadUpdate(ctx, updatedThread, {
-          mode: actualMode,
-          trust_mode: isYolo,
-          auto_approve: autoApprove,
-        });
-        modeForUi = ctx.currentThread.mode;
-        modelForUi = ctx.currentThread.model;
-      } catch (err) {
-        ctx.postMessage({
-          type: "error",
-          message: `Mode changed in settings but failed to update current thread: ${getErrorMessage(err)}`,
-        });
-        modeForUi = ctx.currentThread.mode;
-        modelForUi = ctx.currentThread.model;
-        infoMessage = `Default mode changed to ${actualMode}; current thread remains ${ctx.currentThread.mode}`;
-      }
-    }
-    ctx.postMessage({ type: "settingsUpdated", mode: modeForUi, model: modelForUi, reasoningEffort });
-    ctx.postMessage({ type: "info", message: infoMessage });
-  } else {
-    ctx.postMessage({ type: "info", message: `Current mode: ${cfg().get<string>("defaultMode", "agent")}\nUsage: /mode [agent|plan|yolo|1|2|3]` });
+  const arg = args.trim();
+  if (!arg) {
+    ctx.postMessage({
+      type: "info",
+      message: `Current mode: ${modeLabel(ctx.currentThread?.mode || cfg().get<string>("defaultMode", "agent"))} | Permission: ${POSTURE_LABELS[effectivePosture(ctx)]}\nUsage: /mode [act|plan|operate|1|2|3]`,
+    });
+    return;
   }
+
+  // Legacy YOLO spellings are a one-way permission shorthand for Act + Full
+  // Access, never a visible mode (mirrors TUI's `commands::mode`).
+  if (isYoloAlias(arg)) {
+    await applyMode(ctx, "agent", { posture: "full_access" });
+    return;
+  }
+
+  const resolved = resolveModeArg(arg);
+  if (!resolved) {
+    ctx.postMessage({
+      type: "info",
+      message: `Current mode: ${modeLabel(ctx.currentThread?.mode || cfg().get<string>("defaultMode", "agent"))} | Permission: ${POSTURE_LABELS[effectivePosture(ctx)]}\nUsage: /mode [act|plan|operate|1|2|3]`,
+    });
+    return;
+  }
+  await applyMode(ctx, resolved);
+}
+
+/** `/auto` — TUI parity: switch the permission posture to Auto-Review so the
+ *  agent just works, without changing the mode. */
+async function handleAuto(ctx: SlashCommandContext, args: string): Promise<void> {
+  if (args.trim()) {
+    ctx.postMessage({ type: "info", message: "Usage: /auto" });
+    return;
+  }
+  await applyPosture(ctx, "auto_review");
+}
+
+/** Apply a TUI mode to the current thread and the startup default.
+ *
+ * Patch only `mode` unless a posture is explicitly requested: the runtime
+ * preserves the thread's effective posture when `auto_approve` is absent
+ * (`runtime_policy_with_overrides`), and sending our stale cached posture
+ * would silently overwrite the engine's. */
+async function applyMode(
+  ctx: SlashCommandContext,
+  mode: TuiMode,
+  opts?: { posture?: PermissionPosture }
+): Promise<void> {
+  const model = ctx.currentThread?.model || cfg().get<string>("defaultModel", "deepseek-v4-pro");
+  const reasoningEffort = cfg().get<string>("reasoningEffort", "auto");
+  const posture = opts?.posture;
+  await cfg().update("defaultMode", mode, vscode.ConfigurationTarget.Global);
+  if (posture) {
+    await cfg().update("defaultPermissionPosture", POSTURE_WIRE[posture], vscode.ConfigurationTarget.Global);
+  }
+
+  let modeForUi = mode;
+  let postureForUi = posture ?? effectivePosture(ctx);
+  let modelForUi = model;
+  let infoMessage = `Mode changed to ${MODE_LABELS[mode]}`;
+
+  if (ctx.currentThread) {
+    try {
+      const updates: { mode: string; permission_posture?: string } = { mode };
+      if (posture) updates.permission_posture = POSTURE_WIRE[posture];
+      const updatedThread = await ctx.api.updateThread(ctx.currentThread.id, updates);
+      mergeThreadUpdate(ctx, updatedThread, updates);
+      modeForUi = normalizeMode(ctx.currentThread.mode);
+      postureForUi = effectivePosture(ctx);
+      modelForUi = ctx.currentThread.model;
+    } catch (err) {
+      ctx.postMessage({
+        type: "error",
+        message: `Mode changed in settings but failed to update current thread: ${getErrorMessage(err)}`,
+      });
+      modeForUi = normalizeMode(ctx.currentThread.mode);
+      postureForUi = effectivePosture(ctx);
+      modelForUi = ctx.currentThread.model;
+      infoMessage = `Default mode changed to ${MODE_LABELS[mode]}; current thread remains ${modeLabel(ctx.currentThread.mode)}`;
+    }
+  }
+  ctx.postMessage({ type: "settingsUpdated", mode: modeForUi, posture: postureForUi, model: modelForUi, reasoningEffort });
+  ctx.postMessage({ type: "info", message: infoMessage });
+}
+
+/** Apply a permission posture to the current thread and the startup default. */
+async function applyPosture(ctx: SlashCommandContext, posture: PermissionPosture): Promise<void> {
+  const model = ctx.currentThread?.model || cfg().get<string>("defaultModel", "deepseek-v4-pro");
+  const reasoningEffort = cfg().get<string>("reasoningEffort", "auto");
+  const mode = normalizeMode(ctx.currentThread?.mode || cfg().get<string>("defaultMode", "agent"));
+  const wire = POSTURE_WIRE[posture];
+  await cfg().update("defaultPermissionPosture", wire, vscode.ConfigurationTarget.Global);
+
+  let postureForUi = posture;
+  let infoMessage = `Permission posture changed to ${POSTURE_LABELS[posture]}`;
+  if (ctx.currentThread) {
+    try {
+      const updatedThread = await ctx.api.updateThread(ctx.currentThread.id, {
+        permission_posture: wire,
+      });
+      mergeThreadUpdate(ctx, updatedThread, { permission_posture: wire });
+      postureForUi = effectivePosture(ctx);
+    } catch (err) {
+      ctx.postMessage({
+        type: "error",
+        message: `Permission posture changed in settings but failed to update current thread: ${getErrorMessage(err)}`,
+      });
+      postureForUi = effectivePosture(ctx);
+      infoMessage = `Default permission posture changed to ${POSTURE_LABELS[posture]}; current thread remains ${postureLabel(postureForUi)}`;
+    }
+  }
+  ctx.postMessage({ type: "settingsUpdated", mode, posture: postureForUi, model, reasoningEffort });
+  ctx.postMessage({ type: "info", message: infoMessage });
+}
+
+/** The current thread's effective posture, falling back to the startup default. */
+function effectivePosture(ctx: SlashCommandContext): PermissionPosture {
+  if (ctx.currentThread) return postureFromThread(ctx.currentThread);
+  return normalizePosture(cfg().get<string>("defaultPermissionPosture", "ask"));
 }
 
 async function handleModel(ctx: SlashCommandContext, args: string): Promise<void> {
   const model = args.trim();
   if (model) {
     await cfg().update("defaultModel", model, vscode.ConfigurationTarget.Global);
-    const defaultMode = cfg().get<string>("defaultMode", "agent");
+    const defaultMode = normalizeMode(cfg().get<string>("defaultMode", "agent"));
     const reasoningEffort = cfg().get<string>("reasoningEffort", "auto");
-    let modeForUi = defaultMode;
+    const posture = effectivePosture(ctx);
+    let modeForUi: string = defaultMode;
     let modelForUi = model;
     let infoMessage = `Model changed to ${model}`;
     if (ctx.currentThread) {
       try {
         const updatedThread = await ctx.api.updateThread(ctx.currentThread.id, { model });
         mergeThreadUpdate(ctx, updatedThread, { model });
-        modeForUi = ctx.currentThread.mode;
+        modeForUi = normalizeMode(ctx.currentThread.mode);
         modelForUi = ctx.currentThread.model;
       } catch (err) {
         ctx.postMessage({
           type: "error",
           message: `Model changed in settings but failed to update current thread: ${getErrorMessage(err)}`,
         });
-        modeForUi = ctx.currentThread.mode;
+        modeForUi = normalizeMode(ctx.currentThread.mode);
         modelForUi = ctx.currentThread.model;
         infoMessage = `Default model changed to ${model}; current thread remains ${ctx.currentThread.model}`;
       }
     }
-    ctx.postMessage({ type: "settingsUpdated", mode: modeForUi, model: modelForUi, reasoningEffort });
+    ctx.postMessage({ type: "settingsUpdated", mode: modeForUi, posture, model: modelForUi, reasoningEffort });
     ctx.postMessage({ type: "info", message: infoMessage });
   } else {
     ctx.postMessage({ type: "info", message: `Current model: ${cfg().get<string>("defaultModel", "deepseek-v4-pro")}` });
@@ -200,7 +292,7 @@ async function handleReasoning(ctx: SlashCommandContext, args: string): Promise<
   const effort = args.trim().toLowerCase();
   if (["auto", "off", "low", "medium", "high", "max"].includes(effort)) {
     await cfg().update("reasoningEffort", effort, vscode.ConfigurationTarget.Global);
-    ctx.postMessage({ type: "settingsUpdated", mode: cfg().get<string>("defaultMode", "agent"), model: cfg().get<string>("defaultModel", "deepseek-v4-pro"), reasoningEffort: effort });
+    ctx.postMessage({ type: "settingsUpdated", mode: normalizeMode(ctx.currentThread?.mode || cfg().get<string>("defaultMode", "agent")), posture: effectivePosture(ctx), model: cfg().get<string>("defaultModel", "deepseek-v4-pro"), reasoningEffort: effort });
     ctx.postMessage({ type: "info", message: `Reasoning effort changed to ${effort}` });
   } else {
     ctx.postMessage({ type: "info", message: `Current reasoning effort: ${cfg().get<string>("reasoningEffort", "auto")}\nUsage: /reasoning [auto|off|low|medium|high|max]` });
@@ -249,7 +341,7 @@ async function handleConfig(ctx: SlashCommandContext, args: string): Promise<voi
 }
 
 async function handleSettings(ctx: SlashCommandContext, _args: string): Promise<void> {
-  ctx.postMessage({ type: "info", message: `Current settings:\n- Mode: ${cfg().get<string>("defaultMode", "agent")}\n- Model: ${cfg().get<string>("defaultModel", "deepseek-v4-pro")}\n- Reasoning Effort: ${cfg().get<string>("reasoningEffort", "auto")}\n- Engine Path: ${cfg().get<string>("enginePath", "codewhale")}\n- Auto Start Engine: ${cfg().get<boolean>("autoStartEngine", true)}` });
+  ctx.postMessage({ type: "info", message: `Current settings:\n- Mode: ${modeLabel(ctx.currentThread?.mode || cfg().get<string>("defaultMode", "agent"))}\n- Permission: ${POSTURE_LABELS[effectivePosture(ctx)]}\n- Model: ${cfg().get<string>("defaultModel", "deepseek-v4-pro")}\n- Reasoning Effort: ${cfg().get<string>("reasoningEffort", "auto")}\n- Engine Path: ${cfg().get<string>("enginePath", "codewhale")}` });
 }
 
 async function handleInterrupt(ctx: SlashCommandContext, _args: string): Promise<void> {
@@ -488,20 +580,21 @@ async function handleStatus(ctx: SlashCommandContext, _args: string): Promise<vo
   Version: ${runtimeInfo.version}
   Auth: ${authInfo}
   Thread: ${ctx.currentThread ? ctx.currentThread.id.slice(0, 12) + "..." : "None"}
-  Mode: ${cfg().get<string>("defaultMode", "agent")}
+  Mode: ${modeLabel(ctx.currentThread?.mode || cfg().get<string>("defaultMode", "agent"))}
+  Permission: ${POSTURE_LABELS[effectivePosture(ctx)]}
   Model: ${cfg().get<string>("defaultModel", "deepseek-v4-pro")}`
     });
   } catch (err) {
     const running = ctx.engine.isRunning;
     ctx.postMessage({
       type: "info",
-      message: `Engine: ${running ? "Running" : "Stopped"}\nPort: ${ctx.engine.port}\nThread: ${ctx.currentThread ? ctx.currentThread.id.slice(0, 12) + "..." : "None"}\nMode: ${cfg().get<string>("defaultMode", "agent")}\nModel: ${cfg().get<string>("defaultModel", "deepseek-v4-pro")}\n(${formatError("Runtime info unavailable", err)})`
+      message: `Engine: ${running ? "Running" : "Stopped"}\nPort: ${ctx.engine.port}\nThread: ${ctx.currentThread ? ctx.currentThread.id.slice(0, 12) + "..." : "None"}\nMode: ${modeLabel(ctx.currentThread?.mode || cfg().get<string>("defaultMode", "agent"))}\nPermission: ${POSTURE_LABELS[effectivePosture(ctx)]}\nModel: ${cfg().get<string>("defaultModel", "deepseek-v4-pro")}\n(${formatError("Runtime info unavailable", err)})`
     });
   }
 }
 
 async function handleHome(ctx: SlashCommandContext, _args: string): Promise<void> {
-  ctx.postMessage({ type: "info", message: `Dashboard:\n- Threads: see sidebar\n- Mode: ${cfg().get<string>("defaultMode", "agent")}\n- Model: ${cfg().get<string>("defaultModel", "deepseek-v4-pro")}\n- Reasoning: ${cfg().get<string>("reasoningEffort", "auto")}` });
+  ctx.postMessage({ type: "info", message: `Dashboard:\n- Threads: see sidebar\n- Mode: ${modeLabel(ctx.currentThread?.mode || cfg().get<string>("defaultMode", "agent"))}\n- Permission: ${POSTURE_LABELS[effectivePosture(ctx)]}\n- Model: ${cfg().get<string>("defaultModel", "deepseek-v4-pro")}\n- Reasoning: ${cfg().get<string>("reasoningEffort", "auto")}` });
 }
 
 async function handleWorkspace(ctx: SlashCommandContext, _args: string): Promise<void> {
@@ -569,24 +662,60 @@ async function handleTrust(ctx: SlashCommandContext, args: string): Promise<void
   const sub = args.trim().toLowerCase();
   if (sub === "on") {
     await cfg().update("autoApprove", true, vscode.ConfigurationTarget.Global);
+    await cfg().update(
+      "defaultPermissionPosture",
+      POSTURE_WIRE.full_access,
+      vscode.ConfigurationTarget.Global
+    );
     if (ctx.currentThread) {
       try {
-        await ctx.api.updateThread(ctx.currentThread.id, { auto_approve: true, trust_mode: true });
+        const updated = await ctx.api.updateThread(ctx.currentThread.id, {
+          permission_posture: POSTURE_WIRE.full_access,
+        });
+        mergeThreadUpdate(ctx, updated, {
+          permission_posture: POSTURE_WIRE.full_access,
+          auto_approve: true,
+          trust_mode: true,
+        });
       } catch { /* non-critical */ }
     }
-    ctx.postMessage({ type: "info", message: "Trust mode enabled (auto-approve)" });
+    postCurrentSettings(ctx);
+    ctx.postMessage({ type: "info", message: "Trust mode enabled (Full Access)" });
   } else if (sub === "off") {
-    const isYolo = cfg().get<string>("defaultMode", "agent") === "yolo";
-    await cfg().update("autoApprove", false, vscode.ConfigurationTarget.Global);
+    // A legacy startup default of `yolo` is Act + Full Access, so turning
+    // trust off must not silently downgrade it.
+    const isYolo = isYoloAlias(cfg().get<string>("defaultMode", "agent"));
+    const posture: PermissionPosture = isYolo ? "full_access" : "ask";
+    await cfg().update("autoApprove", isYolo, vscode.ConfigurationTarget.Global);
+    await cfg().update(
+      "defaultPermissionPosture",
+      POSTURE_WIRE[posture],
+      vscode.ConfigurationTarget.Global
+    );
     if (ctx.currentThread) {
       try {
-        await ctx.api.updateThread(ctx.currentThread.id, { auto_approve: isYolo, trust_mode: isYolo });
+        const updated = await ctx.api.updateThread(ctx.currentThread.id, {
+          permission_posture: POSTURE_WIRE[posture],
+        });
+        mergeThreadUpdate(ctx, updated, { permission_posture: POSTURE_WIRE[posture] });
       } catch { /* non-critical */ }
     }
+    postCurrentSettings(ctx);
     ctx.postMessage({ type: "info", message: "Trust mode disabled" });
   } else {
     ctx.postMessage({ type: "info", message: `Usage: /trust [on|off]\nAuto-approve is currently: ${cfg().get<boolean>("autoApprove", false) ? "on" : "off"}` });
   }
+}
+
+/** Push the current mode / posture / model / reasoning to the webview status bar. */
+function postCurrentSettings(ctx: SlashCommandContext): void {
+  ctx.postMessage({
+    type: "settingsUpdated",
+    mode: normalizeMode(ctx.currentThread?.mode || cfg().get<string>("defaultMode", "agent")),
+    posture: effectivePosture(ctx),
+    model: ctx.currentThread?.model || cfg().get<string>("defaultModel", "deepseek-v4-pro"),
+    reasoningEffort: cfg().get<string>("reasoningEffort", "auto"),
+  });
 }
 
 async function handleVerbose(ctx: SlashCommandContext, args: string): Promise<void> {
@@ -668,7 +797,8 @@ async function handleFeedback(_ctx: SlashCommandContext, _args: string): Promise
 
 async function handleHelp(ctx: SlashCommandContext, _args: string): Promise<void> {
   ctx.postMessage({ type: "info", message: `Available commands:
-/mode [agent|plan|yolo|1|2|3] - Switch mode
+/mode [act|plan|operate|1|2|3] - Switch mode (legacy yolo = Act + Full Access)
+/auto - Switch the permission posture to Auto-Review
 /model [name] - Switch model
 /models - List available models
 /reasoning [auto|off|low|medium|high|max] - Set reasoning effort
@@ -687,6 +817,8 @@ async function handleHelp(ctx: SlashCommandContext, _args: string): Promise<void
 /verbose [on|off] - Toggle verbose mode
 /skills - List all available skills with status
 /skill <name> [on|off] - Enable or disable a skill
+/memory - Manage native memory (show/search/get/remember/clear)
+/restore [N] - List snapshots or revert workspace files (requires trust mode)
 /init - Open settings for initialization
 /mcp - Open MCP settings
 /provider - Show provider info
@@ -695,12 +827,12 @@ async function handleHelp(ctx: SlashCommandContext, _args: string): Promise<void
 /exit - Close sidebar
 
 Commands with limited support in GUI:
-/task, /jobs, /note, /memory, /undo, /retry, /share,
+/task, /jobs, /note, /undo, /retry, /share,
 /goal, /network, /queue, /stash, /hooks, /subagents,
 /agent, /attach, /anchor, /sessions, /load, /cycles,
-/cycle, /recall, /relay, /lsp, /review, /restore, /rlm,
-/change, /cache, /profile, /translate, /system, /edit,
-/diff, /logout, /tokens, /cost, /home
+/cycle, /recall, /relay, /lsp, /review,
+/rlm, /change, /cache, /profile, /translate, /system,
+/edit, /diff, /logout, /tokens, /cost, /home
 
 Use the TUI for full command support.` });
 }
@@ -1314,56 +1446,106 @@ async function handleNote(ctx: SlashCommandContext, args: string): Promise<void>
   }
 }
 
+const MEMORY_USAGE = "Usage: /memory [show|search <query>|get <id>|remember [global|workspace] <note>|clear [all|global|workspace]]";
+
+function formatMemoryEntryLine(entry: { id: number; scope: string; stale: boolean; summary: string }): string {
+  const staleMark = entry.stale ? " (stale)" : "";
+  return `  #${entry.id} [${entry.scope}]${staleMark} ${entry.summary}`;
+}
+
+/**
+ * `/memory` — manage the native memory store via the runtime API
+ * (`/v1/memory`), the same store the TUI's `/memory native` subcommands
+ * and the model's `remember` tool use. Never touches local files directly.
+ */
 async function handleMemory(ctx: SlashCommandContext, args: string): Promise<void> {
-  const memoryDir = path.join(os.homedir(), ".deepseek");
-  const memoryPath = path.join(memoryDir, "memory.md");
-  const memArg = args.trim().toLowerCase();
-
-  if (memArg === "help") {
-    ctx.postMessage({ type: "info", message: `Usage: /memory [show|path|clear|edit]\nCurrent path: ${memoryPath}` });
-    return;
-  }
-
-  if (memArg === "path") {
-    ctx.postMessage({ type: "info", message: `Memory path: ${memoryPath}` });
-    return;
-  }
+  const memArg = args.trim();
+  const firstWord = memArg.split(/\s+/)[0] ?? "";
+  const sub = firstWord.toLowerCase() || "show";
+  const rest = memArg.slice(firstWord.length).trim();
 
   try {
-    if (memArg === "clear") {
-      if (fs.existsSync(memoryPath)) {
-        fs.writeFileSync(memoryPath, "(empty)\n");
-        ctx.postMessage({ type: "info", message: "Memory cleared." });
+    await ctx.api.ensureReady();
+
+    if (sub === "help") {
+      ctx.postMessage({ type: "info", message: `${MEMORY_USAGE}\n\nManage the native memory store via the runtime API — the same store the TUI's /memory native subcommands and the model's \`remember\` tool use.` });
+      return;
+    }
+
+    if (sub === "show") {
+      const result = await ctx.api.listMemory({ limit: 20 });
+      if (!result.entries.length) {
+        ctx.postMessage({ type: "info", message: `Memory is empty.\nAdd via /memory remember <note> or let the model use the \`remember\` tool.\n\n${MEMORY_USAGE}` });
       } else {
-        ctx.postMessage({ type: "info", message: "No memory file to clear." });
+        const lines = result.entries.map(formatMemoryEntryLine);
+        ctx.postMessage({ type: "info", message: `Native memory (${result.total}):\n${lines.join("\n")}\n\n${MEMORY_USAGE}` });
       }
       return;
     }
 
-    if (memArg === "edit") {
+    if (sub === "search") {
+      if (!rest) {
+        ctx.postMessage({ type: "error", message: "Usage: /memory search <query>" });
+        return;
+      }
+      const result = await ctx.api.listMemory({ q: rest, limit: 20 });
+      if (!result.entries.length) {
+        ctx.postMessage({ type: "info", message: "No memory matches." });
+      } else {
+        const lines = result.entries.map(formatMemoryEntryLine);
+        ctx.postMessage({ type: "info", message: `Memory matches (${result.total}):\n${lines.join("\n")}` });
+      }
+      return;
+    }
+
+    if (sub === "get") {
+      const id = parseInt(rest, 10);
+      if (isNaN(id) || id < 1) {
+        ctx.postMessage({ type: "error", message: "Usage: /memory get <id>" });
+        return;
+      }
       try {
-        const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(memoryPath));
-        vscode.window.showTextDocument(doc);
-        ctx.postMessage({ type: "info", message: `Opening memory file: ${memoryPath}` });
-      } catch {
-        ctx.postMessage({ type: "info", message: `Memory file not found. Create it at: ${memoryPath}` });
+        const { entry } = await ctx.api.getMemoryEntry(id);
+        ctx.postMessage({ type: "info", message: formatMemoryEntryLine(entry) });
+      } catch (err) {
+        if (getErrorMessage(err).includes("not found")) {
+          ctx.postMessage({ type: "error", message: `memory entry ${id} not found` });
+        } else {
+          throw err;
+        }
       }
       return;
     }
 
-    if (!fs.existsSync(memoryPath)) {
-      ctx.postMessage({ type: "info", message: `Memory file not found.\nPath: ${memoryPath}\nCreate it to start using memory, or use /memory edit to open it.` });
-    } else {
-      const content = fs.readFileSync(memoryPath, "utf-8").trim();
-      if (!content || content === "(empty)") {
-        ctx.postMessage({ type: "info", message: `Memory path: ${memoryPath}\n(empty — add content to the file or use /memory edit)` });
-      } else {
-        const display = content.length > 500
-          ? content.slice(0, 500) + `...\n(truncated, ${content.length} chars total)`
-          : content;
-        ctx.postMessage({ type: "info", message: `Memory path: ${memoryPath}\n─────────────────────────────\n${display}` });
+    if (sub === "remember" || sub === "add") {
+      let scope: "global" | "workspace" | undefined;
+      let note = rest;
+      const scopeMatch = note.match(/^(global|workspace)\s+(.+)$/i);
+      if (scopeMatch) {
+        scope = scopeMatch[1].toLowerCase() as "global" | "workspace";
+        note = scopeMatch[2];
       }
+      if (!note) {
+        ctx.postMessage({ type: "error", message: "Usage: /memory remember [global|workspace] <note>" });
+        return;
+      }
+      const { entry } = await ctx.api.createMemoryEntry(note, scope);
+      ctx.postMessage({ type: "info", message: `Memory remembered as #${entry.id} (${entry.scope}): ${entry.summary}` });
+      return;
     }
+
+    if (sub === "clear") {
+      const scope = (rest || "all").toLowerCase();
+      if (!["all", "global", "workspace"].includes(scope)) {
+        ctx.postMessage({ type: "error", message: "Usage: /memory clear [all|global|workspace]" });
+        return;
+      }
+      await ctx.api.clearMemory(scope as "all" | "global" | "workspace");
+      ctx.postMessage({ type: "info", message: `Memory cleared (${scope}). This cannot be undone.` });
+      return;
+    }
+
+    ctx.postMessage({ type: "error", message: `Unknown subcommand '${sub}'.\n${MEMORY_USAGE}` });
   } catch (err) {
     ctx.postMessage({ type: "error", message: formatError("Memory error", err) });
   }
@@ -1371,8 +1553,109 @@ async function handleMemory(ctx: SlashCommandContext, args: string): Promise<voi
 
 // ── Command registry (dispatcher map) ──
 
+const RESTORE_DEFAULT_LIST_LIMIT = 20;
+const RESTORE_MAX_LIST_LIMIT = 100;
+const RESTORE_MAX_INDEX = 1000;
+
+function formatSnapshotTime(timestampSec: number): string {
+  const d = new Date(timestampSec * 1000);
+  if (isNaN(d.getTime())) return "unknown time";
+  return d.toISOString().slice(0, 16).replace("T", " ") + " UTC";
+}
+
+/**
+ * `/restore` — list snapshots or revert workspace files to the Nth-most-
+ * recent snapshot, mirroring TUI's `/restore` (commands/groups/skills/
+ * restore.rs): no arg lists 20 snapshots, `list [N]` lists more, `<N>`
+ * restores. File mutation is gated on trust mode, same as the TUI.
+ */
+async function handleRestore(ctx: SlashCommandContext, args: string): Promise<void> {
+  const trimmed = args.trim();
+  const lower = trimmed.toLowerCase();
+
+  try {
+    await ctx.api.ensureReady();
+
+    // Listing forms: no arg or "list [N]"
+    if (!trimmed || lower.startsWith("list")) {
+      let limit = RESTORE_DEFAULT_LIST_LIMIT;
+      if (lower.startsWith("list")) {
+        const extra = trimmed.slice(4).trim();
+        if (extra) {
+          const n = parseInt(extra, 10);
+          if (isNaN(n) || n < 1) {
+            ctx.postMessage({ type: "error", message: `Usage: /restore list [N]  (N must be >= 1; got '${extra}')` });
+            return;
+          }
+          if (n > RESTORE_MAX_LIST_LIMIT) {
+            ctx.postMessage({ type: "error", message: `Restore list limit must be <= ${RESTORE_MAX_LIST_LIMIT}; got ${n}.` });
+            return;
+          }
+          limit = n;
+        }
+      }
+      const snapshots = await ctx.api.listSnapshots({ limit });
+      if (!snapshots.length) {
+        ctx.postMessage({ type: "info", message: "No snapshots yet. Send a message to create the first pre-turn snapshot." });
+        return;
+      }
+      const lines = snapshots.map((s, i) =>
+        `  #${String(i + 1).padEnd(2)}  ${formatSnapshotTime(s.timestamp)}  ${s.id.slice(0, 8)}  ${s.label}`
+      );
+      ctx.postMessage({
+        type: "info",
+        message: `Recent snapshots (newest first; pass /restore <N> to revert; /restore list 50 shows more):\n${lines.join("\n")}`,
+      });
+      return;
+    }
+
+    // Restore form: /restore <N> (1-based, newest first)
+    const n = parseInt(trimmed, 10);
+    if (isNaN(n) || n < 1) {
+      ctx.postMessage({ type: "error", message: `Usage: /restore <N> or /restore list [N]  (N is 1-based; got '${trimmed}')` });
+      return;
+    }
+    if (n > RESTORE_MAX_INDEX) {
+      ctx.postMessage({ type: "error", message: `Restore index must be <= ${RESTORE_MAX_INDEX}; got ${n}. Use /restore list [N] to inspect snapshots first.` });
+      return;
+    }
+
+    const snapshots = await ctx.api.listSnapshots({ limit: Math.max(n, RESTORE_DEFAULT_LIST_LIMIT) });
+    if (!snapshots.length) {
+      ctx.postMessage({ type: "info", message: "No snapshots yet. Send a message to create the first pre-turn snapshot." });
+      return;
+    }
+    if (n > snapshots.length) {
+      ctx.postMessage({ type: "error", message: `Only ${snapshots.length} snapshot(s) available; asked for #${n}.` });
+      return;
+    }
+
+    // Trust gate — mirrors TUI: refuse to mutate files outside trusted/full
+    // access (TUI checks yolo || trust_mode; GUI's counterparts are
+    // auto_approve || trust_mode on the current thread).
+    const trusted = ctx.currentThread?.trust_mode || ctx.currentThread?.auto_approve;
+    if (!trusted) {
+      ctx.postMessage({
+        type: "info",
+        message: `Refusing to restore snapshot #${n} ('${snapshots[n - 1].label}') outside trusted mode.\nRun /trust on, then re-run /restore ${n}.`,
+      });
+      return;
+    }
+
+    const target = snapshots[n - 1];
+    await ctx.api.restoreSnapshot(target.id);
+    ctx.postMessage({
+      type: "info",
+      message: `Restored snapshot #${n} ('${target.label}', ${target.id.slice(0, 8)}). Workspace files have been reverted; conversation history is unchanged.`,
+    });
+  } catch (err) {
+    ctx.postMessage({ type: "error", message: formatError("Restore failed", err) });
+  }
+}
+
 const HANDLERS: Record<string, CommandHandler> = {
   "/mode": handleMode,
+  "/auto": handleAuto,
   "/model": handleModel,
   "/models": handleModels,
   "/reasoning": handleReasoning,
@@ -1420,6 +1703,7 @@ const HANDLERS: Record<string, CommandHandler> = {
   "/logout": handleLogout,
   "/note": handleNote,
   "/memory": handleMemory,
+  "/restore": handleRestore,
 };
 
 // ── Handler class ──
@@ -1439,7 +1723,15 @@ export class SlashCommandHandler {
       }
       await handler(this.ctx, args);
     } else {
-      this.ctx.postMessage({ type: "error", message: `Unknown command: ${command}. Type /help for available commands.` });
+      const known = getCommand(command);
+      if (known) {
+        // Known to the registry but no GUI handler → unavailable in GUI.
+        // Surface the registry's helpText (which explains why) instead of
+        // the misleading "Unknown command".
+        this.ctx.postMessage({ type: "info", message: `${known.name}: ${known.helpText}` });
+      } else {
+        this.ctx.postMessage({ type: "error", message: `Unknown command: ${command}. Type /help for available commands.` });
+      }
     }
   }
 }

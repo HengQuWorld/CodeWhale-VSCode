@@ -118,14 +118,13 @@ describe("ChatProvider mode regression", () => {
 
     expect(api.updateThread).toHaveBeenCalledWith("thread-1", {
       mode: "agent",
-      trust_mode: false,
-      auto_approve: false,
     });
     expect(provider.currentThread?.mode).toBe("agent");
     expect(api.startTurn).toHaveBeenCalledWith("thread-1", "use write_file", {
       mode: "agent",
       model: "deepseek-v4-pro",
       reasoning_effort: "auto",
+      permission_posture: "ask",
       auto_approve: false,
       trust_mode: false,
     });
@@ -163,6 +162,7 @@ describe("ChatProvider mode regression", () => {
       mode: "agent",
       model: "deepseek-v4-pro",
       reasoning_effort: "auto",
+      permission_posture: "ask",
       auto_approve: false,
       trust_mode: false,
     });
