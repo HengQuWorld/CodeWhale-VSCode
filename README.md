@@ -272,15 +272,3 @@ Project layout: `src/extension.ts` (entry) → `src/chat-provider.ts` (orchestra
 ## License
 
 [MIT](LICENSE)
-
-### Runtime ownership and recovery
-
-Each trusted VS Code window starts its own authenticated local Runtime. Old port
-files are ignored; restarting never kills an unrelated service. The Runtime token
-is generated for that process and kept out of command arguments, settings, and logs.
-
-Reloading or closing the extension stops that window's Runtime and interrupts active
-work. Completed, saved sessions remain available through Sessions. Save or finish
-active work before reloading; active-turn continuity across reload is not supported.
-The per-file revert button is disabled until the Runtime offers file-scoped restore;
-Undo last turn remains available through the existing thread API.
