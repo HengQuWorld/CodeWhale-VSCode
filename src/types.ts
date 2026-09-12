@@ -438,6 +438,27 @@ export interface RuntimeApiCapabilities {
    *  directly; when false it falls back to the `/v1/usage?group_by=thread`
    *  bucket, which carries USD only. */
   threadUsage: boolean;
+  /** `POST /v1/threads/{id}/file-revert` exists (TUI ≥ the version that added
+   *  file-scoped snapshot restore). When false the Changes panel keeps the
+   *  Revert button disabled with an explanation instead of falling back to
+   *  the whole-workspace snapshot restore, which would silently roll back
+   *  unrelated files. */
+  threadFileRevert: boolean;
+}
+
+/**
+ * Result of `POST /v1/threads/{id}/file-revert`.
+ *
+ * `action` describes what the restore did to the working tree: `modified`
+ * (content came back from the snapshot), `recreated` (the file had been
+ * deleted), `removed` (the file had been created after the snapshot).
+ */
+export interface RevertThreadFileResponse {
+  /** Workspace-relative path that was restored. */
+  path: string;
+  action: "modified" | "recreated" | "removed";
+  snapshot_id: string;
+  snapshot_label: string;
 }
 
 export interface UsageTotals {

@@ -194,11 +194,13 @@ describe("types.ts - Interface structural conformance", () => {
       snapshotList: false,
       snapshotRestore: false,
       threadUsage: true,
+      threadFileRevert: true,
     };
     expect(caps.saveSession).toBe(true);
     expect(caps.threadPatchUndo).toBe(false);
     expect(caps.turnSteer).toBe(true);
     expect(caps.threadUsage).toBe(true);
+    expect(caps.threadFileRevert).toBe(true);
   });
 
   it("AutomationRecord and AutomationRunRecord have required fields", () => {

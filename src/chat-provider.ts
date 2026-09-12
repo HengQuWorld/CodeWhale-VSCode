@@ -160,6 +160,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     snapshotList: false,
     snapshotRestore: false,
     threadUsage: false,
+    threadFileRevert: false,
   };
   // Guard to prevent concurrent autoSaveSession calls.  When multiple
   // turn.completed events fire in quick succession (e.g. SSE reconnection
@@ -2621,8 +2622,11 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       saveSession: this.apiCapabilities.saveSession,
       undoLastTurn: this.apiCapabilities.threadPatchUndo,
       retryLastTurn: this.apiCapabilities.threadRetry,
-      // Workspace snapshot restore cannot implement a per-file action.
-      revertFileChange: false,
+      // Per-file restore needs the engine's file-scoped `file-revert` route.
+      // Without it the panel keeps the button disabled with an explanation:
+      // the only other restore surface is the whole-workspace snapshot
+      // restore, which would silently roll back unrelated files.
+      revertFileChange: this.apiCapabilities.threadFileRevert,
       turnSteer: this.apiCapabilities.turnSteer,
     };
   }
@@ -2637,7 +2641,15 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
   private async refreshApiCapabilities(): Promise<void> {
     try {
       this.apiCapabilities = await this.api.probeRuntimeCapabilities();
-    } catch {
+      // The probe result is otherwise invisible: a capability can be silently
+      // false on an engine that supports the feature, and every gated control
+      // just renders disabled with no reason. Log the raw set so a "button is
+      // greyed out" report can be answered from this file instead of guesswork.
+      this.debugLog(`apiCapabilities: ${JSON.stringify(this.apiCapabilities)}`);
+    } catch (err) {
+      // Never swallow the cause: an all-false set here is indistinguishable
+      // from "the engine is old", and that misdiagnosis is expensive.
+      this.debugLog(`probeRuntimeCapabilities failed: ${getErrorMessage(err)}`);
       this.apiCapabilities = {
         saveSession: false,
         threadUndo: false,
@@ -2647,6 +2659,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         snapshotList: false,
         snapshotRestore: false,
         threadUsage: false,
+        threadFileRevert: false,
       };
     }
     this.postApiCapabilities();
@@ -3083,14 +3096,57 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     }
   }
 
-  /** A workspace snapshot must never be used to implement a single-file action. */
+  /**
+   * Restore one file from the Changes panel.
+   *
+   * Uses the engine's file-scoped `file-revert` endpoint, never
+   * `restoreSnapshot`: the snapshot restore endpoint restores the whole
+   * workspace, so using it for "revert one file" would silently roll back
+   * every other file the session touched.
+   *
+   * One click undoes the most recent recorded change to that file; clicking
+   * again walks further back, mirroring how `/undo` cursors through
+   * snapshots. The file is then dropped from the change record so the panel
+   * stops claiming a change the user has unwound.
+   *
+   * When the connected engine predates the endpoint the button renders
+   * disabled (see `getWebviewCapabilities`); replayed messages are refused
+   * here as well rather than falling back to a workspace-wide restore.
+   */
   private async handleRevertFileChange(
-    _filePath: string,
+    filePath: string,
     _changeType: string,
     _diff: string | undefined
   ): Promise<void> {
-    // Reject old/replayed webview messages as well as hiding the button.
-    this.postMessage({ type: "info", message: t().revertNotSupported });
+    if (!this.apiCapabilities.threadFileRevert) {
+      // Reject old/replayed webview messages as well as hiding the button.
+      this.postMessage({ type: "info", message: t().revertNotSupported });
+      return;
+    }
+    if (!this.currentThread) {
+      this.postMessage({ type: "info", message: t().undoNoTurns });
+      return;
+    }
+
+    try {
+      await this.api.ensureReady();
+      const reverted = await this.api.revertThreadFile(this.currentThread.id, filePath);
+
+      const normPath = normalizePath(filePath);
+      this.turnFileChanges = this.turnFileChanges.filter(
+        (fc) => normalizePath(fc.filePath) !== normPath
+      );
+      this.refreshChangesPanel();
+      this.postMessage({
+        type: "info",
+        message: t().revertSuccess(reverted.path || filePath),
+      });
+    } catch (err) {
+      this.postMessage({
+        type: "error",
+        message: formatError(t().revertFailed, err),
+      });
+    }
   }
 
   public async handleCompact(): Promise<void> {

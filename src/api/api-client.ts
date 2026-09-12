@@ -66,6 +66,7 @@ import type {
   CreateFleetRunRequest,
   CreateFleetRunResponse,
   ThreadGoal,
+  RevertThreadFileResponse,
 } from "../types";
 
 // Re-export types for backward compatibility
@@ -130,6 +131,7 @@ export type {
   CreateFleetRunRequest,
   CreateFleetRunResponse,
   ThreadGoal,
+  RevertThreadFileResponse,
 };
 
 const NOT_SYNCED: unique symbol = Symbol("NOT_SYNCED");
@@ -362,6 +364,19 @@ export class CodeWhaleApiClient {
     )) as { restored: string };
   }
 
+  /** Restore a single file from the newest snapshot this thread's session
+   *  owns. This is the file-scoped counterpart of `restoreSnapshot` and the
+   *  only restore surface the Changes panel may use: the whole-workspace
+   *  snapshot restore would roll back every other file the turn touched. */
+  async revertThreadFile(
+    threadId: string,
+    path: string
+  ): Promise<RevertThreadFileResponse> {
+    return (await this.post(`/v1/threads/${threadId}/file-revert`, {
+      path,
+    })) as RevertThreadFileResponse;
+  }
+
   // ── Memory (native store, mirrors TUI's /v1/memory) ──
 
   /** List native memory entries. `q` filters by full-text search;
@@ -567,6 +582,7 @@ export class CodeWhaleApiClient {
       snapshotList,
       snapshotRestore,
       threadUsage,
+      threadFileRevert,
     ] = await Promise.all([
       this.probePath("/v1/sessions"),
       this.probePath("/v1/threads/__probe__/undo"),
@@ -580,6 +596,11 @@ export class CodeWhaleApiClient {
       // on older runtimes yields 404 (→ false). A GET probe would invoke
       // the handler and conflate "thread not found" 404 with "no route" 404.
       this.probePath("/v1/threads/__probe__/usage", "POST"),
+      // GET-probe for the same reason in reverse: file-revert is POST-only, so
+      // GET yields 405 on an engine that has it. Probing with POST would run
+      // the handler and get 404 for the unknown `__probe__` thread — a false
+      // negative that would disable the button on an engine that supports it.
+      this.probePath("/v1/threads/__probe__/file-revert"),
     ]);
 
     return {
@@ -591,6 +612,7 @@ export class CodeWhaleApiClient {
       snapshotList,
       snapshotRestore,
       threadUsage,
+      threadFileRevert,
     };
   }
 

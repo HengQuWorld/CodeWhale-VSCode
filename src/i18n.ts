@@ -197,11 +197,9 @@ interface Translations {
   revertConfirmMessage: string;
   revertConfirmButton: string;
   revertCancelButton: string;
-  revertSuccess: (filePath: string) => string;
-  revertFailure: (filePath: string, reason: string) => string;
-  revertFileCreated: string;
-  revertNotAvailable: string;
   revertNotSupported: string;
+  revertSuccess: (filePath: string) => string;
+  revertFailed: string;
   revertUnsupportedTooltip: string;
   undoConfirmTitle: string;
   undoConfirmMessage: string;
@@ -512,18 +510,16 @@ const en: Translations = {
   undoLastTurn: "Undo last turn",
   retryLastTurn: "Retry last turn",
   revertFile: "Revert",
-  revertFileTooltip: "Revert this file to the state before this turn",
+  revertFileTooltip: "Revert the most recent recorded change to this file",
   revertThisFile: "Revert this file",
   revertConfirmTitle: "Revert file changes?",
   revertConfirmMessage: 'This will restore "{filePath}" to its pre-turn state. This cannot be undone. Continue?',
   revertConfirmButton: "Revert",
   revertCancelButton: "Cancel",
-  revertSuccess: (filePath) => `Reverted ${filePath} to its pre-turn state.`,
-  revertFailure: (filePath, reason) => `Failed to revert ${filePath}: ${reason}`,
-  revertFileCreated: "This file was created in this turn. Reverting will delete it.",
-  revertNotAvailable: "Revert is only available for changes made during this session. Reload the file to discard local edits.",
   revertNotSupported: "Single-file revert is unavailable. Use Undo last turn to restore the changes for the whole turn.",
-  revertUnsupportedTooltip: "Revert is unavailable in the connected TUI runtime",
+  revertSuccess: (filePath) => `Reverted "${filePath}" to its previously recorded state.`,
+  revertFailed: "Revert failed",
+  revertUnsupportedTooltip: "Single-file revert is unavailable. Use Undo last turn.",
   undoConfirmTitle: "Undo last turn?",
   undoConfirmMessage: "This will remove the last user/assistant exchange from the view. The server-side turn history is preserved, so the AI will still see your previous message in future turns.",
   undoConfirmButton: "Undo",
@@ -833,18 +829,16 @@ const zhCn: Translations = {
   undoLastTurn: "撤销上一轮",
   retryLastTurn: "重试上一轮",
   revertFile: "回滚",
-  revertFileTooltip: "将此文件回滚到本轮开始之前的状态",
+  revertFileTooltip: "回滚此文件最近一次的变更记录",
   revertThisFile: "回滚此文件",
   revertConfirmTitle: "确认回滚文件?",
   revertConfirmMessage: '这将把「{filePath}」恢复到本轮开始之前的状态。该操作不可撤销,是否继续?',
   revertConfirmButton: "回滚",
   revertCancelButton: "取消",
-  revertSuccess: (filePath) => `已回滚 ${filePath} 至本轮开始之前的状态。`,
-  revertFailure: (filePath, reason) => `回滚 ${filePath} 失败:${reason}`,
-  revertFileCreated: "此文件是在本轮中新建的,回滚会删除它。",
-  revertNotAvailable: "回滚仅对本会话中产生的更改有效。如需放弃本地编辑,请直接重新加载文件。",
   revertNotSupported: "暂不支持单文件回滚。请使用“撤销上一轮”恢复整轮更改。",
-  revertUnsupportedTooltip: "当前 TUI 运行时不支持回滚",
+  revertSuccess: (filePath) => `已将「${filePath}」回滚到上一次记录的状态。`,
+  revertFailed: "回滚失败",
+  revertUnsupportedTooltip: "暂不支持单文件回滚。请使用“撤销上一轮”。",
   undoConfirmTitle: "确认撤销上一轮?",
   undoConfirmMessage: "这会从视图中移除最后一组用户/助手消息。服务器端的轮次历史仍然保留,AI 在后续轮次中仍会看到你之前的内容。",
   undoConfirmButton: "撤销",
@@ -1212,11 +1206,9 @@ export function webviewTranslations(tr: Translations) {
     revertConfirmMessage: tr.revertConfirmMessage,
     revertConfirmButton: tr.revertConfirmButton,
     revertCancelButton: tr.revertCancelButton,
-    revertSuccess: tr.revertSuccess,
-    revertFailure: tr.revertFailure,
-    revertFileCreated: tr.revertFileCreated,
-    revertNotAvailable: tr.revertNotAvailable,
     revertNotSupported: tr.revertNotSupported,
+    revertSuccess: tr.revertSuccess,
+    revertFailed: tr.revertFailed,
     revertUnsupportedTooltip: tr.revertUnsupportedTooltip,
     undoConfirmTitle: tr.undoConfirmTitle,
     undoConfirmMessage: tr.undoConfirmMessage,

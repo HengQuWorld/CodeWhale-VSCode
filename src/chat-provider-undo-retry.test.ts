@@ -137,4 +137,74 @@ describe("single-file revert boundary", () => {
     expect((provider as any).sessionState.data.turnFileChanges).toEqual(changes);
     expect(postMessage).toHaveBeenCalledWith({ type: "info", message: expect.stringContaining("Single-file revert is unavailable") });
   });
+
+  it("enables per-file revert only when the engine exposes the file-revert route", () => {
+    const { provider } = createProvider();
+    (provider as any).apiCapabilities.snapshotList = true;
+    (provider as any).apiCapabilities.snapshotRestore = true;
+    expect((provider as any).getWebviewCapabilities().revertFileChange).toBe(false);
+
+    (provider as any).apiCapabilities.threadFileRevert = true;
+    expect((provider as any).getWebviewCapabilities().revertFileChange).toBe(true);
+  });
+
+  it("reverts one file through the file-scoped endpoint and drops it from the change record", async () => {
+    const { provider, api, postMessage } = createProvider();
+    const revertThreadFile = vi.fn(async () => ({
+      path: "a.ts",
+      action: "modified",
+      snapshot_id: "abc123",
+      snapshot_label: "pre-turn:1",
+    }));
+    (api as any).revertThreadFile = revertThreadFile;
+    (provider as any).apiCapabilities.threadFileRevert = true;
+    (provider as any).sessionState.data.turnFileChanges = [
+      { filePath: "a.ts", changeType: "modified", addedLines: 1, removedLines: 0 },
+      { filePath: "b.ts", changeType: "modified", addedLines: 2, removedLines: 1 },
+    ];
+
+    await (provider as any).handleRevertFileChange("a.ts", "modified", undefined);
+
+    expect(api.ensureReady).toHaveBeenCalledOnce();
+    expect(revertThreadFile).toHaveBeenCalledWith("thread-1", "a.ts");
+    // The unwound file is gone; the other file's record is untouched.
+    expect((provider as any).sessionState.data.turnFileChanges).toEqual([
+      { filePath: "b.ts", changeType: "modified", addedLines: 2, removedLines: 1 },
+    ]);
+    expect(postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "changesState",
+        changes: [expect.objectContaining({ filePath: "b.ts" })],
+      })
+    );
+    expect(postMessage).toHaveBeenCalledWith({
+      type: "info",
+      message: expect.stringContaining("a.ts"),
+    });
+  });
+
+  it("never falls back to the whole-workspace snapshot restore", async () => {
+    const { provider, api, postMessage } = createProvider();
+    const restoreSnapshot = vi.fn();
+    const listSnapshots = vi.fn();
+    (api as any).restoreSnapshot = restoreSnapshot;
+    (api as any).listSnapshots = listSnapshots;
+    (api as any).revertThreadFile = vi.fn(async () => {
+      throw new Error("409: No snapshot owned by this session differs");
+    });
+    (provider as any).apiCapabilities.threadFileRevert = true;
+
+    await (provider as any).handleRevertFileChange("a.ts", "modified", undefined);
+
+    expect(restoreSnapshot).not.toHaveBeenCalled();
+    expect(listSnapshots).not.toHaveBeenCalled();
+    // A failed revert must not silently drop the file from the record.
+    expect((provider as any).sessionState.data.turnFileChanges).toEqual([
+      { filePath: "a.ts", changeType: "modified", addedLines: 1, removedLines: 0 },
+    ]);
+    expect(postMessage).toHaveBeenCalledWith({
+      type: "error",
+      message: expect.stringContaining("No snapshot owned by this session differs"),
+    });
+  });
 });

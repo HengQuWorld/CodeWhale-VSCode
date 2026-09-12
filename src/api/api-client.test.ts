@@ -883,3 +883,68 @@ describe("CodeWhaleApiClient - Usage methods", () => {
     expect(result.totals.turns).toBe(5);
   });
 });
+
+describe("CodeWhaleApiClient - per-file revert", () => {
+  type RawResponse = { statusCode: number; data: string };
+
+  /** Stub the raw HTTP layer so the test asserts the wire contract the engine
+   *  sees — method, path and body — instead of the transport. */
+  function clientStubbingRaw(
+    respond: (method: string, path: string, body: unknown) => RawResponse
+  ) {
+    const client = new CodeWhaleApiClient("http://localhost:54321");
+    const calls: { method: string; path: string; body: unknown }[] = [];
+    (client as any).requestRaw = vi.fn(
+      async (method: string, path: string, body: unknown) => {
+        calls.push({ method, path, body });
+        return respond(method, path, body);
+      }
+    );
+    return { client, calls };
+  }
+
+  it("probes file-revert with GET and reports it unavailable when the route 404s", async () => {
+    const { client, calls } = clientStubbingRaw(() => ({ statusCode: 404, data: "{}" }));
+
+    const caps = await client.probeRuntimeCapabilities();
+
+    expect(caps.threadFileRevert).toBe(false);
+    expect(calls).toContainEqual({
+      method: "GET",
+      path: "/v1/threads/__probe__/file-revert",
+      body: undefined,
+    });
+  });
+
+  it("treats a 405 on the GET probe as the endpoint being available", async () => {
+    const { client } = clientStubbingRaw((_method, path) =>
+      path === "/v1/threads/__probe__/file-revert"
+        ? { statusCode: 405, data: "{}" }
+        : { statusCode: 404, data: "{}" }
+    );
+
+    const caps = await client.probeRuntimeCapabilities();
+
+    expect(caps.threadFileRevert).toBe(true);
+  });
+
+  it("posts a per-file revert to the thread-scoped file-revert route", async () => {
+    const { client, calls } = clientStubbingRaw(() => ({
+      statusCode: 200,
+      data: JSON.stringify({
+        path: "a.ts",
+        action: "modified",
+        snapshot_id: "s1",
+        snapshot_label: "pre-turn:1",
+      }),
+    }));
+
+    const result = await client.revertThreadFile("thread-1", "a.ts");
+
+    expect(calls).toEqual([
+      { method: "POST", path: "/v1/threads/thread-1/file-revert", body: { path: "a.ts" } },
+    ]);
+    expect(result.path).toBe("a.ts");
+    expect(result.action).toBe("modified");
+  });
+});
