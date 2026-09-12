@@ -17,6 +17,9 @@ design-language.md
 debug-ide-plugin-freeze.md
 troubleshooting-ide-plugin-freeze.md
 
+# Docs and demo media (guides + recordings — never shipped; keeps the VSIX ~200 KB)
+docs/**
+
 # Package lock & gitignore (not needed at runtime)
 package-lock.json
 .gitignore
