@@ -81,11 +81,6 @@
           "default": "codewhale",
           "description": "%config.enginePath.description%"
         },
-        "brotherwhale.enginePort": {
-          "type": "number",
-          "default": 7878,
-          "description": "%config.enginePort.description%"
-        },
         "brotherwhale.defaultModel": {
           "type": "string",
           "default": "deepseek-v4-pro",
@@ -123,11 +118,6 @@
           ],
           "default": "auto",
           "description": "%config.reasoningEffort.description%"
-        },
-        "brotherwhale.autoStartEngine": {
-          "type": "boolean",
-          "default": true,
-          "description": "%config.autoStartEngine.description%"
         },
         "brotherwhale.autoApprove": {
           "type": "boolean",

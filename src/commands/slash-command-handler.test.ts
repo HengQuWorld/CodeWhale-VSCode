@@ -18,7 +18,6 @@ const vscodeState = vi.hoisted(() => {
     ["configProfile", undefined],
     ["translationEnabled", false],
     ["enginePath", "codewhale"],
-    ["autoStartEngine", true],
   ]);
 
   return {
@@ -264,7 +263,6 @@ describe("SlashCommandHandler - Dispatcher Pattern", () => {
     vscodeState.configValues.set("configProfile", undefined);
     vscodeState.configValues.set("translationEnabled", false);
     vscodeState.configValues.set("enginePath", "codewhale");
-    vscodeState.configValues.set("autoStartEngine", true);
     vscodeState.updateMock.mockClear();
     vscodeState.executeCommandMock.mockClear();
   });

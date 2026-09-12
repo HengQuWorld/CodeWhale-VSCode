@@ -341,7 +341,7 @@ async function handleConfig(ctx: SlashCommandContext, args: string): Promise<voi
 }
 
 async function handleSettings(ctx: SlashCommandContext, _args: string): Promise<void> {
-  ctx.postMessage({ type: "info", message: `Current settings:\n- Mode: ${modeLabel(ctx.currentThread?.mode || cfg().get<string>("defaultMode", "agent"))}\n- Permission: ${POSTURE_LABELS[effectivePosture(ctx)]}\n- Model: ${cfg().get<string>("defaultModel", "deepseek-v4-pro")}\n- Reasoning Effort: ${cfg().get<string>("reasoningEffort", "auto")}\n- Engine Path: ${cfg().get<string>("enginePath", "codewhale")}\n- Auto Start Engine: ${cfg().get<boolean>("autoStartEngine", true)}` });
+  ctx.postMessage({ type: "info", message: `Current settings:\n- Mode: ${modeLabel(ctx.currentThread?.mode || cfg().get<string>("defaultMode", "agent"))}\n- Permission: ${POSTURE_LABELS[effectivePosture(ctx)]}\n- Model: ${cfg().get<string>("defaultModel", "deepseek-v4-pro")}\n- Reasoning Effort: ${cfg().get<string>("reasoningEffort", "auto")}\n- Engine Path: ${cfg().get<string>("enginePath", "codewhale")}` });
 }
 
 async function handleInterrupt(ctx: SlashCommandContext, _args: string): Promise<void> {
