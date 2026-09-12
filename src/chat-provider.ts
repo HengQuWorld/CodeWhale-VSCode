@@ -2957,12 +2957,20 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     try {
       await this.api.ensureReady();
 
-      // Use patch-undo endpoint: tries snapshot file rollback first,
-      // then removes the last conversation turn — same as TUI's `/undo`.
+      // The engine owns the trust decision, because it is the only side that
+      // knows whether a rollback target actually exists. That lets it tell
+      // "nothing to revert" (fork the turn, touch no files) apart from
+      // "something to revert but this thread is not trusted" (refuse outright,
+      // fork nothing). The GUI must not second-guess it by picking an endpoint,
+      // or the two surfaces drift into "one refuses while the other silently
+      // half-undoes" — a fork whose file changes stay on disk is a workspace
+      // the transcript can no longer account for.
       const result = await this.api.patchUndoThreadTurn(this.currentThread.id);
 
-      // Show file rollback info if files were restored.
-      if (result.patch_result.files_restored && result.patch_result.summary) {
+      // Report the file outcome either way. Staying silent when nothing was
+      // restored is how a user comes to believe their workspace was rolled
+      // back when it was not.
+      if (result.patch_result.summary) {
         this.postMessage({ type: "info", message: result.patch_result.summary });
       }
 
@@ -2995,6 +3003,12 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       const msg = getErrorMessage(err);
       if (msg.includes("exceeds") || msg.includes("No user turn")) {
         this.postMessage({ type: "info", message: t().undoNoTurns });
+      } else if (msg.includes("outside trusted mode")) {
+        // An expected refusal, not a failure: the engine declined to roll the
+        // workspace back and said how to enable it. Surface that sentence on
+        // its own rather than wrapping a deliberate policy answer in HTTP
+        // framing ("Undo failed: API error 409: …").
+        this.postMessage({ type: "info", message: msg.replace(/^API error \d+: /, "") });
       } else {
         this.postMessage({ type: "error", message: formatError("Undo failed", err) });
       }

@@ -810,6 +810,25 @@ describe("CodeWhaleApiClient - HTTP methods with mocked server", () => {
     await expect(client.getThread("nonexistent")).rejects.toThrow("API error 404");
   });
 
+  it("unwraps the engine's JSON error envelope so the message stays readable", async () => {
+    // The runtime's ApiError serializes as {"error":{"message":...}}; the
+    // thrown message must carry the sentence inside, not the envelope, so a
+    // deliberate refusal (e.g. patch-undo outside trusted mode) reads as
+    // guidance instead of raw JSON.
+    mockHttpRequest(
+      409,
+      JSON.stringify({
+        error: {
+          message: "Refusing to undo workspace files outside trusted mode.",
+          status: 409,
+        },
+      })
+    );
+    await expect(client.health()).rejects.toThrow(
+      "API error 409: Refusing to undo workspace files outside trusted mode."
+    );
+  });
+
   it("handles non-JSON response gracefully", async () => {
     mockHttpRequest(200, "plain text");
     const result = await client.health();

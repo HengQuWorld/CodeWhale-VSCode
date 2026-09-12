@@ -63,8 +63,9 @@ describe("ChatProvider undo/retry server flow", () => {
     vi.clearAllMocks();
   });
 
-  it("uses patchUndoThreadTurn and resets local state before reloading history", async () => {
+  it("rolls files back through patchUndoThreadTurn when the thread is trusted", async () => {
     const { provider, api, postMessage } = createProvider();
+    (provider as any).currentThread = { id: "thread-1", trust_mode: true };
     api.patchUndoThreadTurn.mockResolvedValue({
       patch_result: {
         files_restored: true,
@@ -89,6 +90,56 @@ describe("ChatProvider undo/retry server flow", () => {
     expect(postMessage).toHaveBeenCalledWith({ type: "info", message: "Restored 1 file from snapshot" });
     expect(postMessage).toHaveBeenCalledWith({ type: "setInputText", text: "retry me" });
     expect(postMessage).toHaveBeenCalledWith({ type: "historyUpdated" });
+  });
+
+  it("surfaces the engine's refusal and changes nothing when the rollback is not permitted", async () => {
+    const { provider, api, postMessage } = createProvider();
+    // The engine owns the trust decision and answers an untrusted rollback with
+    // a 409. The GUI must present that as a deliberate refusal rather than
+    // reinterpret it as a reason to pick a different endpoint.
+    api.patchUndoThreadTurn.mockRejectedValue(
+      new Error(
+        "API error 409: Refusing to undo workspace files outside trusted mode. " +
+          "Turn on /trust or switch this thread to Full Access, then undo again."
+      )
+    );
+    const changes = structuredClone((provider as any).sessionState.data.turnFileChanges);
+
+    await provider.handleUndoLastTurn();
+
+    expect(api.patchUndoThreadTurn).toHaveBeenCalledWith("thread-1");
+    expect(provider.currentThread).toEqual({ id: "thread-1" });
+    expect((provider as any).sessionState.data.turnFileChanges).toEqual(changes);
+    // The engine's own sentence, presented as guidance rather than a failure.
+    expect(postMessage).toHaveBeenCalledWith({
+      type: "info",
+      message: expect.stringContaining("outside trusted mode"),
+    });
+    expect(postMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: "error" })
+    );
+  });
+
+  it("tells the user when the engine restored no files", async () => {
+    const { provider, api, postMessage } = createProvider();
+    (provider as any).currentThread = { id: "thread-1", trust_mode: true };
+    api.patchUndoThreadTurn.mockResolvedValue({
+      patch_result: {
+        files_restored: false,
+        summary: "No current-session tool or pre-turn snapshots differ from the current workspace.",
+      },
+      thread: { id: "thread-2" },
+      original_user_text: null,
+    });
+
+    await provider.handleUndoLastTurn();
+
+    // Silence here is how a user comes to believe the workspace was rolled
+    // back when it was not.
+    expect(postMessage).toHaveBeenCalledWith({
+      type: "info",
+      message: expect.stringContaining("No current-session tool or pre-turn snapshots differ"),
+    });
   });
 
   it("uses retryThreadTurn and keeps the new turn id from the server", async () => {

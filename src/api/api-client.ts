@@ -136,6 +136,28 @@ export type {
 
 const NOT_SYNCED: unique symbol = Symbol("NOT_SYNCED");
 
+/**
+ * Pull the human-readable message out of an engine error body.
+ *
+ * The runtime's `ApiError` serializes as a JSON envelope
+ * (`{"error":{"message":...,"status":...}}`); showing the envelope itself
+ * would bury the sentence the engine wrote for the user (e.g. the patch-undo
+ * trust refusal). Non-JSON bodies are used as-is.
+ */
+function extractApiErrorMessage(data: string): string {
+  const raw = data.slice(0, 500);
+  try {
+    const parsed = JSON.parse(raw) as { error?: { message?: unknown } };
+    const message = parsed?.error?.message;
+    if (typeof message === "string" && message) {
+      return message.slice(0, 500);
+    }
+  } catch {
+    // Not a JSON envelope — use the body as-is.
+  }
+  return raw;
+}
+
 export class CodeWhaleApiClient {
   private authToken: string | null;
   private engine: EngineRef | null = null;
@@ -1048,7 +1070,7 @@ export class CodeWhaleApiClient {
   ): Promise<unknown> {
     return this.requestRaw(method, path, body).then(({ statusCode, data }) => {
       if (statusCode >= 400) {
-        throw new Error(`API error ${statusCode}: ${data.slice(0, 500)}`);
+        throw new Error(`API error ${statusCode}: ${extractApiErrorMessage(data)}`);
       }
       try {
         return JSON.parse(data);
