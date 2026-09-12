@@ -79,7 +79,8 @@
         "brotherwhale.enginePath": {
           "type": "string",
           "default": "codewhale",
-          "description": "%config.enginePath.description%"
+          "description": "%config.enginePath.description%",
+          "scope": "machine"
         },
         "brotherwhale.defaultModel": {
           "type": "string",
@@ -94,7 +95,8 @@
             "operate"
           ],
           "default": "agent",
-          "description": "%config.defaultMode.description%"
+          "description": "%config.defaultMode.description%",
+          "scope": "machine"
         },
         "brotherwhale.defaultPermissionPosture": {
           "type": "string",
@@ -122,7 +124,8 @@
         "brotherwhale.autoApprove": {
           "type": "boolean",
           "default": false,
-          "description": "%config.autoApprove.description%"
+          "description": "%config.autoApprove.description%",
+          "scope": "machine"
         },
         "brotherwhale.showThreadList": {
           "type": "boolean",
@@ -164,5 +167,10 @@
     "vitest": "^4.1.7",
     "webpack": "^5.90.0",
     "webpack-cli": "^5.1.0"
+  },
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false
+    }
   }
 }

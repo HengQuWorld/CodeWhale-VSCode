@@ -214,10 +214,16 @@ your workspace + the model provider you configured in the engine
 ```
 
 1. On activation the extension resolves the `codewhale` binary, allocates a free loopback port, and spawns `codewhale --workspace <folder> serve --http --host 127.0.0.1 --port <port>`.
-2. The chosen port is written per workspace into extension storage and reused on later sessions; a healthy engine is never restarted, and an unhealthy one is replaced.
+2. Each trusted window owns the Runtime process it spawns: a fresh bearer token is generated per start and handed to the child through its environment (never on the command line), the extension waits for the child's own bind receipt before sending any request, and the local API rejects anonymous callers. No port state is persisted between sessions; only the child a window started is stopped on restart or shutdown.
 3. The webview talks only to `ChatProvider`; `ChatProvider` talks only to the engine's runtime API. There is no second source of truth, and no agent logic in the extension.
 4. At startup the extension probes which runtime endpoints exist, so features backed by newer API surfaces degrade gracefully on older engines.
 5. Because everything is local, the engine owns model access, tools, and file mutations — the GUI only renders and steers them.
+
+### Runtime ownership and recovery
+
+Each trusted VS Code window starts its own authenticated local Runtime. Old port files are ignored; restarting never kills an unrelated service. The Runtime token is generated for that process and kept out of command arguments, settings, and logs.
+
+Reloading or closing the extension stops that window's Runtime and interrupts active work. Completed, saved sessions remain available through Sessions. Save or finish active work before reloading; active-turn continuity across reload is not supported. The per-file revert control is disabled until the Runtime offers file-scoped restore; Undo last turn remains available through the existing thread API.
 
 ## Troubleshooting
 
@@ -266,3 +272,15 @@ Project layout: `src/extension.ts` (entry) → `src/chat-provider.ts` (orchestra
 ## License
 
 [MIT](LICENSE)
+
+### Runtime ownership and recovery
+
+Each trusted VS Code window starts its own authenticated local Runtime. Old port
+files are ignored; restarting never kills an unrelated service. The Runtime token
+is generated for that process and kept out of command arguments, settings, and logs.
+
+Reloading or closing the extension stops that window's Runtime and interrupts active
+work. Completed, saved sessions remain available through Sessions. Save or finish
+active work before reloading; active-turn continuity across reload is not supported.
+The per-file revert button is disabled until the Runtime offers file-scoped restore;
+Undo last turn remains available through the existing thread API.
