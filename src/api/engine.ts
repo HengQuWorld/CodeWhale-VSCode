@@ -124,6 +124,7 @@ export class CodeWhaleEngine {
     const token = randomBytes(32).toString("hex");
     this._token = token;
     const tasksDir = path.join(this.context.globalStorageUri.fsPath, "tasks");
+    fs.mkdirSync(tasksDir, { recursive: true });
     const config = vscode.workspace.getConfiguration("brotherwhale");
     const enginePath = resolveEnginePath(config.get<string>("enginePath", "codewhale"));
     const args = workspace ? ["--workspace", workspace] : [];
