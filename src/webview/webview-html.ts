@@ -178,6 +178,10 @@ export interface WebviewTranslations {
   fileNotSupported: string;
   changes: string;
   noFileChanges: string;
+  undoLastTurn: string;
+  retryLastTurn: string;
+  undoLabel: string;
+  retryLabel: string;
   undoUnsupportedTooltip: string;
   retryUnsupportedTooltip: string;
   revertUnsupportedTooltip: string;
@@ -472,8 +476,8 @@ ${css}
       <div id="toolbar">
         <button id="btn-new-thread">${tr.newThread}</button>
         <button id="btn-compact">${tr.compact}</button>
-        <button id="btn-undo" title="Undo last turn">↩ Undo</button>
-        <button id="btn-retry" title="Retry last turn">🔁 Retry</button>
+        <button id="btn-undo" title="${tr.undoLastTurn}">↩ ${tr.undoLabel}</button>
+        <button id="btn-retry" title="${tr.retryLastTurn}">🔁 ${tr.retryLabel}</button>
         <span class="thread-count" id="thread-count" title="${tr.toggleHistory}">0 sessions</span>
       </div>
       <div id="input-resize-handle" title="Drag to resize input area"></div>

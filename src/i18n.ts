@@ -190,6 +190,8 @@ interface Translations {
   // Undo / Retry / Revert
   undoLastTurn: string;
   retryLastTurn: string;
+  undoLabel: string;
+  retryLabel: string;
   revertFile: string;
   revertFileTooltip: string;
   revertThisFile: string;
@@ -509,6 +511,8 @@ const en: Translations = {
   // Undo / Retry / Revert
   undoLastTurn: "Undo last turn",
   retryLastTurn: "Retry last turn",
+  undoLabel: "Undo",
+  retryLabel: "Retry",
   revertFile: "Revert",
   revertFileTooltip: "Revert the most recent recorded change to this file",
   revertThisFile: "Revert this file",
@@ -828,6 +832,8 @@ const zhCn: Translations = {
   // 撤销 / 重试 / 回滚
   undoLastTurn: "撤销上一轮",
   retryLastTurn: "重试上一轮",
+  undoLabel: "撤销",
+  retryLabel: "重试",
   revertFile: "回滚",
   revertFileTooltip: "回滚此文件最近一次的变更记录",
   revertThisFile: "回滚此文件",
@@ -1199,6 +1205,8 @@ export function webviewTranslations(tr: Translations) {
     // Undo / Retry / Revert
     undoLastTurn: tr.undoLastTurn,
     retryLastTurn: tr.retryLastTurn,
+    undoLabel: tr.undoLabel,
+    retryLabel: tr.retryLabel,
     revertFile: tr.revertFile,
     revertFileTooltip: tr.revertFileTooltip,
     revertThisFile: tr.revertThisFile,
