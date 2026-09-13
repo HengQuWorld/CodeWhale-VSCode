@@ -343,7 +343,7 @@ export function getWebviewHtml(
 <head>
   <meta charset="UTF-8">
   <meta http-equiv="Content-Security-Policy"
-    content="default-src 'none'; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}';">
+    content="default-src 'none'; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}'; img-src data:;">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>CodeWhale Chat</title>
   <style nonce="${nonce}">

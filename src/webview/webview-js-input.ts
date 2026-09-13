@@ -25,13 +25,37 @@ export function getInputScript(tr: WebviewTranslations): string {
   // ── Attachments ──
   var currentAttachments = [];
 
+  // Thumbnails arrive once, keyed by attachment id, in their own message: the
+  // attachment list itself never carries the base64 payload, because a 5 MiB
+  // image is a ~6.7 MiB string and the list is republished on every change.
+  // Cached here so re-rendering a chip never needs the bytes again.
+  var previewCache = {};
+
+  function setAttachmentPreview(id, previewUrl) {
+    if (!id || typeof previewUrl !== 'string') return;
+    previewCache[id] = previewUrl;
+  }
+
   function renderAttachments() {
     attachmentsArea.innerHTML = '';
+    var liveIds = {};
     currentAttachments.forEach(function(att, idx) {
       var chip = document.createElement('span');
       chip.className = 'attachment-chip';
-      var icon = att.kind === 'video' ? '\\uD83C\\uDFAC' : att.kind === 'file' ? '\\uD83D\\uDCC4' : '\\uD83D\\uDDBC';
-      chip.innerHTML = '<span>' + icon + '</span><span class="attachment-name" title="' + __wvEscapeHtml(att.path) + '">' + __wvEscapeHtml(att.name) + '</span><span class="attachment-remove" data-idx="' + idx + '">\\u2715</span>';
+      if (att.previewUrl && att.id) previewCache[att.id] = att.previewUrl;
+      if (att.id) liveIds[att.id] = true;
+      var previewUrl = att.previewUrl || (att.id ? previewCache[att.id] : '');
+      if (att.kind === 'image' && previewUrl) {
+        // Inline data URL: the file lives outside the workspace, so this needs
+        // no webview resource permissions (CSP allows img-src data:).
+        chip.classList.add('has-thumb');
+        chip.innerHTML = '<img class="attachment-thumb" alt="" src="' + __wvEscapeHtml(previewUrl) + '">' +
+          '<span class="attachment-name" title="' + __wvEscapeHtml(att.path) + '">' + __wvEscapeHtml(att.name) + '</span>' +
+          '<span class="attachment-remove" data-idx="' + idx + '">\\u2715</span>';
+      } else {
+        var icon = att.kind === 'video' ? '\\uD83C\\uDFAC' : att.kind === 'file' ? '\\uD83D\\uDCC4' : '\\uD83D\\uDDBC';
+        chip.innerHTML = '<span>' + icon + '</span><span class="attachment-name" title="' + __wvEscapeHtml(att.path) + '">' + __wvEscapeHtml(att.name) + '</span><span class="attachment-remove" data-idx="' + idx + '">\\u2715</span>';
+      }
       attachmentsArea.appendChild(chip);
     });
     attachmentsArea.querySelectorAll('.attachment-remove').forEach(function(btn) {
@@ -39,6 +63,11 @@ export function getInputScript(tr: WebviewTranslations): string {
         var idx = parseInt(btn.getAttribute('data-idx'), 10);
         vscode.postMessage({ type: 'removeAttachment', index: idx });
       });
+    });
+    // Drop cached thumbnails for attachments that are gone, so a long session
+    // that sends and clears cannot accumulate them.
+    Object.keys(previewCache).forEach(function(id) {
+      if (!liveIds[id]) delete previewCache[id];
     });
   }
 
@@ -257,6 +286,220 @@ export function getInputScript(tr: WebviewTranslations): string {
   });
   attachBtn.addEventListener('click', function() { vscode.postMessage({ type: 'attachFile' }); });
 
+  // ── Pasted / dropped images (TUI clipboard.rs parity) ──
+  // The blob is base64'd here and persisted by the extension host under
+  // ~/.codewhale/clipboard-images/, then re-enters through the normal
+  // attachment flow as an [Attached image: <path>] placeholder line.
+  // Only mimes the engine accepts; the host re-validates bytes and size.
+  var IMAGE_MIME_RE = /^image\\/(png|jpeg|gif|webp)$/;
+
+  function sendImageFile(file) {
+    var reader = new FileReader();
+    reader.onload = function() {
+      vscode.postMessage({ type: 'attachImage', mime: file.type, dataUrl: reader.result, name: file.name });
+    };
+    reader.readAsDataURL(file);
+  }
+
+  // OS file drops (Finder / Explorer) carry File blobs, not workspace paths.
+  // Non-image bytes are base64'd to the host, persisted under
+  // ~/.codewhale/dropped-files/, and re-enter as a normal file attachment —
+  // the same @path mention the attach-file button produces. The transport
+  // cap keeps oversized drops from serialising through postMessage.
+  var MAX_DROP_FILE_BYTES = 50 * 1024 * 1024;
+
+  function sendDroppedFileBlob(file) {
+    if (file.size > MAX_DROP_FILE_BYTES) {
+      vscode.postMessage({ type: 'dropTooLarge', name: file.name, size: file.size });
+      return;
+    }
+    var reader = new FileReader();
+    reader.onload = function() {
+      vscode.postMessage({ type: 'attachFileBlob', dataUrl: reader.result, name: file.name });
+    };
+    reader.readAsDataURL(file);
+  }
+
+  inputEl.addEventListener('paste', function(e) {
+    try {
+      var items = e.clipboardData && e.clipboardData.items;
+      if (!items) return;
+      for (var i = 0; i < items.length; i++) {
+        var item = items[i];
+        if (item.kind === 'file' && IMAGE_MIME_RE.test(item.type)) {
+          e.preventDefault();
+          var file = item.getAsFile();
+          if (file) sendImageFile(file);
+        }
+      }
+    } catch (err) { /* image paste must never break text paste */ }
+  });
+
+  // Drag & drop is document-level: the whole webview is a drop target, not
+  // just the input. dragover must preventDefault unconditionally or
+  // Chromium refuses to fire drop at all — the gate only decides whether
+  // the drag is "file-ish" (for the copy cursor and the highlight).
+  function dragHasPayload(e) {
+    if (!e.dataTransfer || !e.dataTransfer.types) return false;
+    var types = e.dataTransfer.types;
+    for (var i = 0; i < types.length; i++) {
+      if (
+        types[i] === 'Files' ||
+        types[i] === 'text/uri-list' ||
+        types[i] === 'text/plain' ||
+        types[i] === 'text'
+      ) return true;
+    }
+    return false;
+  }
+
+  function stopFileDragEvent(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation();
+  }
+
+  function getDroppedFiles(dataTransfer) {
+    var files = [];
+    if (!dataTransfer) return files;
+    if (dataTransfer.files && dataTransfer.files.length > 0) {
+      for (var i = 0; i < dataTransfer.files.length; i++) files.push(dataTransfer.files[i]);
+    }
+    // Some VS Code / Chromium drags expose file items without populating the
+    // FileList on drop, so scan items too.
+    if (dataTransfer.items && dataTransfer.items.length > 0) {
+      for (var j = 0; j < dataTransfer.items.length; j++) {
+        var item = dataTransfer.items[j];
+        if (!item || item.kind !== 'file') continue;
+        var file = item.getAsFile && item.getAsFile();
+        if (!file) continue;
+        var duplicate = false;
+        for (var k = 0; k < files.length; k++) {
+          if (
+            files[k].name === file.name &&
+            files[k].size === file.size &&
+            files[k].type === file.type &&
+            files[k].lastModified === file.lastModified
+          ) {
+            duplicate = true;
+            break;
+          }
+        }
+        if (!duplicate) files.push(file);
+      }
+    }
+    return files;
+  }
+
+  // text/uri-list is the file-drag protocol and is trusted outright, comment
+  // lines and all. text/plain is not a file protocol: prose and code
+  // selections arrive there too, and a snippet whose first line starts with
+  // '/' is not a path. Such a drop must keep its default text insert instead
+  // of being swallowed as an attach that then fails.
+  function looksLikeFilePathText(text) {
+    if (!text) return false;
+    // Whitespace is the discriminator, not a law about paths: a dropped text
+    // selection is usually multi-word prose. The price is that a text-dropped
+    // path *containing* spaces stays text — Finder / Explorer drops arrive
+    // via uri-list / Files and are unaffected.
+    if (/\\s/.test(text)) return false;
+    if (text.indexOf('file:') === 0) return true;
+    if (!(text.charAt(0) === '/' || text.indexOf('~/') === 0 || /^[a-zA-Z]:[\\\\/]/.test(text))) {
+      return false;
+    }
+    // Require a filename-ish last segment, so '/mode' or '/api/v1' stays text.
+    var base = text.slice(Math.max(text.lastIndexOf('/'), text.lastIndexOf('\\\\')) + 1);
+    return base.indexOf('.') >= 0;
+  }
+
+  function getDroppedPathCandidates(dataTransfer) {
+    var candidates = [];
+    if (!dataTransfer) return candidates;
+    var uriList = dataTransfer.getData('text/uri-list') || '';
+    var uriCandidates = uriList.split(/\\r?\\n/).filter(function(line) {
+      return line && line.charAt(0) !== '#';
+    });
+    for (var i = 0; i < uriCandidates.length; i++) {
+      if (candidates.indexOf(uriCandidates[i]) < 0) candidates.push(uriCandidates[i]);
+    }
+    if (candidates.length > 0) return candidates;
+    var plain = (
+      dataTransfer.getData('text/plain') ||
+      dataTransfer.getData('text') ||
+      ''
+    ).trim();
+    if (looksLikeFilePathText(plain)) candidates.push(plain);
+    return candidates;
+  }
+
+  function handleDropPayload(e) {
+    if (!e.dataTransfer) return;
+
+    // Prefer uri-list / text paths from the editor: they preserve the original
+    // workspace path and align exactly with the attach-file button behavior.
+    var pathCandidates = getDroppedPathCandidates(e.dataTransfer);
+    if (pathCandidates.length > 0) {
+      stopFileDragEvent(e);
+      vscode.postMessage({ type: 'attachPaths', uris: pathCandidates });
+      return;
+    }
+
+    // 1) OS file drops (Finder / Explorer): File blobs without paths.
+    //    Inline-able images attach directly; every other file (PDF, docs,
+    //    videos, …) rides the attachFileBlob path so drops match the
+    //    attach-file button. Swallow the browser default (navigating the
+    //    webview to the file) regardless.
+    var files = getDroppedFiles(e.dataTransfer);
+    if (files.length > 0) {
+      stopFileDragEvent(e);
+      for (var i = 0; i < files.length; i++) {
+        if (IMAGE_MIME_RE.test(files[i].type)) {
+          sendImageFile(files[i]);
+        } else {
+          sendDroppedFileBlob(files[i]);
+        }
+      }
+      return;
+    }
+  }
+
+  function handleFileDragEnter(e) {
+    if (!dragHasPayload(e)) return;
+    stopFileDragEvent(e);
+    document.body.classList.add('drag-over');
+  }
+
+  function handleFileDragOver(e) {
+    if (!dragHasPayload(e)) return;
+    stopFileDragEvent(e);
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+  }
+
+  function handleFileDragLeave(e) {
+    if (!dragHasPayload(e)) return;
+    if (!e.relatedTarget) document.body.classList.remove('drag-over');
+  }
+
+  function handleFileDrop(e) {
+    try {
+      document.body.classList.remove('drag-over');
+      if (!dragHasPayload(e)) return;
+      handleDropPayload(e);
+    } catch (err) { /* image drop must never break the input */ }
+  }
+
+  // Capture phase is important here: VS Code / Chromium may let the textarea
+  // or host shell consume the drop first, which leaves us with a focused input
+  // but no attachment event.
+  window.addEventListener('dragenter', handleFileDragEnter, true);
+  window.addEventListener('dragover', handleFileDragOver, true);
+  window.addEventListener('dragleave', handleFileDragLeave, true);
+  window.addEventListener('drop', handleFileDrop, true);
+  document.addEventListener('dragenter', handleFileDragEnter);
+  document.addEventListener('dragover', handleFileDragOver);
+  document.addEventListener('dragleave', handleFileDragLeave);
+  document.addEventListener('drop', handleFileDrop);
+
   var isComposing = false;
   inputEl.addEventListener('compositionstart', function() { isComposing = true; });
   inputEl.addEventListener('compositionend', function() { isComposing = false; });
@@ -348,6 +591,7 @@ export function getInputScript(tr: WebviewTranslations): string {
     renderAttachments: renderAttachments,
     getCurrentAttachments: function() { return currentAttachments; },
     setCurrentAttachments: function(v) { currentAttachments = v; },
+    setAttachmentPreview: setAttachmentPreview,
     updateSendStopButton: updateSendStopButton,
   };
 

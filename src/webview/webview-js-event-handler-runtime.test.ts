@@ -42,6 +42,7 @@ class FakeElement {
   public value = "";
   public scrollTop = 0;
   public scrollHeight = 0;
+  public focusCount = 0;
   public classList = new FakeClassList();
   public parentElement: FakeElement | null = null;
   private listeners = new Map<string, (event: unknown) => void>();
@@ -74,7 +75,9 @@ class FakeElement {
 
   remove(): void {}
 
-  focus(): void {}
+  focus(): void {
+    this.focusCount += 1;
+  }
 
   setSelectionRange(_start: number, _end: number): void {}
 
@@ -104,6 +107,7 @@ function createRuntimeHarness() {
   const documentListeners = new Map<string, (event: any) => void>();
   const taskDetailCalls: unknown[] = [];
   const agentDetailCalls: unknown[] = [];
+  const attachmentPreviewCalls: Array<{ id: string; previewUrl: string }> = [];
 
   const windowObj: Record<string, any> = {
     __wvI18n: makeTr(),
@@ -162,6 +166,9 @@ function createRuntimeHarness() {
       applyApiCapabilities: () => {},
       setCurrentAttachments: () => {},
       renderAttachments: () => {},
+      setAttachmentPreview: (id: string, previewUrl: string) => {
+        attachmentPreviewCalls.push({ id, previewUrl });
+      },
     },
     addEventListener: (name: string, handler: (event: any) => void) => {
       windowListeners.set(name, handler);
@@ -199,6 +206,7 @@ function createRuntimeHarness() {
     documentListeners,
     taskDetailCalls,
     agentDetailCalls,
+    attachmentPreviewCalls,
   };
 }
 
@@ -238,6 +246,32 @@ describe("webview-js-event-handler runtime", () => {
     expect(harness.getElement("current-reasoning").textContent).toBe("high");
     expect(harness.getElement("status-text").textContent).toBe("Ready (deepseek-v4-pro)");
     expect(harness.postMessages).toEqual([{ type: "webviewReady" }]);
+  });
+
+  it("returns focus to the input after attachments change", () => {
+    const harness = createRuntimeHarness();
+    const inputEl = harness.getElement("input");
+
+    harness.dispatchMessage({
+      type: "attachmentsChanged",
+      attachments: [{ kind: "file", path: "/tmp/readme.md", name: "readme.md" }],
+    });
+
+    expect(inputEl.focusCount).toBe(1);
+  });
+
+  it("hands attachment thumbnails to the input module without re-rendering", () => {
+    const harness = createRuntimeHarness();
+
+    harness.dispatchMessage({
+      type: "attachmentPreview",
+      id: "att-1",
+      previewUrl: "data:image/png;base64,AAA",
+    });
+
+    expect(harness.attachmentPreviewCalls).toEqual([
+      { id: "att-1", previewUrl: "data:image/png;base64,AAA" },
+    ]);
   });
 
   it("updates the visible model label and ready status text from providerModels currentModel", () => {

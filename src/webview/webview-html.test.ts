@@ -340,6 +340,11 @@ describe("webview-html.ts assembler", () => {
     expect(html).toContain("script-src 'nonce-");
   });
 
+  it("allows data-url images for attachment previews", () => {
+    const html = getWebviewHtml(makeMockWebview(), makeMockExtensionUri(), makeTr());
+    expect(html).toContain("img-src data:");
+  });
+
   it("contains CSS from webview-css module", () => {
     const html = getWebviewHtml(makeMockWebview(), makeMockExtensionUri(), makeTr());
     expect(html).toContain("--bg:");

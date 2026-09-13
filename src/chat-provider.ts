@@ -120,6 +120,51 @@ function mergeThreadRecord(
   };
 }
 
+/**
+ * Identify an image's format from its magic bytes, mirroring TUI
+ * image_attach.rs sniff_media_type: the provider validates the payload,
+ * not the file extension or the label the sender chose. Returns null for
+ * anything outside the four accepted formats.
+ */
+function sniffImageMime(bytes: Buffer): string | null {
+  const head = (len: number) => bytes.subarray(0, len).toString("latin1");
+  if (bytes.length >= 8 && head(8) === "\x89PNG\r\n\x1a\n") {
+    return "image/png";
+  }
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
+    return "image/jpeg";
+  }
+  if (bytes.length >= 6) {
+    const gif = head(6);
+    if (gif === "GIF87a" || gif === "GIF89a") {
+      return "image/gif";
+    }
+  }
+  if (bytes.length >= 12 && head(4) === "RIFF" && bytes.subarray(8, 12).toString("latin1") === "WEBP") {
+    return "image/webp";
+  }
+  return null;
+}
+
+function imageBytesMatchMime(bytes: Buffer, mime: string): boolean {
+  return sniffImageMime(bytes) === mime;
+}
+
+/**
+ * One pending attachment. `previewUrl` is a transient thumbnail payload: it is
+ * delivered to the webview once in its own message (see
+ * `announceAttachmentPreview`) and deliberately kept out of the
+ * `attachmentsChanged` list, which is re-published on every add / remove /
+ * send.
+ */
+interface AttachmentRecord {
+  id: string;
+  kind: string;
+  path: string;
+  name: string;
+  previewUrl?: string;
+}
+
 export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandContext {
   public static readonly viewType = "brotherwhale.chat";
 
@@ -138,7 +183,9 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
   private fleetDetailPollTimer: ReturnType<typeof setInterval> | null = null;
   private activeFleetRunId: string | null = null;
   private _disposables: vscode.Disposable[] = [];
-  private currentAttachments: Array<{ kind: string; path: string; name: string }> = [];
+  private currentAttachments: AttachmentRecord[] = [];
+  /** Monotonic source of attachment ids; see AttachmentRecord. */
+  private attachmentSeq = 0;
   private showAllWorkspaces: boolean = false;
   /** Fallback workspace from the TUI, used when VS Code has no folder open. */
   private tuiWorkspace: string | null = null;
@@ -367,6 +414,13 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         break;
       case "webviewReady":
         try {
+          // A reloaded webview has lost both its preview cache and its copy
+          // of the attachment list, while the host still holds the records
+          // and would send them with the next turn. Re-announce the
+          // thumbnails first, then republish the list, so the chips and
+          // their thumbs come back together.
+          this.reannounceAttachmentPreviews();
+          this.postAttachmentsChanged();
           await this.api.ensureReady();
           await this.syncWebviewState();
         } catch (err) {
@@ -402,6 +456,25 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         break;
       case "removeAttachment":
         this.handleRemoveAttachment(msg.index as number);
+        break;
+      case "attachImage":
+        await this.handleAttachImageInline(
+          msg.mime as string,
+          msg.dataUrl as string,
+          typeof msg.name === "string" ? msg.name : undefined
+        );
+        break;
+      case "attachPaths":
+        this.handleAttachPaths(Array.isArray(msg.uris) ? msg.uris as string[] : []);
+        break;
+      case "attachFileBlob":
+        this.handleAttachFileBlob(
+          typeof msg.name === "string" ? msg.name : undefined,
+          msg.dataUrl as string
+        );
+        break;
+      case "dropTooLarge":
+        this.postMessage({ type: "error", message: t().fileDropTooLarge });
         break;
       case "undoLastTurn":
         await this.handleUndoLastTurn();
@@ -1414,28 +1487,26 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       });
       if (!uris || uris.length === 0) return;
 
+      let attached = false;
       for (const uri of uris) {
-        const ext = path.extname(uri.fsPath).toLowerCase();
-        const kind = ChatProvider.MEDIA_EXTENSIONS[ext];
-        if (kind) {
-          this.currentAttachments.push({
-            kind,
-            path: uri.fsPath,
-            name: path.basename(uri.fsPath),
-          });
-        } else {
-          this.currentAttachments.push({
-            kind: "file",
-            path: uri.fsPath,
-            name: path.basename(uri.fsPath),
+        // Isolation per path: one unreadable entry (a stat that fails with
+        // something other than ENOENT) must not cost the user the rest of
+        // the selection.
+        try {
+          attached = this.attachPathAsAttachment(uri.fsPath) || attached;
+        } catch (err) {
+          this.postMessage({
+            type: "error",
+            message: formatError("Failed to attach file", err),
           });
         }
       }
 
-      this.postMessage({
-        type: "attachmentsChanged",
-        attachments: this.currentAttachments,
-      });
+      // Reached even when a path throws, so the webview and the host can never
+      // disagree about what the next send will carry.
+      if (attached) {
+        this.postAttachmentsChanged();
+      }
     } catch (err) {
       this.postMessage({
         type: "error",
@@ -1444,13 +1515,268 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     }
   }
 
+  /**
+   * Publish the current attachment list to the webview.
+   *
+   * The list carries no previewUrl. A 5 MiB image is a ~6.7 MiB base64 string
+   * and this list is re-published on every add / remove / send, so re-sending
+   * those bytes each time would push megabytes through postMessage to rebuild
+   * a 44px thumbnail the webview already has. Previews travel once, in their
+   * own message; see announceAttachmentPreview.
+   */
+  private postAttachmentsChanged(): void {
+    this.postMessage({
+      type: "attachmentsChanged",
+      attachments: this.currentAttachments.map((att) => ({
+        id: att.id,
+        kind: att.kind,
+        path: att.path,
+        name: att.name,
+      })),
+    });
+  }
+
+  /** Hand the webview one thumbnail payload, keyed by attachment id. Sent when
+   *  the attachment is created — and again on webview reload, where the
+   *  webview's cache is gone. Never sent as part of the list. */
+  private announceAttachmentPreview(att: AttachmentRecord): void {
+    if (!att.previewUrl) return;
+    this.postMessage({
+      type: "attachmentPreview",
+      id: att.id,
+      previewUrl: att.previewUrl,
+    });
+  }
+
+  /** Re-announce every live thumbnail, for a webview that just reloaded and
+   *  therefore has an empty preview cache. */
+  private reannounceAttachmentPreviews(): void {
+    for (const att of this.currentAttachments) {
+      this.announceAttachmentPreview(att);
+    }
+  }
+
+  /**
+   * Attach one path as an attachment record. Image-kind paths are validated
+   * here at attach time — TUI /attach parity (contract.rs attach_media →
+   * image_attach.rs): empty, oversized (>5 MiB) or bytes that sniff to none
+   * of PNG/JPEG/GIF/WebP are refused up front with the shared image errors,
+   * instead of failing in-band at send time (expand_attachment_blocks).
+   * Failures post their own error and return false; callers must not add a
+   * second message. Video and plain files carry no content restrictions
+   * (the engine reads them via the @path mention).
+   */
+  private attachPathAsAttachment(filePath: string, displayName?: string): boolean {
+    const stat = fs.statSync(filePath, { throwIfNoEntry: false });
+    if (!stat || !stat.isFile()) {
+      this.postMessage({ type: "error", message: t().fileNotSupported });
+      return false;
+    }
+
+    const ext = path.extname(filePath).toLowerCase();
+    const kind = ChatProvider.MEDIA_EXTENSIONS[ext] ?? "file";
+    const record: AttachmentRecord = {
+      id: this.nextAttachmentId(),
+      kind,
+      path: filePath,
+      name: displayName ? path.basename(displayName) : path.basename(filePath),
+    };
+    if (kind === "image") {
+      if (stat.size > ChatProvider.MAX_INLINE_IMAGE_BYTES) {
+        this.postMessage({ type: "error", message: t().imagePasteTooLarge });
+        return false;
+      }
+      // A missing preview means the bytes failed the magic-byte sniff:
+      // BMP/TIFF/SVG/renamed files or empty/corrupt content (readImage-
+      // PreviewDataUrl re-stats and re-reads under the same 5 MiB bound).
+      const previewUrl = this.readImagePreviewDataUrl(filePath);
+      if (!previewUrl) {
+        this.postMessage({ type: "error", message: t().imagePasteUnsupported });
+        return false;
+      }
+      record.previewUrl = previewUrl;
+    }
+    this.currentAttachments.push(record);
+    // Announced before the caller publishes the list, so the webview's cache
+    // is populated by the time it renders the chip.
+    this.announceAttachmentPreview(record);
+    return true;
+  }
+
+  private nextAttachmentId(): string {
+    this.attachmentSeq += 1;
+    return `att-${this.attachmentSeq}`;
+  }
+
+  /** Best-effort data-URL thumbnail for an image file; undefined when the
+   *  file is unreadable, oversized, or not a sniffable image. Preview only —
+   *  the engine re-validates at expansion time regardless. */
+  private readImagePreviewDataUrl(filePath: string): string | undefined {
+    try {
+      const stat = fs.statSync(filePath, { throwIfNoEntry: false });
+      if (!stat || !stat.isFile() || stat.size > ChatProvider.MAX_INLINE_IMAGE_BYTES) return undefined;
+      const bytes = fs.readFileSync(filePath);
+      const mime = sniffImageMime(bytes);
+      return mime ? `data:${mime};base64,${bytes.toString("base64")}` : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * Attach one or more local paths referenced by uri-list / text drops from
+   * the editor. Mirrors the normal file picker flow so drag-and-drop and the
+   * attach button share the same attachment model. Per-file failures (missing
+   * file, invalid image) are reported by attachPathAsAttachment itself.
+   */
+  private handleAttachPaths(uris: string[]): void {
+    let attached = false;
+    for (const uri of uris) {
+      if (typeof uri !== "string" || !uri.trim()) continue;
+      // Isolation per path: one bad entry (a stat that fails with something
+      // other than ENOENT, a malformed file: URI) must not cost the user the
+      // rest of the drop.
+      try {
+        // file: URIs arrive from uri-list drops; bare paths from text drops.
+        // A home-relative path is accepted by the webview's text heuristic,
+        // so expand it here — fs.statSync does not.
+        const filePath = uri.startsWith("file:")
+          ? vscode.Uri.parse(uri).fsPath
+          : uri.startsWith("~/")
+            ? path.join(os.homedir(), uri.slice(2))
+            : uri;
+        attached = this.attachPathAsAttachment(filePath) || attached;
+      } catch (err) {
+        this.postMessage({
+          type: "error",
+          message: formatError("Failed to attach dropped file", err),
+        });
+      }
+    }
+    // Reached even when a path throws, so the webview and the host can never
+    // disagree about what the next send will carry.
+    if (attached) {
+      this.postAttachmentsChanged();
+    }
+  }
+
+  /** Inline image mimes accepted from paste/drop, mirroring the TUI's sniff
+   *  list in image_attach.rs (PNG/JPEG/GIF/WebP only). */
+  private static readonly INLINE_IMAGE_EXTS: Record<string, string> = {
+    "image/png": ".png",
+    "image/jpeg": ".jpg",
+    "image/gif": ".gif",
+    "image/webp": ".webp",
+  };
+
+  /** Per-image ceiling shared with TUI image_attach.rs MAX_IMAGE_BYTES. */
+  private static readonly MAX_INLINE_IMAGE_BYTES = 5 * 1024 * 1024;
+
+  /**
+   * Persist a pasted/dropped image and register it as an attachment.
+   *
+   * TUI clipboard.rs parity: bytes land in ~/.codewhale/clipboard-images/
+   * under a generated name, then flow through the existing
+   * `[Attached image: <path>]` placeholder the engine expands into
+   * ContentBlock::ImageUrl blocks. Validation (magic-byte sniff + 5 MiB)
+   * matches image_attach.rs so failures surface here, before the turn is
+   * sent, instead of as an in-band notice after it.
+   */
+  private async handleAttachImageInline(mime: string, dataUrl: string, name?: string): Promise<void> {
+    try {
+      const ext = ChatProvider.INLINE_IMAGE_EXTS[mime];
+      const marker = `data:${mime};base64,`;
+      if (!ext || !dataUrl.startsWith(marker)) {
+        this.postMessage({ type: "error", message: t().imagePasteUnsupported });
+        return;
+      }
+      const bytes = Buffer.from(dataUrl.slice(marker.length), "base64");
+      if (bytes.length === 0 || !imageBytesMatchMime(bytes, mime)) {
+        this.postMessage({ type: "error", message: t().imagePasteInvalid });
+        return;
+      }
+      if (bytes.length > ChatProvider.MAX_INLINE_IMAGE_BYTES) {
+        this.postMessage({ type: "error", message: t().imagePasteTooLarge });
+        return;
+      }
+      const dir = path.join(os.homedir(), ".codewhale", "clipboard-images");
+      fs.mkdirSync(dir, { recursive: true });
+      const fileName = `clipboard-${Date.now()}-${Math.floor(Math.random() * 1e4)}${ext}`;
+      const filePath = path.join(dir, fileName);
+      fs.writeFileSync(filePath, bytes);
+      // Display the original name (drag & drop), fall back to the stored one.
+      const displayName = name ? path.basename(name) : fileName;
+      const record: AttachmentRecord = {
+        id: this.nextAttachmentId(),
+        kind: "image",
+        path: filePath,
+        name: displayName,
+        // The incoming data URL is already the exact preview payload.
+        previewUrl: dataUrl,
+      };
+      this.currentAttachments.push(record);
+      this.announceAttachmentPreview(record);
+      this.postAttachmentsChanged();
+    } catch (err) {
+      this.postMessage({
+        type: "error",
+        message: formatError("Failed to attach image", err),
+      });
+    }
+  }
+
+  /** Transport cap for blob drops serialised through postMessage; the
+   *  attach-file button has no cap because it references paths directly. */
+  private static readonly MAX_DROPPED_FILE_BYTES = 50 * 1024 * 1024;
+
+  /**
+   * Persist a dropped OS file (Finder / Explorer) and register it as a file
+   * attachment. Webview drops carry bytes, not paths, so the blob lands in
+   * ~/.codewhale/dropped-files/ under a sanitized name and re-enters the
+   * same @<path> mention the attach-file button produces. Mirrors the
+   * clipboard-image flow above.
+   */
+  private handleAttachFileBlob(name: string | undefined, dataUrl: string): void {
+    try {
+      const marker = ";base64,";
+      const idx = typeof dataUrl === "string" ? dataUrl.indexOf(marker) : -1;
+      if (idx < 0) {
+        this.postMessage({ type: "error", message: t().fileNotSupported });
+        return;
+      }
+      const bytes = Buffer.from(dataUrl.slice(idx + marker.length), "base64");
+      if (bytes.length === 0) {
+        this.postMessage({ type: "error", message: t().fileNotSupported });
+        return;
+      }
+      if (bytes.length > ChatProvider.MAX_DROPPED_FILE_BYTES) {
+        this.postMessage({ type: "error", message: t().fileDropTooLarge });
+        return;
+      }
+      const dir = path.join(os.homedir(), ".codewhale", "dropped-files");
+      fs.mkdirSync(dir, { recursive: true });
+      const safeName = ((name || "").split("/").pop() || "")
+        .replace(/[^\w.-]+/g, "_")
+        .slice(-80);
+      const fileName = `dropped-${Date.now()}-${Math.floor(Math.random() * 1e4)}${safeName ? "-" + safeName : ""}`;
+      const filePath = path.join(dir, fileName);
+      fs.writeFileSync(filePath, bytes);
+      // Display the original name (drag & drop), fall back to the stored one.
+      if (this.attachPathAsAttachment(filePath, name ? path.basename(name) : fileName)) {
+        this.postAttachmentsChanged();
+      }
+    } catch (err) {
+      this.postMessage({
+        type: "error",
+        message: formatError("Failed to attach dropped file", err),
+      });
+    }
+  }
+
   private handleRemoveAttachment(index: number): void {
     if (index >= 0 && index < this.currentAttachments.length) {
       this.currentAttachments.splice(index, 1);
-      this.postMessage({
-        type: "attachmentsChanged",
-        attachments: this.currentAttachments,
-      });
+      this.postAttachmentsChanged();
     }
   }
 
@@ -1459,7 +1785,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
 
     const attachments = [...this.currentAttachments];
     this.currentAttachments = [];
-    this.postMessage({ type: "attachmentsChanged", attachments: [] });
+    this.postAttachmentsChanged();
 
     let fullText = text;
     if (attachments.length > 0) {

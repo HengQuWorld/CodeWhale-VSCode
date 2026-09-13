@@ -1100,6 +1100,28 @@ export function getWebviewCss(): string {
       flex-shrink: 0;
     }
     .attachment-chip .attachment-remove:hover { opacity: 1; }
+    .attachment-chip.has-thumb {
+      padding: 3px;
+      gap: 6px;
+      max-width: 280px;
+    }
+    .attachment-chip .attachment-thumb {
+      width: 44px;
+      height: 44px;
+      object-fit: cover;
+      border-radius: 3px;
+      display: block;
+      flex-shrink: 0;
+    }
+    body.drag-over::after {
+      content: '';
+      position: fixed;
+      inset: 0;
+      border: 2px dashed var(--accent);
+      background: color-mix(in srgb, var(--accent) 8%, transparent);
+      pointer-events: none;
+      z-index: 999;
+    }
     #input-row {
       display: flex;
       flex: 1;

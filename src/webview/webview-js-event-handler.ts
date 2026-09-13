@@ -911,6 +911,14 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
       case 'attachmentsChanged':
         window.__wvInput.setCurrentAttachments(msg.attachments || []);
         window.__wvInput.renderAttachments();
+        if (inputEl) inputEl.focus();
+        break;
+
+      // Thumbnails travel separately from the list (and always before it), so
+      // a 5 MiB image is not re-sent on every add / remove / send. Cached by
+      // the input module; no re-render needed, the list follows.
+      case 'attachmentPreview':
+        window.__wvInput.setAttachmentPreview(msg.id, msg.previewUrl);
         break;
 
       case 'clearChat':

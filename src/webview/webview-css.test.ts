@@ -92,6 +92,19 @@ describe("webview-css.ts", () => {
     expect(css).toContain("#input-row");
   });
 
+  it("styles the image attachment thumbnail", () => {
+    const css = getWebviewCss();
+    expect(css).toContain(".attachment-chip.has-thumb");
+    expect(css).toContain(".attachment-thumb");
+    expect(css).toContain("object-fit: cover");
+  });
+
+  it("styles the file-drag highlight", () => {
+    const css = getWebviewCss();
+    expect(css).toContain("body.drag-over::after");
+    expect(css).toContain("pointer-events: none");
+  });
+
   it("contains unavailable button styles", () => {
     const css = getWebviewCss();
     expect(css).toContain(".is-unavailable");

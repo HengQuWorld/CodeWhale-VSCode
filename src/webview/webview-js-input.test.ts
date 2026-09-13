@@ -57,6 +57,11 @@ describe("webview-js-input.ts", () => {
     expect(script).toContain("btn-attach");
   });
 
+  // Paste / drag-and-drop behaviour is covered by
+  // webview-js-input-runtime.test.ts, which executes the emitted script
+  // against a fake DOM. Asserting the source merely mentions a listener cannot
+  // distinguish working wiring from a listener with an empty body.
+
   it("contains API capabilities handling", () => {
     const script = getInputScript(makeTr());
     expect(script).toContain("__wvApiCapabilities");

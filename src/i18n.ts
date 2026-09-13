@@ -173,6 +173,10 @@ interface Translations {
   removeAttachment: string;
   attachedFileCount: string;
   fileNotSupported: string;
+  imagePasteUnsupported: string;
+  imagePasteInvalid: string;
+  imagePasteTooLarge: string;
+  fileDropTooLarge: string;
   changes: string;
   noFileChanges: string;
   fileChanges: string;
@@ -494,6 +498,10 @@ const en: Translations = {
   removeAttachment: "Remove",
   attachedFileCount: "{n} file(s) attached",
   fileNotSupported: "File type not supported",
+  imagePasteUnsupported: "Only PNG, JPEG, GIF and WebP images can be attached",
+  imagePasteInvalid: "The image content could not be read",
+  imagePasteTooLarge: "Image exceeds the 5 MB per-image limit; downscale or crop it first",
+  fileDropTooLarge: "Dropped file exceeds the 50 MB limit; use the attach button for larger files",
   changes: "Changes",
   noFileChanges: "No file changes in this session",
   fileChanges: "Changes",
@@ -815,6 +823,10 @@ const zhCn: Translations = {
   removeAttachment: "移除",
   attachedFileCount: "已附加 {n} 个文件",
   fileNotSupported: "不支持的文件类型",
+  imagePasteUnsupported: "仅支持附加 PNG、JPEG、GIF、WebP 图片",
+  imagePasteInvalid: "无法读取图片内容",
+  imagePasteTooLarge: "图片超过单张 5 MB 上限，请先缩小或裁剪",
+  fileDropTooLarge: "拖拽文件超过 50 MB 上限，更大的文件请使用附件按钮添加",
   changes: "变更",
   noFileChanges: "本次会话无文件变更",
   fileChanges: "文件变更",
