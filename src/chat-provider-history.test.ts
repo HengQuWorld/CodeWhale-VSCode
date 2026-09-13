@@ -710,10 +710,14 @@ describe("ChatProvider thread history rendering", () => {
         changeType: "modified",
       });
       expect(changesState.changes[0].diff).toContain("diff --git a/src/app.ts b/src/app.ts");
-      // The chain itself stays provider-side: the cumulative Diff lookup in
-      // the Changes panel reads it there, not from the webview payload.
-      const chains = (provider as any).turnFileChanges as Array<{ diffs?: string[] }>;
-      expect(chains[0].diffs).toHaveLength(1);
+      // One record per change, and the panel reads the diff from it.
+      const records = (provider as any).turnFileChanges as Array<{
+        diff?: string;
+        changeIndex?: number;
+      }>;
+      expect(records).toHaveLength(1);
+      expect(records[0].diff).toBe(changesState.changes[0].diff);
+      expect(records[0].changeIndex).toBe(0);
       // The reconstructed diff recovers exactly the pre-edit content.
       expect(reconstructOldContent("one\nTWO\nthree\n", changesState.changes[0].diff)).toBe(
         "one\ntwo\nthree\n",
@@ -725,7 +729,7 @@ describe("ChatProvider thread history rendering", () => {
         .flatMap((message) => message.toolCalls ?? [])
         .find((toolCall) => toolCall.name === "edit");
       expect(card?.fileChange?.diff).toBe(changesState.changes[0].diff);
-      expect(card?.fileChange?.diffIndex).toBe(0);
+      expect(card?.fileChange?.changeIndex).toBe(0);
     } finally {
       (vscode.workspace as unknown as { workspaceFolders: unknown }).workspaceFolders = undefined;
       fs.rmSync(dir, { recursive: true, force: true });
@@ -775,8 +779,9 @@ describe("ChatProvider thread history rendering", () => {
         .map((call: unknown[]) => call[0] as Record<string, any>)
         .find((message: Record<string, any>) => message.type === "changesState");
       expect(changesState.changes[0].diff).toBeUndefined();
-      const chains = (provider as any).turnFileChanges as Array<{ diffs?: string[] }>;
-      expect(chains[0].diffs).toEqual([]);
+      const records = (provider as any).turnFileChanges as Array<{ diff?: string }>;
+      expect(records).toHaveLength(1);
+      expect(records[0].diff).toBeUndefined();
     } finally {
       (vscode.workspace as unknown as { workspaceFolders: unknown }).workspaceFolders = undefined;
       fs.rmSync(dir, { recursive: true, force: true });
@@ -1002,14 +1007,20 @@ describe("ChatProvider thread history rendering", () => {
       const editCall = cards.find((toolCall) => toolCall.name === "edit");
 
       expect(writeCall?.fileChange?.diff).toContain("+++ b/src/app.ts");
-      expect(writeCall?.fileChange?.diffIndex).toBe(0);
+      expect(writeCall?.fileChange?.changeIndex).toBe(0);
       expect(editCall?.fileChange?.diff).toContain("diff --git a/src/app.ts b/src/app.ts");
-      expect(editCall?.fileChange?.diffIndex).toBe(1);
+      expect(editCall?.fileChange?.changeIndex).toBe(1);
 
-      const chains = (provider as any).turnFileChanges as Array<{ diffs?: string[]; diff?: string }>;
-      expect(chains[0].diffs).toHaveLength(2);
-      expect(chains[0].diffs?.[1]).toBe(editCall?.fileChange?.diff);
-      expect(chains[0].diff).toBe(editCall?.fileChange?.diff);
+      // Two changes to one file are two records: reverting either leaves the
+      // other reviewable.
+      const records = (provider as any).turnFileChanges as Array<{
+        diff?: string;
+        changeIndex?: number;
+      }>;
+      expect(records).toHaveLength(2);
+      expect(records[0].changeIndex).toBe(0);
+      expect(records[1].changeIndex).toBe(1);
+      expect(records[1].diff).toBe(editCall?.fileChange?.diff);
     } finally {
       (vscode.workspace as unknown as { workspaceFolders: unknown }).workspaceFolders = undefined;
       fs.rmSync(dir, { recursive: true, force: true });
@@ -1075,23 +1086,27 @@ describe("ChatProvider thread history rendering", () => {
         .flatMap((message) => message.toolCalls ?? [])
         .filter((toolCall) => toolCall.name === "edit");
       expect(cards).toHaveLength(2);
-      expect(cards[0].fileChange?.diffIndex).toBe(0);
-      expect(cards[1].fileChange?.diffIndex).toBe(1);
+      expect(cards[0].fileChange?.changeIndex).toBe(0);
+      expect(cards[1].fileChange?.changeIndex).toBe(1);
 
-      const chains = (provider as any).turnFileChanges as Array<{ diffs?: string[]; diff?: string }>;
-      expect(chains[0].diffs).toHaveLength(2);
-      const secondDiff = chains[0].diffs?.[1];
+      const records = (provider as any).turnFileChanges as Array<{
+        diff?: string;
+        changeIndex?: number;
+      }>;
+      expect(records).toHaveLength(2);
+      const secondDiff = records[1].diff;
       expect(secondDiff).toBeDefined();
       expect(reconstructOldContent("ONE\nTWO\n", secondDiff!)).toBe("ONE\ntwo\n");
-      expect(reconstructOriginalContent(chains[0].diffs!, "ONE\nTWO\n")).toBe("one\ntwo\n");
-      expect(chains[0].diff).toBe(chains[0].diffs?.[1]);
+      const chainedDiffs = records.map((record) => record.diff!);
+      expect(reconstructOriginalContent(chainedDiffs, "ONE\nTWO\n")).toBe("one\ntwo\n");
+      expect(records[0].diff).toBe(cards[0].fileChange?.diff);
     } finally {
       (vscode.workspace as unknown as { workspaceFolders: unknown }).workspaceFolders = undefined;
       fs.rmSync(dir, { recursive: true, force: true });
     }
   });
 
-  it("drops the aggregate diff when a later edit no longer matches the file", async () => {
+  it("keeps each change's own diff when a later edit no longer matches the file", async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "bw-session-stale-mixed-"));
     try {
       fs.mkdirSync(path.join(dir, "src"), { recursive: true });
@@ -1151,11 +1166,20 @@ describe("ChatProvider thread history rendering", () => {
       const changesState = postMessage.mock.calls
         .map((call: unknown[]) => call[0] as Record<string, any>)
         .find((message: Record<string, any>) => message.type === "changesState");
-      expect(changesState.changes[0].diff).toBeUndefined();
+      expect(changesState.changes[0].diff).toContain("+++ b/src/app.ts");
+      expect(changesState.changes[1].diff).toBeUndefined();
 
-      const chains = (provider as any).turnFileChanges as Array<{ diffs?: string[]; diff?: string }>;
-      expect(chains[0].diffs).toEqual([]);
-      expect(chains[0].diff).toBeUndefined();
+      const records = (provider as any).turnFileChanges as Array<{
+        diff?: string;
+        changeIndex?: number;
+      }>;
+      expect(records).toHaveLength(2);
+      expect(records[0].diff).toContain("+++ b/src/app.ts");
+      expect(records[0].changeIndex).toBe(0);
+      expect(records[1].diff).toBeUndefined();
+      // A change with no diff does not consume an index: reconstruction
+      // counts the diffs that exist.
+      expect(records[1].changeIndex).toBeUndefined();
 
       const cards = provider.messages.flatMap((message) => message.toolCalls ?? []);
       const writeCall = cards.find((toolCall) => toolCall.name === "write");

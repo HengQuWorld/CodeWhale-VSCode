@@ -386,16 +386,26 @@ export class CodeWhaleApiClient {
     )) as { restored: string };
   }
 
-  /** Restore a single file from the newest snapshot this thread's session
-   *  owns. This is the file-scoped counterpart of `restoreSnapshot` and the
-   *  only restore surface the Changes panel may use: the whole-workspace
-   *  snapshot restore would roll back every other file the turn touched. */
+  /** Restore a single file to the revision the change record was built from.
+   *
+   *  This is the file-scoped counterpart of `restoreSnapshot` and the only
+   *  restore surface the Changes panel may use: the whole-workspace snapshot
+   *  restore would roll back every other file the turn touched.
+   *
+   *  The engine restores exactly the snapshot the client names: `snapshotId`
+   *  is the `tool:<call_id>` restore point taken before the selected change,
+   *  and `expectedHash` is the `sha256:` digest of the bytes the panel showed
+   *  (or `absent` when it showed the file deleted). It refuses with 409 rather
+   *  than guess when the file moved since, so a stale review cannot silently
+   *  overwrite later edits. */
   async revertThreadFile(
     threadId: string,
-    path: string
+    revert: { path: string; snapshotId: string; expectedHash: string }
   ): Promise<RevertThreadFileResponse> {
     return (await this.post(`/v1/threads/${threadId}/file-revert`, {
-      path,
+      path: revert.path,
+      snapshot_id: revert.snapshotId,
+      expected_hash: revert.expectedHash,
     })) as RevertThreadFileResponse;
   }
 

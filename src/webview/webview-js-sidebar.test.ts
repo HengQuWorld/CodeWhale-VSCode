@@ -188,4 +188,19 @@ describe("webview-js-sidebar.ts", () => {
     expect(script).toContain("tab-changes");
     expect(script).not.toContain("workState.fileChanges");
   });
+
+  it("lists one row per change, each pointing at its own diff", () => {
+    const script = getSidebarScript(makeTr());
+    // A file edited three times is three rows: the row names the change it
+    // shows, so the Diff action reconstructs that change rather than the
+    // file's running total.
+    expect(script).toContain("data-change-index=");
+    expect(script).toContain("changeIndex: changeIdx !== null");
+    expect(script).not.toContain("useCumulative: true");
+  });
+
+  it("generates a script the webview can parse", () => {
+    // The webview scripts are string-built, so nothing else type-checks them.
+    expect(() => new Function(getSidebarScript(makeTr()))).not.toThrow();
+  });
 });

@@ -953,17 +953,32 @@ describe("CodeWhaleApiClient - per-file revert", () => {
       data: JSON.stringify({
         path: "a.ts",
         action: "modified",
-        snapshot_id: "s1",
-        snapshot_label: "pre-turn:1",
+        snapshot_id: "3f2a".padEnd(40, "0"),
+        snapshot_label: "tool:call_abc123",
       }),
     }));
 
-    const result = await client.revertThreadFile("thread-1", "a.ts");
+    // The engine restores the restore point the client names and checks the
+    // revision it reviewed; a body without both is a 422, not a fallback.
+    const result = await client.revertThreadFile("thread-1", {
+      path: "a.ts",
+      snapshotId: "3f2a".padEnd(40, "0"),
+      expectedHash: "sha256:" + "ab".repeat(32),
+    });
 
     expect(calls).toEqual([
-      { method: "POST", path: "/v1/threads/thread-1/file-revert", body: { path: "a.ts" } },
+      {
+        method: "POST",
+        path: "/v1/threads/thread-1/file-revert",
+        body: {
+          path: "a.ts",
+          snapshot_id: "3f2a".padEnd(40, "0"),
+          expected_hash: "sha256:" + "ab".repeat(32),
+        },
+      },
     ]);
     expect(result.path).toBe("a.ts");
     expect(result.action).toBe("modified");
+    expect(result.snapshot_label).toBe("tool:call_abc123");
   });
 });

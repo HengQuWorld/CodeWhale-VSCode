@@ -38,7 +38,6 @@ import {
   stripTurnMeta,
   isInternalRuntimeHandoff,
   reconstructOldContent,
-  reconstructOriginalContent,
   getDiffStateForIndex,
   extractRecordedEdits,
   reverseApplyRecordedEdits,
@@ -46,6 +45,7 @@ import {
   type RecordedEdit,
 } from "./utils/diff-utils";
 import { resolveRecordedFilePath } from "./utils/file-paths";
+import { MAX_EAGER_HASH_BYTES, sha256OfFile } from "./utils/file-hash";
 import { t, webviewTranslations, currentLocale } from "./i18n";
 import { ConfigPanel } from "./config-panel";
 import {
@@ -443,7 +443,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         }
         break;
       case "openDiff":
-        this.handleOpenDiff(msg.filePath as string, msg.diff as string | undefined, msg.useCumulative as boolean, msg.diffIndex as number | undefined);
+        this.handleOpenDiff(msg.filePath as string, msg.diff as string | undefined, msg.changeIndex as number | undefined);
         break;
       case "openFile":
         this.handleOpenFile(msg.filePath as string);
@@ -486,7 +486,8 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         await this.handleRevertFileChange(
           msg.filePath as string,
           msg.changeType as string,
-          msg.diff as string | undefined
+          msg.diff as string | undefined,
+          msg.callId as string | undefined
         );
         break;
       case "deleteSession":
@@ -754,32 +755,9 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
             });
 
             for (const tc of toolCalls) {
-              if (tc.fileChange) {
-                const normPath = normalizePath(tc.fileChange.filePath);
-                const existingIdx = this.turnFileChanges.findIndex(existing => normalizePath(existing.filePath) === normPath);
-                if (existingIdx >= 0) {
-                  // Merge with existing change for cumulative stats
-                  const existing = this.turnFileChanges[existingIdx];
-                  const existingDiffs = existing.diffs ?? (existing.diff ? [existing.diff] : []);
-                  const newDiffs = tc.fileChange.diff ? [...existingDiffs, tc.fileChange.diff] : existingDiffs;
-                  this.turnFileChanges[existingIdx] = {
-                    ...tc.fileChange,
-                    addedLines: existing.addedLines + tc.fileChange.addedLines,
-                    removedLines: existing.removedLines + tc.fileChange.removedLines,
-                    changeType: tc.fileChange.changeType === "created" ? "created" :
-                               tc.fileChange.changeType === "deleted" && existing.changeType !== "created" ? "deleted" :
-                               existing.changeType,
-                    diff: tc.fileChange.diff ?? existing.diff,
-                    diffs: newDiffs,
-                    toolName: tc.fileChange.toolName ?? existing.toolName,
-                  };
-                } else {
-                  this.turnFileChanges.push({
-                    ...tc.fileChange,
-                    diffs: tc.fileChange.diff ? [tc.fileChange.diff] : [],
-                  });
-                }
-              }
+              // One record per change: the panel lists what each tool call did,
+              // so reverting one of them leaves the others reviewable.
+              if (tc.fileChange) this.appendFileChange(tc.fileChange);
             }
           }
           content = "";
@@ -1267,32 +1245,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     // Collect file changes from reconstructed tool calls so the sidebar
     // Changes panel reflects the loaded session (mirrors loadHistory).
     for (const tc of globalToolCalls) {
-      if (tc.fileChange) {
-        const normPath = normalizePath(tc.fileChange.filePath);
-        const existingIdx = this.turnFileChanges.findIndex(existing => normalizePath(existing.filePath) === normPath);
-        if (existingIdx >= 0) {
-          // Merge with existing change for cumulative stats
-          const existing = this.turnFileChanges[existingIdx];
-          const existingDiffs = existing.diffs ?? (existing.diff ? [existing.diff] : []);
-          const newDiffs = tc.fileChange.diff ? [...existingDiffs, tc.fileChange.diff] : existingDiffs;
-          this.turnFileChanges[existingIdx] = {
-            ...tc.fileChange,
-            addedLines: existing.addedLines + tc.fileChange.addedLines,
-            removedLines: existing.removedLines + tc.fileChange.removedLines,
-            changeType: tc.fileChange.changeType === "created" ? "created" :
-                       tc.fileChange.changeType === "deleted" && existing.changeType !== "created" ? "deleted" :
-                       existing.changeType,
-            diff: tc.fileChange.diff ?? existing.diff,
-            diffs: newDiffs,
-            toolName: tc.fileChange.toolName ?? existing.toolName,
-          };
-        } else {
-          this.turnFileChanges.push({
-            ...tc.fileChange,
-            diffs: tc.fileChange.diff ? [tc.fileChange.diff] : [],
-          });
-        }
-      }
+      if (tc.fileChange) this.appendFileChange(tc.fileChange);
     }
     this.backfillSessionFileDiffs(globalToolCalls);
     this.refreshChangesPanel();
@@ -2863,18 +2816,19 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       }
     }
 
-    for (const [key, calls] of callsByPath) {
-      const aggregate = this.turnFileChanges.find((fc) => normalizePath(fc.filePath) === key);
-      if (!aggregate) continue;
-
-      const recordedEditCalls = calls.filter((call) => editsByCall.has(call));
+    for (const calls of callsByPath.values()) {
+      const recordedEditCalls = calls.filter((call) => editsByCall.has(call) && call.fileChange);
       if (recordedEditCalls.length === 0) continue;
 
       const missingCallDiff = recordedEditCalls.some((call) => !call.fileChange?.diff);
       const reconstructedByCall = new Map<ToolCallInfo, string>();
 
       if (missingCallDiff) {
-        const absPath = resolveRecordedFilePath(aggregate.filePath, this.recordedPathRoots(), defaultTasksDir());
+        const absPath = resolveRecordedFilePath(
+          recordedEditCalls[0].fileChange!.filePath,
+          this.recordedPathRoots(),
+          defaultTasksDir()
+        );
         let content: string;
         try {
           content = fs.readFileSync(absPath, "utf8");
@@ -2885,7 +2839,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         for (let i = recordedEditCalls.length - 1; i >= 0; i--) {
           const call = recordedEditCalls[i];
           const edits = editsByCall.get(call)!;
-          const patch = formatRecordedEditsAsDiff(aggregate.filePath, content, edits);
+          const patch = formatRecordedEditsAsDiff(call.fileChange!.filePath, content, edits);
           const before = patch === null ? null : reverseApplyRecordedEdits(content, edits);
           if (patch === null || before === null) {
             reconstructedByCall.clear();
@@ -2897,32 +2851,66 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       }
 
       if (!missingCallDiff || reconstructedByCall.size === recordedEditCalls.length) {
-        const diffs: string[] = [];
-        for (const call of calls) {
-          const fileChange = call.fileChange;
-          if (!fileChange) continue;
+        for (const call of recordedEditCalls) {
+          const fileChange = call.fileChange!;
           const diff = fileChange.diff ?? reconstructedByCall.get(call);
-          if (!diff) continue;
-          fileChange.diff = diff;
-          fileChange.diffIndex = diffs.length;
-          diffs.push(diff);
+          if (diff) fileChange.diff = diff;
         }
-        aggregate.diffs = diffs;
-        if (diffs.length > 0) {
-          aggregate.diff = diffs[diffs.length - 1];
-        }
-      } else {
-        // A cumulative Changes-panel diff is only trustworthy when we can walk
-        // the whole edit chain back from the current file. If any recorded
-        // edit no longer lines up, do not keep an earlier diff here: that
-        // would open the wrong patch for the file's latest recorded state.
-        aggregate.diff = undefined;
-        aggregate.diffs = [];
       }
+      // A diff that cannot be walked back is left absent rather than replaced
+      // by an earlier one: showing the wrong patch for a change is worse than
+      // showing none.
+    }
+    // Every change carries its own position in its file's history; the diff
+    // reconstruction above may have filled in diffs that shift later ones.
+    this.reindexFileChanges();
+  }
+
+  /**
+   * Append one change record. Records share their object with the tool call
+   * card that produced them, so the panel and the card always agree on the
+   * change's identity, index and reviewed digest.
+   */
+  private appendFileChange(change: FileChangeInfo): void {
+    if (this.turnFileChanges.includes(change)) return;
+    this.turnFileChanges.push(change);
+    this.reindexFileChanges();
+  }
+
+  /**
+   * Number each change within its own file's history, counting only changes
+   * that carry a diff. `changeIndex` is what a card's Diff action sends back:
+   * reconstructing a change's before/after content means walking the file's
+   * *later* changes back from what is on disk, so the index has to describe
+   * the change, not the file.
+   */
+  private reindexFileChanges(): void {
+    const nextIndexByPath = new Map<string, number>();
+    for (const change of this.turnFileChanges) {
+      if (!change.diff) {
+        change.changeIndex = undefined;
+        continue;
+      }
+      const key = normalizePath(change.filePath);
+      const index = nextIndexByPath.get(key) ?? 0;
+      change.changeIndex = index;
+      nextIndexByPath.set(key, index + 1);
     }
   }
 
-  /** Push file changes to the webview Changes panel */
+  /** The diffs of one file's changes, in the order `changeIndex` counts them. */
+  private diffsForPath(filePath: string): string[] {
+    const key = normalizePath(filePath);
+    return this.turnFileChanges
+      .filter((change) => normalizePath(change.filePath) === key && change.diff)
+      .map((change) => change.diff!);
+  }
+
+  /** Push the recorded changes to the webview Changes panel.
+   *
+   *  One entry per change, not per file: the panel's Diff action reconstructs
+   *  the change at `changeIndex` within its file's history, and its Revert
+   *  action names the exact tool call (`callId`) whose restore point it wants. */
   private refreshChangesPanel(): void {
     this.postMessage({
       type: "changesState",
@@ -2932,6 +2920,8 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         addedLines: fc.addedLines,
         removedLines: fc.removedLines,
         diff: fc.diff,
+        changeIndex: fc.changeIndex,
+        callId: fc.callId,
         toolName: fc.toolName,
       })),
     });
@@ -3437,17 +3427,17 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
   }
 
   /**
-   * Restore one file from the Changes panel.
+   * Restore one change from the Changes panel.
    *
    * Uses the engine's file-scoped `file-revert` endpoint, never
    * `restoreSnapshot`: the snapshot restore endpoint restores the whole
    * workspace, so using it for "revert one file" would silently roll back
    * every other file the session touched.
    *
-   * One click undoes the most recent recorded change to that file; clicking
-   * again walks further back, mirroring how `/undo` cursors through
-   * snapshots. The file is then dropped from the change record so the panel
-   * stops claiming a change the user has unwound.
+   * The callers name the change they are showing — the engine's
+   * `tool:<call_id>` restore point taken before that tool call — and only that
+   * record is dropped afterwards. Earlier changes to the same file are still
+   * on disk, so they stay listed and stay revertable.
    *
    * When the connected engine predates the endpoint the button renders
    * disabled (see `getWebviewCapabilities`); replayed messages are refused
@@ -3456,7 +3446,8 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
   private async handleRevertFileChange(
     filePath: string,
     _changeType: string,
-    _diff: string | undefined
+    _diff: string | undefined,
+    callId?: string
   ): Promise<void> {
     if (!this.apiCapabilities.threadFileRevert) {
       // Reject old/replayed webview messages as well as hiding the button.
@@ -3468,25 +3459,180 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       return;
     }
 
+    const changesForPath = this.turnFileChanges.filter(
+      (fc) => normalizePath(fc.filePath) === normalizePath(filePath)
+    );
+    // The card names the tool call that produced the change it is showing. A
+    // message without one (an older webview bundle, or a replayed action)
+    // falls back to the file's most recent change, which is what that button
+    // always meant.
+    const record = callId
+      ? changesForPath.find((fc) => fc.callId === callId)
+      : changesForPath[changesForPath.length - 1];
+
+    // The engine restores exactly the restore point the client names; it never
+    // picks "the newest snapshot that differs". The panel's identity for a
+    // change is the tool call that produced it — the engine snapshots the
+    // workspace as `tool:<call_id>` before every file-modifying call — so a
+    // record without that id has nothing safe to name.
+    if (!record?.callId) {
+      this.postMessage({ type: "info", message: t().revertNoSnapshot });
+      return;
+    }
+
     try {
       await this.api.ensureReady();
-      const reverted = await this.api.revertThreadFile(this.currentThread.id, filePath);
 
-      const normPath = normalizePath(filePath);
-      this.turnFileChanges = this.turnFileChanges.filter(
-        (fc) => normalizePath(fc.filePath) !== normPath
-      );
+      // Prove the revision before asking. An unprovable digest is refused
+      // here rather than replaced by one taken at request time: the engine's
+      // check for "the file moved since the review" can only protect the
+      // user's own edits if the client sends the revision it actually showed.
+      const expectedHash = this.expectedHashFor(record);
+      if (!expectedHash) {
+        this.postMessage({ type: "info", message: t().revertUnreadableFile });
+        return;
+      }
+
+      const snapshotId = await this.findSnapshotId(`tool:${record.callId}`);
+      if (!snapshotId) {
+        this.postMessage({ type: "info", message: t().revertNoSnapshot });
+        return;
+      }
+
+      const reverted = await this.api.revertThreadFile(this.currentThread.id, {
+        path: record.filePath || filePath,
+        snapshotId,
+        expectedHash,
+      });
+
+      // Drop only the change that was unwound: earlier changes to the same
+      // file are still on disk, so their records stay reviewable.
+      this.turnFileChanges = this.turnFileChanges.filter((fc) => fc !== record);
+      this.reindexFileChanges();
       this.refreshChangesPanel();
       this.postMessage({
         type: "info",
         message: t().revertSuccess(reverted.path || filePath),
       });
     } catch (err) {
+      if (this.explainRevertRefusal(getErrorMessage(err), record)) return;
       this.postMessage({
         type: "error",
         message: formatError(t().revertFailed, err),
       });
     }
+  }
+
+  /** The `tool:<call_id>` restore point that preceded a recorded change, if the
+   *  engine still lists it. The listing is workspace-wide and capped at 100 by
+   *  the endpoint, so a pruned or aged-out snapshot reads as "not there" and
+   *  the caller explains that instead of reverting some other revision. */
+  private async findSnapshotId(label: string): Promise<string | undefined> {
+    try {
+      const snapshots = await this.api.listSnapshots({ limit: 100 });
+      return snapshots.find((snapshot) => snapshot.label === label)?.id;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** Roots for resolving a path the runtime recorded, engine workspace first:
+   *  the engine hashes and restores the file *it* sees, so resolving against a
+   *  different folder would describe a different revision. */
+  private revertPathRoots(): string[] {
+    const roots = [this.currentThread?.workspace, ...this.recordedPathRoots()];
+    return roots.filter((root, index): root is string => !!root && roots.indexOf(root) === index);
+  }
+
+  private hashCurrentFile(filePath: string): string | undefined {
+    const absPath = resolveRecordedFilePath(
+      filePath,
+      this.revertPathRoots(),
+      defaultTasksDir()
+    );
+    return sha256OfFile(absPath);
+  }
+
+  /**
+   * The digest the file-revert endpoint expects for a change record.
+   *
+   * A record carries the digest taken while it was recorded, so the engine can
+   * tell "the user edited this file after the panel showed it" apart from
+   * "restore as reviewed". Records rebuilt from an earlier session have no
+   * such capture — the panel rebuilt them against the file's current contents,
+   * so their digest is taken now. `undefined` means the revision cannot be
+   * proved, and the caller refuses rather than send a digest it never saw.
+   */
+  private expectedHashFor(change: FileChangeInfo): string | undefined {
+    return change.expectedHash ?? this.hashCurrentFile(change.filePath);
+  }
+
+  /**
+   * Record the revision a change was recorded from, at the moment it is
+   * recorded — before the user can edit the file behind the panel's back.
+   *
+   * Best-effort by design: a file too large to hash cheaply, or one that cannot
+   * be read, simply leaves the record without a digest, and `expectedHashFor`
+   * falls back to the current bytes when the user acts on it.
+   */
+  private stampReviewedHash(change: FileChangeInfo): void {
+    if (!change.callId) return;
+    const absPath = resolveRecordedFilePath(
+      change.filePath,
+      this.revertPathRoots(),
+      defaultTasksDir()
+    );
+    const hash = sha256OfFile(absPath, { maxBytes: MAX_EAGER_HASH_BYTES });
+    if (hash === undefined) return;
+    // "absent" is a claim that the panel saw a deletion. Any other missing
+    // path is a resolution problem, not a fact about the file.
+    if (hash === "absent" && change.changeType !== "deleted") return;
+    change.expectedHash = hash;
+  }
+
+  /**
+   * Turn an engine refusal into the sentence the user needs, and refresh what
+   * the engine reported as stale. Returns true when it was handled here.
+   *
+   * A 409 is a decision, not a failure: the engine declines exactly because the
+   * client cannot see whether a restore point exists, is current, or is allowed
+   * by the thread's trust. Reporting it as "Revert failed: API error 409" hides
+   * the one piece of guidance that resolves it.
+   */
+  private explainRevertRefusal(message: string, record: FileChangeInfo): boolean {
+    if (message.includes("outside trusted mode")) {
+      this.postMessage({ type: "info", message: t().revertUntrusted });
+      return true;
+    }
+    if (message.includes("changed after the selected change record")) {
+      // The engine refused because the file moved since the panel recorded it.
+      // Re-read the bytes now and keep them on the record, so the next click is
+      // the deliberate re-review the engine asks for rather than a digest
+      // invented at request time.
+      record.expectedHash = this.hashCurrentFile(record.filePath);
+      this.postMessage({ type: "info", message: t().revertFileChanged });
+      return true;
+    }
+    if (message.includes("already matches snapshot")) {
+      this.postMessage({ type: "info", message: t().revertNothingToRevert });
+      return true;
+    }
+    if (
+      message.includes("restore point is unavailable") ||
+      message.includes("belongs to another session")
+    ) {
+      this.postMessage({ type: "info", message: t().revertStaleRecord });
+      return true;
+    }
+    if (message.includes("active turn") || message.includes("is not available")) {
+      this.postMessage({ type: "info", message: t().revertBusy });
+      return true;
+    }
+    if (message.includes("no bound session")) {
+      this.postMessage({ type: "info", message: t().revertNoSnapshot });
+      return true;
+    }
+    return false;
   }
 
   public async handleCompact(): Promise<void> {
@@ -3703,72 +3849,51 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     return roots.filter((root, index): root is string => !!root && roots.indexOf(root) === index);
   }
 
-  private async handleOpenDiff(filePath: string, diff?: string, useCumulative?: boolean, diffIndex?: number): Promise<void> {
+  private async handleOpenDiff(filePath: string, diff?: string, changeIndex?: number): Promise<void> {
     try {
       const absPath = resolveRecordedFilePath(filePath, this.recordedPathRoots(), defaultTasksDir());
 
-      // Look up the full diffs array from turnFileChanges for multi-edit files
-      const normPath = normalizePath(filePath);
-      const existing = this.turnFileChanges.find(fc => normalizePath(fc.filePath) === normPath);
-      const diffs = existing?.diffs;
-      // Use cumulative mode only when explicitly requested (changes sidebar)
-      const useCumulativeMode = useCumulative && diffs && diffs.length > 0;
+      const diffs = this.diffsForPath(filePath);
 
-      if (useCumulativeMode || diff) {
+      if (diff) {
         this.ensureDiffProvider();
 
         let oldContent: string;
         let newContent: string;
 
-        if (useCumulativeMode) {
-          // Cumulative mode (changes sidebar): read current file, reverse-apply all diffs
+        if (changeIndex !== undefined && changeIndex >= 0 && changeIndex < diffs.length) {
+          // Reconstruct this change's own before/after from the file's later
+          // changes: a record describes one change, so the diff that opened
+          // must be that change's, not the file's running total.
           try {
             const currentUri = vscode.Uri.file(absPath);
             const doc = await vscode.workspace.openTextDocument(currentUri);
-            newContent = doc.getText();
-          } catch {
-            const parsed = parseDiffToSides(diffs![0]);
-            newContent = parsed.newContent;
-          }
-
-          const reconstructed = reconstructOriginalContent(diffs!, newContent);
-          if (reconstructed !== null) {
-            oldContent = reconstructed;
-          } else {
-            const fallbackDiff = diff || diffs![diffs!.length - 1];
-            const singleReconstructed = reconstructOldContent(newContent, fallbackDiff);
-            oldContent = singleReconstructed !== null ? singleReconstructed : parseDiffToSides(fallbackDiff).oldContent;
-          }
-        } else if (diffs && diffs.length > 0 && diffIndex !== undefined && diffIndex >= 0) {
-          // Single diff with precise indexing: reconstruct full-file old/new for this specific change
-          try {
-            const currentUri = vscode.Uri.file(absPath);
-            const doc = await vscode.workspace.openTextDocument(currentUri);
-            const state = getDiffStateForIndex(diffs, doc.getText(), diffIndex);
+            const state = getDiffStateForIndex(diffs, doc.getText(), changeIndex);
             if (state) {
               oldContent = state.oldContent;
               newContent = state.newContent;
             } else {
               // Reconstruction failed, fall back to parsing diff
-              const parsed = parseDiffToSides(diff!);
+              const parsed = parseDiffToSides(diff);
               oldContent = parsed.oldContent;
               newContent = parsed.newContent;
             }
           } catch {
-            const parsed = parseDiffToSides(diff!);
+            const parsed = parseDiffToSides(diff);
             oldContent = parsed.oldContent;
             newContent = parsed.newContent;
           }
         } else {
-          // Single diff without indexing (only one modification): read file, reverse-apply
+          // No recorded index (a single change, or a card from a session whose
+          // chain no longer lines up): read the file and reverse-apply it.
           try {
             const currentUri = vscode.Uri.file(absPath);
             const doc = await vscode.workspace.openTextDocument(currentUri);
             newContent = doc.getText();
-            const reconstructed = reconstructOldContent(newContent, diff!);
-            oldContent = reconstructed !== null ? reconstructed : parseDiffToSides(diff!).oldContent;
+            const reconstructed = reconstructOldContent(newContent, diff);
+            oldContent = reconstructed !== null ? reconstructed : parseDiffToSides(diff).oldContent;
           } catch {
-            const parsed = parseDiffToSides(diff!);
+            const parsed = parseDiffToSides(diff);
             oldContent = parsed.oldContent;
             newContent = parsed.newContent;
           }
@@ -4397,49 +4522,22 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
           });
           if (fcSignal) {
             const fc: FileChangeInfo = fcSignal;
+            this.stampReviewedHash(fc);
             if (tc) {
               tc.fileChange = fc;
             }
-              const normPath = normalizePath(fc.filePath);
-              const existingIdx = this.turnFileChanges.findIndex(existing => normalizePath(existing.filePath) === normPath);
-              // Set diffIndex on fc before merging (index in the diffs array this diff will occupy)
-              if (fc.diff) {
-                const prevDiffs = existingIdx >= 0
-                  ? (this.turnFileChanges[existingIdx].diffs ?? (this.turnFileChanges[existingIdx].diff ? [this.turnFileChanges[existingIdx].diff] : []))
-                  : [];
-                fc.diffIndex = prevDiffs.length;
-              }
-              if (existingIdx >= 0) {
-                // Merge with existing change for cumulative stats
-                const existing = this.turnFileChanges[existingIdx];
-                const existingDiffs = existing.diffs ?? (existing.diff ? [existing.diff] : []);
-                const newDiffs = fc.diff ? [...existingDiffs, fc.diff] : existingDiffs;
-                this.turnFileChanges[existingIdx] = {
-                  ...fc,
-                  addedLines: existing.addedLines + fc.addedLines,
-                  removedLines: existing.removedLines + fc.removedLines,
-                  changeType: fc.changeType === "created" ? "created" :
-                             fc.changeType === "deleted" && existing.changeType !== "created" ? "deleted" :
-                             existing.changeType,
-                  diff: fc.diff ?? existing.diff,
-                  diffs: newDiffs,
-                  toolName: fc.toolName ?? existing.toolName,
-                };
-              } else {
-                this.turnFileChanges.push({
-                  ...fc,
-                  diffs: fc.diff ? [fc.diff] : [],
-                });
-              }
-              if (tcIdx !== undefined) {
-                this.postMessage({
-                  type: "fileChangeDetected",
-                  messageId: msg.id,
-                  toolCallIdx: tcIdx,
-                  fileChange: fc,
-                });
-              }
-              this.refreshWorkPanel();
+            // Appended, never merged into a per-file total: the card, the
+            // Changes panel and the revert target all describe this one call.
+            this.appendFileChange(fc);
+            if (tcIdx !== undefined) {
+              this.postMessage({
+                type: "fileChangeDetected",
+                messageId: msg.id,
+                toolCallIdx: tcIdx,
+                fileChange: fc,
+              });
+            }
+            this.refreshWorkPanel();
           }
           if (pl.item?.metadata?.task_updates) {
             const checklist = (pl.item.metadata.task_updates as Record<string, unknown>).checklist;

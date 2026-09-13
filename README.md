@@ -130,9 +130,10 @@ Switch from the status bar or with `/mode` (shortcuts `1`/`2`/`3`) and `/auto`. 
 - The legacy **Threads** tab still exists but is hidden by default (`brotherwhale.showThreadList`).
 
 ### Changes and diffs in the editor
-- A **Changes** section per conversation, with file-change cards built from the engine's authoritative mutation metadata.
+- A **Changes** section per conversation, with one card per recorded change, built from the engine's authoritative mutation metadata.
 - **Diff view** with correct line numbers, reconstructing the file the model actually saw.
 - **Open** a changed file directly in the editor, or **Diff** it inline.
+- **Revert** restores one recorded change through the engine's file-scoped endpoint, naming the restore point taken before that change; the rest of the file's changes — and every other file — are left alone.
 - Replayed sessions rebuild diffs from the recorded replacements — and deliberately show *no* diff rather than a fabricated one when the chain no longer lines up.
 
 ### Tasks, agents, and Fleet
@@ -223,7 +224,7 @@ your workspace + the model provider you configured in the engine
 
 Each trusted VS Code window starts its own authenticated local Runtime. Old port files are ignored; restarting never kills an unrelated service. The Runtime token is generated for that process and kept out of command arguments, settings, and logs.
 
-Reloading or closing the extension stops that window's Runtime and interrupts active work. Completed, saved sessions remain available through Sessions. Save or finish active work before reloading; active-turn continuity across reload is not supported. The per-file revert control is disabled until the Runtime offers file-scoped restore; Undo last turn remains available through the existing thread API.
+Reloading or closing the extension stops that window's Runtime and interrupts active work. Completed, saved sessions remain available through Sessions. Save or finish active work before reloading; active-turn continuity across reload is not supported. Per-file Revert works against the engine's file-scoped restore endpoint; on an engine that predates it the control stays disabled with an explanation, and Undo last turn remains available through the existing thread API.
 
 ## Troubleshooting
 

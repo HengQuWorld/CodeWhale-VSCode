@@ -89,6 +89,22 @@ describe("webview-js-messages.ts", () => {
     expect(script).toContain("fc-revert");
   });
 
+  it("names the change on the card's Diff and Revert actions", () => {
+    const script = getMessagesScript(makeTr());
+    // One file can change more than once; each card carries the position of
+    // its own change (Diff) and the tool call that produced it (Revert), so an
+    // action on one card cannot touch another change to the same file.
+    expect(script).toContain("data-change-index=");
+    expect(script).toContain("data-call-id=");
+    expect(script).toContain("changeIndex: changeIdx !== null");
+    expect(script).toContain("callId: callId");
+  });
+
+  it("generates a script the webview can parse", () => {
+    // The webview scripts are string-built, so nothing else type-checks them.
+    expect(() => new Function(getMessagesScript(makeTr()))).not.toThrow();
+  });
+
   it("contains approval bar rendering", () => {
     const script = getMessagesScript(makeTr());
     expect(script).toContain("approval-bar");

@@ -355,14 +355,14 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
     }
     html += '<div class="fc-actions">';
     if (fc.diff) {
-      html += '<button class="fc-view-diff" data-file-path="' + __wvEscapeHtml(fc.filePath) + '" data-diff-key="' + diffKey + '" data-diff-index="' + (fc.diffIndex !== undefined ? fc.diffIndex : '') + '" title="' + __wvEscapeHtml(__i18n.viewDiffTooltip) + '">\\uD83D\\uDD0D ' + __wvEscapeHtml(__i18n.viewDiff) + '</button>';
+      html += '<button class="fc-view-diff" data-file-path="' + __wvEscapeHtml(fc.filePath) + '" data-diff-key="' + diffKey + '" data-change-index="' + (fc.changeIndex !== undefined ? fc.changeIndex : '') + '" title="' + __wvEscapeHtml(__i18n.viewDiffTooltip) + '">\\uD83D\\uDD0D ' + __wvEscapeHtml(__i18n.viewDiff) + '</button>';
     }
     if (fc.changeType !== 'deleted') {
       html += '<button class="fc-open-file" data-file-path="' + __wvEscapeHtml(fc.filePath) + '" title="' + __wvEscapeHtml(__i18n.openFileTooltip) + '">\\uD83D\\uDCC4 ' + __wvEscapeHtml(__i18n.openFile) + '</button>';
     }
     var apiCapabilities = window.__wvApiCapabilities || {};
     if (apiCapabilities.revertFileChange) {
-      html += '<button class="fc-revert" data-file-path="' + __wvEscapeHtml(fc.filePath) + '" data-change-type="' + __wvEscapeHtml(fc.changeType) + '" data-diff-key="' + (fc.diff ? diffKey : '') + '" title="' + __wvEscapeHtml(__i18n.revertFileTooltip) + '">\\u21A9 ' + __wvEscapeHtml(__i18n.revertFile) + '</button>';
+      html += '<button class="fc-revert" data-file-path="' + __wvEscapeHtml(fc.filePath) + '" data-change-type="' + __wvEscapeHtml(fc.changeType) + '" data-diff-key="' + (fc.diff ? diffKey : '') + '" data-call-id="' + __wvEscapeHtml(fc.callId || '') + '" title="' + __wvEscapeHtml(__i18n.revertFileTooltip) + '">\\u21A9 ' + __wvEscapeHtml(__i18n.revertFile) + '</button>';
     } else {
       html += '<button class="fc-revert is-unavailable" aria-disabled="true" data-disabled="true" data-tooltip="' + __wvEscapeHtml(__i18n.revertUnsupportedTooltip) + '">\\u21A9 ' + __wvEscapeHtml(__i18n.revertFile) + '</button>';
     }
@@ -507,9 +507,9 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
     if (target.classList.contains('fc-view-diff')) {
       var filePath = target.getAttribute('data-file-path');
       var diffKey = target.getAttribute('data-diff-key');
-      var diffIdx = target.getAttribute('data-diff-index');
+      var changeIdx = target.getAttribute('data-change-index');
       if (filePath) {
-        vscode.postMessage({ type: 'openDiff', filePath: filePath, diff: (diffKey ? _diffStore.get(diffKey) : undefined) || undefined, diffIndex: diffIdx !== null && diffIdx !== '' ? parseInt(diffIdx) : undefined });
+        vscode.postMessage({ type: 'openDiff', filePath: filePath, diff: (diffKey ? _diffStore.get(diffKey) : undefined) || undefined, changeIndex: changeIdx !== null && changeIdx !== '' ? parseInt(changeIdx) : undefined });
       }
       return;
     }
@@ -529,8 +529,11 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
       var filePath = target.getAttribute('data-file-path');
       var changeType = target.getAttribute('data-change-type') || 'modified';
       var diffKey = target.getAttribute('data-diff-key');
+      // The card names the change it is showing: one file can be changed more
+      // than once, and reverting one of them must not touch the others.
+      var callId = target.getAttribute('data-call-id') || undefined;
       if (filePath) {
-        vscode.postMessage({ type: 'revertFileChange', filePath: filePath, changeType: changeType, diff: (diffKey ? _diffStore.get(diffKey) : undefined) || undefined });
+        vscode.postMessage({ type: 'revertFileChange', filePath: filePath, changeType: changeType, diff: (diffKey ? _diffStore.get(diffKey) : undefined) || undefined, callId: callId });
       }
       return;
     }
@@ -538,9 +541,9 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
     if (target.classList.contains('work-fc-view-diff')) {
       var filePath = target.getAttribute('data-file-path');
       var diffKey = target.getAttribute('data-diff-key');
-      var diffIdx = target.getAttribute('data-diff-index');
+      var changeIdx = target.getAttribute('data-change-index');
       if (filePath) {
-        vscode.postMessage({ type: 'openDiff', filePath: filePath, diff: (diffKey ? _diffStore.get(diffKey) : undefined) || undefined, diffIndex: diffIdx !== null && diffIdx !== '' ? parseInt(diffIdx) : undefined });
+        vscode.postMessage({ type: 'openDiff', filePath: filePath, diff: (diffKey ? _diffStore.get(diffKey) : undefined) || undefined, changeIndex: changeIdx !== null && changeIdx !== '' ? parseInt(changeIdx) : undefined });
       }
       return;
     }

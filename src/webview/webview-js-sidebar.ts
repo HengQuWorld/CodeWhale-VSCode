@@ -885,7 +885,8 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
       container.appendChild(el);
       return;
     }
-    // Summary header
+    // Summary header. Entries are changes, not files: a file edited three
+    // times is three rows, each with its own diff and its own revert target.
     var header = document.createElement('div');
     header.className = 'work-section';
     var createdCount = 0, modifiedCount = 0, deletedCount = 0;
@@ -907,7 +908,7 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
     header.innerHTML = '<div class="work-section-title"><span class="work-section-title-icon">\\uD83D\\uDCC1</span>' + __wvEscapeHtml(__i18n.fileChanges) + ' <span class="work-section-subtitle">(' + changesState.length + ')</span></div><div class="change-summary-row">' + summaryParts.join(' ') + '</div>';
     container.appendChild(header);
 
-    // File list
+    // Change list
     var list = document.createElement('div');
     list.className = 'work-section change-list';
     var html = '';
@@ -930,7 +931,7 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
       }
       html += '<span class="change-actions">';
       if (fc.diff) {
-        html += '<button class="change-btn change-view-diff" data-file-path="' + __wvEscapeHtml(fc.filePath) + '" data-diff-key="' + diffKey + '" title="' + __wvEscapeHtml(__i18n.viewDiffTooltip) + '">Diff</button>';
+        html += '<button class="change-btn change-view-diff" data-file-path="' + __wvEscapeHtml(fc.filePath) + '" data-diff-key="' + diffKey + '" data-change-index="' + (fc.changeIndex !== undefined ? fc.changeIndex : '') + '" title="' + __wvEscapeHtml(__i18n.viewDiffTooltip) + '">Diff</button>';
       }
       if (fc.changeType !== 'deleted') {
         html += '<button class="change-btn change-open-file" data-file-path="' + __wvEscapeHtml(fc.filePath) + '" title="' + __wvEscapeHtml(__i18n.openFileTooltip) + '">Open</button>';
@@ -947,7 +948,8 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
       if (target.classList.contains('change-view-diff')) {
         var filePath = target.getAttribute('data-file-path');
         var diffKey = target.getAttribute('data-diff-key');
-        vscode.postMessage({ type: 'openDiff', filePath: filePath, diff: (diffKey ? _diffStore.get(diffKey) : undefined) || undefined, useCumulative: true });
+        var changeIdx = target.getAttribute('data-change-index');
+        vscode.postMessage({ type: 'openDiff', filePath: filePath, diff: (diffKey ? _diffStore.get(diffKey) : undefined) || undefined, changeIndex: changeIdx !== null && changeIdx !== '' ? parseInt(changeIdx) : undefined });
       } else if (target.classList.contains('change-open-file')) {
         var filePath = target.getAttribute('data-file-path');
         vscode.postMessage({ type: 'openFile', filePath: filePath });

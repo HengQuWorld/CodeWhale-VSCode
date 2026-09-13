@@ -1,4 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { createHash } from "node:crypto";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 vi.mock("vscode", () => ({
   workspace: {
@@ -24,6 +28,7 @@ vi.mock("vscode", () => ({
 }));
 
 import { ChatProvider } from "./chat-provider";
+import type { FileChangeInfo } from "./utils/session-state";
 
 function createProvider() {
   const api = {
@@ -199,25 +204,47 @@ describe("single-file revert boundary", () => {
     expect((provider as any).getWebviewCapabilities().revertFileChange).toBe(true);
   });
 
-  it("reverts one file through the file-scoped endpoint and drops it from the change record", async () => {
+  it("reverts exactly the restore point the change names, and drops it from the record", async () => {
     const { provider, api, postMessage } = createProvider();
+    const snapshotId = "3f2a".padEnd(40, "0");
+    const expectedHash = "sha256:" + "ab".repeat(32);
     const revertThreadFile = vi.fn(async () => ({
       path: "a.ts",
       action: "modified",
-      snapshot_id: "abc123",
-      snapshot_label: "pre-turn:1",
+      snapshot_id: snapshotId,
+      snapshot_label: "tool:call_abc123",
     }));
+    const listSnapshots = vi.fn(async () => [
+      { id: "11".padEnd(40, "0"), label: "tool:call_other", timestamp: 1 },
+      { id: snapshotId, label: "tool:call_abc123", timestamp: 2 },
+    ]);
     (api as any).revertThreadFile = revertThreadFile;
+    (api as any).listSnapshots = listSnapshots;
     (provider as any).apiCapabilities.threadFileRevert = true;
     (provider as any).sessionState.data.turnFileChanges = [
-      { filePath: "a.ts", changeType: "modified", addedLines: 1, removedLines: 0 },
+      {
+        filePath: "a.ts",
+        changeType: "modified",
+        addedLines: 1,
+        removedLines: 0,
+        callId: "call_abc123",
+        expectedHash,
+      },
       { filePath: "b.ts", changeType: "modified", addedLines: 2, removedLines: 1 },
     ];
 
     await (provider as any).handleRevertFileChange("a.ts", "modified", undefined);
 
     expect(api.ensureReady).toHaveBeenCalledOnce();
-    expect(revertThreadFile).toHaveBeenCalledWith("thread-1", "a.ts");
+    // The engine restores the restore point the client names. Naming it is what
+    // keeps this from being "the newest snapshot that differs", which can erase
+    // the user's later edits while leaving this change in place.
+    expect(listSnapshots).toHaveBeenCalledWith({ limit: 100 });
+    expect(revertThreadFile).toHaveBeenCalledWith("thread-1", {
+      path: "a.ts",
+      snapshotId,
+      expectedHash,
+    });
     // The unwound file is gone; the other file's record is untouched.
     expect((provider as any).sessionState.data.turnFileChanges).toEqual([
       { filePath: "b.ts", changeType: "modified", addedLines: 2, removedLines: 1 },
@@ -234,28 +261,285 @@ describe("single-file revert boundary", () => {
     });
   });
 
-  it("never falls back to the whole-workspace snapshot restore", async () => {
+  it("explains a change whose restore point is gone instead of reverting another one", async () => {
     const { provider, api, postMessage } = createProvider();
-    const restoreSnapshot = vi.fn();
-    const listSnapshots = vi.fn();
-    (api as any).restoreSnapshot = restoreSnapshot;
-    (api as any).listSnapshots = listSnapshots;
-    (api as any).revertThreadFile = vi.fn(async () => {
-      throw new Error("409: No snapshot owned by this session differs");
+    const revertThreadFile = vi.fn();
+    (api as any).revertThreadFile = revertThreadFile;
+    // The listing is workspace-wide and capped: a pruned snapshot is simply
+    // absent, and the client must not substitute a different one.
+    (api as any).listSnapshots = vi.fn(async () => [
+      { id: "11".padEnd(40, "0"), label: "tool:call_other", timestamp: 1 },
+    ]);
+    (provider as any).apiCapabilities.threadFileRevert = true;
+    (provider as any).sessionState.data.turnFileChanges = [
+      {
+        filePath: "a.ts",
+        changeType: "modified",
+        addedLines: 1,
+        removedLines: 0,
+        callId: "call_abc123",
+        expectedHash: "sha256:" + "ab".repeat(32),
+      },
+    ];
+
+    await (provider as any).handleRevertFileChange("a.ts", "modified", undefined);
+
+    expect(revertThreadFile).not.toHaveBeenCalled();
+    expect(postMessage).toHaveBeenCalledWith({
+      type: "info",
+      message: expect.stringContaining("no engine restore point"),
     });
+    expect((provider as any).sessionState.data.turnFileChanges).toHaveLength(1);
+  });
+
+  it("refuses a record whose runtime published no call id", async () => {
+    const { provider, api, postMessage } = createProvider();
+    const revertThreadFile = vi.fn();
+    const listSnapshots = vi.fn();
+    (api as any).revertThreadFile = revertThreadFile;
+    (api as any).listSnapshots = listSnapshots;
     (provider as any).apiCapabilities.threadFileRevert = true;
 
     await (provider as any).handleRevertFileChange("a.ts", "modified", undefined);
 
-    expect(restoreSnapshot).not.toHaveBeenCalled();
+    // Without the engine's identity for the change there is nothing to name,
+    // and guessing would be the workspace-wide rollback this route replaced.
     expect(listSnapshots).not.toHaveBeenCalled();
-    // A failed revert must not silently drop the file from the record.
-    expect((provider as any).sessionState.data.turnFileChanges).toEqual([
-      { filePath: "a.ts", changeType: "modified", addedLines: 1, removedLines: 0 },
+    expect(revertThreadFile).not.toHaveBeenCalled();
+    expect(postMessage).toHaveBeenCalledWith({
+      type: "info",
+      message: expect.stringContaining("no engine restore point"),
+    });
+  });
+
+  it("keeps a non-refusal failure an error and never falls back to the whole-workspace restore", async () => {
+    const { provider, api, postMessage } = createProvider();
+    const restoreSnapshot = vi.fn();
+    (api as any).restoreSnapshot = restoreSnapshot;
+    (api as any).listSnapshots = vi.fn(async () => [
+      { id: "11".padEnd(40, "0"), label: "tool:call_abc123", timestamp: 1 },
     ]);
+    (api as any).revertThreadFile = vi.fn(async () => {
+      throw new Error("API error 500: File restore failed: git checkout failed");
+    });
+    (provider as any).apiCapabilities.threadFileRevert = true;
+    (provider as any).sessionState.data.turnFileChanges = [
+      {
+        filePath: "a.ts",
+        changeType: "modified",
+        addedLines: 1,
+        removedLines: 0,
+        callId: "call_abc123",
+        expectedHash: "sha256:" + "ab".repeat(32),
+      },
+    ];
+
+    await (provider as any).handleRevertFileChange("a.ts", "modified", undefined);
+
+    expect(restoreSnapshot).not.toHaveBeenCalled();
+    // A failed revert must not silently drop the file from the record.
+    expect((provider as any).sessionState.data.turnFileChanges).toHaveLength(1);
     expect(postMessage).toHaveBeenCalledWith({
       type: "error",
-      message: expect.stringContaining("No snapshot owned by this session differs"),
+      message: expect.stringContaining("git checkout failed"),
     });
+  });
+
+  it("re-reads the file and asks for a deliberate retry when it moved under the panel", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "bw-revert-"));
+    try {
+      const abs = path.join(dir, "a.ts");
+      fs.writeFileSync(abs, "edited by hand\n");
+      const { provider, api, postMessage } = createProvider();
+      (api as any).listSnapshots = vi.fn(async () => [
+        { id: "11".padEnd(40, "0"), label: "tool:call_abc123", timestamp: 1 },
+      ]);
+      // The engine's own sentence for a revision that no longer matches.
+      (api as any).revertThreadFile = vi.fn(async () => {
+        throw new Error(
+          "API error 409: The file changed after the selected change record. Refresh and review it before restoring; nothing was changed."
+        );
+      });
+      (provider as any).apiCapabilities.threadFileRevert = true;
+      (provider as any).currentThread = { id: "thread-1", workspace: dir };
+      const record = {
+        filePath: "a.ts",
+        changeType: "modified" as const,
+        addedLines: 1,
+        removedLines: 0,
+        callId: "call_abc123",
+        expectedHash: "sha256:" + "00".repeat(32),
+      };
+      (provider as any).sessionState.data.turnFileChanges = [record];
+
+      await (provider as any).handleRevertFileChange("a.ts", "modified", undefined);
+
+      // Guidance, not HTTP framing — and the record now carries the revision
+      // the user is looking at, so the next click is the re-review the engine asks for.
+      expect(postMessage).toHaveBeenCalledWith({
+        type: "info",
+        message: expect.stringContaining("click Revert again"),
+      });
+      expect(record.expectedHash).toBe(
+        "sha256:" + createHash("sha256").update("edited by hand\n").digest("hex")
+      );
+      expect((provider as any).sessionState.data.turnFileChanges).toHaveLength(1);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("reverts only the change a card names, keeping the file's other changes reviewable", async () => {
+    const { provider, api, postMessage } = createProvider();
+    const firstSnapshot = "aa".padEnd(40, "0");
+    const snapshotId = "bb".padEnd(40, "0");
+    const revertThreadFile = vi.fn(async () => ({
+      path: "a.ts",
+      action: "modified",
+      snapshot_id: snapshotId,
+      snapshot_label: "tool:call_second",
+    }));
+    (api as any).revertThreadFile = revertThreadFile;
+    (api as any).listSnapshots = vi.fn(async () => [
+      { id: firstSnapshot, label: "tool:call_first", timestamp: 1 },
+      { id: snapshotId, label: "tool:call_second", timestamp: 2 },
+    ]);
+    (provider as any).apiCapabilities.threadFileRevert = true;
+    const state = (provider as any).sessionState.data;
+    const first: FileChangeInfo = {
+      filePath: "a.ts",
+      changeType: "modified",
+      addedLines: 1,
+      removedLines: 0,
+      diff: "diff one",
+      callId: "call_first",
+      expectedHash: "sha256:" + "11".repeat(32),
+    };
+    const second: FileChangeInfo = {
+      filePath: "a.ts",
+      changeType: "modified",
+      addedLines: 2,
+      removedLines: 1,
+      diff: "diff two",
+      callId: "call_second",
+      expectedHash: "sha256:" + "22".repeat(32),
+    };
+    state.turnFileChanges = [first, second];
+    (provider as any).reindexFileChanges();
+    expect(first.changeIndex).toBe(0);
+    expect(second.changeIndex).toBe(1);
+
+    await (provider as any).handleRevertFileChange("a.ts", "modified", undefined, "call_second");
+
+    // The card named the second change, so the first one — still on disk —
+    // stays listed, and the surviving change is renumbered in its file.
+    expect(revertThreadFile).toHaveBeenCalledWith("thread-1", {
+      path: "a.ts",
+      snapshotId,
+      expectedHash: second.expectedHash,
+    });
+    expect(state.turnFileChanges).toEqual([first]);
+    expect(first.changeIndex).toBe(0);
+    expect(postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "changesState",
+        changes: [expect.objectContaining({ filePath: "a.ts", diff: "diff one" })],
+      })
+    );
+  });
+
+  it("falls back to the file's most recent change when a message names none", async () => {
+    const { provider, api } = createProvider();
+    const snapshotId = "bb".padEnd(40, "0");
+    const revertThreadFile = vi.fn(async () => ({
+      path: "a.ts",
+      action: "modified",
+      snapshot_id: snapshotId,
+      snapshot_label: "tool:call_second",
+    }));
+    (api as any).revertThreadFile = revertThreadFile;
+    (api as any).listSnapshots = vi.fn(async () => [
+      { id: snapshotId, label: "tool:call_second", timestamp: 2 },
+    ]);
+    (provider as any).apiCapabilities.threadFileRevert = true;
+    (provider as any).sessionState.data.turnFileChanges = [
+      {
+        filePath: "a.ts",
+        changeType: "modified",
+        addedLines: 1,
+        removedLines: 0,
+        callId: "call_first",
+        expectedHash: "sha256:" + "11".repeat(32),
+      },
+      {
+        filePath: "a.ts",
+        changeType: "modified",
+        addedLines: 2,
+        removedLines: 1,
+        callId: "call_second",
+        expectedHash: "sha256:" + "22".repeat(32),
+      },
+    ];
+
+    await (provider as any).handleRevertFileChange("a.ts", "modified", undefined);
+
+    expect(revertThreadFile).toHaveBeenCalledWith("thread-1", {
+      path: "a.ts",
+      snapshotId,
+      expectedHash: "sha256:" + "22".repeat(32),
+    });
+  });
+
+  it("presents the engine's refusals as guidance rather than HTTP errors", async () => {
+    const refusals = [
+      {
+        engineMessage:
+          "API error 409: Refusing to restore workspace files outside trusted mode. Turn on /trust or switch this thread to Full Access, then retry.",
+        expected: "trusted thread",
+      },
+      {
+        engineMessage:
+          "API error 409: Thread thread-1 already has an active turn in workspace /w",
+        expected: "busy with another turn",
+      },
+      {
+        engineMessage:
+          "API error 409: Selected restore point is unavailable or belongs to another session; refresh the change record and select the change again.",
+        expected: "Reload the session",
+      },
+      {
+        engineMessage:
+          "API error 409: 'a.ts' already matches snapshot 'tool:call_abc123'; nothing to revert.",
+        expected: "nothing to revert",
+      },
+    ];
+
+    for (const { engineMessage, expected } of refusals) {
+      const { provider, api, postMessage } = createProvider();
+      (api as any).listSnapshots = vi.fn(async () => [
+        { id: "11".padEnd(40, "0"), label: "tool:call_abc123", timestamp: 1 },
+      ]);
+      (api as any).revertThreadFile = vi.fn(async () => {
+        throw new Error(engineMessage);
+      });
+      (provider as any).apiCapabilities.threadFileRevert = true;
+      (provider as any).sessionState.data.turnFileChanges = [
+        {
+          filePath: "a.ts",
+          changeType: "modified",
+          addedLines: 1,
+          removedLines: 0,
+          callId: "call_abc123",
+          expectedHash: "sha256:" + "ab".repeat(32),
+        },
+      ];
+
+      await (provider as any).handleRevertFileChange("a.ts", "modified", undefined);
+
+      expect(postMessage, engineMessage).toHaveBeenCalledWith({
+        type: "info",
+        message: expect.stringContaining(expected),
+      });
+    }
   });
 });

@@ -27,18 +27,38 @@ export interface ToolCallInfo {
   fileChange?: FileChangeInfo;
 }
 
+/**
+ * One recorded change to one file.
+ *
+ * A record describes a single tool call's edit, never a running total for the
+ * path: the panel lists what each call did, and reverting one of them must
+ * leave the others reviewable. Per-file statistics are summed where they are
+ * displayed (the sidebar's summary row), not stored.
+ */
 export interface FileChangeInfo {
   filePath: string;
   changeType: "created" | "modified" | "deleted";
   addedLines: number;
   removedLines: number;
   diff?: string;
-  /** All diffs for this file across the session, in chronological order */
-  diffs?: string[];
-  /** Index of this diff in the diffs array, used to reconstruct state for per-card diff */
-  diffIndex?: number;
-  oldContent?: string;
-  newContent?: string;
+  /** Position of this change within its file's history, counting only the
+   *  changes that carry a diff (0-based). Rebuilding a change's before/after
+   *  content walks the file's later changes back from what is on disk, so each
+   *  change needs its own index. Assigned by `reindexFileChanges`. */
+  changeIndex?: number;
+  /** Engine call id of the tool call this record describes, when the runtime
+   *  published one. The engine snapshots the whole workspace as
+   *  `tool:<call_id>` before every file-modifying call, and the file-revert
+   *  endpoint requires the client to name *that* snapshot — it never guesses
+   *  "the newest snapshot that differs", because an unrelated newer snapshot
+   *  can erase the user's later edits while leaving this change in place. */
+  callId?: string;
+  /** `sha256:<hex>` of the bytes this record was built from, or `absent` when
+   *  the panel saw the file deleted. Sent as `expected_hash`, so the engine can
+   *  tell "the file moved since the panel showed it" apart from "restore as
+   *  reviewed". Captured when the change is recorded; records restored from an
+   *  earlier session fall back to the current bytes at click time. */
+  expectedHash?: string;
   toolName?: string;
 }
 

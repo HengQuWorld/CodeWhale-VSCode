@@ -204,6 +204,13 @@ interface Translations {
   revertConfirmButton: string;
   revertCancelButton: string;
   revertNotSupported: string;
+  revertNoSnapshot: string;
+  revertFileChanged: string;
+  revertNothingToRevert: string;
+  revertUnreadableFile: string;
+  revertUntrusted: string;
+  revertBusy: string;
+  revertStaleRecord: string;
   revertSuccess: (filePath: string) => string;
   revertFailed: string;
   revertUnsupportedTooltip: string;
@@ -529,6 +536,13 @@ const en: Translations = {
   revertConfirmButton: "Revert",
   revertCancelButton: "Cancel",
   revertNotSupported: "Single-file revert is unavailable. Use Undo last turn to restore the changes for the whole turn.",
+  revertNoSnapshot: "This change has no engine restore point of its own, so it cannot be reverted: workspace snapshots may be disabled, or the restore point has already been pruned. Use Undo last turn to restore the whole turn.",
+  revertFileChanged: "This file changed after the panel recorded the change, so nothing was reverted. The change record now reflects the file's current bytes — click Revert again to restore it.",
+  revertNothingToRevert: "This file already matches the recorded restore point; there was nothing to revert.",
+  revertUnreadableFile: "Could not read this file to verify its current contents, so nothing was reverted. Use Undo last turn instead.",
+  revertUntrusted: "The engine only restores workspace files in a trusted thread. Turn on /trust or switch this thread to Full Access, then retry.",
+  revertBusy: "The engine is busy with another turn in this workspace, or its workspace directory is unavailable. Wait for the turn to finish and retry.",
+  revertStaleRecord: "The engine no longer holds the restore point for this change. Reload the session and select the change again.",
   revertSuccess: (filePath) => `Reverted "${filePath}" to its previously recorded state.`,
   revertFailed: "Revert failed",
   revertUnsupportedTooltip: "Single-file revert is unavailable. Use Undo last turn.",
@@ -854,6 +868,13 @@ const zhCn: Translations = {
   revertConfirmButton: "回滚",
   revertCancelButton: "取消",
   revertNotSupported: "暂不支持单文件回滚。请使用“撤销上一轮”恢复整轮更改。",
+  revertNoSnapshot: "该变更没有对应的引擎还原点,无法单独回滚:工作区快照可能已关闭,或该还原点已被清理。请改用“撤销上一轮”恢复整轮更改。",
+  revertFileChanged: "面板记录该变更之后,文件内容发生了变化,因此没有执行回滚。变更记录已按文件当前内容刷新,再次点击“回滚”即可恢复。",
+  revertNothingToRevert: "该文件已与记录的还原点一致,无需回滚。",
+  revertUnreadableFile: "无法读取该文件以核对当前内容,因此没有执行回滚。请改用“撤销上一轮”。",
+  revertUntrusted: "引擎仅在受信任的线程中恢复工作区文件。请开启 /trust 或把该线程切换为完全访问后重试。",
+  revertBusy: "引擎正在该工作区执行另一轮对话,或其工作区目录不可用。请等待本轮结束后重试。",
+  revertStaleRecord: "引擎已不再持有该变更的还原点。请重新加载会话后再选择该变更。",
   revertSuccess: (filePath) => `已将「${filePath}」回滚到上一次记录的状态。`,
   revertFailed: "回滚失败",
   revertUnsupportedTooltip: "暂不支持单文件回滚。请使用“撤销上一轮”。",

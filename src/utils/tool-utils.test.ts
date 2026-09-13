@@ -159,6 +159,37 @@ describe("detectFileChange", () => {
     });
     expect(fc?.changeType).toBe("deleted");
   });
+
+  it("carries the engine's tool-call id, which names the change's restore point", () => {
+    // The engine snapshots the workspace as `tool:<call_id>` before a
+    // file-modifying call; file-revert restores exactly that snapshot, so the
+    // change record has to keep the id.
+    const fc = detectFileChange({
+      toolName: "write",
+      input: { path: "src/app.ts" },
+      metadata: { ...mutationMetadata(), tool_use_id: "call_abc123" },
+    });
+    expect(fc?.callId).toBe("call_abc123");
+  });
+
+  it("carries the call id on the legacy detection path too", () => {
+    const fc = detectFileChange({
+      toolName: "write_file",
+      input: { path: "src/app.ts" },
+      output: `Wrote 10 bytes to src/app.ts\n${UPDATED_DIFF}`,
+      metadata: { tool_use_id: "call_legacy" },
+    });
+    expect(fc?.callId).toBe("call_legacy");
+  });
+
+  it("leaves the call id unset when the runtime published no identity", () => {
+    const fc = detectFileChange({
+      toolName: "write",
+      input: { path: "src/app.ts" },
+      metadata: mutationMetadata(),
+    });
+    expect(fc?.callId).toBeUndefined();
+  });
 });
 
 describe("apply_patch input aliases", () => {

@@ -91,6 +91,29 @@ export interface FileChangeSignal {
   removedLines: number;
   diff?: string;
   toolName: string;
+  /** Engine call id of the tool call, when the runtime published one in the
+   *  item metadata. Names the `tool:<call_id>` snapshot the file-revert
+   *  endpoint needs; see `FileChangeInfo.callId`. */
+  callId?: string;
+}
+
+/**
+ * The engine's tool-call identity for an item, if it published one.
+ *
+ * Live tool items carry `tool_use_id` (the id the engine also labels its
+ * pre-tool workspace snapshot with); the request-user-input item uses
+ * `tool_call_id` for the same purpose. An item without either is a recording
+ * that predates the identity, so it cannot name a snapshot.
+ */
+function toolCallIdFromMetadata(
+  metadata: Record<string, unknown> | null | undefined
+): string | undefined {
+  if (!metadata) return undefined;
+  for (const key of ["tool_use_id", "tool_call_id"]) {
+    const value = metadata[key];
+    if (typeof value === "string" && value) return value;
+  }
+  return undefined;
 }
 
 /**
@@ -142,6 +165,7 @@ export function detectFileChange(params: {
       removedLines: stats.removed,
       diff: mutation.diff,
       toolName,
+      callId: toolCallIdFromMetadata(params.metadata),
     };
   }
 
@@ -172,6 +196,7 @@ export function detectFileChange(params: {
     removedLines: stats.removed,
     diff,
     toolName,
+    callId: toolCallIdFromMetadata(params.metadata),
   };
 }
 
