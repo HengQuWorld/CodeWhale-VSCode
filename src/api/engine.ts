@@ -6,7 +6,7 @@ import * as net from "net";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { randomBytes } from "crypto";
+import { createHash, randomBytes } from "crypto";
 
 const HEALTH_TIMEOUT_MS = 3000;
 const STARTUP_TIMEOUT_MS = 10000;
@@ -68,6 +68,19 @@ function findFreePort(): Promise<number> {
   });
 }
 
+/** A stable directory name per workspace: a window must come back to the store
+ * it wrote, because the Runtime allows a single process per store. */
+function workspaceStoreKey(workspace: string): string {
+  if (!workspace) return "no-workspace";
+  return `ws-${createHash("sha256").update(workspace).digest("hex").slice(0, 16)}`;
+}
+
+/** A failed start reports the child's own error line: a refusal the user can act
+ * on, rather than only "the engine exited". */
+function engineStartupError(childError: string): Error {
+  return new Error(childError ? `Engine exited before becoming ready: ${childError}` : "Engine exited before becoming ready");
+}
+
 export class CodeWhaleEngine {
   private process: ChildProcess | null = null;
   private _port = 7878;
@@ -117,6 +130,10 @@ export class CodeWhaleEngine {
     const generation = this.generation;
     await stopping;
     this.assertCurrent(generation);
+    // One store per workspace, and always the same one. The Runtime allows a
+    // single process per store, so a window must not borrow another window's,
+    // and a reload must come back to its own history instead of a fresh store.
+    const runtimeDir = path.join(this.context.globalStorageUri.fsPath, "runtime", workspaceStoreKey(workspace));
     const requestedPort = await findFreePort();
     this.assertCurrent(generation);
     this._port = 0;
@@ -125,6 +142,7 @@ export class CodeWhaleEngine {
     this._token = token;
     const tasksDir = path.join(this.context.globalStorageUri.fsPath, "tasks");
     fs.mkdirSync(tasksDir, { recursive: true });
+    fs.mkdirSync(runtimeDir, { recursive: true });
     const config = vscode.workspace.getConfiguration("brotherwhale");
     const enginePath = resolveEnginePath(config.get<string>("enginePath", "codewhale"));
     const args = workspace ? ["--workspace", workspace] : [];
@@ -142,9 +160,14 @@ export class CodeWhaleEngine {
       [pathKey]: [...existingPath.split(pathSep), ...extraPaths.filter(p => !existingPath.split(pathSep).includes(p))].join(pathSep),
     };
     delete env[isWindows ? "PATH" : "Path"];
+    // This workspace's own store, named under both spellings so an older Runtime
+    // isolates instead of silently sharing a store another window already owns.
+    env.CODEWHALE_RUNTIME_DIR = runtimeDir;
+    env.DEEPSEEK_RUNTIME_DIR = runtimeDir;
     // Never inherit an alternate token or pass the generated secret in argv.
     delete env.DEEPSEEK_RUNTIME_TOKEN;
     this.log(`Starting: ${enginePath} ${args.join(" ")}`);
+    this.log(`With CODEWHALE_RUNTIME_DIR=${runtimeDir}`);
     let child: ChildProcess;
     try {
       child = spawn(enginePath, args, { stdio: ["ignore", "pipe", "pipe"], env, windowsHide: true });
@@ -176,7 +199,14 @@ export class CodeWhaleEngine {
       }
     };
     const errorLines = child.stderr ? createInterface({ input: child.stderr }) : undefined;
-    errorLines?.on("line", (line: string) => this.log(`[stderr] ${line}`, token));
+    let childError = "";
+    errorLines?.on("line", (line: string) => {
+      // Keep the Runtime's own error line: a warning printed earlier in the same
+      // stream must not become the reason reported to the user.
+      const text = line.trim();
+      if (text && !/error/i.test(childError)) childError = text;
+      this.log(`[stderr] ${line}`, token);
+    });
     child.once("exit", (code, signal) => {
       outputLines?.close();
       errorLines?.close();
@@ -189,7 +219,7 @@ export class CodeWhaleEngine {
       while (true) {
         this.assertCurrent(generation);
         if (spawnError) throw spawnError;
-        if (this.process !== child) throw new Error("Engine exited before becoming ready");
+        if (this.process !== child) throw engineStartupError(childError);
         // Public health is insufficient: the owned child must enforce its token.
         if (port !== undefined) {
           const anonymous = await this.probe(port);
@@ -203,7 +233,7 @@ export class CodeWhaleEngine {
         await new Promise(resolve => setTimeout(resolve, HEALTH_RETRY_INTERVAL_MS));
       }
       this.assertCurrent(generation);
-      if (this.process !== child) throw new Error("Engine exited before becoming ready");
+      if (this.process !== child) throw engineStartupError(childError);
       this._port = port!;
       this._workspaceKey = workspace;
       this._running = true;

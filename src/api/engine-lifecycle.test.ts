@@ -61,6 +61,10 @@ const storage = process.env.FIXTURE_STORAGE;
 const args = process.argv.slice(2);
 const port = Number(args[args.indexOf('--port') + 1]);
 if (process.env.FIXTURE_MODE === 'exit') process.exit(1);
+if (process.env.FIXTURE_MODE === 'owner-conflict') {
+  console.error('error: This runtime is already active in another process. Close the other Codewhale session and try again, or set CODEWHALE_RUNTIME_DIR to a different directory.');
+  process.exit(1);
+}
 if (process.env.FIXTURE_MODE === 'hang') setInterval(() => {}, 1000);
 else {
  const token = process.env.CODEWHALE_RUNTIME_TOKEN;
@@ -174,6 +178,34 @@ describe("owned Runtime lifecycle", () => {
     state.mode = "exit"; const { item } = engine();
     await expect(item.ensureRunning()).rejects.toThrow("exited");
     state.mode = "normal"; await item.ensureRunning(); expect(item.isRunning).toBe(true);
+  });
+
+  it("gives every workspace its own store and comes back to it on restart", async () => {
+    const { item } = engine();
+    await item.ensureRunning();
+    const store = state.launches.at(-1)!.options.env.CODEWHALE_RUNTIME_DIR as string;
+    // Never the Runtime default: another window may already own that one.
+    expect(store.startsWith(path.join(state.storage, "runtime"))).toBe(true);
+    expect(fs.existsSync(store)).toBe(true);
+    // Isolation moves the Runtime store only; tasks stay where the GUI reads them.
+    expect(state.launches.at(-1)!.options.env.DEEPSEEK_TASKS_DIR).toBe(path.join(state.storage, "tasks"));
+    // A reload of the same workspace finds the store it already has.
+    await item.restart();
+    expect(state.launches.at(-1)!.options.env.CODEWHALE_RUNTIME_DIR).toBe(store);
+    // A different workspace never reuses that store.
+    state.workspace = path.join(root, "other-workspace");
+    fs.mkdirSync(state.workspace);
+    await item.ensureRunning();
+    const other = state.launches.at(-1)!.options.env.CODEWHALE_RUNTIME_DIR as string;
+    expect(other).not.toBe(store);
+    expect(other.startsWith(path.join(state.storage, "runtime"))).toBe(true);
+  });
+
+  it("shows the Runtime's own refusal instead of a generic exit message", async () => {
+    state.mode = "owner-conflict"; const { item } = engine();
+    await expect(item.ensureRunning()).rejects.toThrow("already active in another process");
+    expect(state.launches).toHaveLength(1);
+    expect(item.isRunning).toBe(false); expect(item.token).toBeNull();
   });
 
   it.each(["ensureRunning", "restart"] as const)("cancels a same-tick %s before it can launch", async (method) => {
