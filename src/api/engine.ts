@@ -68,6 +68,14 @@ function findFreePort(): Promise<number> {
   });
 }
 
+// Shared-engine discovery file (globalStorage/serve.json) written by the window
+// that launched the engine, so later windows reuse it instead of starting a new one.
+interface ServeState {
+  port: number;
+  token: string;
+  pid?: number;
+}
+
 export class CodeWhaleEngine {
   private process: ChildProcess | null = null;
   private _port = 7878;
@@ -76,9 +84,9 @@ export class CodeWhaleEngine {
   private _running = false;
   private _starting: Promise<void> | null = null;
   private _stopping: Promise<void> | null = null;
-  private _workspaceKey = "";
   private generation = 0;
   private disposed = false;
+  private attached = false;
 
   constructor(
     private outputChannel: vscode.OutputChannel,
@@ -91,20 +99,20 @@ export class CodeWhaleEngine {
   get token(): string | null { return this._token; }
   get isRunning(): boolean { return this._running; }
 
-  private getWorkspaceKey(): string {
-    return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? "";
-  }
-
   async ensureRunning(): Promise<void> {
     if (this.disposed) throw new Error("Engine has been disposed");
     if (!vscode.workspace.isTrusted) throw new Error("Trust this workspace before starting CodeWhale");
-    const workspace = this.getWorkspaceKey();
-    if (this._running && this.process && this._workspaceKey === workspace) return;
+    if (this._running && this.process) return;
+    if (this._running && this.attached) {
+      if (await this.sharedServeAlive()) return;
+      this.attached = false;
+      this._running = false;
+    }
     if (this._starting) {
       await this._starting;
       return this.ensureRunning();
     }
-    const starting = this.launch(workspace);
+    const starting = this.launch();
     this._starting = starting;
     try { await starting; }
     finally { if (this._starting === starting) this._starting = null; }
@@ -112,13 +120,16 @@ export class CodeWhaleEngine {
 
   async start(): Promise<void> { await this.ensureRunning(); }
 
-  private async launch(workspace: string): Promise<void> {
+  private async launch(): Promise<void> {
     const stopping = this.stop();
     const generation = this.generation;
     await stopping;
     this.assertCurrent(generation);
+    if (await this.attachSharedServe()) return;
     const requestedPort = await findFreePort();
     this.assertCurrent(generation);
+    if (await this.attachSharedServe()) return;
+    this.attached = false;
     this._port = 0;
     let port: number | undefined;
     const token = randomBytes(32).toString("hex");
@@ -127,8 +138,9 @@ export class CodeWhaleEngine {
     fs.mkdirSync(tasksDir, { recursive: true });
     const config = vscode.workspace.getConfiguration("brotherwhale");
     const enginePath = resolveEnginePath(config.get<string>("enginePath", "codewhale"));
-    const args = workspace ? ["--workspace", workspace] : [];
-    args.push("serve", "--http", "--host", this._host, "--port", String(requestedPort));
+    // No --workspace: the shared engine is workspace-agnostic. Each thread
+    // already carries its own workspace via the API.
+    const args = ["serve", "--http", "--host", this._host, "--port", String(requestedPort)];
     const extraPaths = isWindows
       ? [path.join(process.env.APPDATA || path.join(homeDir(), "AppData", "Roaming"), "npm")]
       : ["/opt/homebrew/bin", "/usr/local/bin", "/home/linuxbrew/.linuxbrew/bin"];
@@ -205,8 +217,8 @@ export class CodeWhaleEngine {
       this.assertCurrent(generation);
       if (this.process !== child) throw new Error("Engine exited before becoming ready");
       this._port = port!;
-      this._workspaceKey = workspace;
       this._running = true;
+      this.writeServeState({ port: port!, token, pid: child.pid });
       this.log(`Engine ready on port ${port}`);
     } catch (error) {
       if (this.process === child) await this.stop();
@@ -264,7 +276,56 @@ export class CodeWhaleEngine {
     await stopping;
     if (starting) { try { await starting; } catch { /* cancelled start */ } }
     this.assertCurrent(generation);
+    this.clearServeState();
     await this.ensureRunning();
+  }
+
+  private serveStatePath(): string {
+    return path.join(this.context.globalStorageUri.fsPath, "serve.json");
+  }
+
+  private readServeState(): ServeState | null {
+    try {
+      return JSON.parse(fs.readFileSync(this.serveStatePath(), "utf8")) as ServeState;
+    } catch {
+      return null;
+    }
+  }
+
+  private writeServeState(state: ServeState): void {
+    try {
+      fs.writeFileSync(this.serveStatePath(), JSON.stringify(state));
+    } catch (error) {
+      this.log(`Could not persist shared-engine state: ${error instanceof Error ? error.message : error}`);
+    }
+  }
+
+  private clearServeState(): void {
+    try { fs.rmSync(this.serveStatePath(), { force: true }); } catch { /* best effort */ }
+  }
+
+  private async attachSharedServe(): Promise<boolean> {
+    const state = this.readServeState();
+    if (!state || typeof state.port !== "number" || !state.token) return false;
+    const anonymous = await this.probe(state.port);
+    if (anonymous?.status === 401) {
+      const authenticated = await this.probe(state.port, state.token);
+      if (authenticated?.status === 200 && Array.isArray(authenticated.body)) {
+        this._port = state.port;
+        this._token = state.token;
+        this._running = true;
+        this.attached = true;
+        this.log(`Reusing the running engine on port ${state.port}`);
+        return true;
+      }
+    }
+    this.clearServeState();
+    return false;
+  }
+
+  private async sharedServeAlive(): Promise<boolean> {
+    const result = await this.probe(this._port, this._token ?? undefined);
+    return result?.status === 200 && Array.isArray(result.body);
   }
 
   private probe(port: number, token?: string): Promise<{ status: number; body: unknown } | null> {
@@ -299,7 +360,8 @@ export class CodeWhaleEngine {
   }
 
   dispose(): void {
+    // Keep the shared engine alive so other windows keep reusing it.
+    // A new engine is only launched when none is running.
     this.disposed = true;
-    void this.stop().catch(() => { /* best effort on synchronous disposal; deactivate awaits stop */ });
   }
 }

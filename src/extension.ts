@@ -64,5 +64,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 }
 
 export async function deactivate(): Promise<void> {
-  await engine?.stop();
+  // Keep the shared engine alive so other windows keep reusing it;
+  // a new engine is only launched when none is running.
 }
