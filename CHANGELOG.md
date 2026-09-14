@@ -1,5 +1,11 @@
 # Change Log
 
+## 0.6.1
+
+### Bug Fixes
+
+- **A second editor window can start its own Runtime again** — Every window handed its Runtime child the same store, and the Runtime allows one process per store, so only the first window came up: the second child exited with "This runtime is already active in another process" before it bound its port, and the panel could only report "Engine exited before becoming ready". Each child now runs on `CODEWHALE_RUNTIME_DIR` under the extension's global storage, keyed by the workspace path, so the store a workspace uses is decided by the workspace rather than by which window happened to start first, and a reload comes back to the same history instead of a fresh store. Both env spellings are set, so an older Runtime isolates as well instead of silently sharing another window's store. Isolation moves the Runtime store only: tasks stay where the panel reads them and saved sessions stay shared. The shared store from earlier versions is no longer read, so a workspace's Threads list starts empty once; that store is left on disk untouched. A second window on the same workspace still cannot share a store, but it now shows the Runtime's own refusal instead of a generic message — the child's error line travels with the startup error, which makes every other startup failure legible too.
+
 ## 0.6.0
 
 ### New Features
