@@ -1296,22 +1296,6 @@ export function getWebviewCss(): string {
       color: var(--fg);
       background: var(--brand-primary);
     }
-    #settings-bar #btn-config {
-      background: transparent;
-      border: none;
-      color: var(--muted);
-      cursor: pointer;
-      font-size: 1.4em;
-      padding: 4px 8px;
-      border-radius: 4px;
-      line-height: 1;
-      flex-shrink: 0;
-      margin-left: auto;
-    }
-    #settings-bar #btn-config:hover {
-      color: var(--fg);
-      background: var(--brand-primary);
-    }
 
     /* ── Slash Menu ── */
 

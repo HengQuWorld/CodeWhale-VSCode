@@ -7,6 +7,7 @@
   "commands.newThread.title": "CodeWhale: 新建会话",
   "commands.compactContext.title": "CodeWhale: 压缩上下文",
   "commands.restartEngine.title": "CodeWhale: 重启引擎",
+  "commands.openConfig.title": "CodeWhale: 打开配置面板",
   "config.enginePath.description": "codewhale 可执行文件路径",
   "config.defaultModel.description": "新会话的默认模型",
   "config.defaultMode.description": "新会话的默认模式：agent（Act）、plan 或 operate",
