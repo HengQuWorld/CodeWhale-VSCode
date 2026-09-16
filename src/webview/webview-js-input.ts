@@ -22,6 +22,10 @@ export function getInputScript(tr: WebviewTranslations): string {
   var undoDefaultTitle = undoBtn ? (undoBtn.getAttribute('title') || '') : '';
   var retryDefaultTitle = retryBtn ? (retryBtn.getAttribute('title') || '') : '';
 
+  // The textarea keeps the height it is given — the CSS default of about two
+  // rows, or whatever the resize handle set. Longer text scrolls inside it
+  // rather than growing the box.
+
   // ── Attachments ──
   var currentAttachments = [];
 
@@ -214,7 +218,6 @@ export function getInputScript(tr: WebviewTranslations): string {
     if (isStreaming && isSlash && !slashAllowedWhileStreaming) return;
     if (isStreaming && !isSlash && !canSteer) return;
     inputEl.value = '';
-    inputEl.style.height = 'auto';
     window.__wvMessages.setUserScrolledUp(false);
     messageHistory.unshift(text);
     if (messageHistory.length > 200) messageHistory.length = 200;
@@ -266,6 +269,11 @@ export function getInputScript(tr: WebviewTranslations): string {
   }
 
   // ── Send/Stop button toggle ──
+  // The button is icon-only now, so the localized action name lives in its
+  // tooltip / aria-label and has to follow the send-vs-stop state.
+  var sendLabel = (__i18n && __i18n.send) || 'Send';
+  var stopLabel = (__i18n && __i18n.interrupt) || 'Stop';
+
   function updateSendStopButton(isStreaming) {
     if (!sendStopBtn) return;
     if (isStreaming) {
@@ -273,6 +281,9 @@ export function getInputScript(tr: WebviewTranslations): string {
     } else {
       sendStopBtn.classList.remove('streaming');
     }
+    var label = isStreaming ? stopLabel : sendLabel;
+    sendStopBtn.setAttribute('title', label);
+    sendStopBtn.setAttribute('aria-label', label);
     updateInputPlaceholder();
   }
 
@@ -539,8 +550,6 @@ export function getInputScript(tr: WebviewTranslations): string {
         historyIndex = Math.min(historyIndex + 1, messageHistory.length - 1);
         inputEl.value = messageHistory[historyIndex];
         inputEl.selectionStart = inputEl.selectionEnd = inputEl.value.length;
-        inputEl.style.height = 'auto';
-        inputEl.style.height = Math.min(inputEl.scrollHeight, 120) + 'px';
         return;
       }
     } else if (e.key === 'ArrowDown' && historyIndex !== -1) {
@@ -555,8 +564,6 @@ export function getInputScript(tr: WebviewTranslations): string {
           inputEl.value = messageHistory[historyIndex];
         }
         inputEl.selectionStart = inputEl.selectionEnd = 0;
-        inputEl.style.height = 'auto';
-        inputEl.style.height = Math.min(inputEl.scrollHeight, 120) + 'px';
         return;
       }
     }
@@ -568,8 +575,6 @@ export function getInputScript(tr: WebviewTranslations): string {
   });
 
   inputEl.addEventListener('input', function() {
-    inputEl.style.height = 'auto';
-    inputEl.style.height = Math.min(inputEl.scrollHeight, 120) + 'px';
     slashMenuSelected = 0;
     updateSlashMenu(inputEl.value);
   });

@@ -89,7 +89,64 @@ describe("webview-css.ts", () => {
   it("contains input and attachment styles", () => {
     const css = getWebviewCss();
     expect(css).toContain(".attachment-chip");
-    expect(css).toContain("#input-row");
+    expect(css).toContain("#input-box");
+    expect(css).toContain("#input-toolbar");
+  });
+
+  it("lays the composer out as a textarea above a bottom toolbar", () => {
+    const css = getWebviewCss();
+
+    // The composer stacks its textarea above the action toolbar.
+    expect(css).toContain("#input-box {");
+    expect(css).toContain("#input-toolbar {");
+    expect(css).toContain("flex-direction: column;");
+    // Send is pushed to the far right, so left-side buttons flow from the left.
+    expect(css).toContain("margin-left: auto;");
+  });
+
+  it("sizes the composer by its content and never lets it be squeezed", () => {
+    const css = getWebviewCss();
+    const boxRule = css.slice(
+      css.indexOf("#input-box {"),
+      css.indexOf("}", css.indexOf("#input-box {"))
+    );
+
+    // flex-basis: auto keeps the border wrapped around the textarea plus the
+    // toolbar, and flex-shrink: 0 means a short input area cannot push the
+    // toolbar out of the box.
+    expect(boxRule).toContain("flex: 1 0 auto;");
+    // A zero basis (or min-height: 0) made the box collapse while the text and
+    // the toolbar overflowed outside its border.
+    expect(boxRule).not.toContain("min-height: 0;");
+  });
+
+  it("gives the textarea a hardcoded two-row floor and scrolls the overflow", () => {
+    const css = getWebviewCss();
+    const taRule = css.slice(
+      css.indexOf("#input-area textarea {"),
+      css.indexOf("}", css.indexOf("#input-area textarea {"))
+    );
+
+    // Roughly two rows, a little taller than the toolbar: the composer's own
+    // floor is this plus the toolbar.
+    expect(taRule).toContain("min-height: 52px;");
+    // Text past the chosen height scrolls inside the box.
+    expect(taRule).toContain("overflow-y: auto;");
+    expect(taRule).toContain("scrollbar-width: none;");
+  });
+
+  it("shows exactly one send/stop icon at a time", () => {
+    const css = getWebviewCss();
+
+    // Both icon rules are scoped to #input-toolbar, so they carry the same
+    // specificity as the streaming overrides, which therefore win.
+    expect(css).toContain("#input-toolbar .btn-send-stop .btn-icon-send { display: block;");
+    expect(css).toContain("#input-toolbar .btn-send-stop .btn-icon-stop { display: none;");
+    expect(css).toContain(".btn-send-stop.streaming .btn-icon-send { display: none; }");
+    expect(css).toContain(".btn-send-stop.streaming .btn-icon-stop { display: block; }");
+    // Regression: a generic `svg` rule carrying two ids outranked the per-icon
+    // rules, so send and stop rendered side by side.
+    expect(css).not.toContain("svg { display: block; }");
   });
 
   it("styles the image attachment thumbnail", () => {

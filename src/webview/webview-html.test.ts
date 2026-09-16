@@ -391,6 +391,46 @@ describe("webview-html.ts assembler", () => {
     expect(html).toContain('id="attachments-area"');
   });
 
+  it("stacks the composer's textarea above a bottom toolbar", () => {
+    const html = getWebviewHtml(makeMockWebview(), makeMockExtensionUri(), makeTr());
+    const boxStart = html.indexOf('id="input-box"');
+    const toolbarStart = html.indexOf('id="input-toolbar"');
+    const composer = html.slice(boxStart, toolbarStart);
+    const toolbar = html.slice(toolbarStart, html.indexOf('id="status"'));
+
+    // The textarea sits inside the composer, above the toolbar.
+    expect(boxStart).toBeGreaterThan(-1);
+    expect(composer).toContain('id="input"');
+    expect(composer).not.toContain('id="btn-attach"');
+    // Attach comes first (left) and send last (far right) in the toolbar.
+    expect(toolbar).toContain('id="btn-attach"');
+    expect(toolbar).toContain('id="btn-send-stop"');
+    expect(toolbar.indexOf('id="btn-attach"')).toBeLessThan(
+      toolbar.indexOf('id="btn-send-stop"')
+    );
+  });
+
+  it("drags the textarea's own height within the CSS bounds", () => {
+    const html = getWebviewHtml(makeMockWebview(), makeMockExtensionUri(), makeTr());
+
+    // The handle sizes the textarea rather than the whole area: the composer
+    // follows it, and text past that height scrolls inside the box.
+    expect(html).toContain("var MIN_INPUT_HEIGHT = 52;");
+    expect(html).toContain("var MAX_INPUT_HEIGHT = 340;");
+    expect(html).toContain("inputEl.style.height = newHeight + 'px';");
+    expect(html).not.toContain("function minAreaHeight()");
+  });
+
+  it("keeps the send control icon-only", () => {
+    const html = getWebviewHtml(makeMockWebview(), makeMockExtensionUri(), makeTr());
+
+    // A plane for send, a square for stop, and no text labels left over.
+    expect(html).toContain("btn-icon-send");
+    expect(html).toContain("btn-icon-stop");
+    expect(html).not.toContain("btn-text-send");
+    expect(html).not.toContain("btn-text-stop");
+  });
+
   it("contains toolbar buttons", () => {
     const html = getWebviewHtml(makeMockWebview(), makeMockExtensionUri(), makeTr());
     expect(html).toContain('id="btn-new-thread"');
