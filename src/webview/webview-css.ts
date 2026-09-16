@@ -71,6 +71,37 @@ export function getWebviewCss(): string {
     }
     #threads-panel.open { display: flex; }
 
+    /* ── Sidebar Resize Handle ── */
+
+    #sidebar-resize-handle {
+      display: none;
+      width: 4px;
+      cursor: col-resize;
+      flex-shrink: 0;
+      background: transparent;
+      position: relative;
+      z-index: 10;
+      transition: background 0.15s;
+    }
+    /* Only available while the threads panel is open: a collapsed sidebar has
+       nothing to widen, and showing the grip there would just invite a drag
+       that has no effect. */
+    #threads-panel.open + #sidebar-resize-handle {
+      display: block;
+    }
+    #sidebar-resize-handle:hover,
+    #sidebar-resize-handle.active {
+      background: var(--vscode-panel-border, var(--border));
+    }
+    #sidebar-resize-handle::after {
+      content: '';
+      position: absolute;
+      left: -3px;
+      right: -3px;
+      top: 0;
+      bottom: 0;
+    }
+
     /* ── Input Resize Handle ── */
 
     #input-resize-handle {

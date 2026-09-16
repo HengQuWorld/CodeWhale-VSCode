@@ -30,6 +30,7 @@ describe("webview-css.ts", () => {
     const css = getWebviewCss();
     expect(css).toContain("#layout");
     expect(css).toContain("#threads-panel");
+    expect(css).toContain("#sidebar-resize-handle");
     expect(css).toContain("#input-resize-handle");
     expect(css).toContain("#chat-area");
     expect(css).toContain("#messages");
@@ -38,6 +39,19 @@ describe("webview-css.ts", () => {
     expect(css).toContain("#settings-bar");
     expect(css).toContain("#slash-menu");
     expect(css).toContain("#ui-tooltip");
+  });
+
+  it("hides the sidebar resize grip while the threads panel is collapsed", () => {
+    const css = getWebviewCss();
+
+    // The grip must not exist for dragging when the threads panel is closed.
+    const ruleStart = css.indexOf("#sidebar-resize-handle {");
+    const ruleEnd = css.indexOf("}", ruleStart);
+    const handleRule = css.slice(ruleStart, ruleEnd);
+
+    expect(handleRule).toContain("display: none;");
+    expect(css).toContain("#threads-panel.open + #sidebar-resize-handle {");
+    expect(css).toContain("display: block;");
   });
 
   it("contains message styling", () => {

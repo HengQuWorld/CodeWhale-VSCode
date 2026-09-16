@@ -410,6 +410,8 @@ ${css}
         <div class="sidebar-section-body" id="tab-changes"></div>
       </div>
     </div>
+    <div id="sidebar-resize-handle" title="Drag to resize sidebar"></div>
+
     <div id="chat-area">
       <div id="settings-bar">
         <button id="btn-threads" title="${tr.toggleHistory}">📋</button>
@@ -560,6 +562,78 @@ ${css}
   <script nonce="${nonce}">
     (function() {
       'use strict';
+      var handle = document.getElementById('sidebar-resize-handle');
+      var panel = document.getElementById('threads-panel');
+      if (!handle || !panel) return;
+
+      // Restore saved width from previous session
+      try {
+        var savedWidth = localStorage.getItem('codewhale:sidebarWidth');
+        if (savedWidth) {
+          var w = parseInt(savedWidth, 10);
+          if (w >= 120 && w <= 600) {
+            panel.style.width = w + 'px';
+          }
+        }
+      } catch(e) { /* localStorage may not be available */ }
+
+      var startX, startWidth;
+      var lastClientX = 0;
+      var rafId = null;
+
+      function onMouseDown(e) {
+        startX = e.clientX;
+        startWidth = panel.getBoundingClientRect().width;
+        handle.classList.add('active');
+        document.body.classList.add('is-resizing');
+        document.body.style.cursor = 'col-resize';
+        document.body.style.userSelect = 'none';
+        window.addEventListener('mousemove', onMouseMove);
+        window.addEventListener('mouseup', onMouseUp);
+        window.addEventListener('mouseleave', onMouseUp);
+        window.addEventListener('blur', onMouseUp);
+        e.preventDefault();
+      }
+
+      function onMouseMove(e) {
+        if (startX === undefined) return;
+        lastClientX = e.clientX;
+        if (rafId !== null) return;
+        rafId = requestAnimationFrame(function() {
+          rafId = null;
+          if (startX === undefined) return;
+          var newWidth = startWidth + (lastClientX - startX);
+          if (newWidth < 120) newWidth = 120;
+          if (newWidth > 600) newWidth = 600;
+          panel.style.width = newWidth + 'px';
+        });
+      }
+
+      function onMouseUp() {
+        handle.classList.remove('active');
+        document.body.classList.remove('is-resizing');
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+        window.removeEventListener('mousemove', onMouseMove);
+        window.removeEventListener('mouseup', onMouseUp);
+        window.removeEventListener('mouseleave', onMouseUp);
+        window.removeEventListener('blur', onMouseUp);
+        if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
+        // Save width for next session
+        try {
+          var finalWidth = panel.getBoundingClientRect().width;
+          localStorage.setItem('codewhale:sidebarWidth', String(Math.round(finalWidth)));
+        } catch(e) { /* ignore localStorage errors */ }
+        startX = undefined;
+        startWidth = undefined;
+      }
+
+      handle.addEventListener('mousedown', onMouseDown);
+    })();
+  </script>
+  <script nonce="${nonce}">
+    (function() {
+      'use strict';
       var handle = document.getElementById('input-resize-handle');
       var inputArea = document.getElementById('input-area');
       var inputEl = document.getElementById('input');
@@ -617,8 +691,10 @@ ${css}
         document.body.classList.remove('is-resizing');
         document.body.style.cursor = '';
         document.body.style.userSelect = '';
-        document.removeEventListener('mousemove', onMouseMove);
-        document.removeEventListener('mouseup', onMouseUp);
+        window.removeEventListener('mousemove', onMouseMove);
+        window.removeEventListener('mouseup', onMouseUp);
+        window.removeEventListener('mouseleave', onMouseUp);
+        window.removeEventListener('blur', onMouseUp);
         // Save the height for next session
         try {
           var finalHeight = inputEl.getBoundingClientRect().height;

@@ -357,6 +357,7 @@ describe("webview-html.ts assembler", () => {
     const html = getWebviewHtml(makeMockWebview(), makeMockExtensionUri(), makeTr());
     expect(html).toContain('id="layout"');
     expect(html).toContain('id="threads-panel"');
+    expect(html).toContain('id="sidebar-resize-handle"');
     expect(html).toContain('id="input-resize-handle"');
     expect(html).toContain('id="chat-area"');
     expect(html).toContain('id="messages"');
@@ -462,10 +463,27 @@ describe("webview-html.ts assembler", () => {
     expect(html).toContain("window.__wvSidebar");
   });
 
-  it("includes all module scripts (shared state + modules = 11)", () => {
+  it("includes all module scripts (shared state + modules = 12)", () => {
     const html = getWebviewHtml(makeMockWebview(), makeMockExtensionUri(), makeTr());
     const scriptCount = (html.match(/<script nonce=/g) || []).length;
-    expect(scriptCount).toBe(11);
+    expect(scriptCount).toBe(12);
+  });
+
+  it("drags the sidebar width with hardened listeners and persists it", () => {
+    const html = getWebviewHtml(makeMockWebview(), makeMockExtensionUri(), makeTr());
+
+    // Restored handle wired to the threads panel, sized with rAF-throttled
+    // writes, freed on mouseleave/blur, and persisted across sessions.
+    expect(html).toContain("getElementById('sidebar-resize-handle')");
+    expect(html).toContain("getElementById('threads-panel')");
+    expect(html).toContain("window.addEventListener('mousemove', onMouseMove)");
+    expect(html).toContain("window.addEventListener('mouseleave', onMouseUp)");
+    expect(html).toContain("window.addEventListener('blur', onMouseUp)");
+    expect(html).toContain("requestAnimationFrame");
+    expect(html).toContain("cancelAnimationFrame");
+    expect(html).toContain("localStorage.getItem('codewhale:sidebarWidth')");
+    expect(html).toContain("localStorage.setItem('codewhale:sidebarWidth'");
+    expect(html).toContain("panel.style.width = newWidth + 'px';");
   });
 
   it("contains utilities module output", () => {
