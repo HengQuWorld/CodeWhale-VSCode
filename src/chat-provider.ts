@@ -2453,7 +2453,8 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
 
   // ── Thread Goal (control plane) ──
 
-  /** Push the active thread's goal (or null) to the webview. */
+  /** Push the active thread's goal (or null) to the webview. The Work panel's
+   *  goal slot renders from this same message, so the goal is stated once. */
   public async refreshGoal(): Promise<void> {
     const threadId = this.currentThread?.id;
     if (!threadId) {
@@ -2766,13 +2767,13 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     };
   }
 
-  /** Push the current work state to the webview Work panel */
+  /** Push the current work state to the webview Work panel.
+   *
+   *  The goal is not part of this payload: it is owned by the goal control plane
+   *  (`goalState`), which the Work panel renders in its first slot. */
   public refreshWorkPanel(): void {
-    const cfg = vscode.workspace.getConfiguration("brotherwhale");
-    const goal = cfg.get<string | undefined>("goalObjective") || null;
     this.postMessage({
       type: "workState",
-      goal,
       checklist: this.checklistItems,
       checklistCompletionPct: this.checklistCompletionPct,
       strategy: this.strategySteps,

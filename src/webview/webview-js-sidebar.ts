@@ -26,7 +26,7 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
   var taskDraftPrompt = '';
 
   // ── Work state ──
-  var workState = { goal: null, checklist: [], checklistCompletionPct: 0, strategy: [], cycleCount: 0, coherenceState: 'healthy', coherenceLabel: '' };
+  var workState = { checklist: [], checklistCompletionPct: 0, strategy: [], cycleCount: 0, coherenceState: 'healthy', coherenceLabel: '' };
 
   // ── Changes state ──
   var changesState = [];
@@ -779,11 +779,14 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
   }
 
   // ── Render Work ──
+  // The panel's first slot (#work-goal) is the goal control plane, owned by the
+  // goal module; this renders the body below it. The goal is deliberately not
+  // repeated here.
   function renderWork() {
-    var container = document.getElementById('tab-work');
+    var container = document.getElementById('work-body');
     if (!container) return;
     container.innerHTML = '';
-    var hasContent = workState.goal || workState.checklist.length > 0 || workState.strategy.length > 0 || workState.cycleCount > 0 || (workState.coherenceState && workState.coherenceState !== 'healthy');
+    var hasContent = workState.checklist.length > 0 || workState.strategy.length > 0 || workState.cycleCount > 0 || (workState.coherenceState && workState.coherenceState !== 'healthy');
     if (!hasContent) {
       var el = document.createElement('div');
       el.className = 'work-empty';
@@ -801,18 +804,6 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
       var severity = isWarning ? 'warning' : 'info';
       var icon = isWarning ? '\\u26A0' : '\\u2139';
       section.innerHTML = '<div class="work-coherence ' + severity + '"><span class="work-coherence-icon">' + icon + '</span>' + __wvEscapeHtml(stateLabel) + '</div>';
-      container.appendChild(section);
-    }
-    // ── Goal ──
-    if (workState.goal) {
-      var section = document.createElement('div');
-      section.className = 'work-section';
-      section.innerHTML =
-        '<div class="work-section-title"><span class="work-section-title-icon">\\uD83C\\uDFAF</span>' + __wvEscapeHtml(__i18n.goal) + '</div>' +
-        '<div class="work-goal-card">' +
-          '<div class="work-goal-label">' + __wvEscapeHtml(__i18n.goal) + '</div>' +
-          '<div class="work-goal-text">' + __wvEscapeHtml(workState.goal) + '</div>' +
-        '</div>';
       container.appendChild(section);
     }
     // ── Checklist ──

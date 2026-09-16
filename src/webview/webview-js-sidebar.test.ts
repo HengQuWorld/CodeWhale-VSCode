@@ -166,6 +166,15 @@ describe("webview-js-sidebar.ts", () => {
     expect(script).not.toContain("workState.fileChanges");
   });
 
+  it("renders the work body only, leaving the goal to the goal module", () => {
+    const script = getSidebarScript(makeTr());
+    // The Work section owns two slots; the goal module fills the first one, so
+    // the work renderer must not touch it — and must not restate the goal.
+    expect(script).toContain("getElementById('work-body')");
+    expect(script).not.toContain("getElementById('tab-work')");
+    expect(script).not.toContain("workState.goal");
+  });
+
   it("contains renderChanges function for the Changes panel", () => {
     const script = getSidebarScript(makeTr());
     expect(script).toContain("function renderChanges");

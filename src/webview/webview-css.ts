@@ -1900,42 +1900,6 @@ export function getWebviewCss(): string {
       opacity: 0.7;
     }
 
-    /* ── Goal Card ── */
-    .work-goal-card {
-      margin: 4px 0 6px;
-      padding: 10px 12px;
-      background: linear-gradient(135deg, rgba(240, 160, 48, 0.08) 0%, rgba(240, 160, 48, 0.04) 100%);
-      border-left: 3px solid #f0a030;
-      border-radius: 0 8px 8px 0;
-      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
-      transition: box-shadow 0.2s, transform 0.2s;
-    }
-    .work-goal-card:hover {
-      box-shadow: 0 2px 6px rgba(240, 160, 48, 0.15);
-      transform: translateX(2px);
-    }
-    body[data-vscode-theme-kind="vscode-dark"] .work-goal-card {
-      background: linear-gradient(135deg, rgba(240, 160, 48, 0.12) 0%, rgba(240, 160, 48, 0.06) 100%);
-    }
-    .work-goal-label {
-      font-size: 0.68em;
-      font-weight: 700;
-      color: #f0a030;
-      text-transform: uppercase;
-      letter-spacing: 0.6px;
-      margin-bottom: 4px;
-      display: flex;
-      align-items: center;
-      gap: 4px;
-    }
-    .work-goal-text {
-      font-size: 0.88em;
-      font-weight: 500;
-      color: var(--fg);
-      line-height: 1.5;
-      word-break: break-word;
-    }
-
     /* ── Progress Bar ── */
     .work-progress-bar-bg {
       height: 4px;
@@ -2722,12 +2686,18 @@ export function getWebviewCss(): string {
 
     /* ── Goal control plane ── */
 
+    /* Compact row: the goal slot is the Work panel's first line, so an absent
+       goal must cost one line, not a full empty-state block. */
     .goal-empty {
       display: flex;
-      flex-direction: column;
       align-items: center;
+      justify-content: space-between;
       gap: 8px;
-      padding: 16px 10px;
+      padding: 6px 10px;
+    }
+    .goal-empty-text {
+      font-size: 0.78em;
+      color: var(--muted);
     }
     .goal-set-btn {
       border: 1px solid var(--accent);
@@ -2740,6 +2710,16 @@ export function getWebviewCss(): string {
     }
     .goal-set-btn:hover { background: var(--accent-hover); }
     .goal-card { padding: 8px 10px; }
+    /* The goal now shares the Work panel, whose header no longer names it, so
+       the card names itself (TUI prefixes its title with "Goal: " for the same
+       reason). */
+    .goal-label {
+      font-size: 0.68em;
+      font-weight: 700;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+    }
     .goal-header { display: flex; align-items: center; gap: 4px; margin-bottom: 6px; }
     .goal-objective {
       font-size: 0.85em;

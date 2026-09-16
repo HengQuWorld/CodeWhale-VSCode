@@ -194,7 +194,6 @@ describe("isCommandAvailableInGui", () => {
     expect(isCommandAvailableInGui("/load")).toBe("full");
     expect(isCommandAvailableInGui("/task")).toBe("full");
     expect(isCommandAvailableInGui("/trust")).toBe("full");
-    expect(isCommandAvailableInGui("/verbose")).toBe("full");
     expect(isCommandAvailableInGui("/logout")).toBe("partial");
     expect(isCommandAvailableInGui("/change")).toBe("partial");
   });
@@ -217,14 +216,15 @@ describe("isCommandAvailableInGui", () => {
     expect(isCommandAvailableInGui("/rlm")).toBe("unavailable");
     expect(isCommandAvailableInGui("/lsp")).toBe("unavailable");
     expect(isCommandAvailableInGui("/statusline")).toBe("unavailable");
+    expect(isCommandAvailableInGui("/verbose")).toBe("unavailable");
+    expect(isCommandAvailableInGui("/profile")).toBe("unavailable");
+    expect(isCommandAvailableInGui("/translate")).toBe("unavailable");
   });
 
   it("marks now-available commands (previously unavailable)", () => {
     expect(isCommandAvailableInGui("/goal")).toBe("full");
     expect(isCommandAvailableInGui("/anchor")).toBe("full");
     expect(isCommandAvailableInGui("/cache")).toBe("full");
-    expect(isCommandAvailableInGui("/profile")).toBe("full");
-    expect(isCommandAvailableInGui("/translate")).toBe("full");
     expect(isCommandAvailableInGui("/system")).toBe("full");
     expect(isCommandAvailableInGui("/edit")).toBe("full");
     expect(isCommandAvailableInGui("/diff")).toBe("full");
@@ -387,16 +387,22 @@ describe("Now-available commands (previously unavailable)", () => {
     expect(cmd.helpText).toContain("/cache");
   });
 
-  it("/profile: fully available", () => {
+  it("/profile: unavailable with an explanation", () => {
     const cmd = new SlashCommandRegistry().getCommand("/profile")!;
-    expect(cmd.availability).toBe("full");
-    expect(cmd.helpText).toContain("/profile");
+    expect(cmd.availability).toBe("unavailable");
+    expect(cmd.helpText).toContain("Not available");
   });
 
-  it("/translate: fully available", () => {
+  it("/translate: unavailable with an explanation", () => {
     const cmd = new SlashCommandRegistry().getCommand("/translate")!;
-    expect(cmd.availability).toBe("full");
-    expect(cmd.helpText).toContain("/translate");
+    expect(cmd.availability).toBe("unavailable");
+    expect(cmd.helpText).toContain("Not available");
+  });
+
+  it("/verbose: unavailable with an explanation", () => {
+    const cmd = new SlashCommandRegistry().getCommand("/verbose")!;
+    expect(cmd.availability).toBe("unavailable");
+    expect(cmd.helpText).toContain("Not available");
   });
 });
 

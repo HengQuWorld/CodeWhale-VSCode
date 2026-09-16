@@ -367,19 +367,15 @@ ${css}
         <div class="sidebar-section-body" id="tab-sessions"></div>
         <div class="sidebar-section-body" id="tab-threads-list"></div>
       </div>
-      <div class="sidebar-section" id="sidebar-goal">
-        <div class="sidebar-section-header" id="goal-section-toggle">
-          <span class="sidebar-section-title">🎯 ${tr.goal}</span>
-          <span class="sidebar-section-arrow">▼</span>
-        </div>
-        <div class="sidebar-section-body" id="tab-goal"></div>
-      </div>
       <div class="sidebar-section" id="sidebar-work">
         <div class="sidebar-section-header" id="work-section-toggle">
-          <span class="sidebar-section-title">◆ ${tr.work}</span>
+          <span class="sidebar-section-title">🎯 ${tr.work}</span>
           <span class="sidebar-section-arrow">▼</span>
         </div>
-        <div class="sidebar-section-body" id="tab-work"></div>
+        <div class="sidebar-section-body" id="tab-work">
+          <div id="work-goal"></div>
+          <div id="work-body"></div>
+        </div>
       </div>
       <div class="sidebar-section" id="sidebar-fleet">
         <div class="sidebar-section-header" id="fleet-section-toggle">
@@ -533,7 +529,7 @@ ${css}
         activeThreadId: null,
         showAllWorkspaces: false,
         sidebarTab: 'sessions',
-        workState: { goal: null, checklist: [], checklistCompletionPct: 0, strategy: [], cycleCount: 0, coherenceState: 'healthy', coherenceLabel: '' },
+        workState: { checklist: [], checklistCompletionPct: 0, strategy: [], cycleCount: 0, coherenceState: 'healthy', coherenceLabel: '' },
         renderSessions: function() {},
         renderThreads: function() {},
         renderTasks: function() {},

@@ -176,9 +176,12 @@ describe("Sidebar clearing on thread switch", () => {
       const byType = callsByType(postMessage);
       // workState must be pushed so the Work panel reflects the new thread
       expect(byType.workState).toBeDefined();
-      const work = byType.workState[0] as { goal: unknown; checklist: unknown[]; coherenceState: string };
+      const work = byType.workState[0] as { checklist: unknown[]; coherenceState: string; goal?: unknown };
       expect(work.coherenceState).toBe("healthy");
       expect(work.checklist).toEqual([]);
+      // The goal is owned by the goal control plane (goalState) and rendered in
+      // the Work panel's dedicated slot — it must not be restated here.
+      expect(work.goal).toBeUndefined();
       // changesState must be pushed so the Changes panel reflects the new thread
       expect(byType.changesState).toBeDefined();
       expect((byType.changesState[0] as { changes: unknown[] }).changes).toEqual([]);

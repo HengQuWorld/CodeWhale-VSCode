@@ -382,6 +382,20 @@ describe("webview-html.ts assembler", () => {
     expect(html).toContain('id="tab-changes"');
   });
 
+  it("keeps the goal inside the Work panel instead of its own section", () => {
+    const html = getWebviewHtml(makeMockWebview(), makeMockExtensionUri(), makeTr());
+    // The goal used to be a second sidebar section, which duplicated the Work
+    // panel's goal row. It is now the Work panel's first slot, and the body
+    // below it is the second — so both live under one section.
+    expect(html).not.toContain('id="sidebar-goal"');
+    expect(html).not.toContain('id="tab-goal"');
+    expect(html).toContain('id="work-goal"');
+    expect(html).toContain('id="work-body"');
+    expect(html).toMatch(/id="tab-work"[\s\S]*id="work-goal"[\s\S]*id="work-body"/);
+    // The goal renderer must target that slot, not a container of its own.
+    expect(html).toContain("getElementById('work-goal')");
+  });
+
   it("contains input area with all controls", () => {
     const html = getWebviewHtml(makeMockWebview(), makeMockExtensionUri(), makeTr());
     expect(html).toContain('id="input"');

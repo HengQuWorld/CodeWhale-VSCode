@@ -13,10 +13,6 @@ const vscodeState = vi.hoisted(() => {
     ["reasoningEffort", "auto"],
     ["autoApprove", false],
     ["costCurrency", "usd"],
-    ["goalObjective", undefined],
-    ["goalTokenBudget", undefined],
-    ["configProfile", undefined],
-    ["translationEnabled", false],
     ["enginePath", "codewhale"],
   ]);
 
@@ -102,12 +98,15 @@ vi.mock("../utils/cost-calculator", () => ({
 const mockCommandRegistry = vi.hoisted(() => [
   { name: "/theme", desc: "Change theme", category: "unavailable", availability: "unavailable", helpText: "Not available: GUI uses VSCode's theme system." },
   { name: "/restore", desc: "Restore from snapshot", category: "session", availability: "full", helpText: "/restore [N|list [N]]" },
+  { name: "/verbose", desc: "Toggle verbose mode", category: "unavailable", availability: "unavailable", helpText: "Not available: the GUI has no verbose output mode to toggle." },
+  { name: "/profile", desc: "Switch profile", category: "unavailable", availability: "unavailable", helpText: "Not available: switching profiles must be passed to the engine at startup." },
+  { name: "/translate", desc: "Toggle translation", category: "unavailable", availability: "unavailable", helpText: "Not available: translation mode is a TUI feature." },
 ]);
 
 vi.mock("./slash-commands", () => ({
   isCommandAvailableInGui: vi.fn((name: string) => {
     // Default: most commands are available
-    const unavailable = ["/theme", "/share", "/network", "/queue", "/stash", "/hooks", "/subagents", "/agent", "/statusline", "/cycles", "/cycle", "/recall", "/relay", "/lsp", "/review", "/rlm"];
+    const unavailable = ["/theme", "/share", "/network", "/queue", "/stash", "/hooks", "/subagents", "/agent", "/statusline", "/cycles", "/cycle", "/recall", "/relay", "/lsp", "/review", "/rlm", "/verbose", "/profile", "/translate"];
     if (unavailable.includes(name)) return "unavailable";
     return "full";
   }),
@@ -115,6 +114,24 @@ vi.mock("./slash-commands", () => ({
     mockCommandRegistry.find((c) => c.name === name)
   ),
 }));
+
+// ── Helper: a thread goal record as the runtime returns it ──
+
+function goalRecord(overrides: Record<string, unknown> = {}) {
+  return {
+    thread_id: "thread-1",
+    goal_id: "goal-1",
+    objective: "Ship refactor",
+    status: "active",
+    token_budget: null as number | null,
+    tokens_used: 0,
+    time_used_seconds: 0,
+    continuation_count: 0,
+    created_at: 0,
+    updated_at: 0,
+    ...overrides,
+  };
+}
 
 // ── Helper: create context ──
 
@@ -211,6 +228,12 @@ function createContext(overrides: Partial<SlashCommandContext> = {}): SlashComma
       clearMemory: vi.fn(async () => ({ cleared: true })),
       listSnapshots: vi.fn(async () => []),
       restoreSnapshot: vi.fn(async () => ({ restored: "snap" })),
+      getThreadGoal: vi.fn(async () => null),
+      upsertThreadGoal: vi.fn(async (_threadId: string, objective: string, tokenBudget?: number) =>
+        goalRecord({ objective, token_budget: tokenBudget ?? null })),
+      deleteThreadGoal: vi.fn(async () => undefined),
+      completeThreadGoal: vi.fn(async () => goalRecord({ status: "complete" })),
+      blockThreadGoal: vi.fn(async () => goalRecord({ status: "blocked" })),
     } as any,
     engine: {
       isRunning: true,
@@ -236,6 +259,7 @@ function createContext(overrides: Partial<SlashCommandContext> = {}): SlashComma
     refreshSessionList: vi.fn(),
     refreshTaskList: vi.fn(async () => undefined),
     refreshWorkPanel: vi.fn(),
+    refreshGoal: vi.fn(async () => undefined),
     loadSessionMessages: vi.fn(async () => undefined),
     handleInterrupt: vi.fn(async () => undefined),
     handleCompact: vi.fn(async () => undefined),
@@ -258,10 +282,6 @@ describe("SlashCommandHandler - Dispatcher Pattern", () => {
     vscodeState.configValues.set("reasoningEffort", "auto");
     vscodeState.configValues.set("autoApprove", false);
     vscodeState.configValues.set("costCurrency", "usd");
-    vscodeState.configValues.set("goalObjective", undefined);
-    vscodeState.configValues.set("goalTokenBudget", undefined);
-    vscodeState.configValues.set("configProfile", undefined);
-    vscodeState.configValues.set("translationEnabled", false);
     vscodeState.configValues.set("enginePath", "codewhale");
     vscodeState.updateMock.mockClear();
     vscodeState.executeCommandMock.mockClear();
@@ -312,10 +332,10 @@ describe("SlashCommandHandler - Dispatcher Pattern", () => {
         "/mode", "/model", "/models", "/reasoning", "/config", "/settings",
         "/interrupt", "/clear", "/compact", "/exit", "/rename", "/save",
         "/export", "/context", "/tokens", "/cost", "/status", "/home",
-        "/workspace", "/task", "/trust", "/verbose", "/undo", "/retry",
+        "/workspace", "/task", "/trust", "/undo", "/retry",
         "/attach", "/goal", "/skills", "/skill", "/mcp", "/provider",
         "/links", "/feedback", "/anchor", "/sessions", "/load", "/change",
-        "/cache", "/profile", "/translate", "/system", "/edit", "/diff",
+        "/cache", "/system", "/edit", "/diff",
         "/jobs", "/logout", "/note", "/memory",
       ];
       for (const cmd of expectedCommands) {
@@ -1237,103 +1257,132 @@ describe("SlashCommandHandler - Dispatcher Pattern", () => {
   // ── /goal ──
 
   describe("/goal", () => {
-    it("sets goal with objective and budget", async () => {
+    it("sets the thread goal with objective and budget", async () => {
       const postMessage = vi.fn();
-      const refreshWorkPanel = vi.fn();
-      const ctx = createContext({ postMessage, refreshWorkPanel });
+      const refreshGoal = vi.fn(async () => undefined);
+      const ctx = createContext({
+        postMessage,
+        refreshGoal,
+        currentThread: { id: "thread-1" } as any,
+      });
       const handler = new SlashCommandHandler(ctx);
 
       await handler.handle("/goal", "Ship refactor | budget: 1234");
 
-      expect(vscodeState.updateMock).toHaveBeenCalledWith("goalObjective", "Ship refactor", "global");
-      expect(vscodeState.updateMock).toHaveBeenCalledWith("goalTokenBudget", 1234, "global");
-      expect(refreshWorkPanel).toHaveBeenCalledOnce();
+      expect(ctx.api.upsertThreadGoal).toHaveBeenCalledWith("thread-1", "Ship refactor", 1234);
+      expect(refreshGoal).toHaveBeenCalledOnce();
+      expect(postMessage).toHaveBeenCalledWith({
+        type: "info",
+        message: expect.stringContaining('Goal set: "Ship refactor"'),
+      });
     });
 
-    it("clears goal with 'clear'", async () => {
+    it("sets the goal without a budget", async () => {
       const postMessage = vi.fn();
-      const refreshWorkPanel = vi.fn();
-      const ctx = createContext({ postMessage, refreshWorkPanel });
-      const handler = new SlashCommandHandler(ctx);
-
-      await handler.handle("/goal", "clear");
-
-      expect(vscodeState.updateMock).toHaveBeenCalledWith("goalObjective", undefined, "global");
-      expect(vscodeState.updateMock).toHaveBeenCalledWith("goalTokenBudget", undefined, "global");
-    });
-
-    it("sets goal without budget", async () => {
-      const postMessage = vi.fn();
-      const ctx = createContext({ postMessage });
+      const ctx = createContext({ postMessage, currentThread: { id: "thread-1" } as any });
       const handler = new SlashCommandHandler(ctx);
 
       await handler.handle("/goal", "Just do it");
 
-      expect(vscodeState.updateMock).toHaveBeenCalledWith("goalObjective", "Just do it", "global");
+      expect(ctx.api.upsertThreadGoal).toHaveBeenCalledWith("thread-1", "Just do it", undefined);
+    });
+
+    it("clears the goal via the API", async () => {
+      const postMessage = vi.fn();
+      const refreshGoal = vi.fn(async () => undefined);
+      const ctx = createContext({
+        postMessage,
+        refreshGoal,
+        currentThread: { id: "thread-1" } as any,
+      });
+      const handler = new SlashCommandHandler(ctx);
+
+      await handler.handle("/goal", "clear");
+
+      expect(ctx.api.deleteThreadGoal).toHaveBeenCalledWith("thread-1");
+      expect(refreshGoal).toHaveBeenCalledOnce();
+      expect(postMessage).toHaveBeenCalledWith({ type: "info", message: "Goal cleared." });
+    });
+
+    it("completes the goal with 'done'", async () => {
+      const postMessage = vi.fn();
+      const ctx = createContext({ postMessage, currentThread: { id: "thread-1" } as any });
+      const handler = new SlashCommandHandler(ctx);
+
+      await handler.handle("/goal", "done");
+
+      expect(ctx.api.completeThreadGoal).toHaveBeenCalledWith("thread-1");
+      expect(ctx.api.upsertThreadGoal).not.toHaveBeenCalled();
+    });
+
+    it("blocks the goal with 'blocked'", async () => {
+      const postMessage = vi.fn();
+      const ctx = createContext({ postMessage, currentThread: { id: "thread-1" } as any });
+      const handler = new SlashCommandHandler(ctx);
+
+      await handler.handle("/goal", "blocked");
+
+      expect(ctx.api.blockThreadGoal).toHaveBeenCalledWith("thread-1");
+    });
+
+    it("reports the current goal for 'status'", async () => {
+      const postMessage = vi.fn();
+      const ctx = createContext({ postMessage, currentThread: { id: "thread-1" } as any });
+      (ctx.api.getThreadGoal as any).mockResolvedValue(
+        goalRecord({ objective: "Ship refactor", token_budget: 2000, tokens_used: 500 })
+      );
+      const handler = new SlashCommandHandler(ctx);
+
+      await handler.handle("/goal", "status");
+
+      const message = postMessage.mock.calls[0][0].message;
+      expect(message).toContain("Ship refactor");
+      expect(message).toContain("active");
+    });
+
+    it("reports when the thread has no goal", async () => {
+      const postMessage = vi.fn();
+      const ctx = createContext({ postMessage, currentThread: { id: "thread-1" } as any });
+      const handler = new SlashCommandHandler(ctx);
+
+      await handler.handle("/goal", "");
+
+      expect(ctx.api.getThreadGoal).toHaveBeenCalledWith("thread-1");
+      expect(postMessage.mock.calls[0][0].message).toContain("No goal set for this thread");
+    });
+
+    it("explains that goals are thread-scoped when no thread is open", async () => {
+      const postMessage = vi.fn();
+      const ctx = createContext({ postMessage, currentThread: null });
+      const handler = new SlashCommandHandler(ctx);
+
+      await handler.handle("/goal", "Ship refactor");
+
+      expect(ctx.api.upsertThreadGoal).not.toHaveBeenCalled();
+      expect(postMessage.mock.calls[0][0].message).toContain("Goals belong to a thread");
     });
   });
 
-  // ── /verbose ──
+  // ── Commands the GUI does not implement ──
 
-  describe("/verbose", () => {
-    it("enables verbose mode with 'on'", async () => {
-      const postMessage = vi.fn();
-      const ctx = createContext({ postMessage });
-      const handler = new SlashCommandHandler(ctx);
+  describe("commands without a GUI implementation", () => {
+    // These used to write config keys that package.json never declared, so every
+    // use raised "no registered configuration" from VSCode — and the values they
+    // wrote were never read by anything. They are now registry-only: no handler,
+    // unavailable, and the dispatcher surfaces the explanation.
+    it.each(["/verbose", "/profile", "/translate"])(
+      "%s explains itself instead of writing an undeclared setting",
+      async (cmd) => {
+        const postMessage = vi.fn();
+        const ctx = createContext({ postMessage });
+        const handler = new SlashCommandHandler(ctx);
 
-      await handler.handle("/verbose", "on");
+        await handler.handle(cmd, "on");
 
-      expect(vscodeState.updateMock).toHaveBeenCalledWith("verbose", true, "global");
-    });
-
-    it("disables verbose mode with 'off'", async () => {
-      const postMessage = vi.fn();
-      const ctx = createContext({ postMessage });
-      const handler = new SlashCommandHandler(ctx);
-
-      await handler.handle("/verbose", "off");
-
-      expect(vscodeState.updateMock).toHaveBeenCalledWith("verbose", false, "global");
-    });
-  });
-
-  // ── /profile ──
-
-  describe("/profile", () => {
-    it("switches profile", async () => {
-      const postMessage = vi.fn();
-      const ctx = createContext({ postMessage });
-      const handler = new SlashCommandHandler(ctx);
-
-      await handler.handle("/profile", "work");
-
-      expect(vscodeState.updateMock).toHaveBeenCalledWith("configProfile", "work", "global");
-    });
-
-    it("shows current profile when no arg", async () => {
-      const postMessage = vi.fn();
-      const ctx = createContext({ postMessage });
-      const handler = new SlashCommandHandler(ctx);
-
-      await handler.handle("/profile", "");
-
-      const msg = postMessage.mock.calls[0][0].message;
-      expect(msg).toContain("Current profile");
-    });
-  });
-
-  // ── /translate ──
-
-  describe("/translate", () => {
-    it("toggles translation mode", async () => {
-      const postMessage = vi.fn();
-      const ctx = createContext({ postMessage });
-      const handler = new SlashCommandHandler(ctx);
-
-      await handler.handle("/translate", "");
-
-      expect(vscodeState.updateMock).toHaveBeenCalledWith("translationEnabled", true, "global");
-    });
+        expect(vscodeState.updateMock).not.toHaveBeenCalled();
+        expect(postMessage.mock.calls[0][0].message).toContain("Not available");
+      }
+    );
   });
 
   // ── /edit ──

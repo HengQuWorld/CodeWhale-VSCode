@@ -63,6 +63,9 @@ export interface SlashCommandContext {
   refreshSessionList(): void;
   refreshTaskList(): Promise<void>;
   refreshWorkPanel(): void;
+  /** Re-fetch the current thread's goal from the runtime and push it to the
+   * webview. Both the Goal panel and the Work panel's goal title read from it. */
+  refreshGoal(): Promise<void>;
   loadSessionMessages(sessionId: string): Promise<void>;
   handleInterrupt(): Promise<void>;
   handleCompact(): Promise<void>;
@@ -718,19 +721,6 @@ function postCurrentSettings(ctx: SlashCommandContext): void {
   });
 }
 
-async function handleVerbose(ctx: SlashCommandContext, args: string): Promise<void> {
-  const sub = args.trim().toLowerCase();
-  if (sub === "on") {
-    await cfg().update("verbose", true, vscode.ConfigurationTarget.Global);
-    ctx.postMessage({ type: "info", message: "Verbose mode enabled" });
-  } else if (sub === "off") {
-    await cfg().update("verbose", false, vscode.ConfigurationTarget.Global);
-    ctx.postMessage({ type: "info", message: "Verbose mode disabled" });
-  } else {
-    ctx.postMessage({ type: "info", message: `Verbose mode: ${cfg().get<boolean>("verbose", false) ? "on" : "off"}\nUsage: /verbose [on|off]` });
-  }
-}
-
 async function handleInit(ctx: SlashCommandContext, _args: string): Promise<void> {
   vscode.commands.executeCommand("workbench.action.openSettings", "brotherwhale");
   ctx.postMessage({ type: "info", message: "Use the VSCode settings to configure CodeWhale. Open settings with /config." });
@@ -814,7 +804,6 @@ async function handleHelp(ctx: SlashCommandContext, _args: string): Promise<void
 /status - Show engine status
 /workspace [path] - Show/set workspace
 /trust [on|off] - Toggle trust mode
-/verbose [on|off] - Toggle verbose mode
 /skills - List all available skills with status
 /skill <name> [on|off] - Enable or disable a skill
 /memory - Manage native memory (show/search/get/remember/clear)
@@ -831,8 +820,11 @@ Commands with limited support in GUI:
 /goal, /network, /queue, /stash, /hooks, /subagents,
 /agent, /attach, /anchor, /sessions, /load, /cycles,
 /cycle, /recall, /relay, /lsp, /review,
-/rlm, /change, /cache, /profile, /translate, /system,
+/rlm, /change, /cache, /system,
 /edit, /diff, /logout, /tokens, /cost, /home
+
+Not available in GUI (run it to see why):
+/verbose, /profile, /translate
 
 Use the TUI for full command support.` });
 }
@@ -845,38 +837,95 @@ async function handleRetry(ctx: SlashCommandContext, _args: string): Promise<voi
   await ctx.handleRetryLastTurn();
 }
 
+/** Usage line shared by every `/goal` reply. Mirrors the TUI surface except for
+ *  pause/resume, which the runtime exposes no endpoint for. */
+const GOAL_USAGE =
+  "/goal <objective> [| budget: <tokens>] | /goal status | /goal done | /goal blocked | /goal clear";
+
+/** Parse `"<objective> | budget: <n>"`. The budget is advisory telemetry in the
+ *  engine (`ThreadGoal.token_budget`), so a malformed budget is dropped rather
+ *  than failing the whole command. */
+function parseGoalArgs(raw: string): { objective: string; budget?: number } {
+  const pipeIdx = raw.indexOf("|");
+  if (pipeIdx < 0) return { objective: raw.trim() };
+  const objective = raw.slice(0, pipeIdx).trim();
+  const match = raw.slice(pipeIdx + 1).match(/budget:\s*(\d+)/i);
+  return { objective, budget: match ? parseInt(match[1], 10) : undefined };
+}
+
+/** Report the thread's goal without mutating it. */
+async function reportGoal(ctx: SlashCommandContext, threadId: string): Promise<void> {
+  const goal = await ctx.api.getThreadGoal(threadId);
+  if (!goal) {
+    ctx.postMessage({ type: "info", message: `No goal set for this thread.\nUsage: ${GOAL_USAGE}` });
+    return;
+  }
+  const budget = goal.token_budget
+    ? `\nBudget: ${goal.tokens_used.toLocaleString()} / ${goal.token_budget.toLocaleString()} tokens`
+    : "";
+  ctx.postMessage({
+    type: "info",
+    message: `Goal [${goal.status}]: ${goal.objective}${budget}\nUsage: ${GOAL_USAGE}`,
+  });
+}
+
+/**
+ * `/goal` — the goal is the thread's durable objective, owned and persisted by
+ * the engine at `/v1/threads/{id}/goal`. That is the same record the Goal panel
+ * edits and the same one the TUI renders as the work surface title ("Goal: …"),
+ * so `/goal` and the Goal panel can no longer disagree.
+ *
+ * The previous implementation wrote an undeclared `goalObjective` setting
+ * instead (never a real thread goal, and never visible in VSCode settings),
+ * which left the Work panel's goal title tracking a value the engine ignored.
+ */
 async function handleGoal(ctx: SlashCommandContext, args: string): Promise<void> {
+  const raw = args.trim();
+  const sub = raw.toLowerCase();
+  const threadId = ctx.currentThread?.id;
+
+  if (!threadId) {
+    ctx.postMessage({
+      type: "info",
+      message: `Goals belong to a thread — open a thread first.\nUsage: ${GOAL_USAGE}`,
+    });
+    return;
+  }
+
   try {
-    const goalArg = args.trim();
-    if (goalArg === "clear" || goalArg === "reset" || goalArg === "done") {
-      await cfg().update("goalObjective", undefined, vscode.ConfigurationTarget.Global);
-      await cfg().update("goalTokenBudget", undefined, vscode.ConfigurationTarget.Global);
-      ctx.postMessage({ type: "info", message: "Goal cleared." });
-    } else if (goalArg) {
-      const pipeIdx = goalArg.indexOf("|");
-      let objective = goalArg;
-      let budget: number | undefined;
-      if (pipeIdx >= 0) {
-        objective = goalArg.slice(0, pipeIdx).trim();
-        const budgetStr = goalArg.slice(pipeIdx + 1).trim();
-        const budgetMatch = budgetStr.match(/budget:\s*(\d+)/i);
-        if (budgetMatch) budget = parseInt(budgetMatch[1], 10);
-      }
-      await cfg().update("goalObjective", objective, vscode.ConfigurationTarget.Global);
-      if (budget) await cfg().update("goalTokenBudget", budget, vscode.ConfigurationTarget.Global);
-      const budgetStr = budget ? ` (budget: ${budget} tokens)` : "";
-      ctx.postMessage({ type: "info", message: `Goal set: "${objective}"${budgetStr} — tracking progress.` });
-    } else {
-      const currentGoal = cfg().get<string | undefined>("goalObjective");
-      if (currentGoal) {
-        const currentBudget = cfg().get<number | undefined>("goalTokenBudget");
-        const budgetStr = currentBudget ? ` (budget: ${currentBudget} tokens)` : "";
-        ctx.postMessage({ type: "info", message: `Current goal: "${currentGoal}"${budgetStr}` });
-      } else {
-        ctx.postMessage({ type: "info", message: "No goal set.\nUsage: /goal <objective> [| budget: <tokens>]\n/goal clear — clear current goal" });
-      }
+    await ctx.api.ensureReady();
+
+    if (!raw || sub === "status" || sub === "show") {
+      await reportGoal(ctx, threadId);
+      return;
     }
-    ctx.refreshWorkPanel();
+
+    if (sub === "clear" || sub === "reset") {
+      await ctx.api.deleteThreadGoal(threadId);
+      ctx.postMessage({ type: "info", message: "Goal cleared." });
+    } else if (sub === "done" || sub === "complete") {
+      const goal = await ctx.api.completeThreadGoal(threadId);
+      ctx.postMessage({ type: "info", message: `Goal completed: "${goal.objective}"` });
+    } else if (sub === "block" || sub === "blocked") {
+      const goal = await ctx.api.blockThreadGoal(threadId);
+      ctx.postMessage({ type: "info", message: `Goal blocked: "${goal.objective}"` });
+    } else {
+      const { objective, budget } = parseGoalArgs(raw);
+      if (!objective) {
+        ctx.postMessage({
+          type: "info",
+          message: `Goal objective must not be blank.\nUsage: ${GOAL_USAGE}`,
+        });
+        return;
+      }
+      const goal = await ctx.api.upsertThreadGoal(threadId, objective, budget);
+      const budgetStr = goal.token_budget
+        ? ` (budget: ${goal.token_budget.toLocaleString()} tokens)`
+        : "";
+      ctx.postMessage({ type: "info", message: `Goal set: "${goal.objective}"${budgetStr}` });
+    }
+
+    await ctx.refreshGoal();
   } catch (err) {
     ctx.postMessage({ type: "error", message: formatError("Goal error", err) });
   }
@@ -1166,23 +1215,6 @@ async function handleCache(ctx: SlashCommandContext, _args: string): Promise<voi
   } else {
     ctx.postMessage({ type: "info", message: "No active thread for cache info." });
   }
-}
-
-async function handleProfile(ctx: SlashCommandContext, args: string): Promise<void> {
-  const profileArg = args.trim();
-  if (!profileArg) {
-    const currentProfile = cfg().get<string | undefined>("configProfile");
-    ctx.postMessage({ type: "info", message: `Current profile: ${currentProfile || "(default)"}\nUsage: /profile <name>\nProfiles are defined in ~/.deepseek/config.toml under [profiles] sections.` });
-  } else {
-    await cfg().update("configProfile", profileArg, vscode.ConfigurationTarget.Global);
-    ctx.postMessage({ type: "info", message: `Profile switched to '${profileArg}'. Restart the engine for full effect.` });
-  }
-}
-
-async function handleTranslate(ctx: SlashCommandContext, _args: string): Promise<void> {
-  const current = cfg().get<boolean>("translationEnabled", false);
-  await cfg().update("translationEnabled", !current, vscode.ConfigurationTarget.Global);
-  ctx.postMessage({ type: "info", message: `Translation ${!current ? "enabled" : "disabled"}` });
 }
 
 async function handleSystem(ctx: SlashCommandContext, _args: string): Promise<void> {
@@ -1676,7 +1708,6 @@ const HANDLERS: Record<string, CommandHandler> = {
   "/workspace": handleWorkspace,
   "/task": handleTask,
   "/trust": handleTrust,
-  "/verbose": handleVerbose,
   "/init": handleInit,
   "/mcp": handleMcp,
   "/provider": handleProvider,
@@ -1694,8 +1725,6 @@ const HANDLERS: Record<string, CommandHandler> = {
   "/load": handleLoad,
   "/change": handleChange,
   "/cache": handleCache,
-  "/profile": handleProfile,
-  "/translate": handleTranslate,
   "/system": handleSystem,
   "/edit": handleEdit,
   "/diff": handleDiff,

@@ -65,18 +65,20 @@ export function getGoalScript(_tr: WebviewTranslations): string {
   }
 
   function renderGoal() {
-    var container = document.getElementById('tab-goal');
+    var container = document.getElementById('work-goal');
     if (!container) return;
     container.innerHTML = '';
 
     if (editing) { renderEditor(container); return; }
 
     if (!goal) {
+      // Compact, not a full-height empty state: this sits at the top of the Work
+      // panel above the live checklist, so it must not push the work down. A
+      // goal-less thread showing no goal title is also the TUI's behaviour.
       var empty = document.createElement('div');
       empty.className = 'goal-empty';
       empty.innerHTML =
-        '<div class="work-empty-icon">🎯</div>' +
-        '<div class="work-empty-text">' + __wvEscapeHtml(__i18n.goalNoGoal) + '</div>' +
+        '<span class="goal-empty-text">' + __wvEscapeHtml(__i18n.goalNoGoal) + '</span>' +
         '<button class="goal-set-btn" type="button"><span class="goal-btn-icon">＋</span>' + __wvEscapeHtml(__i18n.goalSet) + '</button>';
       empty.querySelector('.goal-set-btn').onclick = function() { openEditor('create'); };
       container.appendChild(empty);
@@ -86,6 +88,7 @@ export function getGoalScript(_tr: WebviewTranslations): string {
     var status = goal.status || 'active';
     var html = '<div class="goal-card">';
     html += '<div class="goal-header">';
+    html += '<span class="goal-label">' + __wvEscapeHtml(__i18n.goal) + '</span>';
     html += '<span class="fleet-status-icon ' + statusClass(status) + '">' + statusIcon(status) + '</span>';
     html += '<span class="fleet-status-badge ' + statusClass(status) + '">' + __wvEscapeHtml(titleCase(status)) + '</span>';
     html += '</div>';

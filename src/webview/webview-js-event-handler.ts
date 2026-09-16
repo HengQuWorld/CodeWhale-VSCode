@@ -405,7 +405,7 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
         window.__wvSidebar.closeAgentDetail();
         if (window.__wvFleet) window.__wvFleet.closeFleetDetail();
         // Clear stale work/changes state from previous thread
-        window.__wvSidebar.setWorkState({ goal: null, checklist: [], checklistCompletionPct: 0, strategy: [], cycleCount: 0, coherenceState: 'healthy', coherenceLabel: '' });
+        window.__wvSidebar.setWorkState({ checklist: [], checklistCompletionPct: 0, strategy: [], cycleCount: 0, coherenceState: 'healthy', coherenceLabel: '' });
         window.__wvSidebar.setChangesState([]);
         window.__wvSidebar.renderWork();
         window.__wvSidebar.renderChanges();
@@ -468,7 +468,6 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
 
       case 'workState':
         window.__wvSidebar.setWorkState({
-          goal: msg.goal || null,
           checklist: msg.checklist || [],
           checklistCompletionPct: msg.checklistCompletionPct || 0,
           strategy: msg.strategy || [],
@@ -938,7 +937,7 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
         window.__wvMessages.renderWelcome();
         // Clear sidebar Work panel state so stale data from the previous
         // session doesn't persist into the new one.
-        window.__wvSidebar.setWorkState({ goal: null, checklist: [], checklistCompletionPct: 0, strategy: [], cycleCount: 0, coherenceState: 'healthy', coherenceLabel: '' });
+        window.__wvSidebar.setWorkState({ checklist: [], checklistCompletionPct: 0, strategy: [], cycleCount: 0, coherenceState: 'healthy', coherenceLabel: '' });
         window.__wvSidebar.setChangesState([]);
         window.__wvSidebar.renderWork();
         window.__wvSidebar.renderChanges();
@@ -946,6 +945,14 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
         window.__wvSidebar.renderTasks([]);
         window.__wvSidebar.setAgentRuns([]);
         window.__wvSidebar.renderAgents([]);
+        // The goal slot lives in the Work panel but is owned by the goal control
+        // plane, so it needs its own reset — a stale goal from the previous
+        // thread must not survive a cleared view.
+        if (window.__wvGoal) {
+          window.__wvGoal.setGoal(null);
+          window.__wvGoal.setEditing(false);
+          window.__wvGoal.renderGoal();
+        }
         break;
 
       case 'openConfigPanel':
