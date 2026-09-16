@@ -102,6 +102,22 @@ describe("webview-js-input.ts", () => {
     expect(script).toContain("interrupt");
   });
 
+  it("never resizes the textarea from its content", () => {
+    const script = getInputScript(makeTr());
+
+    // The height belongs to the CSS default and the resize handle; longer text
+    // scrolls inside the box instead of growing it.
+    expect(script).not.toContain("scrollHeight");
+    expect(script).not.toContain("style.height");
+    expect(script).not.toContain("autoGrowInput");
+  });
+
+  it("keeps the icon button's tooltip in sync with the send/stop state", () => {
+    const script = getInputScript(makeTr());
+    expect(script).toContain("sendStopBtn.setAttribute('title', label);");
+    expect(script).toContain("sendStopBtn.setAttribute('aria-label', label);");
+  });
+
   it("handles new thread button click", () => {
     const script = getInputScript(makeTr());
     expect(script).toContain("btn-new-thread");

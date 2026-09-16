@@ -436,3 +436,32 @@ describe("webview-js-input runtime: thumbnail cache", () => {
     expect(chipHtml(h)[0]).not.toContain("attachment-thumb");
   });
 });
+describe("webview-js-input runtime: typing never resizes the textarea", () => {
+  it("keeps the chosen height and lets longer text scroll inside", () => {
+    const h = createHarness();
+    h.input.style.height = "52px";
+    h.input.scrollHeight = 500; // far more text than the box can show
+    h.input.dispatch("input", syntheticEvent());
+
+    expect(h.input.style.height).toBe("52px");
+  });
+
+  it("leaves no measurement override behind on the element", () => {
+    const h = createHarness();
+    h.input.dispatch("input", syntheticEvent());
+
+    // The removed auto-grow helper wrote both of these while measuring.
+    expect(h.input.style.height).toBeUndefined();
+    expect(h.input.style.flexGrow).toBeUndefined();
+  });
+
+  it("does not resize the box when a send clears the textarea", () => {
+    const h = createHarness();
+    h.input.style.height = "150px";
+    h.input.value = "hello";
+    h.input.dispatch("keydown", syntheticEvent({ key: "Enter", shiftKey: false }));
+
+    expect(h.postMessages).toEqual([{ type: "sendMessage", text: "hello" }]);
+    expect(h.input.style.height).toBe("150px");
+  });
+});
