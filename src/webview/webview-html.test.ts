@@ -357,7 +357,6 @@ describe("webview-html.ts assembler", () => {
     const html = getWebviewHtml(makeMockWebview(), makeMockExtensionUri(), makeTr());
     expect(html).toContain('id="layout"');
     expect(html).toContain('id="threads-panel"');
-    expect(html).toContain('id="sidebar-resize-handle"');
     expect(html).toContain('id="input-resize-handle"');
     expect(html).toContain('id="chat-area"');
     expect(html).toContain('id="messages"');
@@ -423,10 +422,10 @@ describe("webview-html.ts assembler", () => {
     expect(html).toContain("window.__wvSidebar");
   });
 
-  it("includes all module scripts (shared state + 11 modules = 12)", () => {
+  it("includes all module scripts (shared state + modules = 11)", () => {
     const html = getWebviewHtml(makeMockWebview(), makeMockExtensionUri(), makeTr());
     const scriptCount = (html.match(/<script nonce=/g) || []).length;
-    expect(scriptCount).toBe(12);
+    expect(scriptCount).toBe(11);
   });
 
   it("contains utilities module output", () => {

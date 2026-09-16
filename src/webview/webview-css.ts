@@ -71,30 +71,6 @@ export function getWebviewCss(): string {
     }
     #threads-panel.open { display: flex; }
 
-    /* ── Sidebar Resize Handle ── */
-
-    #sidebar-resize-handle {
-      width: 4px;
-      cursor: col-resize;
-      flex-shrink: 0;
-      background: transparent;
-      position: relative;
-      z-index: 10;
-      transition: background 0.15s;
-    }
-    #sidebar-resize-handle:hover,
-    #sidebar-resize-handle.active {
-      background: var(--vscode-panel-border, var(--border));
-    }
-    #sidebar-resize-handle::after {
-      content: '';
-      position: absolute;
-      left: -3px;
-      right: -3px;
-      top: 0;
-      bottom: 0;
-    }
-
     /* ── Input Resize Handle ── */
 
     #input-resize-handle {

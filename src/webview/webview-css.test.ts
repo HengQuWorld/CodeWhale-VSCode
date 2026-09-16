@@ -30,7 +30,6 @@ describe("webview-css.ts", () => {
     const css = getWebviewCss();
     expect(css).toContain("#layout");
     expect(css).toContain("#threads-panel");
-    expect(css).toContain("#sidebar-resize-handle");
     expect(css).toContain("#input-resize-handle");
     expect(css).toContain("#chat-area");
     expect(css).toContain("#messages");

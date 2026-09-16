@@ -410,7 +410,6 @@ ${css}
         <div class="sidebar-section-body" id="tab-changes"></div>
       </div>
     </div>
-    <div id="sidebar-resize-handle" title="Drag to resize sidebar"></div>
     <div id="chat-area">
       <div id="settings-bar">
         <button id="btn-threads" title="${tr.toggleHistory}">📋</button>
@@ -560,63 +559,6 @@ ${css}
   <script nonce="${nonce}">
     (function() {
       'use strict';
-      var handle = document.getElementById('sidebar-resize-handle');
-      var panel = document.getElementById('threads-panel');
-      if (!handle || !panel) return;
-
-      // Restore saved width from previous session
-      try {
-        var savedWidth = localStorage.getItem('codewhale:sidebarWidth');
-        if (savedWidth) {
-          var w = parseInt(savedWidth, 10);
-          if (w >= 120 && w <= 600) {
-            panel.style.width = w + 'px';
-          }
-        }
-      } catch(e) { /* localStorage may not be available */ }
-
-      var startX, startWidth;
-
-      function onMouseDown(e) {
-        startX = e.clientX;
-        startWidth = panel.getBoundingClientRect().width;
-        handle.classList.add('active');
-        document.body.style.cursor = 'col-resize';
-        document.body.style.userSelect = 'none';
-        document.addEventListener('mousemove', onMouseMove);
-        document.addEventListener('mouseup', onMouseUp);
-        e.preventDefault();
-      }
-
-      function onMouseMove(e) {
-        if (startX === undefined) return;
-        var newWidth = startWidth + (e.clientX - startX);
-        if (newWidth < 120) newWidth = 120;
-        if (newWidth > 600) newWidth = 600;
-        panel.style.width = newWidth + 'px';
-      }
-
-      function onMouseUp() {
-        handle.classList.remove('active');
-        document.body.style.cursor = '';
-        document.body.style.userSelect = '';
-        document.removeEventListener('mousemove', onMouseMove);
-        document.removeEventListener('mouseup', onMouseUp);
-        // Save width for next session
-        try {
-          var finalWidth = panel.getBoundingClientRect().width;
-          localStorage.setItem('codewhale:sidebarWidth', String(Math.round(finalWidth)));
-        } catch(e) { /* ignore localStorage errors */ }
-        startX = undefined;
-        startWidth = undefined;
-      }
-
-      handle.addEventListener('mousedown', onMouseDown);
-    })();
-  </script>
-  <script nonce="${nonce}">
-    (function() {
-      'use strict';
       var handle = document.getElementById('input-resize-handle');
       var inputArea = document.getElementById('input-area');
       if (!handle || !inputArea) return;
@@ -636,37 +578,52 @@ ${css}
       } catch(e) { /* localStorage may not be available */ }
 
       var startY, startHeight;
+      var lastClientY = 0;
+      var rafId = null;
 
       function onMouseDown(e) {
         startY = e.clientY;
         startHeight = inputArea.getBoundingClientRect().height;
         handle.classList.add('active');
         inputArea.classList.add('resizing');
+        document.body.classList.add('is-resizing');
         document.body.style.cursor = 'row-resize';
         document.body.style.userSelect = 'none';
-        document.addEventListener('mousemove', onMouseMove);
-        document.addEventListener('mouseup', onMouseUp);
+        window.addEventListener('mousemove', onMouseMove);
+        window.addEventListener('mouseup', onMouseUp);
+        window.addEventListener('mouseleave', onMouseUp);
+        window.addEventListener('blur', onMouseUp);
         e.preventDefault();
       }
 
       function onMouseMove(e) {
         if (startY === undefined) return;
-        var newHeight = startHeight - (e.clientY - startY);
-        if (newHeight < 56) newHeight = 56;
-        if (newHeight > 400) newHeight = 400;
-        inputArea.style.height = newHeight + 'px';
-        // Keep textarea filling the container during resize
-        var input = document.getElementById('input');
-        if (input) input.style.height = 'auto';
+        lastClientY = e.clientY;
+        if (rafId !== null) return;
+        rafId = requestAnimationFrame(function() {
+          rafId = null;
+          if (startY === undefined) return;
+          var newHeight = startHeight - (lastClientY - startY);
+          if (newHeight < 56) newHeight = 56;
+          if (newHeight > 400) newHeight = 400;
+          inputArea.style.height = newHeight + 'px';
+          // Keep textarea filling the container during resize
+          var input = document.getElementById('input');
+          if (input) input.style.height = 'auto';
+        });
       }
 
       function onMouseUp() {
         handle.classList.remove('active');
         inputArea.classList.remove('resizing');
+        document.body.classList.remove('is-resizing');
         document.body.style.cursor = '';
         document.body.style.userSelect = '';
-        document.removeEventListener('mousemove', onMouseMove);
-        document.removeEventListener('mouseup', onMouseUp);
+        window.removeEventListener('mousemove', onMouseMove);
+        window.removeEventListener('mouseup', onMouseUp);
+        window.removeEventListener('mouseleave', onMouseUp);
+        window.removeEventListener('blur', onMouseUp);
+        if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
         // Save height for next session
         try {
           var finalHeight = inputArea.getBoundingClientRect().height;
