@@ -124,9 +124,11 @@ Switch from the status bar or with `/mode` (shortcuts `1`/`2`/`3`) and `/auto`. 
 ### Sessions, not just threads
 - **Save and resume** conversations as sessions, with search and delete.
 - **Per-turn auto-save**, so a reload or restart does not lose the thread.
+- **Background threads keep running** — switching threads, sessions or starting a new chat no longer touches the running turn: the Runtime owns it, so a goal loop or a long turn keeps going while you work elsewhere. Switching back re-attaches the view to that turn (Stop and Steer work again); stopping one stays explicit (**Stop**).
 - **Cross-workspace resumption** — loading a session from another project rebinds it to the workspace you are in.
 - **Workspace filter** — show sessions from all workspaces or only the current one.
-- **Attention surfacing** — threads waiting on an approval or your input get a pulsing dot, polled while a turn runs.
+- **Attention surfacing** — a thread waiting on an approval or your input carries a count on its rail card (grouped under *Needs you*), a total on the toolbar's **Agent** label, and a VS Code notification you can turn off with `brotherwhale.backgroundThreadNotifications`. Approvals and questions from another thread can be answered inline in its rail card, without switching to it.
+- **Watched, not polled** — every background thread that is running or waiting on you holds one lightweight SSE stream, so badges, notifications and the auto-save stay live without a polling timer.
 - Three peer sidebar tabs — **Sessions** (saved conversations), **Threads** (the active ones) and **Activity** (live agent status: Work, Fleet, Tasks, Agents, Changes) — each with a hint line saying what it holds.
 
 ### Changes and diffs in the editor
@@ -143,6 +145,7 @@ Switch from the status bar or with `/mode` (shortcuts `1`/`2`/`3`) and `/auto`. 
 
 ### Goal, memory, and skills
 - **Thread Goal** — status, token budget (red when over), elapsed time and continuation count, with set / edit / complete / block / delete.
+- **Background goals** — tick *Run on a background thread* when setting a goal and it moves to its own thread, inheriting the model, mode and permission posture of the one you are on; the Work panel lists those goals below the current one, with **Open Thread**. **Resume** re-arms a goal left parked by a Runtime restart (the engine has no startup sweep for them).
 - **Memory** — `/memory` reads and writes the engine's native memory store through the runtime API.
 - **Notes** — `/note` for quick per-workspace notes.
 - **Skills** — `/skills` and `/skill` to list and toggle them.
@@ -200,6 +203,7 @@ Search for `brotherwhale` in VS Code settings (`Cmd/Ctrl+,`).
 | `brotherwhale.reasoningEffort` | `"auto"` | `auto`, `off`, `low`, `medium`, `high`, `max` |
 | `brotherwhale.autoApprove` | `false` | Legacy fallback for auto-approval. Prefer the **Full Access** posture, which already implies it |
 | `brotherwhale.costCurrency` | `"auto"` | `auto` follows the UI language (Chinese → CNY, otherwise USD), or force `usd` / `cny`. Falls back to USD when no native CNY price exists |
+| `brotherwhale.backgroundThreadNotifications` | `true` | Show a VS Code notification when a background thread needs your approval or input (once per attention episode; the rail badge and its count stay live either way) |
 
 ## How it works
 

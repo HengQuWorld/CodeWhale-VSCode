@@ -124,9 +124,11 @@ code --install-extension ./brotherwhale-vscode-0.6.2.vsix --force
 ### 会话（Sessions），而不只是线程
 - 把对话**保存并恢复**为会话，支持搜索与删除。
 - **每回合自动保存**，重载或重启都不会丢线程。
+- **后台线程持续运行** —— 切换线程、载入会话或新建对话都不会再动到正在运行的回合：回合由 Runtime 拥有，目标循环或长时间回合会在你处理其它事情时继续跑。切回该线程时会重新接上这个回合（Stop、Steer 恢复可用）；要停下仍然需要显式点 **Stop**。
 - **跨工作区恢复** —— 载入其他项目的会话时，会自动重新绑定到当前工作区。
 - **工作区过滤** —— 可查看全部工作区的会话，或只看当前工作区。
-- **注意力提示** —— 等待审批或等待你输入的线程会显示脉动圆点，回合运行期间定时轮询。
+- **注意力提示** —— 等待审批或等待你输入的线程，会在它的卡片上显示待办数量（归入 *Needs you* 分组），工具栏 **Agent** 标签上显示总数，并弹出 VS Code 通知（可用 `brotherwhale.backgroundThreadNotifications` 关闭）。其它线程的审批与提问可以直接在它的卡片内联回答，不用先切过去。
+- **监视而非轮询** —— 每个正在运行或等待你的后台线程各持有一条轻量 SSE 流，徽章、通知与自动保存都是实时的，不再有定时轮询。
 - 侧边栏三个并列标签页 —— **Sessions**（已保存的会话）、**Threads**（进行中的线程）、**Activity**（智能体实时状态：工作、车队、任务、子代理、变更），每个标签下都有一行说明它装了什么。
 
 ### 编辑器内的变更与差异
@@ -142,6 +144,7 @@ code --install-extension ./brotherwhale-vscode-0.6.2.vsix --force
 
 ### 目标、记忆与技能
 - **Thread Goal** —— 状态、token 预算（超支显示红色）、耗时与续跑次数，支持设置 / 编辑 / 完成 / 阻塞 / 删除。
+- **后台目标** —— 设置目标时勾选*在后台线程运行*，它会移到独立线程上，继承当前线程的模型、模式与权限姿态；工作面板会在当前目标下方列出这些目标，并提供**打开线程**。**恢复运行**用于重新唤醒被 Runtime 重启搁置的目标（引擎启动时不会自动扫它们）。
 - **Memory** —— `/memory` 通过 runtime API 读写引擎的原生记忆存储。
 - **Notes** —— `/note` 记录按工作区的速记。
 - **Skills** —— `/skills` 与 `/skill` 列出、切换技能。
@@ -199,6 +202,7 @@ code --install-extension ./brotherwhale-vscode-0.6.2.vsix --force
 | `brotherwhale.reasoningEffort` | `"auto"` | `auto`、`off`、`low`、`medium`、`high`、`max` |
 | `brotherwhale.autoApprove` | `false` | 自动批准的旧兜底项。建议改用 **Full Access** 权限姿态，它本身已隐含自动批准 |
 | `brotherwhale.costCurrency` | `"auto"` | `auto` 跟随界面语言（中文 → CNY，否则 USD），也可强制 `usd` / `cny`。没有原生 CNY 价格时回退到 USD |
+| `brotherwhale.backgroundThreadNotifications` | `true` | 后台线程需要你审批或输入时弹出 VS Code 通知（每次等待只提醒一次；Threads 侧栏徽章与计数始终实时） |
 
 ## 工作原理
 
