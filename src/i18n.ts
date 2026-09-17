@@ -9,6 +9,10 @@ interface Translations {
   sessions: string;
   tasks: string;
   work: string;
+  activity: string;
+  sessionsTabHint: string;
+  threadsTabHint: string;
+  activityTabHint: string;
   newThread: string;
   compact: string;
   interrupt: string;
@@ -367,7 +371,8 @@ interface Translations {
 
 const en: Translations = {
   locale: "en",
-  history: "History", threads: "Threads", sessions: "Sessions", tasks: "Tasks", work: "Work",
+  history: "History", threads: "Threads", sessions: "Sessions", tasks: "Tasks", work: "Work", activity: "Activity",
+  sessionsTabHint: "Saved, archived conversations", threadsTabHint: "Active conversation threads", activityTabHint: "Live agent status: work, tasks, agents, changes",
   newThread: "+ New", compact: "⬒ Compact", interrupt: "■ Stop",
   toggleHistory: "Click to toggle history", send: "Send",
   inputPlaceholder: "Ask CodeWhale...",
@@ -693,7 +698,8 @@ const en: Translations = {
 
 const zhCn: Translations = {
   locale: "zh-cn",
-  history: "历史", threads: "线程", sessions: "会话", tasks: "任务", work: "工作",
+  history: "历史", threads: "线程", sessions: "会话", tasks: "任务", work: "工作", activity: "活动",
+  sessionsTabHint: "已保存归档的会话", threadsTabHint: "进行中的对话线程", activityTabHint: "Agent 实时状态：工作、任务、子代理、变更",
   newThread: "+ 新建", compact: "⬒ 压缩", interrupt: "■ 停止",
   toggleHistory: "点击切换历史", send: "发送",
   inputPlaceholder: "向 CodeWhale 提问...",
@@ -1049,6 +1055,10 @@ export function webviewTranslations(tr: Translations) {
     sessions: tr.sessions,
     tasks: tr.tasks,
     work: tr.work,
+    activity: tr.activity,
+    sessionsTabHint: tr.sessionsTabHint,
+    threadsTabHint: tr.threadsTabHint,
+    activityTabHint: tr.activityTabHint,
     newThread: tr.newThread,
     compact: tr.compact,
     interrupt: tr.interrupt,

@@ -262,17 +262,8 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
 
   function initSessionSearch() {
     if (_sessionSearchInited) return;
-    var container = document.getElementById('tab-sessions');
-    if (!container) return;
-    // Insert search bar as the first child, before any session items
-    var searchBar = document.createElement('div');
-    searchBar.className = 'session-search-bar';
-    searchBar.id = 'session-search-bar';
-    var searchInput = document.createElement('input');
-    searchInput.type = 'text';
-    searchInput.className = 'session-search-input';
-    searchInput.id = 'session-search-input';
-    searchInput.placeholder = __i18n.searchPlaceholder;
+    var searchInput = document.getElementById('session-search-input');
+    if (!searchInput) return;
     searchInput.value = sessionSearchQuery;
     searchInput.addEventListener('input', function() {
       sessionSearchQuery = searchInput.value;
@@ -281,8 +272,6 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
         vscode.postMessage({ type: 'searchSessions', query: sessionSearchQuery });
       }, 300);
     });
-    searchBar.appendChild(searchInput);
-    container.insertBefore(searchBar, container.firstChild);
     _sessionSearchInited = true;
   }
 
@@ -410,7 +399,11 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
       threadCountEl.textContent = __wvFormatThreadsCount(count, 'threads');
     }
 
-    container.innerHTML = '';
+    // Preserve the hint header; remove only thread items and the empty placeholder.
+    var existing = container.querySelectorAll('.thread-item, .work-empty');
+    for (var r = 0; r < existing.length; r++) {
+      existing[r].remove();
+    }
 
     if (count === 0) {
       var el = document.createElement('div');
@@ -481,40 +474,26 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
   // ── Switch Sidebar Tab ──
   function switchSidebarTab(tab) {
     sidebarTab = tab;
-    var sessionsBtn = document.getElementById('tab-sessions-btn');
-    var threadsBtn = document.getElementById('tab-threads-btn');
-    var sessionsContainer = document.getElementById('tab-sessions');
-    var threadsContainer = document.getElementById('tab-threads-list');
     var section = document.getElementById('sidebar-threads');
-
-    if (tab === 'sessions') {
-      sessionsBtn.classList.add('active');
-      threadsBtn.classList.remove('active');
-      if (section) section.setAttribute('data-active-tab', 'sessions');
-      sessionsContainer.style.display = '';
-      threadsContainer.style.display = '';
-      if (threadCountEl) threadCountEl.textContent = __wvFormatThreadsCount(sessions.length, 'sessions');
-    } else {
-      sessionsBtn.classList.remove('active');
-      threadsBtn.classList.add('active');
-      if (section) section.setAttribute('data-active-tab', 'threads');
-      sessionsContainer.style.display = '';
-      threadsContainer.style.display = '';
-      if (threadCountEl) threadCountEl.textContent = __wvFormatThreadsCount(threads.length, 'threads');
+    var tabs = ['sessions', 'threads', 'activity'];
+    for (var i = 0; i < tabs.length; i++) {
+      var btn = document.getElementById('tab-' + tabs[i] + '-btn');
+      if (btn) btn.classList.toggle('active', tabs[i] === tab);
+    }
+    if (section) section.setAttribute('data-active-tab', tab);
+    if (threadCountEl) {
+      if (tab === 'sessions') threadCountEl.textContent = __wvFormatThreadsCount(sessions.length, 'sessions');
+      else if (tab === 'threads') threadCountEl.textContent = __wvFormatThreadsCount(threads.length, 'threads');
     }
   }
 
   // ── Apply showThreadList setting ──
+  // The three sidebar tabs (Sessions / Threads / Activity) are peers and are
+  // always visible; the legacy brotherwhale.showThreadList setting no longer
+  // hides the Threads tab. Kept as a no-op so the runtime 'ready' message
+  // still flows through unchanged.
   function applyShowThreadList(show) {
     showThreadList = show;
-    var threadsBtn = document.getElementById('tab-threads-btn');
-    if (threadsBtn) {
-      threadsBtn.style.display = show ? '' : 'none';
-    }
-    // If threads are hidden and currently on the threads tab, switch to sessions
-    if (!show && sidebarTab === 'threads') {
-      switchSidebarTab('sessions');
-    }
   }
   function closeTaskCreateDialog() {
     var overlay = document.getElementById('task-create-overlay');
@@ -1323,6 +1302,9 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
   });
   document.getElementById('tab-threads-btn').addEventListener('click', function() {
     switchSidebarTab('threads');
+  });
+  document.getElementById('tab-activity-btn').addEventListener('click', function() {
+    switchSidebarTab('activity');
   });
 
   // ── Workspace filter toggle ──

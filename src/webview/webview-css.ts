@@ -157,6 +157,7 @@ export function getWebviewCss(): string {
       flex: 1;
     }
     .sidebar-section-action {
+      flex: 0 0 auto;
       font-size: 0.85em;
       cursor: pointer;
       padding: 0 4px;
@@ -182,14 +183,19 @@ export function getWebviewCss(): string {
       max-height: 0 !important;
       overflow: hidden;
     }
-    #sidebar-threads .sidebar-section-body {
+    /* Top-level tab bodies (Sessions / Threads / Activity) fill the sidebar
+       and are shown/hidden by data-active-tab. The direct-child selector
+       keeps the nested Activity sections' own collapse behaviour intact. */
+    #sidebar-threads > .sidebar-section-body {
       max-height: none;
       flex: 1;
       min-height: 0;
-    }
-    #sidebar-threads[data-active-tab="sessions"] #tab-threads-list,
-    #sidebar-threads[data-active-tab="threads"] #tab-sessions {
       display: none;
+    }
+    #sidebar-threads[data-active-tab="sessions"] > #tab-sessions,
+    #sidebar-threads[data-active-tab="threads"] > #tab-threads-list,
+    #sidebar-threads[data-active-tab="activity"] > #tab-activity {
+      display: block;
     }
 
     .sidebar-tabs {
@@ -200,7 +206,9 @@ export function getWebviewCss(): string {
       gap: 4px;
     }
     .sidebar-tab {
-      padding: 4px 12px;
+      flex: 1 1 auto;
+      min-width: 0;
+      padding: 4px 6px;
       font-size: 0.78em;
       font-weight: 600;
       color: var(--muted);
@@ -209,6 +217,10 @@ export function getWebviewCss(): string {
       border-radius: 4px;
       cursor: pointer;
       transition: all 0.15s;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      text-align: center;
     }
     .sidebar-tab:hover {
       background: var(--card-bg);
@@ -301,13 +313,26 @@ export function getWebviewCss(): string {
       font-size: 0.9em;
     }
 
+    /* Tab hint (explains what each sidebar tab holds) */
+    .sidebar-tab-hint {
+      padding: 6px 10px;
+      font-size: 0.8em;
+      color: var(--muted);
+      line-height: 1.4;
+      border-bottom: 1px solid var(--border);
+    }
+
     /* Session search bar */
     .session-search-bar {
+      display: flex;
+      align-items: center;
+      gap: 6px;
       padding: 6px 8px;
       border-bottom: 1px solid var(--border);
     }
     .session-search-input {
-      width: 100%;
+      flex: 1;
+      min-width: 0;
       padding: 5px 8px;
       border: 1px solid var(--border);
       border-radius: 4px;
