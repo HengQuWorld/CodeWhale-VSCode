@@ -589,7 +589,6 @@ ${css}
           var w = parseInt(savedWidth, 10);
           if (w >= 120 && w <= 600) {
             panel.style.width = w + 'px';
-            handle.style.left = w + 'px';
           }
         }
       } catch(e) { /* localStorage may not be available */ }
@@ -623,7 +622,6 @@ ${css}
           if (newWidth < 120) newWidth = 120;
           if (newWidth > 600) newWidth = 600;
           panel.style.width = newWidth + 'px';
-          handle.style.left = newWidth + 'px';
         });
       }
 

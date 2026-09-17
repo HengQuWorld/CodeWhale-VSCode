@@ -159,7 +159,7 @@ code --install-extension ./brotherwhale-vscode-0.6.2.vsix --force
 - **配置面板** —— 设置栏的齿轮（或 `/config`）可读写引擎的 runtime 配置，包括 sandbox 模式、strict tool 模式、memory、search provider 与 prompt suggestion。
 
 ### 为编辑器而做
-- 活动栏容器，侧边栏包含 **Sessions**、**Threads**、**Activity** 三个标签页，最后者汇集 Work、Fleet、Tasks、Agents 与 Changes 面板。线程面板浮在对话之上（不再挤压对话），可用 ✕ 按钮或 `Esc` 收起。
+- 活动栏容器，侧边栏包含 **Sessions**、**Threads**、**Activity** 三个标签页，最后者汇集 Work、Fleet、Tasks、Agents 与 Changes 面板。线程面板与对话并排显示，占用对话区的宽度而不是盖住它，可用 ✕ 按钮或 `Esc` 收起。
 - 状态栏显示引擎状态、模式、权限、提供商、模型与思考深度。
 - 侧边栏与输入区可拖拽调整；自动跟随 VS Code 主题。
 - **英文与简体中文**界面，跟随 VS Code 的显示语言。
@@ -278,7 +278,7 @@ npx @vscode/vsce package --no-dependencies   # 打包 VSIX
 
 感谢通过 Pull Request 改进本扩展的每一位贡献者：
 
-- **[@eoli](https://github.com/eoli)** —— [#9](https://github.com/HengQuWorld/CodeWhale-VSCode/pull/9) 恢复并加固了侧边栏拖拽手柄、把输入区重构为带底栏的输入框、并将设置入口迁移到侧边栏标题栏齿轮（历经 #4–#8 数轮迭代）；[#10](https://github.com/HengQuWorld/CodeWhale-VSCode/pull/10) 新增侧边栏 **Activity** 标签页与各标签说明文字、让线程面板浮于对话之上，并为其加上智能体状态标签与关闭按钮
+- **[@eoli](https://github.com/eoli)** —— [#9](https://github.com/HengQuWorld/CodeWhale-VSCode/pull/9) 恢复并加固了侧边栏拖拽手柄、把输入区重构为带底栏的输入框、并将设置入口迁移到侧边栏标题栏齿轮（历经 #4–#8 数轮迭代）；[#10](https://github.com/HengQuWorld/CodeWhale-VSCode/pull/10) 新增侧边栏 **Activity** 标签页与各标签说明文字，并为其加上智能体状态标签与关闭按钮
 - **[@Hmbown](https://github.com/Hmbown)** —— [#2](https://github.com/HengQuWorld/CodeWhale-VSCode/pull/2) 让每个窗口独立持有并认证自己的 Runtime，并为按文件恢复加了防护
 
 ## 许可证

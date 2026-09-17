@@ -116,7 +116,7 @@ DeepSeek-GUI/
 ### 4. 侧边栏状态
 - 侧边栏三个并列标签页：Sessions（默认激活）、Threads、Activity；没有设置可以隐藏其中任何一个
 - Activity 标签内汇集 Work、Fleet、Tasks、Agents、Changes 区块（各自仍可折叠）
-- Threads 面板浮在对话之上（`#threads-panel` 绝对定位 + `.open`），不再挤压对话区
+- Threads 面板与对话并排（`#threads-panel` 是 `#layout` 里的普通 flex 子项，靠 `.open` 显示），从对话区让出宽度而不是盖住它；不要改回绝对定位的覆盖写法
 - 打开后保持打开状态，除非用户明确关闭（✕ 按钮或 `Esc`）
 - 点击线程项不会自动关闭侧边栏
 

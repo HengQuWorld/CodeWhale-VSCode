@@ -1493,8 +1493,8 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
   if (agentPanelToggleEl) agentPanelToggleEl.addEventListener('click', toggleThreadsPanel);
 
   // ── Escape closes the panel ──
-  // The panel overlays the chat, so the ✕ is not the only way out. Inputs keep
-  // their own Escape handling (slash menu, task draft) — skip when one has focus.
+  // Same effect as the ✕ button, without hunting for it. Inputs keep their own
+  // Escape handling (slash menu, task draft) — skip when one has focus.
   document.addEventListener('keydown', function(e) {
     if (e.key !== 'Escape') return;
     var t = e.target;

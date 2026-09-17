@@ -160,7 +160,7 @@ Switch from the status bar or with `/mode` (shortcuts `1`/`2`/`3`) and `/auto`. 
 - **Config panel** — the gear in the settings bar (or `/config`) reads and writes engine runtime config, including sandbox mode, strict tool mode, memory, search provider and prompt suggestion.
 
 ### Built for the editor
-- Activity-bar container whose sidebar holds the **Sessions**, **Threads** and **Activity** tabs, the last grouping the Work, Fleet, Tasks, Agents and Changes panels. The threads panel overlays the chat instead of squeezing it, and closes with its ✕ button or `Esc`.
+- Activity-bar container whose sidebar holds the **Sessions**, **Threads** and **Activity** tabs, the last grouping the Work, Fleet, Tasks, Agents and Changes panels. The threads panel sits beside the chat and takes its width from it rather than covering it, and closes with its ✕ button or `Esc`.
 - Status bar for engine state, mode, posture, provider, model and reasoning effort.
 - Resizable sidebar and input area; follows your VS Code theme.
 - **English and Simplified Chinese** UI, following VS Code's display language.
@@ -277,7 +277,7 @@ Project layout: `src/extension.ts` (entry) → `src/chat-provider.ts` (orchestra
 
 Thanks to everyone who has improved this extension through pull requests:
 
-- **[@eoli](https://github.com/eoli)** — [#9](https://github.com/HengQuWorld/CodeWhale-VSCode/pull/9) restored the sidebar resize handle with a hardened drag, redesigned the composer with a bottom toolbar, and moved the settings entry to the sidebar title-bar gear (after iterations in #4–#8); [#10](https://github.com/HengQuWorld/CodeWhale-VSCode/pull/10) added the sidebar **Activity** tab and per-tab hints, overlaid the threads panel over the chat, and gave the panel an agent status label and a close button
+- **[@eoli](https://github.com/eoli)** — [#9](https://github.com/HengQuWorld/CodeWhale-VSCode/pull/9) restored the sidebar resize handle with a hardened drag, redesigned the composer with a bottom toolbar, and moved the settings entry to the sidebar title-bar gear (after iterations in #4–#8); [#10](https://github.com/HengQuWorld/CodeWhale-VSCode/pull/10) added the sidebar **Activity** tab and per-tab hints, and gave the panel an agent status label and a close button
 - **[@Hmbown](https://github.com/Hmbown)** — [#2](https://github.com/HengQuWorld/CodeWhale-VSCode/pull/2) made each window own and authenticate its Runtime, and guarded per-file restore
 
 ## License
