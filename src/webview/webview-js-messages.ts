@@ -23,6 +23,47 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
   var SCROLL_BOTTOM_THRESHOLD = 80;
   var _navScrollTimer = null;
 
+  // ── Thinking block rendering (collapsed by default; preview clipped via CSS) ──
+  function thinkingPlainText(content, contentHtml) {
+    if (typeof content === 'string' && content !== '') return content;
+    if (typeof contentHtml === 'string' && contentHtml !== '') {
+      var tmp = document.createElement('div');
+      tmp.innerHTML = contentHtml;
+      return tmp.textContent || '';
+    }
+    return '';
+  }
+
+  function createThinkingBlock(messageId, blockIdx) {
+    var block = document.createElement('div');
+    block.className = 'thinking-block';
+    block.setAttribute('data-block-idx', String(blockIdx));
+    block.innerHTML =
+      '<div class="thinking-toggle">' + __wvEscapeHtml(__i18n.thinkingClose) + '</div>' +
+      '<div class="thinking-preview"></div>' +
+      '<div class="thinking-content" id="thinking-' + messageId + '-' + blockIdx + '"></div>';
+    return block;
+  }
+
+  function updateThinkingBlock(blockEl, contentText, contentHtml) {
+    var text = thinkingPlainText(contentText, contentHtml);
+    var previewEl = blockEl.querySelector('.thinking-preview');
+    if (previewEl) previewEl.textContent = text;
+    var contentEl = blockEl.querySelector('.thinking-content');
+    if (contentEl) {
+      if (typeof contentHtml === 'string' && contentHtml !== '') {
+        contentEl.innerHTML = contentHtml;
+      } else {
+        var streamEl = contentEl.querySelector('.thinking-stream');
+        if (!streamEl) {
+          contentEl.innerHTML = '<div class="thinking-stream"></div>';
+          streamEl = contentEl.querySelector('.thinking-stream');
+        }
+        if (streamEl) streamEl.textContent = text;
+      }
+    }
+  }
+
   function smartScrollToBottom() {
     if (userScrolledUp) return;
     messagesEl.scrollTop = messagesEl.scrollHeight;
@@ -405,13 +446,8 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
       for (var bi = 0; bi < msg.blocks.length; bi++) {
         var b = msg.blocks[bi];
         if (b.type === 'thinking') {
-          var th = b.contentHtml !== undefined ? b.contentHtml : __wvEscapeHtml(b.content || '');
-          var block = document.createElement('div');
-          block.className = 'thinking-block';
-          block.setAttribute('data-block-idx', String(bi));
-          var isOpen = 'open';
-          var toggleLabel = __i18n.thinkingOpen;
-          block.innerHTML = '<div class="thinking-toggle">' + __wvEscapeHtml(toggleLabel) + '</div><div class="thinking-content ' + isOpen + '" id="thinking-' + msg.id + '-' + bi + '">' + th + '</div>';
+          var block = createThinkingBlock(msg.id, bi);
+          updateThinkingBlock(block, b.content, b.contentHtml);
           bodyEl.appendChild(block);
         } else if (b.type === 'tool_call') {
           var tcIdx = b.toolCallIdx;
@@ -435,12 +471,8 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
       }
     } else {
       if (msg.thinkingHtml !== undefined || msg.thinking !== undefined) {
-        var th = msg.thinkingHtml !== undefined ? msg.thinkingHtml : __wvEscapeHtml(msg.thinking || '');
-        var block = document.createElement('div');
-        block.className = 'thinking-block';
-        var isOpen = 'open';
-        var toggleLabel = __i18n.thinkingOpen;
-        block.innerHTML = '<div class="thinking-toggle">' + __wvEscapeHtml(toggleLabel) + '</div><div class="thinking-content ' + isOpen + '" id="thinking-' + msg.id + '-0">' + th + '</div>';
+        var block = createThinkingBlock(msg.id, 0);
+        updateThinkingBlock(block, msg.thinking, msg.thinkingHtml);
         bodyEl.appendChild(block);
       }
 
@@ -481,14 +513,14 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
 
   // ── Thinking Toggle ──
   function toggleThinking(el) {
-    var content = el.nextElementSibling;
-    if (!content) return;
-    var isOpen = content.classList.contains('open');
+    var block = el.parentElement;
+    if (!block) return;
+    var isOpen = block.classList.contains('open');
     if (isOpen) {
-      content.classList.remove('open');
+      block.classList.remove('open');
       el.textContent = __i18n.thinkingClose;
     } else {
-      content.classList.add('open');
+      block.classList.add('open');
       el.textContent = __i18n.thinkingOpen;
     }
   }
@@ -590,6 +622,17 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
         vscode.postMessage({ type: 'userInputCancel', inputId: inputId });
       }
     }
+
+    // Scrollable tool/command output windows: don't let the wheel steal focus
+    // from the chat while browsing history. They stay clipped (overflow hidden)
+    // until the user clicks one, at which point it becomes the single active
+    // scrollable window; clicking anywhere else blurs it.
+    var scrollableTarget = target.closest('.tool-output, .tool-input-command');
+    var scrollables = messagesEl.querySelectorAll('.tool-output.scrollable, .tool-input-command.scrollable');
+    for (var si = 0; si < scrollables.length; si++) {
+      if (scrollables[si] !== scrollableTarget) scrollables[si].classList.remove('scrollable');
+    }
+    if (scrollableTarget) scrollableTarget.classList.toggle('scrollable');
   });
 
   // ── Message Navigation ──
@@ -760,6 +803,8 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
     updateNavDots: updateNavDots,
     jumpToUserMessage: jumpToUserMessage,
     scrollToMessage: scrollToMessage,
+    createThinkingBlock: createThinkingBlock,
+    updateThinkingBlock: updateThinkingBlock,
   };
 
   renderWelcome();

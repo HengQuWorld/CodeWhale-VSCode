@@ -569,29 +569,21 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
       case 'updateThinking': {
         var blockIdx = msg.blockIdx !== undefined ? msg.blockIdx : 0;
         var thinkingEl = document.getElementById('thinking-' + msg.messageId + '-' + blockIdx);
-        if (!thinkingEl) {
+        var block = thinkingEl ? thinkingEl.parentElement : null;
+        if (!block) {
           var bodyEl = document.getElementById('body-' + msg.messageId);
           if (bodyEl) {
-            var block = document.createElement('div');
-            block.className = 'thinking-block';
-            block.setAttribute('data-block-idx', String(blockIdx));
-            block.innerHTML = '<div class="thinking-toggle">' + __wvEscapeHtml(__i18n.thinkingOpen) + '</div><div class="thinking-content open" id="thinking-' + msg.messageId + '-' + blockIdx + '"></div>';
+            block = window.__wvMessages.createThinkingBlock(msg.messageId, blockIdx);
             var insertBefore = bodyEl.querySelector('[data-block-idx="' + (blockIdx + 1) + '"]');
             if (insertBefore) {
               bodyEl.insertBefore(block, insertBefore);
             } else {
               bodyEl.appendChild(block);
             }
-            thinkingEl = block.querySelector('.thinking-content');
           }
         }
-        if (thinkingEl) {
-          if (!thinkingEl.querySelector('.thinking-stream')) {
-            thinkingEl.innerHTML = '<div class="thinking-stream"></div>';
-          }
-          var streamEl = thinkingEl.querySelector('.thinking-stream');
-          if (streamEl) streamEl.textContent = msg.thinking || '';
-          thinkingEl.classList.add('open');
+        if (block) {
+          window.__wvMessages.updateThinkingBlock(block, msg.thinking);
           window.__wvMessages.smartScrollToBottom();
         }
         updateThinkingActivityLabel(msg.messageId, __i18n.thinking);
@@ -622,10 +614,7 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
         var bodyEl = document.getElementById('body-' + msg.messageId);
         if (bodyEl) {
           var blockIdx = msg.blockIdx;
-          var block = document.createElement('div');
-          block.className = 'thinking-block';
-          block.setAttribute('data-block-idx', String(blockIdx));
-          block.innerHTML = '<div class="thinking-toggle">' + __wvEscapeHtml(__i18n.thinkingOpen) + '</div><div class="thinking-content open" id="thinking-' + msg.messageId + '-' + blockIdx + '"></div>';
+          var block = window.__wvMessages.createThinkingBlock(msg.messageId, blockIdx);
           var insertBefore = bodyEl.querySelector('[data-block-idx="' + (blockIdx + 1) + '"]');
           if (insertBefore) {
             bodyEl.insertBefore(block, insertBefore);

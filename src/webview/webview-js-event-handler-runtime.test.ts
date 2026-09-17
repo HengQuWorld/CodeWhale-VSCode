@@ -157,6 +157,8 @@ function createRuntimeHarness() {
       isStreaming: () => false,
       smartScrollToBottom: () => {},
       renderWelcome: () => {},
+      createThinkingBlock: () => new FakeElement(),
+      updateThinkingBlock: () => {},
     },
     __wvInput: {
       updateSendStopButton: (streaming: boolean) => {

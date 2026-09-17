@@ -773,12 +773,30 @@ export function getWebviewCss(): string {
     }
     .thinking-toggle:hover { color: var(--fg); }
 
+    .thinking-preview {
+      /* Tail preview: flex-end pins the (overflowing) text to the bottom,
+         so the clipped portion is the older content on top. */
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-end;
+      margin-top: 6px;
+      line-height: 1.5;
+      white-space: pre-wrap;
+      word-break: break-word;
+      max-height: 9em; /* 6 preview lines × 1.5 line-height */
+      overflow: hidden;
+      color: var(--muted);
+      -webkit-mask-image: linear-gradient(to bottom, transparent 0, rgba(0,0,0,0.85) 14px, #000 100%);
+      mask-image: linear-gradient(to bottom, transparent 0, rgba(0,0,0,0.85) 14px, #000 100%);
+    }
+    .thinking-block.open .thinking-preview { display: none; }
+
     .thinking-content {
       display: none;
       margin-top: 6px;
       line-height: 1.6;
     }
-    .thinking-content.open { display: block; }
+    .thinking-block.open .thinking-content { display: block; }
     .thinking-stream {
       white-space: pre-wrap;
       word-break: break-word;
@@ -833,6 +851,7 @@ export function getWebviewCss(): string {
       margin-left: 4px;
     }
     .tool-call .tool-output {
+      position: relative;
       margin-top: 4px;
       padding: 4px 8px;
       background: var(--input-bg);
@@ -841,8 +860,18 @@ export function getWebviewCss(): string {
       font-size: 0.9em;
       white-space: pre-wrap;
       max-height: 200px;
-      overflow-y: auto;
+      overflow-y: hidden;
     }
+    .tool-call .tool-output::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      border-radius: 3px;
+      background: rgba(128,128,128,0.22);
+      pointer-events: none;
+    }
+    .tool-call .tool-output.scrollable { overflow-y: auto; }
+    .tool-call .tool-output.scrollable::after { display: none; }
     .tool-call .tool-input {
       margin-top: 6px;
       display: flex;
@@ -850,6 +879,7 @@ export function getWebviewCss(): string {
       gap: 3px;
     }
     .tool-call .tool-input-command {
+      position: relative;
       padding: 5px 8px;
       background: var(--input-bg);
       border: 1px solid var(--border);
@@ -860,8 +890,18 @@ export function getWebviewCss(): string {
       word-break: break-word;
       color: var(--fg);
       max-height: 200px;
-      overflow-y: auto;
+      overflow-y: hidden;
     }
+    .tool-call .tool-input-command::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      border-radius: 3px;
+      background: rgba(128,128,128,0.22);
+      pointer-events: none;
+    }
+    .tool-call .tool-input-command.scrollable { overflow-y: auto; }
+    .tool-call .tool-input-command.scrollable::after { display: none; }
     .tool-call .tool-input-row {
       display: flex;
       gap: 6px;
