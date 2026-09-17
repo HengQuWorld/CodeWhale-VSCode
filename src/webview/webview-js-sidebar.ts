@@ -1298,6 +1298,12 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
     switchSidebarTab('activity');
   });
 
+  // ── Close (collapse) button ──
+  document.getElementById('sidebar-close-btn').addEventListener('click', function() {
+    var panel = document.getElementById('threads-panel');
+    if (panel) panel.classList.remove('open');
+  });
+
   // ── Workspace filter toggle ──
   document.getElementById('workspace-filter-toggle').addEventListener('click', function(e) {
     e.stopPropagation();

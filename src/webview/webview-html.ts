@@ -35,6 +35,7 @@ export interface WebviewTranslations {
   activity: string;
   agentStatus: string;
   agentStatusTitle: string;
+  closePanel: string;
   sessionsTabHint: string;
   threadsTabHint: string;
   activityTabHint: string;
@@ -363,6 +364,7 @@ ${css}
           <button class="sidebar-tab active" id="tab-sessions-btn" data-tab="sessions">${tr.sessions}</button>
           <button class="sidebar-tab" id="tab-threads-btn" data-tab="threads">${tr.threads}</button>
           <button class="sidebar-tab" id="tab-activity-btn" data-tab="activity">${tr.activity}</button>
+          <button class="sidebar-close-btn" id="sidebar-close-btn" title="${tr.closePanel}" aria-label="${tr.closePanel}">✕</button>
         </div>
         <div class="sidebar-section-body" id="tab-sessions">
           <div class="sidebar-tab-hint">${tr.sessionsTabHint}</div>

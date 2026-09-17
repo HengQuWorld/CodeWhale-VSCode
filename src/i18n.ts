@@ -12,6 +12,7 @@ interface Translations {
   activity: string;
   agentStatus: string;
   agentStatusTitle: string;
+  closePanel: string;
   sessionsTabHint: string;
   threadsTabHint: string;
   activityTabHint: string;
@@ -374,7 +375,7 @@ interface Translations {
 const en: Translations = {
   locale: "en",
   history: "History", threads: "Threads", sessions: "Sessions", tasks: "Tasks", work: "Work", activity: "Activity",
-  agentStatus: "Agent", agentStatusTitle: "Open agent panel — sessions, threads, activity",
+  agentStatus: "Agent", agentStatusTitle: "Open agent panel — sessions, threads, activity", closePanel: "Close panel",
   sessionsTabHint: "Saved, archived conversations", threadsTabHint: "Active conversation threads", activityTabHint: "Live agent status: work, tasks, agents, changes",
   newThread: "+ New", compact: "⬒ Compact", interrupt: "■ Stop",
   toggleHistory: "Click to toggle history", send: "Send",
@@ -702,7 +703,7 @@ const en: Translations = {
 const zhCn: Translations = {
   locale: "zh-cn",
   history: "历史", threads: "线程", sessions: "会话", tasks: "任务", work: "工作", activity: "活动",
-  agentStatus: "智能体", agentStatusTitle: "打开智能体面板 — 会话、线程、活动",
+  agentStatus: "智能体", agentStatusTitle: "打开智能体面板 — 会话、线程、活动", closePanel: "关闭面板",
   sessionsTabHint: "已保存归档的会话", threadsTabHint: "进行中的对话线程", activityTabHint: "Agent 实时状态：工作、任务、子代理、变更",
   newThread: "+ 新建", compact: "⬒ 压缩", interrupt: "■ 停止",
   toggleHistory: "点击切换历史", send: "发送",
@@ -1062,6 +1063,7 @@ export function webviewTranslations(tr: Translations) {
     activity: tr.activity,
     agentStatus: tr.agentStatus,
     agentStatusTitle: tr.agentStatusTitle,
+    closePanel: tr.closePanel,
     sessionsTabHint: tr.sessionsTabHint,
     threadsTabHint: tr.threadsTabHint,
     activityTabHint: tr.activityTabHint,

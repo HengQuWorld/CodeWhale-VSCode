@@ -241,6 +241,21 @@ export function getWebviewCss(): string {
       background: var(--brand-primary);
       color: white;
     }
+    .sidebar-close-btn {
+      flex: 0 0 auto;
+      background: transparent;
+      border: none;
+      color: var(--muted);
+      cursor: pointer;
+      padding: 4px 7px;
+      border-radius: 3px;
+      font-size: 0.85em;
+      line-height: 1;
+    }
+    .sidebar-close-btn:hover {
+      color: var(--fg);
+      background: var(--card-bg);
+    }
 
     .thread-item {
       padding: 6px 10px;

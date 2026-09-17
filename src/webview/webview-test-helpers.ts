@@ -24,6 +24,7 @@ export function makeTr(overrides?: Partial<WebviewTranslations>): WebviewTransla
     activity: "Activity",
     agentStatus: "Agent",
     agentStatusTitle: "Open agent panel",
+    closePanel: "Close panel",
     sessionsTabHint: "Saved sessions",
     threadsTabHint: "Active threads",
     activityTabHint: "Agent activity",
