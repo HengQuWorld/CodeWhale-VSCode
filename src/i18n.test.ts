@@ -195,12 +195,6 @@ describe("i18n UI string translations", () => {
     { key: "goal", en: "Goal", zhCn: "目标" },
     { key: "checklist", en: "Checklist", zhCn: "检查清单" },
     { key: "strategy", en: "Strategy", zhCn: "策略" },
-    { key: "cycles", en: "cycles", zhCn: "轮次" },
-    { key: "coherenceHealthy", en: "Healthy", zhCn: "健康" },
-    { key: "coherenceGettingCrowded", en: "Getting crowded", zhCn: "上下文趋满" },
-    { key: "coherenceRefreshingContext", en: "Refreshing context…", zhCn: "正在刷新上下文…" },
-    { key: "coherenceVerifyingRecentWork", en: "Verifying recent work…", zhCn: "正在验证近期工作…" },
-    { key: "coherenceResettingPlan", en: "Resetting plan…", zhCn: "正在重置计划…" },
     { key: "completionPct", en: "{n}% complete", zhCn: "已完成 {n}%" },
     { key: "readyTimedOut", en: "Ready (stream timed out)", zhCn: "就绪（流超时）" },
     { key: "note", en: "Note", zhCn: "提示" },
@@ -233,61 +227,6 @@ describe("i18n UI string translations", () => {
   it("English and Chinese translations are different for all keys", () => {
     for (const { en, zhCn } of UI_KEYS) {
       expect(en).not.toBe(zhCn);
-    }
-  });
-});
-
-describe("i18n coherence state translations", () => {
-  const coherenceStates = [
-    { state: "healthy", enKey: "coherenceHealthy" },
-    { state: "getting_crowded", enKey: "coherenceGettingCrowded" },
-    { state: "refreshing_context", enKey: "coherenceRefreshingContext" },
-    { state: "verifying_recent_work", enKey: "coherenceVerifyingRecentWork" },
-    { state: "resetting_plan", enKey: "coherenceResettingPlan" },
-  ];
-
-  const enCoherence: Record<string, string> = {
-    coherenceHealthy: "Healthy",
-    coherenceGettingCrowded: "Getting crowded",
-    coherenceRefreshingContext: "Refreshing context…",
-    coherenceVerifyingRecentWork: "Verifying recent work…",
-    coherenceResettingPlan: "Resetting plan…",
-  };
-
-  const zhCnCoherence: Record<string, string> = {
-    coherenceHealthy: "健康",
-    coherenceGettingCrowded: "上下文趋满",
-    coherenceRefreshingContext: "正在刷新上下文…",
-    coherenceVerifyingRecentWork: "正在验证近期工作…",
-    coherenceResettingPlan: "正在重置计划…",
-  };
-
-  it("every coherence state has a matching translation key", () => {
-    for (const { state, enKey } of coherenceStates) {
-      expect(enCoherence[enKey], `Missing English translation for state ${state}`).toBeDefined();
-      expect(zhCnCoherence[enKey], `Missing Chinese translation for state ${state}`).toBeDefined();
-    }
-  });
-
-  it("coherence state key derivation matches snake_case to camelCase", () => {
-    function stateToKey(state: string): string {
-      return "coherence" + state.charAt(0).toUpperCase() + state.slice(1).replace(/_([a-z])/g, (_, c) => c.toUpperCase());
-    }
-    expect(stateToKey("healthy")).toBe("coherenceHealthy");
-    expect(stateToKey("getting_crowded")).toBe("coherenceGettingCrowded");
-    expect(stateToKey("refreshing_context")).toBe("coherenceRefreshingContext");
-    expect(stateToKey("verifying_recent_work")).toBe("coherenceVerifyingRecentWork");
-    expect(stateToKey("resetting_plan")).toBe("coherenceResettingPlan");
-  });
-
-  it("warning states have distinct visual indicators", () => {
-    const warningStates = ["getting_crowded", "refreshing_context"];
-    const healthyStates = ["healthy"];
-    for (const state of warningStates) {
-      expect(warningStates).toContain(state);
-    }
-    for (const state of healthyStates) {
-      expect(healthyStates).toContain(state);
     }
   });
 });
@@ -363,9 +302,7 @@ describe("i18n webview translations completeness", () => {
     "threadsCountPattern", "modelLabel", "workspaceLabel",
     "loadedThreadPattern", "approvalRequired", "allow", "deny",
     "thinkingToggle", "thinkingOpen", "thinkingClose",
-    "noActiveWork", "cancel", "goal", "checklist", "strategy", "cycles",
-    "coherenceHealthy", "coherenceGettingCrowded", "coherenceRefreshingContext",
-    "coherenceVerifyingRecentWork", "coherenceResettingPlan",
+    "noActiveWork", "cancel", "goal", "checklist", "strategy",
     "completionPct", "readyTimedOut",
     "welcomeTitle", "welcomeSubtitle",
     "welcomeQuote", "welcomeQuoteAuthor",
@@ -379,17 +316,8 @@ describe("i18n webview translations completeness", () => {
     }
   });
 
-  it("webview keys cover all coherence states", () => {
-    const coherenceKeys = webviewKeys.filter((k) => k.startsWith("coherence"));
-    expect(coherenceKeys).toContain("coherenceHealthy");
-    expect(coherenceKeys).toContain("coherenceGettingCrowded");
-    expect(coherenceKeys).toContain("coherenceRefreshingContext");
-    expect(coherenceKeys).toContain("coherenceVerifyingRecentWork");
-    expect(coherenceKeys).toContain("coherenceResettingPlan");
-  });
-
   it("webview keys cover work panel fields", () => {
-    const workKeys = ["noActiveWork", "goal", "checklist", "strategy", "cycles", "completionPct"];
+    const workKeys = ["noActiveWork", "goal", "checklist", "strategy", "completionPct"];
     for (const key of workKeys) {
       expect(webviewKeys).toContain(key);
     }

@@ -92,12 +92,6 @@ export interface WebviewTranslations {
   goal: string;
   checklist: string;
   strategy: string;
-  cycles: string;
-  coherenceHealthy: string;
-  coherenceGettingCrowded: string;
-  coherenceRefreshingContext: string;
-  coherenceVerifyingRecentWork: string;
-  coherenceResettingPlan: string;
   completionPct: string;
   readyTimedOut: string;
   note: string;
@@ -531,7 +525,7 @@ ${css}
         activeThreadId: null,
         showAllWorkspaces: false,
         sidebarTab: 'sessions',
-        workState: { checklist: [], checklistCompletionPct: 0, strategy: [], cycleCount: 0, coherenceState: 'healthy', coherenceLabel: '' },
+        workState: { checklist: [], checklistCompletionPct: 0, strategy: [] },
         renderSessions: function() {},
         renderThreads: function() {},
         renderTasks: function() {},

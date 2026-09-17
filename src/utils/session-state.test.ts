@@ -23,11 +23,8 @@ describe("SessionStateStore - initial state", () => {
     expect(s.activeItems.size).toBe(0);
     expect(s.currentTextBlockIdx).toBe(-1);
     expect(s.currentThinkingBlockIdx).toBe(-1);
-    expect(s.cycleCount).toBe(0);
     expect(s.checklistItems).toEqual([]);
     expect(s.checklistCompletionPct).toBe(0);
-    expect(s.coherenceState).toBe("healthy");
-    expect(s.coherenceLabel).toBe("");
     expect(s.turnFileChanges).toEqual([]);
     expect(s.stats.sessionCostUsd).toBe(0);
     expect(s.stats.sessionCostCny).toBe(0);
@@ -64,14 +61,11 @@ describe("SessionStateStore - reset()", () => {
       currentTurnId: "turn-5",
       currentTextBlockIdx: 3,
       currentThinkingBlockIdx: 1,
-      cycleCount: 7,
       checklistItems: [
         { id: "1", content: "Step 1", status: "completed" },
         { id: "2", content: "Step 2", status: "in_progress" },
       ],
       checklistCompletionPct: 50,
-      coherenceState: "refreshing_context",
-      coherenceLabel: "Refreshing context...",
       turnFileChanges: [
         { filePath: "/src/main.ts", changeType: "modified", addedLines: 0, removedLines: 0 },
       ],
@@ -117,11 +111,8 @@ describe("SessionStateStore - reset()", () => {
     expect(s.activeItems.size).toBe(0);
     expect(s.currentTextBlockIdx).toBe(-1);
     expect(s.currentThinkingBlockIdx).toBe(-1);
-    expect(s.cycleCount).toBe(0);
     expect(s.checklistItems).toEqual([]);
     expect(s.checklistCompletionPct).toBe(0);
-    expect(s.coherenceState).toBe("healthy");
-    expect(s.coherenceLabel).toBe("");
     expect(s.turnFileChanges).toEqual([]);
     expect(s.stats.sessionCostUsd).toBe(0);
     expect(s.stats.sessionCostCny).toBe(0);
@@ -191,10 +182,10 @@ describe("SessionStateStore - update()", () => {
     const store = new SessionStateStore();
     store.update({
       currentTurnId: "turn-1",
-      cycleCount: 3,
+      checklistCompletionPct: 40,
     });
     expect(store.data.currentTurnId).toBe("turn-1");
-    expect(store.data.cycleCount).toBe(3);
+    expect(store.data.checklistCompletionPct).toBe(40);
   });
 
   it("updateStats only affects stats sub-object", () => {
@@ -222,11 +213,8 @@ describe("SessionStateStore - matches current chat-provider reset patterns", () 
       currentTurnId: "turn-old",
       currentTextBlockIdx: 5,
       currentThinkingBlockIdx: 3,
-      cycleCount: 10,
       checklistItems: [{ id: "1", content: "Done", status: "completed" }],
       checklistCompletionPct: 100,
-      coherenceState: "refreshing_context",
-      coherenceLabel: "Refreshing...",
       turnFileChanges: [{ filePath: "/a.ts", changeType: "modified", addedLines: 0, removedLines: 0 }],
     });
     store.updateStats({
@@ -250,11 +238,8 @@ describe("SessionStateStore - matches current chat-provider reset patterns", () 
     expect(s.currentTurnId).toBeNull();
     expect(s.currentTextBlockIdx).toBe(-1);
     expect(s.currentThinkingBlockIdx).toBe(-1);
-    expect(s.cycleCount).toBe(0);
     expect(s.checklistItems).toEqual([]);
     expect(s.checklistCompletionPct).toBe(0);
-    expect(s.coherenceState).toBe("healthy");
-    expect(s.coherenceLabel).toBe("");
     expect(s.turnFileChanges).toEqual([]);
     expect(s.stats.sessionCostUsd).toBe(0);
     expect(s.stats.sessionCostCny).toBe(0);
@@ -274,11 +259,8 @@ describe("SessionStateStore - matches current chat-provider reset patterns", () 
       activeItems: new Map([["item-1", { kind: "tool_call", msgId: "msg-1" }]]),
       currentTextBlockIdx: 2,
       currentThinkingBlockIdx: 1,
-      cycleCount: 5,
       checklistItems: [{ id: "1", content: "Step", status: "completed" }],
       checklistCompletionPct: 75,
-      coherenceState: "getting_crowded",
-      coherenceLabel: "Crowded",
       turnFileChanges: [{ filePath: "/b.ts", changeType: "created", addedLines: 0, removedLines: 0 }],
     });
     store.updateStats({ sessionCostUsd: 2.0, totalInputTokens: 20000 });

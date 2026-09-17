@@ -26,7 +26,7 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
   var taskDraftPrompt = '';
 
   // ── Work state ──
-  var workState = { checklist: [], checklistCompletionPct: 0, strategy: [], cycleCount: 0, coherenceState: 'healthy', coherenceLabel: '' };
+  var workState = { checklist: [], checklistCompletionPct: 0, strategy: [] };
 
   // ── Changes state ──
   var changesState = [];
@@ -786,25 +786,13 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
     var container = document.getElementById('work-body');
     if (!container) return;
     container.innerHTML = '';
-    var hasContent = workState.checklist.length > 0 || workState.strategy.length > 0 || workState.cycleCount > 0 || (workState.coherenceState && workState.coherenceState !== 'healthy');
+    var hasContent = workState.checklist.length > 0 || workState.strategy.length > 0;
     if (!hasContent) {
       var el = document.createElement('div');
       el.className = 'work-empty';
       el.innerHTML = '<div class="work-empty-icon">&#9668;&#65039;</div><div class="work-empty-text">' + __wvEscapeHtml(__i18n.noActiveWork) + '</div>';
       container.appendChild(el);
       return;
-    }
-    // ── Coherence Banner ──
-    if (workState.coherenceState && workState.coherenceState !== 'healthy') {
-      var section = document.createElement('div');
-      section.className = 'work-section';
-      var stateKey = 'coherence' + workState.coherenceState.charAt(0).toUpperCase() + workState.coherenceState.slice(1).replace(/_([a-z])/g, function(_, c) { return c.toUpperCase(); });
-      var stateLabel = __i18n[stateKey] || workState.coherenceLabel || workState.coherenceState;
-      var isWarning = workState.coherenceState === 'refreshing_context' || workState.coherenceState === 'getting_crowded';
-      var severity = isWarning ? 'warning' : 'info';
-      var icon = isWarning ? '\\u26A0' : '\\u2139';
-      section.innerHTML = '<div class="work-coherence ' + severity + '"><span class="work-coherence-icon">' + icon + '</span>' + __wvEscapeHtml(stateLabel) + '</div>';
-      container.appendChild(section);
     }
     // ── Checklist ──
     if (workState.checklist.length > 0) {
@@ -848,13 +836,6 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
         html += '<div class="' + stepClass + '"><span class="work-strategy-icon">' + icon + '</span><span class="work-strategy-text">' + __wvEscapeHtml(step.text) + '</span></div>';
       }
       section.innerHTML = html;
-      container.appendChild(section);
-    }
-    // ── Cycle Count ──
-    if (workState.cycleCount > 0) {
-      var section = document.createElement('div');
-      section.className = 'work-section';
-      section.innerHTML = '<div class="work-cycle-count"><span class="work-cycle-icon">\\uD83D\\uDD04</span>' + __wvEscapeHtml(__i18n.cycles) + ': ' + workState.cycleCount + '</div>';
       container.appendChild(section);
     }
   }

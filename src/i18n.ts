@@ -59,12 +59,6 @@ interface Translations {
   goal: string;
   checklist: string;
   strategy: string;
-  cycles: string;
-  coherenceHealthy: string;
-  coherenceGettingCrowded: string;
-  coherenceRefreshingContext: string;
-  coherenceVerifyingRecentWork: string;
-  coherenceResettingPlan: string;
   completionPct: string;
   readyTimedOut: string;
   note: string;
@@ -402,12 +396,6 @@ const en: Translations = {
   goal: "Goal",
   checklist: "Checklist",
   strategy: "Strategy",
-  cycles: "cycles",
-  coherenceHealthy: "Healthy",
-  coherenceGettingCrowded: "Getting crowded",
-  coherenceRefreshingContext: "Refreshing context…",
-  coherenceVerifyingRecentWork: "Verifying recent work…",
-  coherenceResettingPlan: "Resetting plan…",
   completionPct: "{n}% complete",
   readyTimedOut: "Ready (stream timed out)",
   note: "Note",
@@ -734,12 +722,6 @@ const zhCn: Translations = {
   goal: "目标",
   checklist: "检查清单",
   strategy: "策略",
-  cycles: "轮次",
-  coherenceHealthy: "健康",
-  coherenceGettingCrowded: "上下文趋满",
-  coherenceRefreshingContext: "正在刷新上下文…",
-  coherenceVerifyingRecentWork: "正在验证近期工作…",
-  coherenceResettingPlan: "正在重置计划…",
   completionPct: "已完成 {n}%",
   readyTimedOut: "就绪（流超时）",
   note: "提示",
@@ -1137,12 +1119,6 @@ export function webviewTranslations(tr: Translations) {
     goal: tr.goal,
     checklist: tr.checklist,
     strategy: tr.strategy,
-    cycles: tr.cycles,
-    coherenceHealthy: tr.coherenceHealthy,
-    coherenceGettingCrowded: tr.coherenceGettingCrowded,
-    coherenceRefreshingContext: tr.coherenceRefreshingContext,
-    coherenceVerifyingRecentWork: tr.coherenceVerifyingRecentWork,
-    coherenceResettingPlan: tr.coherenceResettingPlan,
     completionPct: tr.completionPct,
     readyTimedOut: tr.readyTimedOut,
     note: tr.note,

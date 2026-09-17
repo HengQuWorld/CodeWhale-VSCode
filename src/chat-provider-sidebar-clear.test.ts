@@ -42,7 +42,6 @@ function makeThread(id: string): ThreadRecord {
     auto_approve: false,
     latest_turn_id: null,
     archived: false,
-    coherence_state: "healthy",
   };
 }
 
@@ -176,9 +175,9 @@ describe("Sidebar clearing on thread switch", () => {
       const byType = callsByType(postMessage);
       // workState must be pushed so the Work panel reflects the new thread
       expect(byType.workState).toBeDefined();
-      const work = byType.workState[0] as { checklist: unknown[]; coherenceState: string; goal?: unknown };
-      expect(work.coherenceState).toBe("healthy");
+      const work = byType.workState[0] as { checklist: unknown[]; strategy: unknown[]; goal?: unknown };
       expect(work.checklist).toEqual([]);
+      expect(work.strategy).toEqual([]);
       // The goal is owned by the goal control plane (goalState) and rendered in
       // the Work panel's dedicated slot — it must not be restated here.
       expect(work.goal).toBeUndefined();

@@ -398,7 +398,7 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
         window.__wvSidebar.closeAgentDetail();
         if (window.__wvFleet) window.__wvFleet.closeFleetDetail();
         // Clear stale work/changes state from previous thread
-        window.__wvSidebar.setWorkState({ checklist: [], checklistCompletionPct: 0, strategy: [], cycleCount: 0, coherenceState: 'healthy', coherenceLabel: '' });
+        window.__wvSidebar.setWorkState({ checklist: [], checklistCompletionPct: 0, strategy: [] });
         window.__wvSidebar.setChangesState([]);
         window.__wvSidebar.renderWork();
         window.__wvSidebar.renderChanges();
@@ -464,9 +464,6 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
           checklist: msg.checklist || [],
           checklistCompletionPct: msg.checklistCompletionPct || 0,
           strategy: msg.strategy || [],
-          cycleCount: msg.cycleCount || 0,
-          coherenceState: msg.coherenceState || 'healthy',
-          coherenceLabel: msg.coherenceLabel || '',
         });
         window.__wvSidebar.renderWork();
         break;
@@ -930,7 +927,7 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
         window.__wvMessages.renderWelcome();
         // Clear sidebar Work panel state so stale data from the previous
         // session doesn't persist into the new one.
-        window.__wvSidebar.setWorkState({ checklist: [], checklistCompletionPct: 0, strategy: [], cycleCount: 0, coherenceState: 'healthy', coherenceLabel: '' });
+        window.__wvSidebar.setWorkState({ checklist: [], checklistCompletionPct: 0, strategy: [] });
         window.__wvSidebar.setChangesState([]);
         window.__wvSidebar.renderWork();
         window.__wvSidebar.renderChanges();

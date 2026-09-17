@@ -141,76 +141,21 @@ describe("Turn ID routing (bugfix: stale events clobber current turn)", () => {
 
 describe("Event handling state machine", () => {
   interface WorkState {
-    cycleCount: number;
     checklistItems: { id: string; content: string; status: string }[];
     checklistCompletionPct: number;
-    coherenceState: string;
-    coherenceLabel: string;
   }
 
   function createInitialWorkState(): WorkState {
     return {
-      cycleCount: 0,
       checklistItems: [],
       checklistCompletionPct: 0,
-      coherenceState: "healthy",
-      coherenceLabel: "",
     };
   }
 
   it("initializes with default state", () => {
     const state = createInitialWorkState();
-    expect(state.cycleCount).toBe(0);
     expect(state.checklistItems).toHaveLength(0);
     expect(state.checklistCompletionPct).toBe(0);
-    expect(state.coherenceState).toBe("healthy");
-    expect(state.coherenceLabel).toBe("");
-  });
-
-  it("updates cycle count on cycle.advanced event", () => {
-    const state = createInitialWorkState();
-    const payload = { from: 0, to: 1, cycle: 1 };
-    state.cycleCount = payload.to ?? payload.cycle ?? 0;
-    expect(state.cycleCount).toBe(1);
-  });
-
-  it("updates cycle count using 'to' field preferentially", () => {
-    const state = createInitialWorkState();
-    const payload = { from: 2, to: 5, cycle: 3 };
-    state.cycleCount = payload.to ?? payload.cycle ?? 0;
-    expect(state.cycleCount).toBe(5);
-  });
-
-  it("falls back to 'cycle' field when 'to' is missing", () => {
-    const state = createInitialWorkState();
-    const payload: { from?: number; to?: number; cycle?: number } = { from: 0, cycle: 7 };
-    state.cycleCount = payload.to ?? payload.cycle ?? 0;
-    expect(state.cycleCount).toBe(7);
-  });
-
-  it("updates coherence state on coherence.state event", () => {
-    const state = createInitialWorkState();
-    const payload = { state: "refreshing_context", label: "Refreshing context…" };
-    state.coherenceState = payload.state || "healthy";
-    state.coherenceLabel = payload.label || "";
-    expect(state.coherenceState).toBe("refreshing_context");
-    expect(state.coherenceLabel).toBe("Refreshing context…");
-  });
-
-  it("falls back to description when label is missing", () => {
-    const state = createInitialWorkState();
-    const payload = { state: "getting_crowded", description: "Context is getting crowded" };
-    state.coherenceState = payload.state || "healthy";
-    state.coherenceLabel = (payload as any).label || payload.description || "";
-    expect(state.coherenceState).toBe("getting_crowded");
-    expect(state.coherenceLabel).toBe("Context is getting crowded");
-  });
-
-  it("defaults coherence state to healthy when state is missing", () => {
-    const state = createInitialWorkState();
-    const payload = {};
-    state.coherenceState = (payload as any).state || "healthy";
-    expect(state.coherenceState).toBe("healthy");
   });
 
   it("updates checklist items from task_updates metadata", () => {
@@ -243,22 +188,13 @@ describe("Event handling state machine", () => {
 
   it("resets all state on new thread", () => {
     const state: WorkState = {
-      cycleCount: 5,
       checklistItems: [{ id: "1", content: "Done", status: "completed" }],
       checklistCompletionPct: 100,
-      coherenceState: "refreshing_context",
-      coherenceLabel: "Refreshing…",
     };
-    state.cycleCount = 0;
     state.checklistItems = [];
     state.checklistCompletionPct = 0;
-    state.coherenceState = "healthy";
-    state.coherenceLabel = "";
-    expect(state.cycleCount).toBe(0);
     expect(state.checklistItems).toHaveLength(0);
     expect(state.checklistCompletionPct).toBe(0);
-    expect(state.coherenceState).toBe("healthy");
-    expect(state.coherenceLabel).toBe("");
   });
 });
 

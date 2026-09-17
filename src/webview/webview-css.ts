@@ -2007,67 +2007,6 @@ export function getWebviewCss(): string {
       opacity: 1;
     }
 
-    /* ── Coherence Banner ── */
-    .work-coherence {
-      padding: 8px 12px;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      font-size: 0.82em;
-      line-height: 1.4;
-      border-radius: 6px;
-      margin: 6px 0 0;
-      animation: slideIn 0.3s ease-out;
-      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
-    }
-    @keyframes slideIn {
-      from { opacity: 0; transform: translateY(-5px); }
-      to { opacity: 1; transform: translateY(0); }
-    }
-    .work-coherence-icon {
-      flex-shrink: 0;
-      font-size: 1em;
-      animation: bounce 0.6s ease-out;
-    }
-    @keyframes bounce {
-      0%, 100% { transform: translateY(0); }
-      50% { transform: translateY(-3px); }
-    }
-    .work-coherence.warning {
-      background: linear-gradient(135deg, rgba(255, 152, 0, 0.12) 0%, rgba(255, 152, 0, 0.06) 100%);
-      border-left: 3px solid #ff9800;
-      color: #ff9800;
-    }
-    .work-coherence.info {
-      background: linear-gradient(135deg, rgba(33, 150, 243, 0.1) 0%, rgba(33, 150, 243, 0.05) 100%);
-      border-left: 3px solid #2196f3;
-      color: #2196f3;
-    }
-    .work-coherence.error {
-      background: linear-gradient(135deg, rgba(244, 67, 54, 0.1) 0%, rgba(244, 67, 54, 0.05) 100%);
-      border-left: 3px solid #f44336;
-      color: #f44336;
-    }
-
-    /* ── Cycle Count ── */
-    .work-cycle-count {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      font-size: 0.78em;
-      color: var(--muted);
-      padding: 4px 0;
-      opacity: 0.85;
-    }
-    .work-cycle-icon {
-      font-size: 0.9em;
-      animation: rotate 3s linear infinite;
-    }
-    @keyframes rotate {
-      from { transform: rotate(0deg); }
-      to { transform: rotate(360deg); }
-    }
-
     /* ── Empty State ── */
     .work-empty {
       display: flex;

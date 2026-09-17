@@ -78,7 +78,6 @@ describe("types.ts - Interface structural conformance", () => {
       system_prompt: "You are helpful",
       task_id: null,
       title: "Test Thread",
-      coherence_state: "healthy",
     };
     expect(thread.id).toBe("thread-1");
     expect(thread.title).toBe("Test Thread");
@@ -99,7 +98,6 @@ describe("types.ts - Interface structural conformance", () => {
       auto_approve: false,
       latest_turn_id: null,
       archived: false,
-      coherence_state: "healthy",
     };
     expect(thread.latest_response_bookmark).toBeUndefined();
     expect(thread.title).toBeUndefined();
@@ -155,7 +153,6 @@ describe("types.ts - Interface structural conformance", () => {
         auto_approve: false,
         latest_turn_id: null,
         archived: false,
-        coherence_state: "healthy",
       },
       original_user_text: "Fix the bug",
     };

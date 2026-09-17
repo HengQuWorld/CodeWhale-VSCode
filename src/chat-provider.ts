@@ -240,18 +240,12 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
   private set currentTextBlockIdx(v: number) { this.sessionState.data.currentTextBlockIdx = v; }
   private get currentThinkingBlockIdx(): number { return this.sessionState.data.currentThinkingBlockIdx; }
   private set currentThinkingBlockIdx(v: number) { this.sessionState.data.currentThinkingBlockIdx = v; }
-  private get cycleCount(): number { return this.sessionState.data.cycleCount; }
-  private set cycleCount(v: number) { this.sessionState.data.cycleCount = v; }
   private get checklistItems() { return this.sessionState.data.checklistItems; }
   private set checklistItems(v: { id: string; content: string; status: string }[]) { this.sessionState.data.checklistItems = v; }
   private get checklistCompletionPct(): number { return this.sessionState.data.checklistCompletionPct; }
   private set checklistCompletionPct(v: number) { this.sessionState.data.checklistCompletionPct = v; }
   private get strategySteps(): StrategyStep[] { return this.sessionState.data.strategySteps; }
   private set strategySteps(v: StrategyStep[]) { this.sessionState.data.strategySteps = v; }
-  private get coherenceState(): string { return this.sessionState.data.coherenceState; }
-  private set coherenceState(v: string) { this.sessionState.data.coherenceState = v; }
-  private get coherenceLabel(): string { return this.sessionState.data.coherenceLabel; }
-  private set coherenceLabel(v: string) { this.sessionState.data.coherenceLabel = v; }
   private get turnFileChanges(): FileChangeInfo[] { return this.sessionState.data.turnFileChanges; }
   private set turnFileChanges(v: FileChangeInfo[]) { this.sessionState.data.turnFileChanges = v; }
   public get sessionCostUsd(): number { return this.sessionState.data.stats.sessionCostUsd; }
@@ -2777,9 +2771,6 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       checklist: this.checklistItems,
       checklistCompletionPct: this.checklistCompletionPct,
       strategy: this.strategySteps,
-      cycleCount: this.cycleCount,
-      coherenceState: this.coherenceState,
-      coherenceLabel: this.coherenceLabel,
     });
     this.refreshChangesPanel();
   }
@@ -4130,21 +4121,6 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         // so re-fetch the goal to surface updated tokens_used/status instead
         // of leaving the panel on its pre-turn value.
         void this.refreshGoal();
-        break;
-      }
-
-      case "cycle.advanced": {
-        const pl = event.payload as { from?: number; to?: number; cycle?: number };
-        this.cycleCount = pl.to ?? pl.cycle ?? 0;
-        this.refreshWorkPanel();
-        break;
-      }
-
-      case "coherence.state": {
-        const pl = event.payload as { state?: string; label?: string; description?: string };
-        this.coherenceState = pl.state || "healthy";
-        this.coherenceLabel = pl.label || pl.description || "";
-        this.refreshWorkPanel();
         break;
       }
 

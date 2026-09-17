@@ -23,7 +23,6 @@ export interface ThreadRecord {
   system_prompt?: string | null;
   task_id?: string | null;
   title?: string | null;
-  coherence_state: string;
 }
 
 export interface ThreadSummary {

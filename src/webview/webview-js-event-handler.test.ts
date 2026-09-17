@@ -131,7 +131,7 @@ describe("webview-js-event-handler.ts", () => {
     expect(slice).toContain("closeAgentDetail()");
     // Work panel state must be reset to empty
     expect(slice).toContain("setWorkState(");
-    expect(slice).toContain("coherenceState: 'healthy'");
+    expect(slice).toContain("checklist: []");
     // Changes panel must be cleared
     expect(slice).toContain("setChangesState([])");
     expect(slice).toContain("renderWork()");
@@ -170,7 +170,7 @@ describe("webview-js-event-handler.ts", () => {
     const slice = script.slice(clearChatIdx, errorIdx);
     // Work state must be reset
     expect(slice).toContain("setWorkState(");
-    expect(slice).toContain("coherenceState: 'healthy'");
+    expect(slice).toContain("checklist: []");
     // Changes state must be cleared
     expect(slice).toContain("setChangesState([])");
     expect(slice).toContain("renderWork()");

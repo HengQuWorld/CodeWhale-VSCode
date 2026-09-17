@@ -98,38 +98,6 @@ describe("RuntimeEvent type structure", () => {
     expect((event.payload as { status: string }).status).toBe("running");
   });
 
-  it("validates cycle.advanced event structure", () => {
-    const event: RuntimeEvent = {
-      seq: 5,
-      timestamp: new Date().toISOString(),
-      thread_id: "thread-1",
-      turn_id: "turn-1",
-      item_id: null,
-      event: "cycle.advanced",
-      payload: { from: 2, to: 3, cycle: 3 },
-    };
-    expect(event.event).toBe("cycle.advanced");
-    const pl = event.payload as { from: number; to: number; cycle: number };
-    expect(pl.to).toBe(3);
-    expect(pl.cycle).toBe(3);
-  });
-
-  it("validates coherence.state event structure", () => {
-    const event: RuntimeEvent = {
-      seq: 10,
-      timestamp: new Date().toISOString(),
-      thread_id: "thread-1",
-      turn_id: "turn-1",
-      item_id: null,
-      event: "coherence.state",
-      payload: { state: "refreshing_context", label: "Refreshing context…", description: "Verifying recent work" },
-    };
-    expect(event.event).toBe("coherence.state");
-    const pl = event.payload as { state: string; label: string; description: string };
-    expect(pl.state).toBe("refreshing_context");
-    expect(pl.label).toContain("Refreshing");
-  });
-
   it("validates item.started event with tool_call kind", () => {
     const event: RuntimeEvent = {
       seq: 2,
@@ -296,11 +264,9 @@ describe("ThreadRecord type validation", () => {
       auto_approve: false,
       latest_turn_id: null,
       archived: false,
-      coherence_state: "healthy",
     };
     expect(thread.id).toBe("thread-1");
     expect(thread.mode).toBe("agent");
-    expect(thread.coherence_state).toBe("healthy");
   });
 
   it("supports optional title field", () => {
@@ -317,7 +283,6 @@ describe("ThreadRecord type validation", () => {
       auto_approve: false,
       latest_turn_id: "turn-1",
       archived: false,
-      coherence_state: "healthy",
       title: "My Thread",
     };
     expect(thread.title).toBe("My Thread");
@@ -615,7 +580,6 @@ describe("CodeWhaleApiClient - HTTP methods with mocked server", () => {
       auto_approve: false,
       latest_turn_id: null,
       archived: false,
-      coherence_state: "healthy",
     };
     mockHttpRequest(200, JSON.stringify({ thread: threadData, turns: [], items: [], latest_seq: 0 }));
     const result = await client.getThread("thread-1");
@@ -637,7 +601,6 @@ describe("CodeWhaleApiClient - HTTP methods with mocked server", () => {
       auto_approve: false,
       latest_turn_id: null,
       archived: false,
-      coherence_state: "healthy",
     };
     mockHttpRequest(200, JSON.stringify(threadData));
     const result = await client.getThread("thread-2");
@@ -658,7 +621,6 @@ describe("CodeWhaleApiClient - HTTP methods with mocked server", () => {
       auto_approve: false,
       latest_turn_id: null,
       archived: false,
-      coherence_state: "healthy",
     };
     mockHttpRequest(200, JSON.stringify(threadData));
     const result = await client.createThread({ model: "deepseek-v4-pro", mode: "agent" });
@@ -668,7 +630,7 @@ describe("CodeWhaleApiClient - HTTP methods with mocked server", () => {
 
   it("startTurn() sends prompt and returns StartTurnResponse", async () => {
     const response = {
-      thread: { id: "thread-1", schema_version: 1, created_at: "", updated_at: "", model: "", workspace: "", mode: "", allow_shell: false, trust_mode: false, auto_approve: false, latest_turn_id: null, archived: false, coherence_state: "" },
+      thread: { id: "thread-1", schema_version: 1, created_at: "", updated_at: "", model: "", workspace: "", mode: "", allow_shell: false, trust_mode: false, auto_approve: false, latest_turn_id: null, archived: false },
       turn: { id: "turn-1", schema_version: 1, thread_id: "thread-1", status: "in_progress", input_summary: "Hello", created_at: "", item_ids: [], steer_count: 0 },
     };
     mockHttpRequest(200, JSON.stringify(response));
@@ -678,8 +640,8 @@ describe("CodeWhaleApiClient - HTTP methods with mocked server", () => {
 
   it("listThreads() returns array of threads", async () => {
     const threads: ThreadRecord[] = [
-      { schema_version: 1, id: "t1", created_at: "", updated_at: "", model: "", workspace: "", mode: "", allow_shell: false, trust_mode: false, auto_approve: false, latest_turn_id: null, archived: false, coherence_state: "" },
-      { schema_version: 1, id: "t2", created_at: "", updated_at: "", model: "", workspace: "", mode: "", allow_shell: false, trust_mode: false, auto_approve: false, latest_turn_id: null, archived: false, coherence_state: "" },
+      { schema_version: 1, id: "t1", created_at: "", updated_at: "", model: "", workspace: "", mode: "", allow_shell: false, trust_mode: false, auto_approve: false, latest_turn_id: null, archived: false },
+      { schema_version: 1, id: "t2", created_at: "", updated_at: "", model: "", workspace: "", mode: "", allow_shell: false, trust_mode: false, auto_approve: false, latest_turn_id: null, archived: false },
     ];
     mockHttpRequest(200, JSON.stringify(threads));
     const result = await client.listThreads({ limit: 10 });
@@ -688,7 +650,7 @@ describe("CodeWhaleApiClient - HTTP methods with mocked server", () => {
 
   it("updateThread() sends PATCH with updates", async () => {
     const updated: ThreadRecord = {
-      schema_version: 1, id: "thread-1", created_at: "", updated_at: "", model: "", workspace: "", mode: "", allow_shell: false, trust_mode: false, auto_approve: false, latest_turn_id: null, archived: true, coherence_state: "",
+      schema_version: 1, id: "thread-1", created_at: "", updated_at: "", model: "", workspace: "", mode: "", allow_shell: false, trust_mode: false, auto_approve: false, latest_turn_id: null, archived: true,
     };
     mockHttpRequest(200, JSON.stringify(updated));
     const result = await client.updateThread("thread-1", { archived: true });
@@ -697,7 +659,7 @@ describe("CodeWhaleApiClient - HTTP methods with mocked server", () => {
 
   it("undoThreadTurn() returns UndoTurnResponse", async () => {
     const response = {
-      thread: { id: "thread-1", schema_version: 1, created_at: "", updated_at: "", model: "", workspace: "", mode: "", allow_shell: false, trust_mode: false, auto_approve: false, latest_turn_id: null, archived: false, coherence_state: "" },
+      thread: { id: "thread-1", schema_version: 1, created_at: "", updated_at: "", model: "", workspace: "", mode: "", allow_shell: false, trust_mode: false, auto_approve: false, latest_turn_id: null, archived: false },
       original_user_text: "Hello",
     };
     mockHttpRequest(200, JSON.stringify(response));
@@ -707,7 +669,7 @@ describe("CodeWhaleApiClient - HTTP methods with mocked server", () => {
 
   it("undoThreadTurn() with depth option", async () => {
     const response = {
-      thread: { id: "thread-1", schema_version: 1, created_at: "", updated_at: "", model: "", workspace: "", mode: "", allow_shell: false, trust_mode: false, auto_approve: false, latest_turn_id: null, archived: false, coherence_state: "" },
+      thread: { id: "thread-1", schema_version: 1, created_at: "", updated_at: "", model: "", workspace: "", mode: "", allow_shell: false, trust_mode: false, auto_approve: false, latest_turn_id: null, archived: false },
       original_user_text: null,
     };
     mockHttpRequest(200, JSON.stringify(response));
@@ -718,7 +680,7 @@ describe("CodeWhaleApiClient - HTTP methods with mocked server", () => {
   it("patchUndoThreadTurn() returns PatchUndoResponse", async () => {
     const response = {
       patch_result: { files_restored: true, summary: "3 files restored", snapshot_label: "pre-turn:5" },
-      thread: { id: "thread-1", schema_version: 1, created_at: "", updated_at: "", model: "", workspace: "", mode: "", allow_shell: false, trust_mode: false, auto_approve: false, latest_turn_id: null, archived: false, coherence_state: "" },
+      thread: { id: "thread-1", schema_version: 1, created_at: "", updated_at: "", model: "", workspace: "", mode: "", allow_shell: false, trust_mode: false, auto_approve: false, latest_turn_id: null, archived: false },
       original_user_text: "Fix bug",
     };
     mockHttpRequest(200, JSON.stringify(response));
@@ -728,7 +690,7 @@ describe("CodeWhaleApiClient - HTTP methods with mocked server", () => {
 
   it("retryThreadTurn() returns RetryTurnResponse", async () => {
     const response = {
-      thread: { id: "thread-1", schema_version: 1, created_at: "", updated_at: "", model: "", workspace: "", mode: "", allow_shell: false, trust_mode: false, auto_approve: false, latest_turn_id: null, archived: false, coherence_state: "" },
+      thread: { id: "thread-1", schema_version: 1, created_at: "", updated_at: "", model: "", workspace: "", mode: "", allow_shell: false, trust_mode: false, auto_approve: false, latest_turn_id: null, archived: false },
       turn: { id: "turn-2", schema_version: 1, thread_id: "thread-1", status: "queued", input_summary: "Hello", created_at: "", item_ids: [], steer_count: 0 },
     };
     mockHttpRequest(200, JSON.stringify(response));

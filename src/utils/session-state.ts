@@ -154,13 +154,10 @@ export interface SessionStateData {
   activeItems: Map<string, ActiveItem>;
   currentTextBlockIdx: number;
   currentThinkingBlockIdx: number;
-  cycleCount: number;
   checklistItems: ChecklistItem[];
   checklistCompletionPct: number;
   /** Strategy steps from update_plan tool calls */
   strategySteps: StrategyStep[];
-  coherenceState: string;
-  coherenceLabel: string;
   turnFileChanges: FileChangeInfo[];
   stats: SessionStats;
   pendingApprovals: Map<string, ToolCallInfo>;
@@ -196,12 +193,9 @@ function createEmptyState(): SessionStateData {
     activeItems: new Map(),
     currentTextBlockIdx: -1,
     currentThinkingBlockIdx: -1,
-    cycleCount: 0,
     checklistItems: [],
     checklistCompletionPct: 0,
     strategySteps: [],
-    coherenceState: "healthy",
-    coherenceLabel: "",
     turnFileChanges: [],
     stats: {
       sessionCostUsd: 0,
