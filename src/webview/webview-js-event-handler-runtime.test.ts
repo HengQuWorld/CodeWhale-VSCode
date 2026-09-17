@@ -108,6 +108,7 @@ function createRuntimeHarness() {
   const taskDetailCalls: unknown[] = [];
   const agentDetailCalls: unknown[] = [];
   const attachmentPreviewCalls: Array<{ id: string; previewUrl: string }> = [];
+  const goalCalls: Array<{ method: string; args: unknown[] }> = [];
 
   const windowObj: Record<string, any> = {
     __wvI18n: makeTr(),
@@ -120,6 +121,26 @@ function createRuntimeHarness() {
     },
     __wvDiffStore: {
       clear: () => {},
+    },
+    __wvGoal: {
+      applyState: (...args: unknown[]) => {
+        goalCalls.push({ method: "applyState", args });
+      },
+      reset: (...args: unknown[]) => {
+        goalCalls.push({ method: "reset", args });
+      },
+      setGoal: (...args: unknown[]) => {
+        goalCalls.push({ method: "setGoal", args });
+      },
+      setBackgroundGoals: (...args: unknown[]) => {
+        goalCalls.push({ method: "setBackgroundGoals", args });
+      },
+      setEditing: (...args: unknown[]) => {
+        goalCalls.push({ method: "setEditing", args });
+      },
+      renderGoal: (...args: unknown[]) => {
+        goalCalls.push({ method: "renderGoal", args });
+      },
     },
     __wvDiffIdCounter: {
       value: 0,
@@ -155,6 +176,7 @@ function createRuntimeHarness() {
       getStreamingTimeout: () => null,
       setStreamingTimeout: () => {},
       isStreaming: () => false,
+      setUserScrolledUp: () => {},
       smartScrollToBottom: () => {},
       renderWelcome: () => {},
     },
@@ -206,6 +228,7 @@ function createRuntimeHarness() {
     taskDetailCalls,
     agentDetailCalls,
     attachmentPreviewCalls,
+    goalCalls,
   };
 }
 
@@ -414,6 +437,84 @@ describe("webview-js-event-handler runtime", () => {
       type: "setPosture",
       posture: "full_access",
     });
+  });
+
+  it("adopts goalState without disturbing an editor the user may have open", () => {
+    const harness = createRuntimeHarness();
+    const goal = { thread_id: "t1", objective: "ship it", status: "active" };
+
+    harness.dispatchMessage({
+      type: "goalState",
+      goal,
+      backgroundGoals: [{ thread_id: "t2", objective: "other", status: "active" }],
+    });
+
+    // applyState keeps an open editor alive and decides whether a redraw is
+    // needed; the setGoal/setEditing pair it replaces redrew unconditionally.
+    expect(harness.goalCalls).toEqual([
+      {
+        method: "applyState",
+        args: [goal, [{ thread_id: "t2", objective: "other", status: "active" }]],
+      },
+    ]);
+  });
+
+  it("clears the whole goal control plane when the view is cleared", () => {
+    const harness = createRuntimeHarness();
+
+    harness.dispatchMessage({ type: "clearChat" });
+
+    expect(harness.goalCalls).toEqual([{ method: "reset", args: [] }]);
+  });
+
+  it("clears the goal control plane when the viewed thread changes", () => {
+    const harness = createRuntimeHarness();
+
+    harness.dispatchMessage({ type: "threadLoaded", thread: { id: "t2" } });
+
+    // A thread switch is a real view change, not one of the pushes applyState
+    // exists to survive: an editor left open here would keep the draft written
+    // for the thread we just left and save it against this one.
+    expect(harness.goalCalls).toEqual([{ method: "reset", args: [] }]);
+  });
+
+  it("clears the goal control plane when a saved session is opened", () => {
+    const harness = createRuntimeHarness();
+
+    harness.dispatchMessage({ type: "sessionLoaded", sessionId: "s1" });
+
+    // A viewed session has no thread yet, so it has no goal of its own.
+    expect(harness.goalCalls).toEqual([{ method: "reset", args: [] }]);
+  });
+
+  it("keeps a running turn's streaming state when a goal error arrives", () => {
+    const harness = createRuntimeHarness();
+
+    harness.dispatchMessage({ type: "turnStarted", turnId: "turn-1" });
+    expect(harness.sendStopCalls).toEqual([true]);
+
+    harness.dispatchMessage({
+      type: "error",
+      message: "Failed to set goal: engine down",
+      keepStreaming: true,
+    });
+
+    // The banner is the whole answer: the turn this error did not come from is
+    // still running, so the button, the status bar and the stall timeout stay
+    // where they were.
+    expect(harness.sendStopCalls).toEqual([true]);
+    expect(harness.getElement("status").classList.contains("is-streaming")).toBe(true);
+    expect(harness.getElement("status-text").textContent).not.toBe("Error");
+  });
+
+  it("still stops the streaming state for an error that is the turn's", () => {
+    const harness = createRuntimeHarness();
+
+    harness.dispatchMessage({ type: "turnStarted", turnId: "turn-1" });
+    harness.dispatchMessage({ type: "error", message: "Failed to load thread" });
+
+    expect(harness.sendStopCalls).toEqual([true, false]);
+    expect(harness.getElement("status-text").textContent).toBe("Error");
   });
 
   it("routes mode dropdown selections through /mode with the canonical value", () => {

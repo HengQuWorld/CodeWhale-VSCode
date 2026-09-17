@@ -360,6 +360,25 @@ describe("ChatProvider thread history rendering", () => {
     });
   });
 
+  it("re-pushes the goal slot state for the session it just loaded", async () => {
+    // A viewed session has no thread yet, so it has no goal of its own: the
+    // Work panel must not keep showing the previous thread's goal card while
+    // the user reads the session.
+    const session = {
+      metadata: { id: "sess-plain", title: "A saved session", total_tokens: 10 },
+      messages: [{ role: "user", content: [{ type: "text", text: "hello" }] }],
+    };
+
+    const { provider, postMessage } = createProvider(session);
+    await provider.loadSessionMessages("sess-plain");
+
+    expect(postMessage).toHaveBeenCalledWith({
+      type: "goalState",
+      goal: null,
+      backgroundGoals: [],
+    });
+  });
+
   it("renders file-change cards for new TUI write tools via metadata.mutation", async () => {
     // Current TUI `write` tool: the model-facing output carries no diff —
     // the diff and per-file outcome only exist in metadata.mutation.

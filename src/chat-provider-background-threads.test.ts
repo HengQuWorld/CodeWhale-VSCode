@@ -162,6 +162,9 @@ function createProvider(): Harness {
     getThreadGoal: vi.fn(async (): Promise<ThreadGoal | null> => null),
     createThread: vi.fn(async (opts: Record<string, unknown>) => makeThread("thread-goal", opts)),
     upsertThreadGoal: vi.fn(async () => makeGoal()),
+    completeThreadGoal: vi.fn(async () => makeGoal({ status: "complete" })),
+    blockThreadGoal: vi.fn(async () => makeGoal({ status: "blocked" })),
+    deleteThreadGoal: vi.fn(async () => undefined),
     listThreadsSummary: vi.fn(async () => [] as ThreadSummary[]),
     listSessions: vi.fn(async () => ({ sessions: [] })),
     listTasks: vi.fn(async () => ({ tasks: [], counts: { active: 0, completed: 0, failed: 0 } })),
@@ -545,6 +548,105 @@ describe("background thread watching", () => {
       await (provider as any).handleResumeGoal();
 
       expect(api.upsertThreadGoal).toHaveBeenCalledWith("thread-mine", "keep going", 100);
+    });
+
+    it("adopts a thread when the GUI has none, instead of dropping the goal", async () => {
+      const { provider, api } = newProvider();
+      // 新建会话 (handleNewThread) and a saved session from the Sessions tab
+      // both reset the session state, leaving no thread to attach a goal to.
+      expect(provider.currentThread).toBeNull();
+
+      await (provider as any).handleSetGoal("ship the release", 2500);
+
+      expect(api.createThread).toHaveBeenCalledWith(
+        expect.objectContaining({
+          model: "deepseek-v4-pro",
+          mode: "agent",
+          trust_mode: false,
+          auto_approve: false,
+        }),
+      );
+      expect(provider.currentThread?.id).toBe("thread-goal");
+      expect(api.upsertThreadGoal).toHaveBeenCalledWith("thread-goal", "ship the release", 2500);
+      expect(messagesOf(provider, "error")).toHaveLength(0);
+    });
+
+    it("resumes the viewed session when the goal belongs to it", async () => {
+      const { provider, api } = newProvider();
+      // A saved session is viewed without a thread, and the next message will
+      // resume it: a goal set here belongs to that conversation, not to a
+      // thread of its own that the next message would never use and nothing
+      // would watch.
+      (provider as any).sessionState.data.viewingSessionId = "sess-1";
+      api.resumeSessionThread = vi.fn(async () => ({
+        thread_id: "thread-resumed",
+        summary: "a session",
+      }));
+      api.updateThread = vi.fn(async (id: string) => makeThread(id));
+
+      await (provider as any).handleSetGoal("ship the release", 2500);
+
+      expect(api.resumeSessionThread).toHaveBeenCalledWith("sess-1");
+      expect(api.createThread).not.toHaveBeenCalled();
+      expect(provider.currentThread?.id).toBe("thread-resumed");
+      expect(api.upsertThreadGoal).toHaveBeenCalledWith("thread-resumed", "ship the release", 2500);
+      expect((provider as any).sessionState.data.viewingSessionId).toBeNull();
+      expect(messagesOf(provider, "error")).toHaveLength(0);
+    });
+
+    it("keeps a background goal on a thread of its own while a session is viewed", async () => {
+      const { provider, api } = newProvider();
+      (provider as any).sessionState.data.viewingSessionId = "sess-1";
+      api.resumeSessionThread = vi.fn(async () => ({
+        thread_id: "thread-resumed",
+        summary: "a session",
+      }));
+
+      await (provider as any).handleSetGoal("ship the release", undefined, true);
+
+      // "Run on a background thread" is exactly that: the work goes to a new
+      // thread while the view keeps showing the session, which is not resumed
+      // until the user types into it.
+      expect(api.resumeSessionThread).not.toHaveBeenCalled();
+      expect(api.createThread).toHaveBeenCalled();
+      expect(api.upsertThreadGoal).toHaveBeenCalledWith("thread-goal", "ship the release", undefined);
+    });
+
+    it("lets a background goal start with no thread to inherit from", async () => {
+      const { provider, api, streams } = newProvider();
+      expect(provider.currentThread).toBeNull();
+
+      await (provider as any).handleSetGoal("ship the release", undefined, true);
+
+      expect(api.upsertThreadGoal).toHaveBeenCalledWith("thread-goal", "ship the release", undefined);
+      expect(streamFor(streams, "thread-goal")).toBeDefined();
+    });
+
+    it("answers the webview when a save fails, instead of leaving the panel stale", async () => {
+      const { provider, api } = newProvider();
+      provider.currentThread = makeThread("thread-mine");
+      api.upsertThreadGoal.mockRejectedValueOnce(new Error("engine down"));
+
+      await (provider as any).handleSetGoal("ship the release");
+
+      expect(vscodeMock.showErrorMessage).toHaveBeenCalledWith(
+        expect.stringContaining("engine down"),
+      );
+      const errors = messagesOf(provider, "error").map((m) => String(m.message));
+      expect(errors.some((message) => message.includes("engine down"))).toBe(true);
+    });
+
+    it("answers a goal action that has no thread instead of returning in silence", async () => {
+      const { provider, api } = newProvider();
+      expect(provider.currentThread).toBeNull();
+
+      await (provider as any).handleDeleteGoal();
+
+      expect(api.deleteThreadGoal).not.toHaveBeenCalled();
+      expect(vscodeMock.showErrorMessage).toHaveBeenCalledWith(
+        expect.stringContaining("No active thread"),
+      );
+      expect(messagesOf(provider, "error")).toHaveLength(1);
     });
   });
 

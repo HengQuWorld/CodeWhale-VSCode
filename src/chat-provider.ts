@@ -1357,6 +1357,12 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       message: `Viewing session: ${title.slice(0, 80)}\n${msgCount} messages | ${session.metadata.total_tokens.toLocaleString()} tokens${costStr}${modelStr}\n\nStart typing to resume this session and continue the conversation.`
     });
     this.postMessage({ type: "sessionLoaded", sessionId: session.metadata.id });
+    // The Work panel's goal slot is thread-scoped and this view has no thread
+    // yet, so it is re-pushed here the way the new-chat path does it: the slot
+    // is reset by the sessionLoaded handler, and this replaces the previous
+    // thread's goal with the session's own state (no goal, plus any background
+    // goals still running).
+    void this.refreshGoal();
 
     // Reflect the session's recorded stats so the stats bar doesn't keep
     // stale chips from the previously viewed thread. Cost metadata written
@@ -1818,49 +1824,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       await this.api.ensureReady();
 
       if (this.viewingSessionId) {
-        const sessionId = this.viewingSessionId;
-        // Don't pass model/mode — let the backend use the session's persisted
-        // values (runtime_api.rs:911-918 unwraps to session.metadata.model/mode).
-        // Passing cfg defaults would override the session's original model/mode,
-        // busting the prefix cache because the system prompt and tool catalog
-        // change with the model/mode.
-        const result = await this.api.resumeSessionThread(sessionId);
-        try {
-          await this.api.updateThread(result.thread_id, {
-            title: `Resumed: ${result.summary.slice(0, 50)}`,
-          });
-        } catch { /* non-critical */ }
-
-        this.viewingSessionId = null;
-        await this.loadThread(result.thread_id);
-        // Restore cost from the original session's metadata. loadThread →
-        // loadHistory may already have computed totals from the new
-        // thread's turns; MERGE with max rather than overwrite, because
-        // sessions saved by TUI's runtime-API endpoint carry zero cost
-        // metadata (the endpoint snapshots messages/tokens but drops cost)
-        // and a plain assignment would zero out real figures. Mirrors TUI's
-        // monotonic (high-water) cost display philosophy.
-        if (this.pendingSessionCost) {
-          this.sessionCostUsd = Math.max(this.sessionCostUsd, this.pendingSessionCost.sessionCostUsd);
-          this.sessionCostCny = Math.max(this.sessionCostCny, this.pendingSessionCost.sessionCostCny);
-          this.displayedCostHighWaterUsd = Math.max(this.displayedCostHighWaterUsd, this.pendingSessionCost.displayedCostHighWaterUsd);
-          this.displayedCostHighWaterCny = Math.max(this.displayedCostHighWaterCny, this.pendingSessionCost.displayedCostHighWaterCny);
-          this.totalTokens = Math.max(this.totalTokens, this.pendingSessionCost.totalTokens);
-          this.cumulativeTurnSecs = Math.max(this.cumulativeTurnSecs, this.pendingSessionCost.cumulativeTurnSecs);
-          this.pendingSessionCost = null;
-          this.sendSessionStats();
-        }
-        // Preserve the original session ID so subsequent auto-saves update
-        // the same session in-place (mirrors TUI's /load behavior). This is
-        // safe because seed_thread_from_messages now stores the full original
-        // messages (with tool_use/tool_result blocks) on the thread record
-        // via seeded_messages, and ensure_engine_loaded uses those directly
-        // for SyncSession — so the engine's session preserves the exact
-        // prefix. Auto-save (PUT /v1/sessions) snapshots the engine's live
-        // state, which includes the full tool blocks, so the original
-        // session's messages stay cache-friendly for future resumes.
-        this.currentSessionId = sessionId;
-        this.refreshSessionList();
+        await this.resumeViewedSession(this.viewingSessionId);
       }
 
       if (!this.currentThread) {
@@ -2527,6 +2491,57 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     return out;
   }
 
+  /** Resume the saved session the view is showing into a thread of its own.
+   *  Both callers that can be the first thing done to a viewed session —
+   *  sending its first message, and setting its first goal — need the same
+   *  thread, so they get it the same way: a goal attached to a thread of its
+   *  own would run on a conversation the next message never uses, and nothing
+   *  would be watching it. */
+  private async resumeViewedSession(sessionId: string): Promise<void> {
+    // Don't pass model/mode — let the backend use the session's persisted
+    // values (runtime_api.rs:911-918 unwraps to session.metadata.model/mode).
+    // Passing cfg defaults would override the session's original model/mode,
+    // busting the prefix cache because the system prompt and tool catalog
+    // change with the model/mode.
+    const result = await this.api.resumeSessionThread(sessionId);
+    try {
+      await this.api.updateThread(result.thread_id, {
+        title: `Resumed: ${result.summary.slice(0, 50)}`,
+      });
+    } catch { /* non-critical */ }
+
+    this.viewingSessionId = null;
+    await this.loadThread(result.thread_id);
+    // Restore cost from the original session's metadata. loadThread →
+    // loadHistory may already have computed totals from the new
+    // thread's turns; MERGE with max rather than overwrite, because
+    // sessions saved by TUI's runtime-API endpoint carry zero cost
+    // metadata (the endpoint snapshots messages/tokens but drops cost)
+    // and a plain assignment would zero out real figures. Mirrors TUI's
+    // monotonic (high-water) cost display philosophy.
+    if (this.pendingSessionCost) {
+      this.sessionCostUsd = Math.max(this.sessionCostUsd, this.pendingSessionCost.sessionCostUsd);
+      this.sessionCostCny = Math.max(this.sessionCostCny, this.pendingSessionCost.sessionCostCny);
+      this.displayedCostHighWaterUsd = Math.max(this.displayedCostHighWaterUsd, this.pendingSessionCost.displayedCostHighWaterUsd);
+      this.displayedCostHighWaterCny = Math.max(this.displayedCostHighWaterCny, this.pendingSessionCost.displayedCostHighWaterCny);
+      this.totalTokens = Math.max(this.totalTokens, this.pendingSessionCost.totalTokens);
+      this.cumulativeTurnSecs = Math.max(this.cumulativeTurnSecs, this.pendingSessionCost.cumulativeTurnSecs);
+      this.pendingSessionCost = null;
+      this.sendSessionStats();
+    }
+    // Preserve the original session ID so subsequent auto-saves update
+    // the same session in-place (mirrors TUI's /load behavior). This is
+    // safe because seed_thread_from_messages now stores the full original
+    // messages (with tool_use/tool_result blocks) on the thread record
+    // via seeded_messages, and ensure_engine_loaded uses those directly
+    // for SyncSession — so the engine's session preserves the exact
+    // prefix. Auto-save (PUT /v1/sessions) snapshots the engine's live
+    // state, which includes the full tool blocks, so the original
+    // session's messages stay cache-friendly for future resumes.
+    this.currentSessionId = sessionId;
+    this.refreshSessionList();
+  }
+
   // ── Thread Goal (control plane) ──
 
   /** Push the active thread's goal (or null) plus any background goals to the
@@ -2563,7 +2578,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       return;
     }
     try {
-      if (background && this.currentThread) {
+      if (background) {
         // Run the goal on a dedicated background thread: the runtime kicks
         // off the goal turn server-side on PUT and drives every continuation
         // itself (activate_thread_goal / settle_thread_goal_after_turn), so
@@ -2573,11 +2588,15 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         // The posture is pinned to the one the warning below talks about: a
         // new thread created without it takes the runtime's configured
         // default, which is not necessarily what the user runs here.
+        //
+        // There may be no current thread to inherit from (新建会话, or a saved
+        // session opened from the Sessions tab); the configured defaults stand
+        // in, because a background goal must not need a thread already running.
         const posture = this.getEffectivePosture();
         const thread = await this.api.createThread({
-          model: this.currentThread.model || this.getCurrentModel(),
-          mode: this.currentThread.mode || this.getCurrentMode(),
-          workspace: this.currentThread.workspace,
+          model: this.currentThread?.model || this.getCurrentModel(),
+          mode: this.currentThread?.mode || this.getCurrentMode(),
+          workspace: this.currentThread?.workspace ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
           title: trimmed.slice(0, 80),
           permission_posture: POSTURE_WIRE[posture],
           auto_approve: posture === "full_access",
@@ -2599,15 +2618,57 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         this.scheduleThreadListRefresh(0);
         return;
       }
+      // A goal is thread-scoped, but the GUI spends real time in a threadless
+      // state: 新建会话 clears currentThread (handleNewThread), and a saved
+      // session from the Sessions tab has none until it is resumed. This used
+      // to return silently here — no thread, no error, no answer to the
+      // webview — so the Work panel's "＋ Set goal" button looked dead. Get the
+      // thread the goal belongs to the same way the first message would, so it
+      // lands on the conversation the user is about to have.
+      if (!this.currentThread) {
+        await this.ensureGoalThread();
+      }
       const threadId = this.currentThread?.id;
       if (!threadId) {
+        this.reportMissingGoalThread();
         return;
       }
       await this.api.upsertThreadGoal(threadId, trimmed, tokenBudget);
       await this.refreshGoal();
     } catch (err) {
-      vscode.window.showErrorMessage(`Failed to set goal: ${(err as Error).message}`);
+      const message = `Failed to set goal: ${(err as Error).message}`;
+      vscode.window.showErrorMessage(message);
+      // The panel has to answer too: a dropped setGoal used to leave the
+      // webview on a stale editor, which read as "the button does nothing".
+      // keepStreaming: this error is not the turn's, and the turn it did not
+      // come from may still be running — the banner is the whole answer.
+      this.postMessage({ type: "error", message, keepStreaming: true });
     }
+  }
+
+  /** The thread a goal set from this view belongs to, obtained the way the
+   *  first message would obtain it. Two views have no thread yet: 新建会话
+   *  (handleNewThread), and a saved session opened from the Sessions tab —
+   *  which is resumed into its own thread here rather than left behind, since
+   *  the next message will resume it anyway and a goal is thread-scoped. */
+  private async ensureGoalThread(): Promise<void> {
+    if (this.viewingSessionId) {
+      await this.resumeViewedSession(this.viewingSessionId);
+      return;
+    }
+    const cfg = vscode.workspace.getConfiguration("brotherwhale");
+    const mode = normalizeMode(cfg.get<string>("defaultMode", "agent"));
+    const posture = this.getEffectivePosture();
+    this.currentThread = await this.api.createThread({
+      model: this.getCurrentModel(),
+      mode,
+      workspace: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
+      permission_posture: POSTURE_WIRE[posture],
+      auto_approve: posture === "full_access",
+      trust_mode: posture === "full_access",
+    });
+    this.subscribeToEvents();
+    await this.refreshSessionList();
   }
 
   /** Re-arm the current thread's goal. The runtime drives goal continuations
@@ -2616,7 +2677,10 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
    *  startup sweep) — this button is that explicit trigger. */
   private async handleResumeGoal(): Promise<void> {
     const threadId = this.currentThread?.id;
-    if (!threadId) return;
+    if (!threadId) {
+      this.reportMissingGoalThread();
+      return;
+    }
     try {
       const goal = await this.api.getThreadGoal(threadId);
       if (!goal?.objective) return;
@@ -2629,7 +2693,10 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
 
   private async handleCompleteGoal(): Promise<void> {
     const threadId = this.currentThread?.id;
-    if (!threadId) return;
+    if (!threadId) {
+      this.reportMissingGoalThread();
+      return;
+    }
     try {
       await this.api.completeThreadGoal(threadId);
       await this.refreshGoal();
@@ -2640,7 +2707,10 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
 
   private async handleBlockGoal(): Promise<void> {
     const threadId = this.currentThread?.id;
-    if (!threadId) return;
+    if (!threadId) {
+      this.reportMissingGoalThread();
+      return;
+    }
     try {
       await this.api.blockThreadGoal(threadId);
       await this.refreshGoal();
@@ -2651,13 +2721,27 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
 
   private async handleDeleteGoal(): Promise<void> {
     const threadId = this.currentThread?.id;
-    if (!threadId) return;
+    if (!threadId) {
+      this.reportMissingGoalThread();
+      return;
+    }
     try {
       await this.api.deleteThreadGoal(threadId);
       await this.refreshGoal();
     } catch (err) {
       vscode.window.showErrorMessage(`Failed to delete goal: ${(err as Error).message}`);
     }
+  }
+
+  /** Answer a goal action that has no thread to act on. Complete/Block/
+   *  Delete/Resume used to return in silence, so the goal card's buttons
+   *  looked broken whenever the view had moved to a saved session. */
+  private reportMissingGoalThread(): void {
+    const message = t().goalNeedsThread;
+    vscode.window.showErrorMessage(message);
+    // keepStreaming: see handleSetGoal — a goal error must not stop the
+    // streaming indicator of a turn it did not come from.
+    this.postMessage({ type: "error", message, keepStreaming: true });
   }
 
   /** Open session panel showing a specific task's detail */

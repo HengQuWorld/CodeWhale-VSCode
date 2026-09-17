@@ -21,6 +21,28 @@ export function getGoalScript(_tr: WebviewTranslations): string {
   // Goals owned by other (background/parked) threads; pushed by the backend
   // alongside the current thread's goal so the Work panel shows them too.
   var backgroundGoals = [];
+  // The objective of the last goal handed to the extension, kept so a failed
+  // save can restore the draft instead of discarding what the user wrote. It is
+  // cleared once a goalState confirms the goal landed.
+  var submittedObjective = null;
+  // What renderGoal() last drew into #work-goal. The extension pushes goalState
+  // on every sidebar refresh, thread switch and turn end; rebuilding the slot
+  // for an unchanged state swaps the DOM nodes under the user's cursor — a click
+  // whose mousedown and mouseup straddle the rebuild is dispatched on the
+  // nearest common ancestor, so the button's own handler never fires — and it
+  // throws away an editor the user is typing into. Redraw only on real change.
+  var renderedKey = null;
+
+  function renderKey() {
+    // Deliberately not the drafts: while an editor is open the user owns that
+    // DOM, and keying on the text they are typing would make every keystroke a
+    // licence to rebuild it on the next state push.
+    return JSON.stringify([
+      editing ? 'edit:' + editorMode : 'view',
+      goal || null,
+      backgroundGoals || [],
+    ]);
+  }
 
   function titleCase(status) {
     if (!status) return 'unknown';
@@ -68,9 +90,12 @@ export function getGoalScript(_tr: WebviewTranslations): string {
     return date.toLocaleString();
   }
 
-  function renderGoal() {
+  function renderGoal(force) {
     var container = document.getElementById('work-goal');
     if (!container) return;
+    var key = renderKey();
+    if (!force && key === renderedKey) return;
+    renderedKey = key;
     container.innerHTML = '';
 
     if (editing) {
@@ -236,18 +261,36 @@ export function getGoalScript(_tr: WebviewTranslations): string {
       html += '<div class="goal-editor-bg-hint">' + __wvEscapeHtml(__i18n.goalBackgroundHint) + '</div>';
       html += '</div>';
     }
+    var canSave = String(draftObjective || '').trim() !== '';
     html += '<div class="goal-editor-actions">';
     html += '<button class="goal-action-btn" data-goal-editor-action="cancel"><span class="goal-btn-icon">✕</span>' + __wvEscapeHtml(__i18n.cancel) + '</button>';
-    html += '<button class="goal-action-btn primary" data-goal-editor-action="save"><span class="goal-btn-icon">✓</span>' + __wvEscapeHtml(isEdit ? __i18n.goalEdit : __i18n.goalSet) + '</button>';
+    // Saving an empty objective used to end in a silent early return.
+    // Keep the button disabled (and dimmed inline, so the module needs no CSS
+    // entry) until there is something to save.
+    html += '<button class="goal-action-btn primary" data-goal-editor-action="save"' + (canSave ? '' : ' disabled style="opacity:0.5;cursor:not-allowed;"') + '><span class="goal-btn-icon">✓</span>' + __wvEscapeHtml(isEdit ? __i18n.goalEdit : __i18n.goalSet) + '</button>';
     html += '</div>';
     html += '</div>';
     container.innerHTML = html;
 
     var textarea = container.querySelector('.goal-editor-textarea');
     var input = container.querySelector('.goal-editor-input');
+    var saveBtn = container.querySelector('.goal-action-btn[data-goal-editor-action="save"]');
+
+    function syncSaveEnabled() {
+      if (!saveBtn) return;
+      var hasObjective = String(draftObjective || '').trim() !== '';
+      saveBtn.disabled = !hasObjective;
+      saveBtn.style.opacity = hasObjective ? '' : '0.5';
+      saveBtn.style.cursor = hasObjective ? '' : 'not-allowed';
+    }
+
     if (textarea) {
       textarea.focus();
-      textarea.addEventListener('input', function() { draftObjective = textarea.value; });
+      textarea.addEventListener('input', function() {
+        draftObjective = textarea.value;
+        textarea.style.borderColor = '';
+        syncSaveEnabled();
+      });
       textarea.addEventListener('keydown', function(e) {
         if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); submit(); }
         else if (e.key === 'Escape') { e.preventDefault(); cancel(); }
@@ -259,7 +302,15 @@ export function getGoalScript(_tr: WebviewTranslations): string {
 
     function submit() {
       var objective = String(draftObjective || '').trim();
-      if (!objective) return;
+      if (!objective) {
+        // Cmd/Ctrl+Enter is the only way left to reach an empty submit (the
+        // button is disabled); land the gesture on the field that needs it.
+        if (textarea) {
+          textarea.focus();
+          textarea.style.borderColor = '#e05555';
+        }
+        return;
+      }
       var tokenBudget = undefined;
       var rawBudget = String(draftBudget || '').trim();
       if (rawBudget !== '') {
@@ -267,13 +318,21 @@ export function getGoalScript(_tr: WebviewTranslations): string {
         if (!isNaN(parsed)) tokenBudget = parsed;
       }
       var bgCheck = container.querySelector('.goal-editor-bg-check');
+      submittedObjective = objective;
       vscode.postMessage({ type: 'setGoal', objective: objective, tokenBudget: tokenBudget, background: !!(bgCheck && bgCheck.checked) });
+      // Close the editor here rather than leaving it mounted: the old code only
+      // flipped editing and never redrew, so a dropped setGoal froze the
+      // editor on screen — indistinguishable from a dead button. The slot now
+      // shows the pending state, and the extension always answers (goalState,
+      // or an error banner).
       editing = false;
+      renderGoal();
     }
     function cancel() {
       draftObjective = '';
       draftBudget = '';
       draftBackground = false;
+      submittedObjective = null;
       editing = false;
       renderGoal();
     }
@@ -289,19 +348,73 @@ export function getGoalScript(_tr: WebviewTranslations): string {
   function openEditor(mode) {
     editorMode = mode === 'edit' ? 'edit' : 'create';
     editing = true;
-    draftObjective = (editorMode === 'edit' && goal) ? goal.objective : '';
-    draftBudget = (editorMode === 'edit' && goal && goal.token_budget) ? String(goal.token_budget) : '';
+    // The previous submission is either already answered or superseded; the
+    // draft, though, is kept so a failed save can be reopened and retried.
+    submittedObjective = null;
+    // Create-mode keeps whatever draft survived a failed save; Cancel is the
+    // explicit way to throw a draft away (edit-mode always re-seeds from goal).
+    draftObjective = (editorMode === 'edit' && goal) ? goal.objective : draftObjective;
+    draftBudget = (editorMode === 'edit' && goal && goal.token_budget) ? String(goal.token_budget) : draftBudget;
     draftBackground = false;
     renderGoal();
   }
 
+  // ── State intake ──
+  // The extension pushes goalState for the current thread plus every active
+  // background goal. Adopting it must not disturb an editor the user has open:
+  // the push is usually unrelated (a sidebar refresh, a turn ending) and a
+  // redraw would wipe the draft and swap the button out from under the pointer.
+  // A genuine view change is the exception, and it does not come through here:
+  // the event handler resets the slot on clearChat / threadLoaded /
+  // sessionLoaded, so the editor cannot outlive the thread it was opened on.
+  // renderGoal() itself decides whether a redraw is needed.
+  function applyState(nextGoal, nextBackgroundGoals) {
+    goal = nextGoal || null;
+    backgroundGoals = Array.isArray(nextBackgroundGoals) ? nextBackgroundGoals : [];
+    if (
+      !editing &&
+      goal &&
+      submittedObjective !== null &&
+      String(goal.objective || '').trim() === submittedObjective
+    ) {
+      // The extension answered with the goal we asked for: the save landed, so
+      // the draft is no longer a recovery copy.
+      submittedObjective = null;
+      draftObjective = '';
+      draftBudget = '';
+      draftBackground = false;
+    }
+    if (editing) {
+      // Never redraw over an open editor. The data above is already current, so
+      // the slot draws the fresh state the moment the editor closes.
+      return;
+    }
+    renderGoal();
+  }
+
+  /** Drop the whole control plane (new thread / loaded session / cleared view).
+   *  A fresh view must not inherit the previous conversation's goal, its
+   *  background list, or a half-written draft. */
+  function reset() {
+    goal = null;
+    backgroundGoals = [];
+    editing = false;
+    editorMode = 'create';
+    draftObjective = '';
+    draftBudget = '';
+    draftBackground = false;
+    submittedObjective = null;
+    renderGoal(true);
+  }
+
   // ── Expose for event handler ──
+  // applyState is the only way in: a caller that could assign goal / editing
+  // directly would be free to rebuild the slot over an open editor, which is
+  // exactly the regression these two entry points exist to prevent.
   window.__wvGoal = {
     renderGoal: renderGoal,
-    setGoal: function(v) { goal = v; },
-    getGoal: function() { return goal; },
-    setEditing: function(v) { editing = v; },
-    setBackgroundGoals: function(list) { backgroundGoals = Array.isArray(list) ? list : []; },
+    applyState: applyState,
+    reset: reset,
   };
   })();`;
 }

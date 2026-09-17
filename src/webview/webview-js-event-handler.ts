@@ -413,6 +413,11 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
       case 'sessionLoaded':
         window.__wvSidebar.setActiveSessionId(msg.sessionId || null);
         window.__wvSidebar.renderSessions();
+        // A saved session is viewed without a thread, so the goal slot belongs
+        // to no thread at all: drop the previous one's card, its background
+        // list and any open editor before the extension pushes the session's
+        // own state (the goal control plane is thread-scoped).
+        if (window.__wvGoal) window.__wvGoal.reset();
         break;
 
       case 'threadLoaded':
@@ -431,6 +436,13 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
         window.__wvSidebar.renderTasks([]);
         window.__wvSidebar.setAgentRuns([]);
         window.__wvSidebar.renderAgents([]);
+        // The goal slot is thread-scoped too. Switching threads is a real view
+        // change, not one of the pushes applyState is built to survive: an
+        // editor left open here would keep the draft written for the thread we
+        // just left and save it against this one. The extension pushes this
+        // thread's goal (goalState) right after this message, which is what
+        // draws the new card.
+        if (window.__wvGoal) window.__wvGoal.reset();
         break;
 
       case 'taskList':
@@ -478,10 +490,14 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
 
       case 'goalState':
         if (window.__wvGoal) {
-          window.__wvGoal.setGoal(msg.goal || null);
-          window.__wvGoal.setBackgroundGoals(msg.backgroundGoals || []);
-          window.__wvGoal.setEditing(false);
-          window.__wvGoal.renderGoal();
+          // applyState, not a setGoal/setEditing pair: it keeps an editor the
+          // user has open (these pushes are usually unrelated: sidebar refresh,
+          // thread switch, turn end) and skips the redraw when the rendered
+          // state is unchanged. Rebuilding the slot swaps the button node out
+          // from under the cursor — a click spanning the rebuild lands on the
+          // common ancestor and never reaches the button, which read as "＋ Set
+          // goal does nothing" — and it threw away the draft.
+          window.__wvGoal.applyState(msg.goal || null, msg.backgroundGoals || []);
         }
         break;
 
@@ -972,12 +988,10 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
         window.__wvSidebar.setAgentRuns([]);
         window.__wvSidebar.renderAgents([]);
         // The goal slot lives in the Work panel but is owned by the goal control
-        // plane, so it needs its own reset — a stale goal from the previous
-        // thread must not survive a cleared view.
+        // plane, so it needs its own reset — a stale goal (or a half-written
+        // draft) from the previous thread must not survive a cleared view.
         if (window.__wvGoal) {
-          window.__wvGoal.setGoal(null);
-          window.__wvGoal.setEditing(false);
-          window.__wvGoal.renderGoal();
+          window.__wvGoal.reset();
         }
         break;
 
@@ -985,18 +999,26 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
         vscode.postMessage({ type: 'openConfigPanel' });
         break;
 
-      case 'error':
-        setStreamingState(false, __i18n.error);
+      case 'error': {
+        // Not every error is the turn's. A goal error carries keepStreaming
+        // because the turn it did not come from may still be running: stopping
+        // the streaming indicator (and clearing its stall timeout) would
+        // report that turn as finished and stop watching it for a stall.
+        var keepStreaming = msg.keepStreaming === true;
+        if (!keepStreaming) setStreamingState(false, __i18n.error);
         var errEl = document.createElement('div');
         errEl.className = 'error-banner';
         errEl.innerHTML = '<span class="msg-label error">' + __wvEscapeHtml(__i18n.error) + '</span><span>' + __wvEscapeHtml(msg.message) + '</span>';
         messagesEl.appendChild(errEl);
         window.__wvMessages.setUserScrolledUp(false);
         messagesEl.scrollTop = messagesEl.scrollHeight;
-        window.__wvMessages.setStreaming(false);
-        var st = window.__wvMessages.getStreamingTimeout();
-        if (st) { clearTimeout(st); window.__wvMessages.setStreamingTimeout(null); }
+        if (!keepStreaming) {
+          window.__wvMessages.setStreaming(false);
+          var st = window.__wvMessages.getStreamingTimeout();
+          if (st) { clearTimeout(st); window.__wvMessages.setStreamingTimeout(null); }
+        }
         break;
+      }
 
       case 'info': {
         var infoEl = document.createElement('div');

@@ -379,6 +379,7 @@ interface Translations {
   goalTimeUsedTooltip: string;
   goalContinuationsTooltip: string;
   goalBudgetExceeded: string;
+  goalNeedsThread: string;
 }
 
 const en: Translations = {
@@ -710,6 +711,7 @@ const en: Translations = {
   goalTimeUsedTooltip: "Total active time spent pursuing this goal",
   goalContinuationsTooltip: "How many times this goal has been continued",
   goalBudgetExceeded: "over budget",
+  goalNeedsThread: "No active thread for this goal — send a message to start one, then set the goal again.",
 };
 
 const zhCn: Translations = {
@@ -1041,6 +1043,7 @@ const zhCn: Translations = {
   goalTimeUsedTooltip: "为达成此目标已花费的有效时长",
   goalContinuationsTooltip: "该目标被续接的次数",
   goalBudgetExceeded: "已超预算",
+  goalNeedsThread: "目标需要线程：先发送一条消息开始对话，再设定目标。",
 };
 
 const translations: Record<string, Translations> = {
