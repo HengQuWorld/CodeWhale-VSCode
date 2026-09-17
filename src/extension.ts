@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import { CodeWhaleEngine } from "./api/engine";
 import { CodeWhaleApiClient } from "./api/api-client";
 import { ChatProvider } from "./chat-provider";
+import { ConfigPanel } from "./config-panel";
 import { t } from "./i18n";
 
 let engine: CodeWhaleEngine;
@@ -25,6 +26,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       ChatProvider.viewType,
       chatProvider
     )
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("brotherwhale.openConfig", () => {
+      ConfigPanel.createOrShow(context.extensionUri, api);
+    })
   );
 
   context.subscriptions.push(

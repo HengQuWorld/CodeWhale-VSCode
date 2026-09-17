@@ -74,6 +74,7 @@ export function getWebviewCss(): string {
     /* ── Sidebar Resize Handle ── */
 
     #sidebar-resize-handle {
+      display: none;
       width: 4px;
       cursor: col-resize;
       flex-shrink: 0;
@@ -81,6 +82,12 @@ export function getWebviewCss(): string {
       position: relative;
       z-index: 10;
       transition: background 0.15s;
+    }
+    /* Only available while the threads panel is open: a collapsed sidebar has
+       nothing to widen, and showing the grip there would just invite a drag
+       that has no effect. */
+    #threads-panel.open + #sidebar-resize-handle {
+      display: block;
     }
     #sidebar-resize-handle:hover,
     #sidebar-resize-handle.active {
@@ -1122,13 +1129,18 @@ export function getWebviewCss(): string {
       pointer-events: none;
       z-index: 999;
     }
-    #input-row {
+    /* Sized by the composer's own content (textarea + toolbar) and never
+       squeezed. A zero flex basis combined with min-height: 0 collapsed the
+       border while the text and toolbar spilled outside it. */
+    #input-box {
       display: flex;
-      flex: 1;
-      gap: 6px;
-      align-items: flex-end;
-      min-height: 0;
+      flex-direction: column;
+      flex: 1 0 auto;
+      background: var(--input-bg);
+      border: 1px solid var(--input-border);
+      border-radius: 4px;
     }
+    #input-box:focus-within { border-color: var(--brand-primary); }
     #btn-attach {
       background: transparent !important;
       color: var(--fg) !important;
@@ -1142,21 +1154,49 @@ export function getWebviewCss(): string {
     }
     #btn-attach:hover { opacity: 0.8; }
     #input-area textarea {
-      flex: 1;
-      align-self: stretch;
-      background: var(--input-bg);
+      /* Hardcoded floor of roughly two rows, a little taller than the toolbar.
+         The composer can never be shorter than this plus the toolbar, and the
+         resize handle drags between this and MAX_INPUT_HEIGHT (52 and 340 are
+         mirrored in the inline resize script). */
+      flex: 1 0 auto;
+      width: 100%;
+      background: transparent;
       color: var(--input-fg);
-      border: 1px solid var(--input-border);
-      border-radius: 4px;
-      padding: 6px 10px;
+      border: none;
+      padding: 8px 10px 4px 10px;
       font-family: inherit;
       font-size: inherit;
       resize: none;
-      min-height: 36px;
+      min-height: 52px;
       max-height: none;
       outline: none;
+      /* Text past the chosen height scrolls inside the box (scrollbar hidden,
+         as in the reference composer) instead of resizing it. */
+      overflow-y: auto;
+      scrollbar-width: none;
     }
-    #input-area textarea:focus { border-color: var(--brand-primary); }
+    #input-area textarea::-webkit-scrollbar { width: 0; height: 0; }
+
+    /* ── Input toolbar: attach and friends from the left, send on the right ── */
+
+    #input-toolbar {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      padding: 2px 6px 6px 6px;
+      flex: none;
+    }
+    #input-toolbar #btn-attach,
+    #input-toolbar #btn-send-stop {
+      height: 26px;
+      padding: 0 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 5px;
+      line-height: 1;
+      flex-shrink: 0;
+    }
     #input-area button {
       background: var(--brand-primary);
       color: var(--brand-primary-foreground);
@@ -1170,15 +1210,24 @@ export function getWebviewCss(): string {
     #input-area button:hover { background: var(--brand-primary-light); }
     #input-area button:disabled { opacity: 0.5; cursor: not-allowed; }
 
-    /* ── Merged Send/Stop button ── */
-    .btn-send-stop .btn-text-stop { display: none; }
-    .btn-send-stop.streaming .btn-text-send { display: none; }
-    .btn-send-stop.streaming .btn-text-stop { display: inline; }
-    .btn-send-stop.streaming {
-      background: #d32f2f;
+    /* ── Merged Send/Stop button (icon-only, far right of the toolbar) ── */
+
+    #input-toolbar #btn-send-stop {
+      /* Pushes send to the far right; everything before it flows from the left. */
+      margin-left: auto;
+      width: 26px;
+      padding: 0;
     }
-    .btn-send-stop.streaming:hover { background: #e53935; }
-    .btn-send-stop.streaming:active { background: #b71c1c; }
+    /* Exactly one icon is displayed at a time. Every selector below is scoped
+       to the same #input-toolbar id, and nothing may outrank them: a generic
+       svg rule carrying two ids would win and render both icons at once. */
+    #input-toolbar .btn-send-stop .btn-icon-send { display: block; width: 14px; height: 14px; }
+    #input-toolbar .btn-send-stop .btn-icon-stop { display: none; width: 11px; height: 11px; }
+    #input-toolbar .btn-send-stop.streaming .btn-icon-send { display: none; }
+    #input-toolbar .btn-send-stop.streaming .btn-icon-stop { display: block; }
+    #input-toolbar .btn-send-stop.streaming { background: #d32f2f; }
+    #input-toolbar .btn-send-stop.streaming:hover { background: #e53935; }
+    #input-toolbar .btn-send-stop.streaming:active { background: #b71c1c; }
 
     #toolbar {
       padding: 4px 8px;
@@ -1317,22 +1366,6 @@ export function getWebviewCss(): string {
       flex-shrink: 0;
     }
     #settings-bar #btn-threads:hover {
-      color: var(--fg);
-      background: var(--brand-primary);
-    }
-    #settings-bar #btn-config {
-      background: transparent;
-      border: none;
-      color: var(--muted);
-      cursor: pointer;
-      font-size: 1.4em;
-      padding: 4px 8px;
-      border-radius: 4px;
-      line-height: 1;
-      flex-shrink: 0;
-      margin-left: auto;
-    }
-    #settings-bar #btn-config:hover {
       color: var(--fg);
       background: var(--brand-primary);
     }

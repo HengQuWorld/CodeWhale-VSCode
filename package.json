@@ -69,10 +69,24 @@
         "title": "%commands.compactContext.title%"
       },
       {
+        "command": "brotherwhale.openConfig",
+        "title": "%commands.openConfig.title%",
+        "icon": "$(gear)"
+      },
+      {
         "command": "brotherwhale.restartEngine",
         "title": "%commands.restartEngine.title%"
       }
     ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "brotherwhale.openConfig",
+          "when": "view == brotherwhale.chat",
+          "group": "navigation"
+        }
+      ]
+    },
     "configuration": {
       "title": "BrotherWhale",
       "properties": {

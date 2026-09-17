@@ -407,6 +407,7 @@ ${css}
       </div>
     </div>
     <div id="sidebar-resize-handle" title="Drag to resize sidebar"></div>
+
     <div id="chat-area">
       <div id="settings-bar">
         <button id="btn-threads" title="${tr.toggleHistory}">📋</button>
@@ -463,7 +464,6 @@ ${css}
             </div>
           </div>
         </div>
-        <button id="btn-config" title="Open Config Panel">⚙</button>
       </div>
       <div id="messages-wrapper">
         <div id="messages"></div>
@@ -480,13 +480,15 @@ ${css}
       <div id="input-area">
         <div id="slash-menu"></div>
         <div id="attachments-area"></div>
-        <div id="input-row">
-          <button id="btn-attach" title="${tr.attachFiles}">📎</button>
+        <div id="input-box">
           <textarea id="input" placeholder="${tr.inputPlaceholder}" rows="1"></textarea>
-          <button id="btn-send-stop" class="btn-send-stop">
-            <span class="btn-text-send">${tr.send}</span>
-            <span class="btn-text-stop">${tr.interrupt}</span>
-          </button>
+          <div id="input-toolbar">
+            <button id="btn-attach" title="${tr.attachFiles}">📎</button>
+            <button id="btn-send-stop" class="btn-send-stop" title="${tr.send}" aria-label="${tr.send}">
+              <svg class="btn-icon-send" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M3.4 20.4l17.45-7.48a1 1 0 0 0 0-1.84L3.4 3.6a.993.993 0 0 0-1.39.91L2 9.12c0 .5.37.93.87.99L17 12 2.87 13.88c-.5.07-.87.5-.87 1l.01 4.61c0 .71.73 1.2 1.39.91z"/></svg>
+              <svg class="btn-icon-stop" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="4.5" y="4.5" width="15" height="15" rx="2.5" fill="currentColor"/></svg>
+            </button>
+          </div>
         </div>
       </div>
       <div class="status-bar" id="status">
@@ -572,32 +574,47 @@ ${css}
       } catch(e) { /* localStorage may not be available */ }
 
       var startX, startWidth;
+      var lastClientX = 0;
+      var rafId = null;
 
       function onMouseDown(e) {
         startX = e.clientX;
         startWidth = panel.getBoundingClientRect().width;
         handle.classList.add('active');
+        document.body.classList.add('is-resizing');
         document.body.style.cursor = 'col-resize';
         document.body.style.userSelect = 'none';
-        document.addEventListener('mousemove', onMouseMove);
-        document.addEventListener('mouseup', onMouseUp);
+        window.addEventListener('mousemove', onMouseMove);
+        window.addEventListener('mouseup', onMouseUp);
+        window.addEventListener('mouseleave', onMouseUp);
+        window.addEventListener('blur', onMouseUp);
         e.preventDefault();
       }
 
       function onMouseMove(e) {
         if (startX === undefined) return;
-        var newWidth = startWidth + (e.clientX - startX);
-        if (newWidth < 120) newWidth = 120;
-        if (newWidth > 600) newWidth = 600;
-        panel.style.width = newWidth + 'px';
+        lastClientX = e.clientX;
+        if (rafId !== null) return;
+        rafId = requestAnimationFrame(function() {
+          rafId = null;
+          if (startX === undefined) return;
+          var newWidth = startWidth + (lastClientX - startX);
+          if (newWidth < 120) newWidth = 120;
+          if (newWidth > 600) newWidth = 600;
+          panel.style.width = newWidth + 'px';
+        });
       }
 
       function onMouseUp() {
         handle.classList.remove('active');
+        document.body.classList.remove('is-resizing');
         document.body.style.cursor = '';
         document.body.style.userSelect = '';
-        document.removeEventListener('mousemove', onMouseMove);
-        document.removeEventListener('mouseup', onMouseUp);
+        window.removeEventListener('mousemove', onMouseMove);
+        window.removeEventListener('mouseup', onMouseUp);
+        window.removeEventListener('mouseleave', onMouseUp);
+        window.removeEventListener('blur', onMouseUp);
+        if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
         // Save width for next session
         try {
           var finalWidth = panel.getBoundingClientRect().width;
@@ -615,62 +632,70 @@ ${css}
       'use strict';
       var handle = document.getElementById('input-resize-handle');
       var inputArea = document.getElementById('input-area');
-      if (!handle || !inputArea) return;
+      var inputEl = document.getElementById('input');
+      if (!handle || !inputArea || !inputEl) return;
 
-      // Restore saved height from previous session
+      // The drag sizes the textarea itself; the composer box and #input-area are
+      // content-sized and simply follow it. These bounds mirror webview-css.ts:
+      // the textarea's two-row min-height, and 340px which keeps the whole input
+      // area inside its own 400px max-height.
+      var MIN_INPUT_HEIGHT = 52;
+      var MAX_INPUT_HEIGHT = 340;
+
+      // Restore the height chosen in a previous session
       try {
-        var savedHeight = localStorage.getItem('codewhale:inputAreaHeight');
+        var savedHeight = localStorage.getItem('codewhale:inputHeight');
         if (savedHeight) {
           var h = parseInt(savedHeight, 10);
-          if (h >= 56 && h <= 400) {
-            inputArea.style.height = h + 'px';
-            // Reset textarea height so it fills the restored container
-            var input = document.getElementById('input');
-            if (input) input.style.height = 'auto';
+          if (h >= MIN_INPUT_HEIGHT && h <= MAX_INPUT_HEIGHT) {
+            inputEl.style.height = h + 'px';
           }
         }
       } catch(e) { /* localStorage may not be available */ }
 
       var startY, startHeight;
+      var lastClientY = 0;
+      var rafId = null;
 
       function onMouseDown(e) {
         startY = e.clientY;
-        startHeight = inputArea.getBoundingClientRect().height;
+        startHeight = inputEl.getBoundingClientRect().height;
         handle.classList.add('active');
+        // Freezes #input-area's height transition so the box tracks the drag.
         inputArea.classList.add('resizing');
+        document.body.classList.add('is-resizing');
         document.body.style.cursor = 'row-resize';
         document.body.style.userSelect = 'none';
-        document.addEventListener('mousemove', onMouseMove);
-        document.addEventListener('mouseup', onMouseUp);
+        window.addEventListener('mousemove', onMouseMove);
+        window.addEventListener('mouseup', onMouseUp);
+        window.addEventListener('mouseleave', onMouseUp);
+        window.addEventListener('blur', onMouseUp);
         e.preventDefault();
       }
 
       function onMouseMove(e) {
         if (startY === undefined) return;
         var newHeight = startHeight - (e.clientY - startY);
-        if (newHeight < 56) newHeight = 56;
-        if (newHeight > 400) newHeight = 400;
-        inputArea.style.height = newHeight + 'px';
-        // Keep textarea filling the container during resize
-        var input = document.getElementById('input');
-        if (input) input.style.height = 'auto';
+        if (newHeight < MIN_INPUT_HEIGHT) newHeight = MIN_INPUT_HEIGHT;
+        if (newHeight > MAX_INPUT_HEIGHT) newHeight = MAX_INPUT_HEIGHT;
+        inputEl.style.height = newHeight + 'px';
       }
 
       function onMouseUp() {
         handle.classList.remove('active');
         inputArea.classList.remove('resizing');
+        document.body.classList.remove('is-resizing');
         document.body.style.cursor = '';
         document.body.style.userSelect = '';
-        document.removeEventListener('mousemove', onMouseMove);
-        document.removeEventListener('mouseup', onMouseUp);
-        // Save height for next session
+        window.removeEventListener('mousemove', onMouseMove);
+        window.removeEventListener('mouseup', onMouseUp);
+        window.removeEventListener('mouseleave', onMouseUp);
+        window.removeEventListener('blur', onMouseUp);
+        // Save the height for next session
         try {
-          var finalHeight = inputArea.getBoundingClientRect().height;
-          localStorage.setItem('codewhale:inputAreaHeight', String(Math.round(finalHeight)));
+          var finalHeight = inputEl.getBoundingClientRect().height;
+          localStorage.setItem('codewhale:inputHeight', String(Math.round(finalHeight)));
         } catch(e) { /* ignore localStorage errors */ }
-        // Reset textarea height so it fills the resized container
-        var input = document.getElementById('input');
-        if (input) input.style.height = 'auto';
         startY = undefined;
         startHeight = undefined;
       }

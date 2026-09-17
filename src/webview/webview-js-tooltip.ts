@@ -88,6 +88,11 @@ export function getTooltipScript(): string {
   });
 
   document.addEventListener('mousemove', function(e) {
+    // Skip while a resize handle is being dragged: repositioning the tooltip
+    // on every mousemove forces a synchronous layout read
+    // (getBoundingClientRect) that thrashes against the resize handler's
+    // width/height writes.
+    if (document.body.classList.contains('is-resizing')) return;
     if (activeTooltipTarget) {
       positionTooltip(e.clientX, e.clientY);
     }
