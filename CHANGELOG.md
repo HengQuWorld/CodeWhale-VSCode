@@ -1,5 +1,21 @@
 # Change Log
 
+## 0.6.2
+
+### New Features
+
+- **Settings gear in the sidebar title bar** — The config panel was reached through a gear button rendered inside the chat webview; the entry point now lives in the editor chrome instead. The CodeWhale sidebar's view title bar shows a native gear icon (`brotherwhale.openConfig`, contributed through `menus["view/title"]` in the navigation group), so it behaves like every other VSCode panel action and stays available regardless of webview state. The in-webview `#btn-config` button, its CSS and its click handler are gone, along with the redundant `brotherwhale.settings` tree view and `SettingsViewProvider`, leaving the gear as the single entry point; the `/config` slash command keeps opening the same panel.
+
+- **Composer rebuilt as an input box with a bottom toolbar** — The input area is now a bordered box with a `:focus-within` highlight whose bottom edge is a toolbar: the attachment button sits on the left, a compact icon-only Send/Stop button is pinned to the far right (inline SVG paper-plane/square icons, since the webview does not load the codicon font, with titles and aria-labels switching with the streaming state), and the textarea fills the box above. The composer height is under explicit user control: the textarea keeps a 52px floor, the resize handle drags it between 52 and 340px (persisted as `codewhale:inputHeight`), and overflowing text scrolls inside the box instead of growing the frame — the previous auto-grow logic and its height resets on send and history recall, which made the frame jump while typing, are removed. The Stop state also now actually turns red; the `.streaming` rule had been outranked by the generic button background selector.
+
+- **Sidebar resize handle restored with hardened drag** — The threads panel can be resized by dragging inside the webview again. The handle is back with the input handle's hardened pattern: window-level listeners, cleanup on mouseleave/blur, rAF-throttled width writes and an `is-resizing` guard (which also keeps tooltips from repositioning mid-drag), and the width persists across sessions via `codewhale:sidebarWidth`. The handle hides while the threads panel is collapsed, so a closed sidebar never shows a dead grip, and the input handle's cleanup now removes the window listeners it registers.
+
+### Improvements
+
+- **Goal UI consolidated into a single slot** — The thread goal was rendered twice (a standalone sidebar section plus an inline copy in the Work panel); all goal UI now lives in one dedicated `#work-goal` slot inside the Work panel. The chat provider no longer includes the goal in the workState payload — goal state flows exclusively through `refreshGoal` — and `/goal` slash commands now drive the engine's native thread goal API instead of writing local config settings. Outdated CLI-only commands (`/verbose`, `/profile`, `/translate`) are marked unavailable in the GUI.
+
+- **Coherence banner and cycle count removed** — The TUI no longer emits `coherence.state` / `cycle.advanced` events or exposes `coherence_state` on thread records, so the dead chain is removed end to end: the `ThreadRecord` field, session-state fields, chat-provider event cases, webview banner/cycle rendering and reset paths, and the `coherence*` / `cycles` i18n keys. The Work panel empty state now keys on checklist + strategy. Regression coverage for sidebar clearing and the workState payload structure is kept; the fabricated state-machine tests are gone.
+
 ## 0.6.1
 
 ### Bug Fixes
