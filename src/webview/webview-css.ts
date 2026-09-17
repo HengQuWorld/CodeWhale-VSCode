@@ -423,7 +423,6 @@ export function getWebviewCss(): string {
       height: 100%;
       overflow-y: auto;
       padding: 8px;
-      scroll-behavior: smooth;
     }
 
     /* ── Message Navigation Rail ── */
