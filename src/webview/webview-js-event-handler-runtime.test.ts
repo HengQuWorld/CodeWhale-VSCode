@@ -36,6 +36,23 @@ class FakeClassList {
   }
 }
 
+/**
+ * The selector subset the approval panel needs: class names, optionally
+ * narrowed by one trailing class[attr="value"] pair. Anything else answers
+ * nothing, the way this stand-in always did.
+ */
+function matchesSelector(element: FakeElement | null, selector?: string): boolean {
+  if (!element || !selector) return false;
+  const attrMatch = selector.match(/\[([\w-]+)="([^"]*)"\]/);
+  const classPart = attrMatch ? selector.slice(0, attrMatch.index) : selector;
+  const classes = classPart.split(".").filter((part) => part.length > 0);
+  if (classes.length === 0) return false;
+  const elementClasses = element.className.split(/\s+/).filter(Boolean);
+  if (!classes.every((name) => elementClasses.includes(name))) return false;
+  if (attrMatch && element.getAttribute(attrMatch[1]) !== attrMatch[2]) return false;
+  return true;
+}
+
 class FakeElement {
   public textContent = "";
   public value = "";
@@ -76,7 +93,12 @@ class FakeElement {
     return matches.length > 0 ? matches[0] : null;
   }
 
-  closest(): FakeElement | null {
+  closest(selector?: string): FakeElement | null {
+    let node: FakeElement | null = this.parentElement;
+    while (node) {
+      if (matchesSelector(node, selector)) return node;
+      node = node.parentElement;
+    }
     return null;
   }
 
@@ -86,17 +108,7 @@ class FakeElement {
    * answers nothing, as this stand-in always did.
    */
   querySelectorAll(selector?: string): FakeElement[] {
-    if (!selector) return [];
-    const attrMatch = selector.match(/\[([\w-]+)="([^"]*)"\]/);
-    const classPart = attrMatch ? selector.slice(0, attrMatch.index) : selector;
-    const classes = classPart.split(".").filter((part) => part.length > 0);
-    if (classes.length === 0) return [];
-    return this.children.filter((child) => {
-      const childClasses = child.className.split(/\s+/).filter(Boolean);
-      if (!classes.every((name) => childClasses.includes(name))) return false;
-      if (attrMatch && child.getAttribute(attrMatch[1]) !== attrMatch[2]) return false;
-      return true;
-    });
+    return this.children.filter((child) => matchesSelector(child, selector));
   }
 
   appendChild(child: FakeElement): void {
@@ -253,7 +265,17 @@ function createRuntimeHarness() {
 
   const documentObj = {
     getElementById: (id: string) => getEl(id),
-    querySelectorAll: () => [] as FakeElement[],
+    // The webview asks the document for cards by selector (e.g. the approval
+    // bar that carries one id), so the stand-in searches the elements it hands
+    // out — including their children — instead of always answering nothing.
+    querySelectorAll: (selector?: string) => {
+      const found: FakeElement[] = [];
+      for (const element of elements.values()) {
+        if (matchesSelector(element, selector)) found.push(element);
+        for (const child of element.querySelectorAll(selector)) found.push(child);
+      }
+      return found;
+    },
     addEventListener: (name: string, handler: (event: any) => void) => {
       documentListeners.set(name, handler);
     },
@@ -601,6 +623,32 @@ describe("webview-js-event-handler runtime", () => {
 
     expect(harness.approvalItemIds()).toEqual([]);
     expect(harness.getElement("approval-float").getAttribute("hidden")).toBe("");
+  });
+
+  it("moves only the answered card's status, not every card that was waiting", () => {
+    const harness = createRuntimeHarness();
+    // Two tool calls waiting on two different approvals: answering one must not
+    // repaint the other, which is still waiting (or it looks decided and the
+    // user stops looking for the button that is still there).
+    const statuses = ["tc-m1-0", "tc-m1-1"].map((id) => {
+      const card = harness.getElement(id);
+      card.className = "tool-call";
+      const status = new FakeElement();
+      status.className = "tool-status";
+      card.appendChild(status);
+      return status;
+    });
+
+    harness.dispatchMessage({ type: "approvalRequired", approvalId: "a1", messageId: "m1", toolCallIdx: 0, summary: "run the tests" });
+    harness.dispatchMessage({ type: "approvalRequired", approvalId: "a2", messageId: "m1", toolCallIdx: 1, summary: "push the branch" });
+
+    expect(statuses[0].textContent).toContain("Approval Required");
+    expect(statuses[1].textContent).toContain("Approval Required");
+
+    harness.dispatchMessage({ type: "approvalResolved", approvalId: "a1", decision: "allow" });
+
+    expect(statuses[0].textContent).toContain("running");
+    expect(statuses[1].textContent).toContain("Approval Required");
   });
 
   it("does not offer the same approval twice when it is announced again", () => {
