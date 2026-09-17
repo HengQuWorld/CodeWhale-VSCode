@@ -32,6 +32,13 @@ export interface WebviewTranslations {
   sessions: string;
   tasks: string;
   work: string;
+  activity: string;
+  agentStatus: string;
+  agentStatusTitle: string;
+  closePanel: string;
+  sessionsTabHint: string;
+  threadsTabHint: string;
+  activityTabHint: string;
   newThread: string;
   compact: string;
   interrupt: string;
@@ -356,48 +363,60 @@ ${css}
         <div class="sidebar-tabs">
           <button class="sidebar-tab active" id="tab-sessions-btn" data-tab="sessions">${tr.sessions}</button>
           <button class="sidebar-tab" id="tab-threads-btn" data-tab="threads">${tr.threads}</button>
-          <span class="sidebar-section-action" id="workspace-filter-toggle" title="${tr.showAllWorkspaces}">🌐</span>
+          <button class="sidebar-tab" id="tab-activity-btn" data-tab="activity">${tr.activity}</button>
+          <button class="sidebar-close-btn" id="sidebar-close-btn" title="${tr.closePanel}" aria-label="${tr.closePanel}">✕</button>
         </div>
-        <div class="sidebar-section-body" id="tab-sessions"></div>
-        <div class="sidebar-section-body" id="tab-threads-list"></div>
-      </div>
-      <div class="sidebar-section" id="sidebar-work">
-        <div class="sidebar-section-header" id="work-section-toggle">
-          <span class="sidebar-section-title">🎯 ${tr.work}</span>
-          <span class="sidebar-section-arrow">▼</span>
+        <div class="sidebar-section-body" id="tab-sessions">
+          <div class="sidebar-tab-hint">${tr.sessionsTabHint}</div>
+          <div class="session-search-bar" id="session-search-bar">
+            <span class="sidebar-section-action" id="workspace-filter-toggle" title="${tr.showAllWorkspaces}">🌐</span>
+            <input type="text" class="session-search-input" id="session-search-input" placeholder="${tr.searchPlaceholder}">
+          </div>
         </div>
-        <div class="sidebar-section-body" id="tab-work">
-          <div id="work-goal"></div>
-          <div id="work-body"></div>
+        <div class="sidebar-section-body" id="tab-threads-list">
+          <div class="sidebar-tab-hint">${tr.threadsTabHint}</div>
         </div>
-      </div>
-      <div class="sidebar-section" id="sidebar-fleet">
-        <div class="sidebar-section-header" id="fleet-section-toggle">
-          <span class="sidebar-section-title">🚀 ${tr.fleet}</span>
-          <span class="sidebar-section-arrow">▼</span>
+        <div class="sidebar-section-body" id="tab-activity">
+          <div class="sidebar-tab-hint">${tr.activityTabHint}</div>
+          <div class="sidebar-section" id="sidebar-work">
+            <div class="sidebar-section-header" id="work-section-toggle">
+              <span class="sidebar-section-title">🎯 ${tr.work}</span>
+              <span class="sidebar-section-arrow">▼</span>
+            </div>
+            <div class="sidebar-section-body" id="tab-work">
+              <div id="work-goal"></div>
+              <div id="work-body"></div>
+            </div>
+          </div>
+          <div class="sidebar-section" id="sidebar-fleet">
+            <div class="sidebar-section-header" id="fleet-section-toggle">
+              <span class="sidebar-section-title">🚀 ${tr.fleet}</span>
+              <span class="sidebar-section-arrow">▼</span>
+            </div>
+            <div class="sidebar-section-body" id="tab-fleet"></div>
+          </div>
+          <div class="sidebar-section" id="sidebar-tasks">
+            <div class="sidebar-section-header" id="tasks-section-toggle">
+              <span class="sidebar-section-title">⚙ ${tr.tasks}</span>
+              <span class="sidebar-section-arrow">▼</span>
+            </div>
+            <div class="sidebar-section-body" id="tab-tasks"></div>
+          </div>
+          <div class="sidebar-section" id="sidebar-agents">
+            <div class="sidebar-section-header" id="agents-section-toggle">
+              <span class="sidebar-section-title">🤖 ${tr.agents}</span>
+              <span class="sidebar-section-arrow">▼</span>
+            </div>
+            <div class="sidebar-section-body" id="tab-agents"></div>
+          </div>
+          <div class="sidebar-section" id="sidebar-changes">
+            <div class="sidebar-section-header" id="changes-section-toggle">
+              <span class="sidebar-section-title">📝 ${tr.changes}</span>
+              <span class="sidebar-section-arrow">▼</span>
+            </div>
+            <div class="sidebar-section-body" id="tab-changes"></div>
+          </div>
         </div>
-        <div class="sidebar-section-body" id="tab-fleet"></div>
-      </div>
-      <div class="sidebar-section" id="sidebar-tasks">
-        <div class="sidebar-section-header" id="tasks-section-toggle">
-          <span class="sidebar-section-title">⚙ ${tr.tasks}</span>
-          <span class="sidebar-section-arrow">▼</span>
-        </div>
-        <div class="sidebar-section-body" id="tab-tasks"></div>
-      </div>
-      <div class="sidebar-section" id="sidebar-agents">
-        <div class="sidebar-section-header" id="agents-section-toggle">
-          <span class="sidebar-section-title">🤖 ${tr.agents}</span>
-          <span class="sidebar-section-arrow">▼</span>
-        </div>
-        <div class="sidebar-section-body" id="tab-agents"></div>
-      </div>
-      <div class="sidebar-section" id="sidebar-changes">
-        <div class="sidebar-section-header" id="changes-section-toggle">
-          <span class="sidebar-section-title">📝 ${tr.changes}</span>
-          <span class="sidebar-section-arrow">▼</span>
-        </div>
-        <div class="sidebar-section-body" id="tab-changes"></div>
       </div>
     </div>
     <div id="sidebar-resize-handle" title="Drag to resize sidebar"></div>
@@ -468,7 +487,7 @@ ${css}
         <button id="btn-compact">${tr.compact}</button>
         <button id="btn-undo" title="${tr.undoLastTurn}">↩ ${tr.undoLabel}</button>
         <button id="btn-retry" title="${tr.retryLastTurn}">🔁 ${tr.retryLabel}</button>
-        <span class="thread-count" id="thread-count" title="${tr.toggleHistory}">0 sessions</span>
+        <span class="thread-count" id="thread-count" title="${tr.agentStatusTitle}">${tr.agentStatus}</span>
       </div>
       <div id="input-resize-handle" title="Drag to resize input area"></div>
       <div id="input-area">
@@ -563,6 +582,7 @@ ${css}
           var w = parseInt(savedWidth, 10);
           if (w >= 120 && w <= 600) {
             panel.style.width = w + 'px';
+            handle.style.left = w + 'px';
           }
         }
       } catch(e) { /* localStorage may not be available */ }
@@ -596,6 +616,7 @@ ${css}
           if (newWidth < 120) newWidth = 120;
           if (newWidth > 600) newWidth = 600;
           panel.style.width = newWidth + 'px';
+          handle.style.left = newWidth + 'px';
         });
       }
 

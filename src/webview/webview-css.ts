@@ -54,20 +54,29 @@ export function getWebviewCss(): string {
       overflow: hidden;
     }
 
-    #layout { display: flex; flex: 1; overflow: hidden; }
+    #layout { position: relative; display: flex; flex: 1; overflow: hidden; }
 
-    /* ── Sidebar / Threads Panel ── */
+    /* ── Sidebar / Threads Panel ──
+       The panel overlays the chat area (instead of squeezing it), expanding
+       from the left on top of the editor content. */
 
     #threads-panel {
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
       width: 220px;
       min-width: 160px;
       max-width: 600px;
       border-right: 1px solid var(--border);
+      background: var(--bg);
+      box-shadow: 2px 0 12px rgba(0, 0, 0, 0.25);
       overflow-y: auto;
       overflow-x: hidden;
       padding: 0;
       display: none;
       flex-direction: column;
+      z-index: 20;
     }
     #threads-panel.open { display: flex; }
 
@@ -75,12 +84,14 @@ export function getWebviewCss(): string {
 
     #sidebar-resize-handle {
       display: none;
+      position: absolute;
+      left: 220px;
+      top: 0;
+      bottom: 0;
       width: 4px;
       cursor: col-resize;
-      flex-shrink: 0;
       background: transparent;
-      position: relative;
-      z-index: 10;
+      z-index: 21;
       transition: background 0.15s;
     }
     /* Only available while the threads panel is open: a collapsed sidebar has
@@ -157,6 +168,7 @@ export function getWebviewCss(): string {
       flex: 1;
     }
     .sidebar-section-action {
+      flex: 0 0 auto;
       font-size: 0.85em;
       cursor: pointer;
       padding: 0 4px;
@@ -182,14 +194,19 @@ export function getWebviewCss(): string {
       max-height: 0 !important;
       overflow: hidden;
     }
-    #sidebar-threads .sidebar-section-body {
+    /* Top-level tab bodies (Sessions / Threads / Activity) fill the sidebar
+       and are shown/hidden by data-active-tab. The direct-child selector
+       keeps the nested Activity sections' own collapse behaviour intact. */
+    #sidebar-threads > .sidebar-section-body {
       max-height: none;
       flex: 1;
       min-height: 0;
-    }
-    #sidebar-threads[data-active-tab="sessions"] #tab-threads-list,
-    #sidebar-threads[data-active-tab="threads"] #tab-sessions {
       display: none;
+    }
+    #sidebar-threads[data-active-tab="sessions"] > #tab-sessions,
+    #sidebar-threads[data-active-tab="threads"] > #tab-threads-list,
+    #sidebar-threads[data-active-tab="activity"] > #tab-activity {
+      display: block;
     }
 
     .sidebar-tabs {
@@ -200,7 +217,9 @@ export function getWebviewCss(): string {
       gap: 4px;
     }
     .sidebar-tab {
-      padding: 4px 12px;
+      flex: 1 1 auto;
+      min-width: 0;
+      padding: 4px 6px;
       font-size: 0.78em;
       font-weight: 600;
       color: var(--muted);
@@ -209,6 +228,10 @@ export function getWebviewCss(): string {
       border-radius: 4px;
       cursor: pointer;
       transition: all 0.15s;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      text-align: center;
     }
     .sidebar-tab:hover {
       background: var(--card-bg);
@@ -217,6 +240,21 @@ export function getWebviewCss(): string {
     .sidebar-tab.active {
       background: var(--brand-primary);
       color: white;
+    }
+    .sidebar-close-btn {
+      flex: 0 0 auto;
+      background: transparent;
+      border: none;
+      color: var(--muted);
+      cursor: pointer;
+      padding: 4px 7px;
+      border-radius: 3px;
+      font-size: 0.85em;
+      line-height: 1;
+    }
+    .sidebar-close-btn:hover {
+      color: var(--fg);
+      background: var(--card-bg);
     }
 
     .thread-item {
@@ -301,13 +339,26 @@ export function getWebviewCss(): string {
       font-size: 0.9em;
     }
 
+    /* Tab hint (explains what each sidebar tab holds) */
+    .sidebar-tab-hint {
+      padding: 6px 10px;
+      font-size: 0.8em;
+      color: var(--muted);
+      line-height: 1.4;
+      border-bottom: 1px solid var(--border);
+    }
+
     /* Session search bar */
     .session-search-bar {
+      display: flex;
+      align-items: center;
+      gap: 6px;
       padding: 6px 8px;
       border-bottom: 1px solid var(--border);
     }
     .session-search-input {
-      width: 100%;
+      flex: 1;
+      min-width: 0;
       padding: 5px 8px;
       border: 1px solid var(--border);
       border-radius: 4px;

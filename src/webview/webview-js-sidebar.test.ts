@@ -156,9 +156,10 @@ describe("webview-js-sidebar.ts", () => {
     expect(script).toContain("window.__wvFormatRelativeTime");
   });
 
-  it("uses __wvFormatThreadsCount for thread count display", () => {
+  it("keeps thread-count as a sidebar toggle and no longer shows a count", () => {
     const script = getSidebarScript(makeTr());
-    expect(script).toContain("window.__wvFormatThreadsCount");
+    expect(script).toContain("thread-count");
+    expect(script).not.toContain("__wvFormatThreadsCount");
   });
 
   it("does not render file changes in work panel (TUI design: file changes are shown inline, not in Work sidebar)", () => {

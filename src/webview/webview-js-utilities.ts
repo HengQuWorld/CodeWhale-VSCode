@@ -17,12 +17,6 @@ export function getUtilitiesScript(tr: WebviewTranslations): string {
   var __i18n = ${i18nJson};
 
   // ── Utility functions ──
-  window.__wvFormatThreadsCount = function(n, type) {
-    if (type === 'threads') {
-      return __locale === 'zh-cn' ? n + ' \\u4E2A\\u7EBF\\u7A0B' : n + ' thread' + (n !== 1 ? 's' : '');
-    }
-    return __locale === 'zh-cn' ? n + ' \\u4E2A\\u4F1A\\u8BDD' : n + ' session' + (n !== 1 ? 's' : '');
-  };
 
   window.__wvFormatLoadedThread = function(title) {
     return __locale === 'zh-cn' ? '\\u5DF2\\u52A0\\u8F7D: ' + title : 'Loaded: ' + title;
