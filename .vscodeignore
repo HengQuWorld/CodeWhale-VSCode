@@ -10,6 +10,7 @@ vitest.config*
 # Test infrastructure
 .vitest/**
 coverage/**
+*.profraw
 
 # Documentation (not needed at runtime)
 AGENTS.md

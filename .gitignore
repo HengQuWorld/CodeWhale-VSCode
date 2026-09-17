@@ -36,3 +36,6 @@ Thumbs.db
 !.vscode/extensions.json
 !.vscode/launch.json
 !.vscode/tasks.json
+
+# LLVM coverage artifacts (never ship)
+*.profraw
