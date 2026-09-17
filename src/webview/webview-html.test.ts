@@ -390,6 +390,22 @@ describe("webview-html.ts assembler", () => {
     expect(html).toContain('id="tab-changes"');
   });
 
+  it("orders the Activity sections as Work, Changes, Fleet, Tasks, Agents", () => {
+    const html = getWebviewHtml(makeMockWebview(), makeMockExtensionUri(), makeTr());
+    // Changes sits directly under Work: it is the highest-signal section for a
+    // running session, so it must not fall below Fleet/Tasks/Agents.
+    const ordered = [
+      'sidebar-work',
+      'sidebar-changes',
+      'sidebar-fleet',
+      'sidebar-tasks',
+      'sidebar-agents',
+    ];
+    const positions = ordered.map((id) => html.indexOf(`id="${id}"`));
+    positions.forEach((pos) => expect(pos).toBeGreaterThan(-1));
+    expect(positions).toEqual([...positions].sort((a, b) => a - b));
+  });
+
   it("keeps the goal inside the Work panel instead of its own section", () => {
     const html = getWebviewHtml(makeMockWebview(), makeMockExtensionUri(), makeTr());
     // The goal used to be a second sidebar section, which duplicated the Work

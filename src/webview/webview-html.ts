@@ -395,6 +395,13 @@ ${css}
               <div id="work-body"></div>
             </div>
           </div>
+          <div class="sidebar-section" id="sidebar-changes">
+            <div class="sidebar-section-header" id="changes-section-toggle">
+              <span class="sidebar-section-title">📝 ${tr.changes}</span>
+              <span class="sidebar-section-arrow">▼</span>
+            </div>
+            <div class="sidebar-section-body" id="tab-changes"></div>
+          </div>
           <div class="sidebar-section" id="sidebar-fleet">
             <div class="sidebar-section-header" id="fleet-section-toggle">
               <span class="sidebar-section-title">🚀 ${tr.fleet}</span>
@@ -415,13 +422,6 @@ ${css}
               <span class="sidebar-section-arrow">▼</span>
             </div>
             <div class="sidebar-section-body" id="tab-agents"></div>
-          </div>
-          <div class="sidebar-section" id="sidebar-changes">
-            <div class="sidebar-section-header" id="changes-section-toggle">
-              <span class="sidebar-section-title">📝 ${tr.changes}</span>
-              <span class="sidebar-section-arrow">▼</span>
-            </div>
-            <div class="sidebar-section-body" id="tab-changes"></div>
           </div>
         </div>
       </div>

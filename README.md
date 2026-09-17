@@ -129,7 +129,7 @@ Switch from the status bar or with `/mode` (shortcuts `1`/`2`/`3`) and `/auto`. 
 - **Workspace filter** — show sessions from all workspaces or only the current one.
 - **Attention surfacing** — a thread waiting on an approval or your input carries a count on its rail card (grouped under *Needs you*), a total on the toolbar's **Agent** label, and a VS Code notification you can turn off with `brotherwhale.backgroundThreadNotifications`. Approvals and questions from another thread can be answered inline in its rail card, without switching to it.
 - **Watched, not polled** — every background thread that is running or waiting on you holds one lightweight SSE stream, so badges, notifications and the auto-save stay live without a polling timer.
-- Three peer sidebar tabs — **Sessions** (saved conversations), **Threads** (the active ones) and **Activity** (live agent status: Work, Fleet, Tasks, Agents, Changes) — each with a hint line saying what it holds.
+- Three peer sidebar tabs — **Sessions** (saved conversations), **Threads** (the active ones) and **Activity** (live agent status: Work, Changes, Fleet, Tasks, Agents) — each with a hint line saying what it holds.
 
 ### Changes and diffs in the editor
 - A **Changes** section per conversation, with one card per recorded change, built from the engine's authoritative mutation metadata.
@@ -160,7 +160,7 @@ Switch from the status bar or with `/mode` (shortcuts `1`/`2`/`3`) and `/auto`. 
 - **Config panel** — the gear in the settings bar (or `/config`) reads and writes engine runtime config, including sandbox mode, strict tool mode, memory, search provider and prompt suggestion.
 
 ### Built for the editor
-- Activity-bar container whose sidebar holds the **Sessions**, **Threads** and **Activity** tabs, the last grouping the Work, Fleet, Tasks, Agents and Changes panels. The threads panel sits beside the chat and takes its width from it rather than covering it, and closes with its ✕ button or `Esc`.
+- Activity-bar container whose sidebar holds the **Sessions**, **Threads** and **Activity** tabs, the last grouping the Work, Changes, Fleet, Tasks and Agents panels. The threads panel sits beside the chat and takes its width from it rather than covering it, and closes with its ✕ button or `Esc`.
 - Status bar for engine state, mode, posture, provider, model and reasoning effort.
 - Resizable sidebar and input area; follows your VS Code theme.
 - **English and Simplified Chinese** UI, following VS Code's display language.
