@@ -114,8 +114,10 @@ DeepSeek-GUI/
 - 点击任务卡片触发 `/task show <id>` 命令
 
 ### 4. 侧边栏状态
-- 侧边栏区块：Sessions（默认激活）、Threads、Goal、Work、Fleet、Tasks、Agents、Changes
-- 打开后保持打开状态，除非用户明确关闭
+- 侧边栏三个并列标签页：Sessions（默认激活）、Threads、Activity；没有设置可以隐藏其中任何一个
+- Activity 标签内汇集 Work、Fleet、Tasks、Agents、Changes 区块（各自仍可折叠）
+- Threads 面板浮在对话之上（`#threads-panel` 绝对定位 + `.open`），不再挤压对话区
+- 打开后保持打开状态，除非用户明确关闭（✕ 按钮或 `Esc`）
 - 点击线程项不会自动关闭侧边栏
 
 ## 常见问题修复

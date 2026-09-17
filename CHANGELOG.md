@@ -1,5 +1,21 @@
 # Change Log
 
+## Unreleased
+
+### New Features
+
+- **Sidebar rebuilt around three peer tabs** — Sessions, Threads and Activity now sit as equal tabs under a hint line that says what each one holds; the Activity tab gathers the Work, Fleet, Tasks, Agents and Changes sections that used to be stacked under the session list as siblings of it, so the sidebar is one panel instead of a list plus five independent sections. The sections keep their own collapse behaviour inside that tab. The threads panel no longer squeezes the chat: it is an absolutely positioned overlay with an opaque background and a drop shadow, and its resize handle moved with it (the handle is positioned by the same drag that sets the width, and the saved width is applied to both on load). The toolbar's `0 sessions` counter became an **Agent** label whose tooltip explains what the panel holds and which toggles it, and the tab bar gained a ✕ that collapses the panel. ([#10](https://github.com/HengQuWorld/CodeWhale-VSCode/pull/10) by [@eoli](https://github.com/eoli))
+
+### Improvements
+
+- **`brotherwhale.showThreadList` removed** — The setting stopped hiding anything once the three tabs became peers: it was still contributed, documented and read by the chat provider, but the only thing left in the webview was a no-op assignment, so a user who set it saw the Threads tab anyway and nothing said so. The contribution, its `package.nls` strings, its three reads and the no-op it fed are gone; a `settings.json` that still carries it reports the key as unknown, which is the honest answer for a setting that no longer decides anything.
+
+- **The panel closes with `Esc`** — The overlay covers the chat, so the ✕ was the only way out. `Esc` now collapses an open panel; inputs keep their own `Esc` handling (the slash menu, the task draft), and a keypress that reaches one of them is left alone.
+
+### Bug Fixes
+
+- **The Sessions empty state could stack** — `renderSessions()` removed `.session-empty-msg` nodes before each render but appends its empty state as `.work-empty`, so an empty result list (a search with no matches, or a workspace with no saved sessions) added another "no conversations" block on every re-render instead of replacing the one already there. Both list renderers now remove exactly what they create.
+
 ## 0.6.2
 
 ### New Features

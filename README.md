@@ -127,7 +127,7 @@ Switch from the status bar or with `/mode` (shortcuts `1`/`2`/`3`) and `/auto`. 
 - **Cross-workspace resumption** — loading a session from another project rebinds it to the workspace you are in.
 - **Workspace filter** — show sessions from all workspaces or only the current one.
 - **Attention surfacing** — threads waiting on an approval or your input get a pulsing dot, polled while a turn runs.
-- The legacy **Threads** tab still exists but is hidden by default (`brotherwhale.showThreadList`).
+- Three peer sidebar tabs — **Sessions** (saved conversations), **Threads** (the active ones) and **Activity** (live agent status: Work, Fleet, Tasks, Agents, Changes) — each with a hint line saying what it holds.
 
 ### Changes and diffs in the editor
 - A **Changes** section per conversation, with one card per recorded change, built from the engine's authoritative mutation metadata.
@@ -157,7 +157,7 @@ Switch from the status bar or with `/mode` (shortcuts `1`/`2`/`3`) and `/auto`. 
 - **Config panel** — the gear in the settings bar (or `/config`) reads and writes engine runtime config, including sandbox mode, strict tool mode, memory, search provider and prompt suggestion.
 
 ### Built for the editor
-- Activity-bar container with Chat, Sessions, Goal, Work, Fleet, Tasks, Agents and Changes panels.
+- Activity-bar container whose sidebar holds the **Sessions**, **Threads** and **Activity** tabs, the last grouping the Work, Fleet, Tasks, Agents and Changes panels. The threads panel overlays the chat instead of squeezing it, and closes with its ✕ button or `Esc`.
 - Status bar for engine state, mode, posture, provider, model and reasoning effort.
 - Resizable sidebar and input area; follows your VS Code theme.
 - **English and Simplified Chinese** UI, following VS Code's display language.
@@ -199,7 +199,6 @@ Search for `brotherwhale` in VS Code settings (`Cmd/Ctrl+,`).
 | `brotherwhale.defaultPermissionPosture` | `"ask"` | `ask`, `auto_review`, or `full_access` |
 | `brotherwhale.reasoningEffort` | `"auto"` | `auto`, `off`, `low`, `medium`, `high`, `max` |
 | `brotherwhale.autoApprove` | `false` | Legacy fallback for auto-approval. Prefer the **Full Access** posture, which already implies it |
-| `brotherwhale.showThreadList` | `false` | Show the legacy **Threads** tab alongside **Sessions** |
 | `brotherwhale.costCurrency` | `"auto"` | `auto` follows the UI language (Chinese → CNY, otherwise USD), or force `usd` / `cny`. Falls back to USD when no native CNY price exists |
 
 ## How it works
@@ -274,7 +273,7 @@ Project layout: `src/extension.ts` (entry) → `src/chat-provider.ts` (orchestra
 
 Thanks to everyone who has improved this extension through pull requests:
 
-- **[@eoli](https://github.com/eoli)** — [#9](https://github.com/HengQuWorld/CodeWhale-VSCode/pull/9) restored the sidebar resize handle with a hardened drag, redesigned the composer with a bottom toolbar, and moved the settings entry to the sidebar title-bar gear (after iterations in #4–#8)
+- **[@eoli](https://github.com/eoli)** — [#9](https://github.com/HengQuWorld/CodeWhale-VSCode/pull/9) restored the sidebar resize handle with a hardened drag, redesigned the composer with a bottom toolbar, and moved the settings entry to the sidebar title-bar gear (after iterations in #4–#8); [#10](https://github.com/HengQuWorld/CodeWhale-VSCode/pull/10) added the sidebar **Activity** tab and per-tab hints, overlaid the threads panel over the chat, and gave the panel an agent status label and a close button
 - **[@Hmbown](https://github.com/Hmbown)** — [#2](https://github.com/HengQuWorld/CodeWhale-VSCode/pull/2) made each window own and authenticate its Runtime, and guarded per-file restore
 
 ## License
