@@ -1003,6 +1003,9 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
             msgBodyEl.querySelectorAll('.thinking-content').forEach(function(el) { el.innerHTML = msg.thinkingHtml; });
           }
         }
+        if (msg.planApproval && window.__wvMessages.renderPlanApproveButton) {
+          window.__wvMessages.renderPlanApproveButton(msg.messageId);
+        }
         window.__wvMessages.setStreaming(false);
         var st = window.__wvMessages.getStreamingTimeout();
         if (st) { clearTimeout(st); window.__wvMessages.setStreamingTimeout(null); }

@@ -538,6 +538,18 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
     markClippedBlocks(el);
   }
 
+  // ── Plan approval (plan mode → Act) ──
+  function renderPlanApproveButton(messageId) {
+    var msgEl = document.getElementById('msg-' + messageId);
+    if (!msgEl) return;
+    if (msgEl.querySelector('.plan-approve-btn')) return;
+    var btn = document.createElement('button');
+    btn.className = 'plan-approve-btn';
+    btn.textContent = __i18n.planApproveButton;
+    btn.title = __i18n.planApproveButton;
+    msgEl.appendChild(btn);
+  }
+
   // ── Thinking Toggle ──
   function toggleThinking(el) {
     var block = el.parentElement;
@@ -666,6 +678,14 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
 
     if (target.classList.contains('thinking-toggle')) {
       toggleThinking(target);
+    }
+
+    if (target.classList.contains('plan-approve-btn')) {
+      if (!target.disabled) {
+        target.disabled = true;
+        vscode.postMessage({ type: 'approvePlan' });
+      }
+      return;
     }
 
     if (target.classList.contains('btn-allow') || target.classList.contains('btn-deny')) {
@@ -900,6 +920,7 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
     createThinkingBlock: createThinkingBlock,
     updateThinkingBlock: updateThinkingBlock,
     markClippedBlocks: markClippedBlocks,
+    renderPlanApproveButton: renderPlanApproveButton,
   };
 
   renderWelcome();

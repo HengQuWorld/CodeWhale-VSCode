@@ -84,6 +84,7 @@ export function makeTr(overrides?: Partial<WebviewTranslations>): WebviewTransla
     modeLabel: "Mode",
     permissionLabel: "Permission",
     reasoningEffortLabel: "Reasoning",
+    planApproveButton: "Switch to Act & execute",
     welcomeTitle: "CodeWhale",
     welcomeSubtitle: "Your AI coding partner",
     welcomeQuote: "The best way to predict the future is to invent it.",

@@ -439,6 +439,9 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       case "setPosture":
         await this.handleSetPosture(msg.posture as string);
         break;
+      case "approvePlan":
+        await this.handleApprovePlan();
+        break;
       case "switchProvider":
         await this.handleSwitchProvider(msg.provider as string, msg.model as string | undefined);
         break;
@@ -4291,6 +4294,24 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     });
   }
 
+  /** Approve the plan produced in plan mode: switch the thread (and the
+   *  startup default) to Act, then send a follow-up turn telling the agent
+   *  the mode changed so it executes the plan already in the conversation. */
+  private async handleApprovePlan(): Promise<void> {
+    try {
+      // Switch to Act through the same path as `/mode agent` so the config
+      // default and the current thread stay in sync, then let the follow-up
+      // turn start with the thread's now-Act mode.
+      await this.handleSlashCommand("/mode", "agent");
+      await this.handleSendMessage(t().planApproveProceed);
+    } catch (err) {
+      this.postMessage({
+        type: "error",
+        message: formatError("Failed to approve plan", err),
+      });
+    }
+  }
+
   private async handleApprovalDecision(
     approvalId: string,
     decision: "allow" | "deny",
@@ -4718,7 +4739,13 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
             const payload = finalizeAssistantMessage(
               lastMsg,
               isTerminalError ? "error" : "complete",
-              { usage: pl.turn?.usage },
+              {
+                usage: pl.turn?.usage,
+                // In plan mode a successfully completed turn is the plan the
+                // agent just produced; surface an "approve & execute" action
+                // so the user can switch to Act and continue in one click.
+                planApproval: !isTerminalError && normalizeMode(this.currentThread?.mode) === "plan",
+              },
             );
             this.postMessage(payload);
           }

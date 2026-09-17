@@ -95,6 +95,7 @@ export interface WebviewTranslations {
   modeLabel: string;
   permissionLabel: string;
   reasoningEffortLabel: string;
+  planApproveButton: string;
   welcomeTitle: string;
   welcomeSubtitle: string;
   welcomeQuote: string;

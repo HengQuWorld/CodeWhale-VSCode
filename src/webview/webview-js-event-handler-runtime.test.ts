@@ -174,6 +174,7 @@ function createRuntimeHarness() {
   const agentDetailCalls: unknown[] = [];
   const attachmentPreviewCalls: Array<{ id: string; previewUrl: string }> = [];
   const goalCalls: Array<{ method: string; args: unknown[] }> = [];
+  const planApproveCalls: string[] = [];
 
   const windowObj: Record<string, any> = {
     __wvI18n: makeTr(),
@@ -246,6 +247,9 @@ function createRuntimeHarness() {
       renderWelcome: () => {},
       createThinkingBlock: () => new FakeElement(),
       updateThinkingBlock: () => {},
+      renderPlanApproveButton: (messageId: string) => {
+        planApproveCalls.push(messageId);
+      },
     },
     __wvInput: {
       updateSendStopButton: (streaming: boolean) => {
@@ -316,6 +320,7 @@ function createRuntimeHarness() {
     agentDetailCalls,
     attachmentPreviewCalls,
     goalCalls,
+    planApproveCalls,
   };
 }
 
@@ -490,6 +495,16 @@ describe("webview-js-event-handler runtime", () => {
 
     expect(harness.sendStopCalls).toEqual([true, false]);
     expect(harness.getElement("status").classList.contains("is-streaming")).toBe(false);
+  });
+
+  it("renders the plan-approve action only when messageComplete carries planApproval", () => {
+    const harness = createRuntimeHarness();
+
+    harness.dispatchMessage({ type: "messageComplete", messageId: "msg-1" });
+    expect(harness.planApproveCalls).toEqual([]);
+
+    harness.dispatchMessage({ type: "messageComplete", messageId: "msg-2", planApproval: true });
+    expect(harness.planApproveCalls).toEqual(["msg-2"]);
   });
 
   it("routes taskDetail and agentDetail messages to the sidebar detail views", () => {

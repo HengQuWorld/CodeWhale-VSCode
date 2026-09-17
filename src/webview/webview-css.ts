@@ -1282,6 +1282,21 @@ export function getWebviewCss(): string {
       text-align: right;
     }
 
+    .plan-approve-btn {
+      display: inline-block;
+      margin-top: 8px;
+      background: var(--brand-primary);
+      color: var(--brand-primary-foreground);
+      border: none;
+      border-radius: 4px;
+      padding: 5px 12px;
+      font-size: 0.82em;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .plan-approve-btn:hover { opacity: 0.9; }
+    .plan-approve-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+
     .streaming-indicator::after {
       content: '';
       display: inline-block;
