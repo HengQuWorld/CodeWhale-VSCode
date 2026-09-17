@@ -30,6 +30,39 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
   var runtimeVersion = '';
   var sessionStats = null;
 
+  var approvalFloatEl = document.getElementById('approval-float');
+
+  function showApprovalFloat(approvalId, summaryText, rawToolName, toolInput) {
+    if (!approvalFloatEl) return;
+    if (approvalFloatEl.querySelector('.approval-item[data-approval-id="' + approvalId + '"]')) return;
+    approvalFloatEl.removeAttribute('hidden');
+    if (!approvalFloatEl.querySelector('.approval-float-header')) {
+      var header = document.createElement('div');
+      header.className = 'approval-float-header';
+      header.textContent = '\\u26A0 ' + __i18n.approvalRequired;
+      approvalFloatEl.insertBefore(header, approvalFloatEl.firstChild);
+    }
+    var inputHtml = '';
+    if (window.__wvMessages && window.__wvMessages.renderToolInput) {
+      inputHtml = window.__wvMessages.renderToolInput({ name: rawToolName || '', input: toolInput || {} });
+    }
+    var item = document.createElement('div');
+    item.className = 'approval-item';
+    item.setAttribute('data-approval-id', approvalId);
+    item.innerHTML =
+      '<div class="approval-text">\\u26A0 ' + summaryText + '</div>' +
+      inputHtml +
+      '<label class="approval-remember"><input type="checkbox" data-approval-id="' + approvalId + '" class="remember-check" /> Remember for this tool</label>' +
+      '<div class="approval-buttons"><button class="btn-allow" data-approval-id="' + approvalId + '" data-decision="allow">' + __i18n.allow + '</button><button class="btn-deny" data-approval-id="' + approvalId + '" data-decision="deny">' + __i18n.deny + '</button></div>';
+    approvalFloatEl.appendChild(item);
+  }
+
+  function hideApprovalFloat() {
+    if (!approvalFloatEl) return;
+    approvalFloatEl.innerHTML = '';
+    approvalFloatEl.setAttribute('hidden', '');
+  }
+
   // Mode / permission-posture display maps, mirroring the TUI's
   // AppMode::display_name() and ApprovalMode::permission_chip_label().
   var __wvModeLabels = ${JSON.stringify(MODE_LABELS)};
@@ -509,6 +542,7 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
         }
         setStreamingState(false, __i18n.ready);
         messagesEl.innerHTML = '';
+        hideApprovalFloat();
         for (var i = 0; i < msg.messages.length; i++) {
           var m = msg.messages[i];
           var showRole = !msg.compactMode || !!m._realContent;
@@ -738,10 +772,12 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
           }
         }
         setStreamingState(true, __i18n.approvalAwaiting);
+        showApprovalFloat(msg.approvalId, summaryText, msg.rawToolName, msg.toolInput);
         break;
       }
 
       case 'approvalResolved':
+        hideApprovalFloat();
         document.querySelectorAll('.approval-bar').forEach(function(bar) { bar.remove(); });
         if (msg.decision === 'allow') {
           document.querySelectorAll('.tool-status').forEach(function(span) {
@@ -859,6 +895,7 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
         document.querySelectorAll('.thinking-activity').forEach(function(el) { el.remove(); });
         document.querySelectorAll('.approval-bar').forEach(function(bar) { bar.remove(); });
         document.querySelectorAll('.user-input-bar').forEach(function(bar) { bar.remove(); });
+        hideApprovalFloat();
         break;
 
       case 'sessionStats': {
@@ -906,6 +943,7 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
         _diffStore.clear();
         _diffIdCounter.value = 0;
         messagesEl.innerHTML = '';
+        hideApprovalFloat();
         window.__wvMessages.setStreaming(false);
         var st = window.__wvMessages.getStreamingTimeout();
         if (st) { clearTimeout(st); window.__wvMessages.setStreamingTimeout(null); }

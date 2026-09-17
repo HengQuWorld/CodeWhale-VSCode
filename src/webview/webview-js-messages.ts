@@ -237,7 +237,8 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
     tool_use_id: true, tool_name: true, tool_call_id: true,
     tool_result_for: true, input_provenance: true,
     agent_mail_message_id: true, response_redacted: true,
-    task_updates: true
+    task_updates: true,
+    approval_id: true, call_id: true
   };
 
   var SHELL_TOOL_NAMES = {
@@ -526,8 +527,13 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
   }
 
   // ── Approval Decision ──
-  function decideApproval(approvalId, decision) {
-    var checkbox = document.querySelector('.remember-check[data-approval-id="' + approvalId + '"]');
+  function decideApproval(approvalId, decision, btnEl) {
+    var checkbox = null;
+    if (btnEl && btnEl.closest) {
+      var container = btnEl.closest('.approval-item, .approval-bar');
+      if (container) checkbox = container.querySelector('.remember-check[data-approval-id="' + approvalId + '"]');
+    }
+    if (!checkbox) checkbox = document.querySelector('.remember-check[data-approval-id="' + approvalId + '"]');
     var remember = checkbox ? checkbox.checked : false;
     vscode.postMessage({ type: 'approvalDecision', approvalId: approvalId, decision: decision, remember: remember });
   }
@@ -596,7 +602,7 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
       var approvalId = target.getAttribute('data-approval-id');
       var decision = target.getAttribute('data-decision');
       if (approvalId && decision) {
-        decideApproval(approvalId, decision);
+        decideApproval(approvalId, decision, target);
       }
     }
 
@@ -634,6 +640,18 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
     }
     if (scrollableTarget) scrollableTarget.classList.toggle('scrollable');
   });
+
+  var approvalFloatEl = document.getElementById('approval-float');
+  if (approvalFloatEl) {
+    approvalFloatEl.addEventListener('click', function(e) {
+      var target = e.target;
+      if (target.classList.contains('btn-allow') || target.classList.contains('btn-deny')) {
+        var approvalId = target.getAttribute('data-approval-id');
+        var decision = target.getAttribute('data-decision');
+        if (approvalId && decision) decideApproval(approvalId, decision, target);
+      }
+    });
+  }
 
   // ── Message Navigation ──
   var navRail = document.getElementById('message-nav');
@@ -792,6 +810,7 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
     removeMessage: removeMessage,
     renderWelcome: renderWelcome,
     renderToolCall: renderToolCall,
+    renderToolInput: renderToolInput,
     renderFileChangeCard: renderFileChangeCard,
     smartScrollToBottom: smartScrollToBottom,
     isStreaming: function() { return isStreaming; },

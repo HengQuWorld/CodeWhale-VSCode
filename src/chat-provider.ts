@@ -4177,6 +4177,8 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
           toolCallIdx: tcIdx,
           approvalId,
           toolName: friendlyToolName(toolName),
+          rawToolName: toolName,
+          toolInput: actualInput,
           summary,
         });
 

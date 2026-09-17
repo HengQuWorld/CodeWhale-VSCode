@@ -1037,6 +1037,95 @@ export function getWebviewCss(): string {
     .approval-bar .btn-allow { background: #5cb85c; color: white; }
     .approval-bar .btn-deny { background: #d9534f; color: white; }
 
+    .approval-float {
+      position: absolute;
+      left: 12px;
+      right: 12px;
+      bottom: 10px;
+      z-index: 30;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      padding: 10px 12px;
+      border: 1px solid #f0ad4e;
+      border-radius: 8px;
+      background: var(--card-bg);
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+    }
+    .approval-float[hidden] { display: none; }
+    .approval-float-header {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.8em;
+      font-weight: 700;
+      text-transform: uppercase;
+      color: #f0ad4e;
+    }
+    .approval-float .approval-item {
+      padding: 8px 10px;
+      border: 1px solid rgba(240, 173, 78, 0.4);
+      border-radius: 6px;
+      background: rgba(240, 173, 78, 0.08);
+    }
+    .approval-float .approval-text { font-size: 0.9em; margin-bottom: 6px; word-break: break-word; }
+    .approval-float .approval-remember {
+      font-size: 0.8em;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      margin-bottom: 6px;
+      color: var(--muted);
+      cursor: pointer;
+    }
+    .approval-float .approval-remember input { cursor: pointer; }
+    .approval-float .approval-buttons { display: flex; gap: 6px; }
+    .approval-float button {
+      padding: 4px 14px;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 0.85em;
+    }
+    .approval-float .btn-allow { background: #5cb85c; color: white; }
+    .approval-float .btn-deny { background: #d9534f; color: white; }
+    .approval-float .tool-input {
+      margin-top: 6px;
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+    .approval-float .tool-input-command {
+      padding: 5px 8px;
+      background: var(--input-bg);
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      font-family: var(--vscode-editor-font-family, monospace);
+      font-size: 0.9em;
+      white-space: pre-wrap;
+      word-break: break-word;
+      color: var(--fg);
+      max-height: 240px;
+      overflow-y: auto;
+    }
+    .approval-float .tool-input-row {
+      display: flex;
+      gap: 6px;
+      align-items: baseline;
+      font-size: 0.88em;
+    }
+    .approval-float .tool-input-key {
+      flex: 0 0 auto;
+      color: var(--muted);
+      font-weight: 500;
+    }
+    .approval-float .tool-input-value {
+      font-family: var(--vscode-editor-font-family, monospace);
+      white-space: pre-wrap;
+      word-break: break-word;
+      color: var(--fg);
+    }
+
     .user-input-bar {
       margin-top: 8px;
       padding: 10px;
