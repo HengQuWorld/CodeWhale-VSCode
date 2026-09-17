@@ -18,6 +18,8 @@ function makeTr(): WebviewTranslations {
     tasks: "Tasks",
     work: "Work",
     activity: "Activity",
+    agentStatus: "Agent",
+    agentStatusTitle: "Open agent panel",
     sessionsTabHint: "Saved sessions",
     threadsTabHint: "Active threads",
     activityTabHint: "Agent activity",

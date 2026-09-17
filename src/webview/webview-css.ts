@@ -54,20 +54,29 @@ export function getWebviewCss(): string {
       overflow: hidden;
     }
 
-    #layout { display: flex; flex: 1; overflow: hidden; }
+    #layout { position: relative; display: flex; flex: 1; overflow: hidden; }
 
-    /* ── Sidebar / Threads Panel ── */
+    /* ── Sidebar / Threads Panel ──
+       The panel overlays the chat area (instead of squeezing it), expanding
+       from the left on top of the editor content. */
 
     #threads-panel {
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
       width: 220px;
       min-width: 160px;
       max-width: 600px;
       border-right: 1px solid var(--border);
+      background: var(--bg);
+      box-shadow: 2px 0 12px rgba(0, 0, 0, 0.25);
       overflow-y: auto;
       overflow-x: hidden;
       padding: 0;
       display: none;
       flex-direction: column;
+      z-index: 20;
     }
     #threads-panel.open { display: flex; }
 
@@ -75,12 +84,14 @@ export function getWebviewCss(): string {
 
     #sidebar-resize-handle {
       display: none;
+      position: absolute;
+      left: 220px;
+      top: 0;
+      bottom: 0;
       width: 4px;
       cursor: col-resize;
-      flex-shrink: 0;
       background: transparent;
-      position: relative;
-      z-index: 10;
+      z-index: 21;
       transition: background 0.15s;
     }
     /* Only available while the threads panel is open: a collapsed sidebar has

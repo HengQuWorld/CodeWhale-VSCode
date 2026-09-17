@@ -10,7 +10,6 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
   var __i18n = window.__wvI18n;
   var __wvEscapeHtml = window.__wvEscapeHtml;
   var __wvFormatRelativeTime = window.__wvFormatRelativeTime;
-  var __wvFormatThreadsCount = window.__wvFormatThreadsCount;
   var vscode = window.__wvVscode;
 
   // ── Sidebar state ──
@@ -279,7 +278,6 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
     var container = document.getElementById('tab-sessions');
     if (!container) return;
     var count = sessions.length;
-    if (threadCountEl) threadCountEl.textContent = __wvFormatThreadsCount(count, 'sessions');
 
     var filterToggle = document.getElementById('workspace-filter-toggle');
     if (filterToggle) {
@@ -395,9 +393,6 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
     var container = document.getElementById('tab-threads-list');
     if (!container) return;
     var count = threads.length;
-    if (sidebarTab === 'threads' && threadCountEl) {
-      threadCountEl.textContent = __wvFormatThreadsCount(count, 'threads');
-    }
 
     // Preserve the hint header; remove only thread items and the empty placeholder.
     var existing = container.querySelectorAll('.thread-item, .work-empty');
@@ -481,10 +476,6 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
       if (btn) btn.classList.toggle('active', tabs[i] === tab);
     }
     if (section) section.setAttribute('data-active-tab', tab);
-    if (threadCountEl) {
-      if (tab === 'sessions') threadCountEl.textContent = __wvFormatThreadsCount(sessions.length, 'sessions');
-      else if (tab === 'threads') threadCountEl.textContent = __wvFormatThreadsCount(threads.length, 'threads');
-    }
   }
 
   // ── Apply showThreadList setting ──

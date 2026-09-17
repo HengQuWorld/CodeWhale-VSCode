@@ -33,6 +33,8 @@ export interface WebviewTranslations {
   tasks: string;
   work: string;
   activity: string;
+  agentStatus: string;
+  agentStatusTitle: string;
   sessionsTabHint: string;
   threadsTabHint: string;
   activityTabHint: string;
@@ -483,7 +485,7 @@ ${css}
         <button id="btn-compact">${tr.compact}</button>
         <button id="btn-undo" title="${tr.undoLastTurn}">↩ ${tr.undoLabel}</button>
         <button id="btn-retry" title="${tr.retryLastTurn}">🔁 ${tr.retryLabel}</button>
-        <span class="thread-count" id="thread-count" title="${tr.toggleHistory}">0 sessions</span>
+        <span class="thread-count" id="thread-count" title="${tr.agentStatusTitle}">${tr.agentStatus}</span>
       </div>
       <div id="input-resize-handle" title="Drag to resize input area"></div>
       <div id="input-area">
@@ -578,6 +580,7 @@ ${css}
           var w = parseInt(savedWidth, 10);
           if (w >= 120 && w <= 600) {
             panel.style.width = w + 'px';
+            handle.style.left = w + 'px';
           }
         }
       } catch(e) { /* localStorage may not be available */ }
@@ -611,6 +614,7 @@ ${css}
           if (newWidth < 120) newWidth = 120;
           if (newWidth > 600) newWidth = 600;
           panel.style.width = newWidth + 'px';
+          handle.style.left = newWidth + 'px';
         });
       }
 
