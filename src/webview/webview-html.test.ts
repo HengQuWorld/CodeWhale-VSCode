@@ -635,9 +635,9 @@ describe("webview-html.ts assembler", () => {
     expect(html).toContain('id="status-stats"');
   });
 
-  it("contains thread count element", () => {
+  it("contains the agent panel toggle", () => {
     const html = getWebviewHtml(makeMockWebview(), makeMockExtensionUri(), makeTr());
-    expect(html).toContain('id="thread-count"');
+    expect(html).toContain('id="agent-panel-toggle"');
   });
 
   it("contains workspace filter toggle", () => {

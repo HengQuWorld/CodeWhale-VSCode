@@ -6,7 +6,6 @@ const vscodeState = vi.hoisted(() => {
     ["defaultModel", "deepseek-v4-pro"],
     ["reasoningEffort", "auto"],
     ["autoApprove", false],
-    ["showThreadList", false],
   ]);
 
   return {
@@ -99,7 +98,6 @@ describe("ChatProvider mode regression", () => {
     vscodeState.configValues.set("defaultModel", "deepseek-v4-pro");
     vscodeState.configValues.set("reasoningEffort", "auto");
     vscodeState.configValues.set("autoApprove", false);
-    vscodeState.configValues.set("showThreadList", false);
     vscodeState.workspaceFolders = undefined;
   });
 

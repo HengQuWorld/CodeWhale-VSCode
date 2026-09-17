@@ -1326,7 +1326,7 @@ export function getWebviewCss(): string {
       pointer-events: none;
     }
 
-    #toolbar .thread-count {
+    #toolbar .agent-panel-toggle {
       margin-left: auto;
       font-size: 0.75em;
       color: var(--muted);
@@ -1334,7 +1334,7 @@ export function getWebviewCss(): string {
       padding: 2px 8px;
       border-radius: 3px;
     }
-    #toolbar .thread-count:hover { color: var(--fg); background: var(--card-bg); }
+    #toolbar .agent-panel-toggle:hover { color: var(--fg); background: var(--card-bg); }
 
     #settings-bar {
       padding: 4px 8px;

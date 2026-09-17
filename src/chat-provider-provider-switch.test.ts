@@ -6,7 +6,6 @@ const vscodeState = vi.hoisted(() => {
     ["defaultModel", "deepseek-v4-pro"],
     ["reasoningEffort", "auto"],
     ["autoApprove", false],
-    ["showThreadList", false],
   ]);
 
   return {
@@ -54,7 +53,6 @@ describe("ChatProvider provider switch", () => {
     vscodeState.configValues.set("defaultModel", "deepseek-v4-pro");
     vscodeState.configValues.set("reasoningEffort", "auto");
     vscodeState.configValues.set("autoApprove", false);
-    vscodeState.configValues.set("showThreadList", false);
   });
 
   it("pushes the backend-resolved model with providerModels after switching provider", async () => {

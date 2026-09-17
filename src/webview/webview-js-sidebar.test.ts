@@ -156,9 +156,9 @@ describe("webview-js-sidebar.ts", () => {
     expect(script).toContain("window.__wvFormatRelativeTime");
   });
 
-  it("keeps thread-count as a sidebar toggle and no longer shows a count", () => {
+  it("keeps the agent panel toggle in the sidebar and no longer shows a count", () => {
     const script = getSidebarScript(makeTr());
-    expect(script).toContain("thread-count");
+    expect(script).toContain("agent-panel-toggle");
     expect(script).not.toContain("__wvFormatThreadsCount");
   });
 

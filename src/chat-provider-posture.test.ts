@@ -7,7 +7,6 @@ const vscodeState = vi.hoisted(() => {
     ["defaultModel", "deepseek-v4-pro"],
     ["reasoningEffort", "auto"],
     ["autoApprove", false],
-    ["showThreadList", false],
   ]);
 
   return {
@@ -93,7 +92,6 @@ describe("ChatProvider permission posture", () => {
     vscodeState.configValues.set("defaultModel", "deepseek-v4-pro");
     vscodeState.configValues.set("reasoningEffort", "auto");
     vscodeState.configValues.set("autoApprove", false);
-    vscodeState.configValues.set("showThreadList", false);
   });
 
   it("patches only permission_posture and reports the thread's own mode", async () => {

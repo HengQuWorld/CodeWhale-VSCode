@@ -72,7 +72,7 @@ export function getDebugScript(_tr: WebviewTranslations): string {
             __wvProbeHitTarget('input', document.getElementById('input')),
             __wvProbeHitTarget('sendStopBtn', document.getElementById('btn-send-stop')),
             __wvProbeHitTarget('threadsBtn', document.getElementById('btn-threads')),
-            __wvProbeHitTarget('threadCount', document.getElementById('thread-count')),
+            __wvProbeHitTarget('agentPanelToggle', document.getElementById('agent-panel-toggle')),
             __wvProbeHitTarget('status', document.getElementById('status')),
             __wvProbeHitTarget('taskDetailOverlay', document.getElementById('task-detail-overlay')),
             __wvProbeHitTarget('debugPanel', document.getElementById('debug-panel')),

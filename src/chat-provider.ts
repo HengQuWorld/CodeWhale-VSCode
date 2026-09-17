@@ -580,7 +580,6 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       this.postMessage({ type: "clearChat" });
     }
 
-    const cfg = vscode.workspace.getConfiguration("brotherwhale");
     this.postMessage({
         type: "ready",
         model: this.getCurrentModel(),
@@ -589,7 +588,6 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         reasoningEffort: this.getCurrentReasoningEffort(),
         provider: this.currentProvider || undefined,
         runtimeVersion: this.runtimeVersion,
-        showThreadList: cfg.get<boolean>("showThreadList", false),
       });
   }
 
@@ -642,7 +640,6 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       // even on first load. Don't await — this is best-effort and must not
       // block the ready signal.
       void this.refreshProviders();
-      const initCfg = vscode.workspace.getConfiguration("brotherwhale");
       this.postMessage({ 
         type: "ready", 
         model: this.currentThread?.model || this.getCurrentModel(),
@@ -651,11 +648,9 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         reasoningEffort: this.getCurrentReasoningEffort(),
         provider: this.currentProvider || undefined,
         runtimeVersion: this.runtimeVersion,
-        showThreadList: initCfg.get<boolean>("showThreadList", false),
       });
     } catch (err) {
       this.debugLog(`initializeThread ERROR: ${getErrorMessage(err)}\n${(err as Error).stack}`);
-      const errCfg = vscode.workspace.getConfiguration("brotherwhale");
       this.postMessage({
         type: "error",
         message: formatError("Failed to initialize", err),
@@ -668,7 +663,6 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         reasoningEffort: this.getCurrentReasoningEffort(),
         provider: this.currentProvider || undefined,
         runtimeVersion: this.runtimeVersion,
-        showThreadList: errCfg.get<boolean>("showThreadList", false),
       });
     }
   }

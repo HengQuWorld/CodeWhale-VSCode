@@ -14,6 +14,5 @@
   "config.defaultPermissionPosture.description": "Default permission posture for new threads: ask, auto_review, or full_access (the TUI's Ask / Auto-Review / Full Access)",
   "config.reasoningEffort.description": "Reasoning effort level (auto, off, low, medium, high, max)",
   "config.autoApprove.description": "Legacy fallback: auto-approve tool calls. Prefer the Full Access permission posture, which already implies auto-approval.",
-  "config.showThreadList.description": "Show the Threads tab in the sidebar. Legacy feature — threads are superseded by sessions.",
   "config.costCurrency.description": "Currency for cost display: auto follows the interface language (Chinese → CNY, otherwise USD), or force USD/CNY. Amounts come from the TUI runtime's provider-published pricing; when no native CNY price exists the display falls back to USD (same as the TUI)."
 }

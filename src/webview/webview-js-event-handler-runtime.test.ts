@@ -127,7 +127,6 @@ function createRuntimeHarness() {
     __wvApiCapabilities: {},
     __wvSidebar: {
       closeTaskDetail: () => {},
-      applyShowThreadList: () => {},
       setSessions: () => {},
       setShowAllWorkspaces: () => {},
       renderSessions: () => {},
@@ -223,7 +222,6 @@ describe("webview-js-event-handler runtime", () => {
       model: "deepseek-v4-pro",
       reasoningEffort: "auto",
       runtimeVersion: "0.9.0",
-      showThreadList: false,
     });
 
     expect(harness.getElement("current-mode").textContent).toBe("Plan");

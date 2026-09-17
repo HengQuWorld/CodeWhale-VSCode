@@ -487,7 +487,7 @@ ${css}
         <button id="btn-compact">${tr.compact}</button>
         <button id="btn-undo" title="${tr.undoLastTurn}">↩ ${tr.undoLabel}</button>
         <button id="btn-retry" title="${tr.retryLastTurn}">🔁 ${tr.retryLabel}</button>
-        <span class="thread-count" id="thread-count" title="${tr.agentStatusTitle}">${tr.agentStatus}</span>
+        <span class="agent-panel-toggle" id="agent-panel-toggle" title="${tr.agentStatusTitle}">${tr.agentStatus}</span>
       </div>
       <div id="input-resize-handle" title="Drag to resize input area"></div>
       <div id="input-area">

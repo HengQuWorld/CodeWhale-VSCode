@@ -303,7 +303,6 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
         if (msg.provider && currentProviderEl) currentProviderEl.textContent = msg.provider;
         runtimeVersion = msg.runtimeVersion || runtimeVersion || '';
         renderStatusStats();
-        window.__wvSidebar.applyShowThreadList(!!msg.showThreadList);
         break;
 
       case 'settingsUpdated':

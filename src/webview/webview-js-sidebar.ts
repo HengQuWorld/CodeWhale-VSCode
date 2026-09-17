@@ -19,8 +19,7 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
   var activeThreadId = null;
   var showAllWorkspaces = false;
   var sidebarTab = 'sessions';
-  var showThreadList = false;
-  var threadCountEl = document.getElementById('thread-count');
+  var agentPanelToggleEl = document.getElementById('agent-panel-toggle');
   var sessionSearchQuery = '';
   var taskDraftPrompt = '';
 
@@ -289,8 +288,8 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
     // Ensure search bar exists (only created once)
     initSessionSearch();
 
-    // Remove only session items, keep the search bar
-    var existing = container.querySelectorAll('.thread-item, .session-empty-msg');
+    // Remove only session items, keep the hint and the search bar
+    var existing = container.querySelectorAll('.thread-item, .work-empty');
     for (var r = 0; r < existing.length; r++) {
       existing[r].remove();
     }
@@ -467,6 +466,8 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
   }
 
   // ── Switch Sidebar Tab ──
+  // Sessions / Threads / Activity are peers and always visible; there is no
+  // setting that hides one of them.
   function switchSidebarTab(tab) {
     sidebarTab = tab;
     var section = document.getElementById('sidebar-threads');
@@ -478,14 +479,6 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
     if (section) section.setAttribute('data-active-tab', tab);
   }
 
-  // ── Apply showThreadList setting ──
-  // The three sidebar tabs (Sessions / Threads / Activity) are peers and are
-  // always visible; the legacy brotherwhale.showThreadList setting no longer
-  // hides the Threads tab. Kept as a no-op so the runtime 'ready' message
-  // still flows through unchanged.
-  function applyShowThreadList(show) {
-    showThreadList = show;
-  }
   function closeTaskCreateDialog() {
     var overlay = document.getElementById('task-create-overlay');
     if (overlay) {
@@ -1312,7 +1305,18 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
 
   // ── Threads panel toggle buttons ──
   document.getElementById('btn-threads').addEventListener('click', toggleThreadsPanel);
-  if (threadCountEl) threadCountEl.addEventListener('click', toggleThreadsPanel);
+  if (agentPanelToggleEl) agentPanelToggleEl.addEventListener('click', toggleThreadsPanel);
+
+  // ── Escape closes the panel ──
+  // The panel overlays the chat, so the ✕ is not the only way out. Inputs keep
+  // their own Escape handling (slash menu, task draft) — skip when one has focus.
+  document.addEventListener('keydown', function(e) {
+    if (e.key !== 'Escape') return;
+    var t = e.target;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) return;
+    var panel = document.getElementById('threads-panel');
+    if (panel && panel.classList.contains('open')) panel.classList.remove('open');
+  });
 
   // ── Expose for event handler module ──
   window.__wvSidebar = {
@@ -1323,7 +1327,6 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
     renderWork: renderWork,
     renderChanges: renderChanges,
     switchSidebarTab: switchSidebarTab,
-    applyShowThreadList: applyShowThreadList,
     closeTaskDetail: closeTaskDetail,
     showTaskDetail: showTaskDetail,
     closeAgentDetail: closeAgentDetail,

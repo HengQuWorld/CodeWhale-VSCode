@@ -141,11 +141,6 @@
           "description": "%config.autoApprove.description%",
           "scope": "machine"
         },
-        "brotherwhale.showThreadList": {
-          "type": "boolean",
-          "default": false,
-          "description": "%config.showThreadList.description%"
-        },
         "brotherwhale.costCurrency": {
           "type": "string",
           "enum": [

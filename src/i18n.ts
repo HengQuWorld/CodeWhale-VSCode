@@ -704,7 +704,7 @@ const zhCn: Translations = {
   locale: "zh-cn",
   history: "历史", threads: "线程", sessions: "会话", tasks: "任务", work: "工作", activity: "活动",
   agentStatus: "智能体", agentStatusTitle: "打开智能体面板 — 会话、线程、活动", closePanel: "关闭面板",
-  sessionsTabHint: "已保存归档的会话", threadsTabHint: "进行中的对话线程", activityTabHint: "Agent 实时状态：工作、任务、子代理、变更",
+  sessionsTabHint: "已保存归档的会话", threadsTabHint: "进行中的对话线程", activityTabHint: "智能体实时状态：工作、任务、子代理、变更",
   newThread: "+ 新建", compact: "⬒ 压缩", interrupt: "■ 停止",
   toggleHistory: "点击切换历史", send: "发送",
   inputPlaceholder: "向 CodeWhale 提问...",
