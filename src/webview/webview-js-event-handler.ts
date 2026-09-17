@@ -30,6 +30,39 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
   var runtimeVersion = '';
   var sessionStats = null;
 
+  var approvalFloatEl = document.getElementById('approval-float');
+
+  function showApprovalFloat(approvalId, summaryText, rawToolName, toolInput) {
+    if (!approvalFloatEl) return;
+    if (approvalFloatEl.querySelector('.approval-item[data-approval-id="' + approvalId + '"]')) return;
+    approvalFloatEl.removeAttribute('hidden');
+    if (!approvalFloatEl.querySelector('.approval-float-header')) {
+      var header = document.createElement('div');
+      header.className = 'approval-float-header';
+      header.textContent = '\\u26A0 ' + __i18n.approvalRequired;
+      approvalFloatEl.insertBefore(header, approvalFloatEl.firstChild);
+    }
+    var inputHtml = '';
+    if (window.__wvMessages && window.__wvMessages.renderToolInput) {
+      inputHtml = window.__wvMessages.renderToolInput({ name: rawToolName || '', input: toolInput || {} });
+    }
+    var item = document.createElement('div');
+    item.className = 'approval-item';
+    item.setAttribute('data-approval-id', approvalId);
+    item.innerHTML =
+      '<div class="approval-text">\\u26A0 ' + summaryText + '</div>' +
+      inputHtml +
+      '<label class="approval-remember"><input type="checkbox" data-approval-id="' + approvalId + '" class="remember-check" /> Remember for this tool</label>' +
+      '<div class="approval-buttons"><button class="btn-allow" data-approval-id="' + approvalId + '" data-decision="allow">' + __i18n.allow + '</button><button class="btn-deny" data-approval-id="' + approvalId + '" data-decision="deny">' + __i18n.deny + '</button></div>';
+    approvalFloatEl.appendChild(item);
+  }
+
+  function hideApprovalFloat() {
+    if (!approvalFloatEl) return;
+    approvalFloatEl.innerHTML = '';
+    approvalFloatEl.setAttribute('hidden', '');
+  }
+
   // Mode / permission-posture display maps, mirroring the TUI's
   // AppMode::display_name() and ApprovalMode::permission_chip_label().
   var __wvModeLabels = ${JSON.stringify(MODE_LABELS)};
@@ -552,6 +585,7 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
         }
         setStreamingState(false, __i18n.ready);
         messagesEl.innerHTML = '';
+        hideApprovalFloat();
         for (var i = 0; i < msg.messages.length; i++) {
           var m = msg.messages[i];
           var showRole = !msg.compactMode || !!m._realContent;
@@ -612,29 +646,21 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
       case 'updateThinking': {
         var blockIdx = msg.blockIdx !== undefined ? msg.blockIdx : 0;
         var thinkingEl = document.getElementById('thinking-' + msg.messageId + '-' + blockIdx);
-        if (!thinkingEl) {
+        var block = thinkingEl ? thinkingEl.parentElement : null;
+        if (!block) {
           var bodyEl = document.getElementById('body-' + msg.messageId);
           if (bodyEl) {
-            var block = document.createElement('div');
-            block.className = 'thinking-block';
-            block.setAttribute('data-block-idx', String(blockIdx));
-            block.innerHTML = '<div class="thinking-toggle">' + __wvEscapeHtml(__i18n.thinkingOpen) + '</div><div class="thinking-content open" id="thinking-' + msg.messageId + '-' + blockIdx + '"></div>';
+            block = window.__wvMessages.createThinkingBlock(msg.messageId, blockIdx);
             var insertBefore = bodyEl.querySelector('[data-block-idx="' + (blockIdx + 1) + '"]');
             if (insertBefore) {
               bodyEl.insertBefore(block, insertBefore);
             } else {
               bodyEl.appendChild(block);
             }
-            thinkingEl = block.querySelector('.thinking-content');
           }
         }
-        if (thinkingEl) {
-          if (!thinkingEl.querySelector('.thinking-stream')) {
-            thinkingEl.innerHTML = '<div class="thinking-stream"></div>';
-          }
-          var streamEl = thinkingEl.querySelector('.thinking-stream');
-          if (streamEl) streamEl.textContent = msg.thinking || '';
-          thinkingEl.classList.add('open');
+        if (block) {
+          window.__wvMessages.updateThinkingBlock(block, msg.thinking);
           window.__wvMessages.smartScrollToBottom();
         }
         updateThinkingActivityLabel(msg.messageId, __i18n.thinking);
@@ -665,10 +691,7 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
         var bodyEl = document.getElementById('body-' + msg.messageId);
         if (bodyEl) {
           var blockIdx = msg.blockIdx;
-          var block = document.createElement('div');
-          block.className = 'thinking-block';
-          block.setAttribute('data-block-idx', String(blockIdx));
-          block.innerHTML = '<div class="thinking-toggle">' + __wvEscapeHtml(__i18n.thinkingOpen) + '</div><div class="thinking-content open" id="thinking-' + msg.messageId + '-' + blockIdx + '"></div>';
+          var block = window.__wvMessages.createThinkingBlock(msg.messageId, blockIdx);
           var insertBefore = bodyEl.querySelector('[data-block-idx="' + (blockIdx + 1) + '"]');
           if (insertBefore) {
             bodyEl.insertBefore(block, insertBefore);
@@ -792,10 +815,12 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
           }
         }
         setStreamingState(true, __i18n.approvalAwaiting);
+        showApprovalFloat(msg.approvalId, summaryText, msg.rawToolName, msg.toolInput);
         break;
       }
 
       case 'approvalResolved':
+        hideApprovalFloat();
         document.querySelectorAll('.approval-bar').forEach(function(bar) { bar.remove(); });
         // Also retire the inline sidebar card for a background thread's
         // approval (answered without switching) — keyed by approval id.
@@ -923,6 +948,7 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
         document.querySelectorAll('.thinking-activity').forEach(function(el) { el.remove(); });
         document.querySelectorAll('.approval-bar').forEach(function(bar) { bar.remove(); });
         document.querySelectorAll('.user-input-bar').forEach(function(bar) { bar.remove(); });
+        hideApprovalFloat();
         break;
 
       case 'sessionStats': {
@@ -970,6 +996,7 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
         _diffStore.clear();
         _diffIdCounter.value = 0;
         messagesEl.innerHTML = '';
+        hideApprovalFloat();
         window.__wvMessages.setStreaming(false);
         var st = window.__wvMessages.getStreamingTimeout();
         if (st) { clearTimeout(st); window.__wvMessages.setStreamingTimeout(null); }

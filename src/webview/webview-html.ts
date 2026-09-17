@@ -487,6 +487,7 @@ ${css}
       </div>
       <div id="messages-wrapper">
         <div id="messages"></div>
+        <div id="approval-float" class="approval-float" hidden></div>
         <div id="message-nav"></div>
       </div>
       <div id="toolbar">
