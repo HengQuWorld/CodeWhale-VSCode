@@ -58,7 +58,6 @@ function createProvider() {
   const provider = new ChatProvider({} as any, {} as any, api as any);
   provider.postMessage = vi.fn();
   // Stub private collaborators so the test focuses on sidebar-clear behavior
-  (provider as any).confirmSwitchWhenActive = vi.fn(async () => true);
   (provider as any).loadHistory = vi.fn(async () => 0);
   (provider as any).subscribeToEvents = vi.fn();
 

@@ -33,6 +33,18 @@ interface Translations {
   userInputAwaiting: string;
   noConversations: string;
   threadAttention: string;
+  threadsNeedsYou: string;
+  threadsRunning: string;
+  threadsRecent: string;
+  turnContinuesInBackground: string;
+  backgroundAttentionNotification: string;
+  backgroundAttentionOpen: string;
+  backgroundGoalStarted: string;
+  backgroundGoalAskHint: string;
+  goalBackgroundRun: string;
+  goalBackgroundHint: string;
+  goalBackgroundSection: string;
+  goalResume: string;
   noTasks: string;
   taskCreate: string;
   taskCreateTitle: string;
@@ -244,9 +256,6 @@ interface Translations {
   deleteSessionConfirmButton: string;
   deleteSessionSuccess: string;
   deleteSessionFailed: string;
-  switchSessionActiveTurnTitle: string;
-  switchSessionActiveTurnMessage: string;
-  switchSessionActiveTurnButton: string;
   noSearchResults: string;
   // Agent panel
   agents: string;
@@ -385,7 +394,13 @@ const en: Translations = {
   error: "Error", approvalAwaiting: "⏳ Awaiting approval...",
   userInputRequired: "Input required",
   userInputAwaiting: "⏳ Awaiting your input...",
-  noConversations: "No conversations yet", threadAttention: "Waiting for your approval or input — click to open", noTasks: "No tasks",
+  noConversations: "No conversations yet", threadAttention: "Waiting for your approval or input — click to open", threadsNeedsYou: "Needs you", threadsRunning: "Running", threadsRecent: "Recent",
+  turnContinuesInBackground: "Turn continues running in the background",
+  backgroundAttentionNotification: "Thread \"{title}\" is waiting for your approval or input", backgroundAttentionOpen: "Open",
+  backgroundGoalStarted: "Background goal started on its own thread — it keeps running while you work elsewhere.",
+  backgroundGoalAskHint: "Note: the Ask posture blocks each tool approval in the background and auto-denies after the engine timeout — consider Auto-Review or Full Access for background goals.",
+  goalBackgroundRun: "Run on a background thread", goalBackgroundHint: "Background goals keep working while you chat here. Ask posture auto-denies approvals after a timeout.",
+  goalBackgroundSection: "Background goals", goalResume: "Resume", noTasks: "No tasks",
   taskCreate: "New Task", taskCreateTitle: "Create Task", taskCreatePlaceholder: "Describe the background task…", taskCreateSubmit: "Create", taskRefresh: "Refresh", taskDetails: "Details",
   taskOpenThread: "Open Thread", taskAttention: "Attention", taskNeedsAttention: "Needs attention", taskPendingApprovals: "Pending Approvals", taskPendingInputs: "Pending Inputs", taskContinueInThread: "Continue in thread",
   threadsCount: (n) => `${n} thread${n !== 1 ? "s" : ""}`,
@@ -572,9 +587,6 @@ const en: Translations = {
   deleteSessionConfirmButton: "Delete",
   deleteSessionSuccess: "Session deleted",
   deleteSessionFailed: "Failed to delete session",
-  switchSessionActiveTurnTitle: "Conversation in progress",
-  switchSessionActiveTurnMessage: "The assistant is currently reasoning. Loading a session will stop the current turn. Continue?",
-  switchSessionActiveTurnButton: "Stop & Switch",
   noSearchResults: "No matching sessions",
   // Agent panel
   agents: "Agents",
@@ -713,7 +725,13 @@ const zhCn: Translations = {
   error: "错误", approvalAwaiting: "⏳ 等待审批...",
   userInputRequired: "需要输入",
   userInputAwaiting: "⏳ 等待您的输入...",
-  noConversations: "暂无会话", threadAttention: "等待你的审批或输入——点击打开", noTasks: "暂无任务",
+  noConversations: "暂无会话", threadAttention: "等待你的审批或输入——点击打开", threadsNeedsYou: "等你处理", threadsRunning: "运行中", threadsRecent: "最近",
+  turnContinuesInBackground: "回合将在后台继续运行",
+  backgroundAttentionNotification: "线程「{title}」正在等待你的审批或输入", backgroundAttentionOpen: "打开",
+  backgroundGoalStarted: "后台目标已在独立线程启动——你在别处工作时它会持续运行。",
+  backgroundGoalAskHint: "注意：Ask 姿态下后台的每次工具审批都会阻塞，超时后自动拒绝——后台目标建议使用 Auto-Review 或 Full Access。",
+  goalBackgroundRun: "在后台线程运行", goalBackgroundHint: "后台目标在你继续聊天时持续工作。Ask 姿态下审批超时会自动拒绝。",
+  goalBackgroundSection: "后台目标", goalResume: "恢复运行", noTasks: "暂无任务",
   taskCreate: "新建任务", taskCreateTitle: "新建任务", taskCreatePlaceholder: "描述要后台执行的任务…", taskCreateSubmit: "创建", taskRefresh: "刷新", taskDetails: "详情",
   taskOpenThread: "打开线程", taskAttention: "待处理", taskNeedsAttention: "需要处理", taskPendingApprovals: "待授权", taskPendingInputs: "待输入", taskContinueInThread: "在线程中继续",
   threadsCount: (n) => `${n} 个会话`,
@@ -900,9 +918,6 @@ const zhCn: Translations = {
   deleteSessionConfirmButton: "删除",
   deleteSessionSuccess: "会话已删除",
   deleteSessionFailed: "删除会话失败",
-  switchSessionActiveTurnTitle: "当前对话正在进行中",
-  switchSessionActiveTurnMessage: "助手正在推理中，加载会话将中断当前对话。是否继续？",
-  switchSessionActiveTurnButton: "中断并切换",
   noSearchResults: "没有匹配的会话",
   // Agent panel
   agents: "子代理",
@@ -1084,6 +1099,13 @@ export function webviewTranslations(tr: Translations) {
     userInputAwaiting: tr.userInputAwaiting,
     noConversations: tr.noConversations,
     threadAttention: tr.threadAttention,
+    threadsNeedsYou: tr.threadsNeedsYou,
+    threadsRunning: tr.threadsRunning,
+    threadsRecent: tr.threadsRecent,
+    goalBackgroundRun: tr.goalBackgroundRun,
+    goalBackgroundHint: tr.goalBackgroundHint,
+    goalBackgroundSection: tr.goalBackgroundSection,
+    goalResume: tr.goalResume,
     noTasks: tr.noTasks,
     taskCreate: tr.taskCreate,
     taskCreateTitle: tr.taskCreateTitle,
@@ -1272,9 +1294,6 @@ export function webviewTranslations(tr: Translations) {
     deleteSessionConfirmButton: tr.deleteSessionConfirmButton,
     deleteSessionSuccess: tr.deleteSessionSuccess,
     deleteSessionFailed: tr.deleteSessionFailed,
-    switchSessionActiveTurnTitle: tr.switchSessionActiveTurnTitle,
-    switchSessionActiveTurnMessage: tr.switchSessionActiveTurnMessage,
-    switchSessionActiveTurnButton: tr.switchSessionActiveTurnButton,
     noSearchResults: tr.noSearchResults,
     // Agent panel
     agents: tr.agents,

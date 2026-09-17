@@ -18,6 +18,8 @@ import type {
   TaskSummary,
   ThreadDetailResponse,
   CreateFleetRunRequest,
+  ThreadSummary,
+  ThreadGoal,
 } from "./types";
 import { formatError, getErrorMessage } from "./utils/error-handler";
 import { getWebviewHtml } from "./webview/webview-html";
@@ -56,6 +58,7 @@ import {
   type FileChangeInfo,
   type StrategyStep,
   type SessionCostSnapshot,
+  type UserInputState,
 } from "./utils/session-state";
 import {
   friendlyToolName,
@@ -165,6 +168,25 @@ interface AttachmentRecord {
   previewUrl?: string;
 }
 
+/**
+ * Lightweight per-thread runtime cursor for a thread the view is not showing.
+ * The runtime owns the turn (runtime_threads.rs owns the turn lifecycle), so
+ * this only tracks what the rail badge, the attention notification, the
+ * auto-save target and the "is it still busy" decision need while the user
+ * works elsewhere.
+ */
+interface BackgroundThreadState {
+  lastEventSeq: number;
+  currentTurnId: string | null;
+  running: boolean;
+  attention: number;
+  /** Auto-save in-place target (same thread → same session). */
+  sessionId: string | null;
+  goal: ThreadGoal | null;
+  goalChecked: boolean;
+  notifiedAttention: boolean;
+}
+
 export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandContext {
   public static readonly viewType = "brotherwhale.chat";
 
@@ -175,7 +197,6 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
   private slashHandler: SlashCommandHandler;
   private eventController: AbortController | null = null;
   private taskRefreshTimer: ReturnType<typeof setInterval> | null = null;
-  private threadAttentionTimer: ReturnType<typeof setInterval> | null = null;
   private taskDetailRefreshTimer: ReturnType<typeof setInterval> | null = null;
   private activeTaskDetailId: string | null = null;
   private fleetDetailRefreshTimer: ReturnType<typeof setTimeout> | null = null;
@@ -215,6 +236,27 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
   // would create a new session on the server, producing duplicates.
   private autoSaveInProgress = false;
   private readonly textArtifactPreviewStore = new Map<string, { content: string; language?: string }>();
+
+  // ── Background (non-viewed) thread support ──
+  // The runtime owns every turn: it keeps running server-side when the
+  // client switches away (runtime_threads.rs owns the turn lifecycle). The
+  // GUI parks the outgoing thread here and keeps a lightweight per-thread
+  // SSE watch so badges, notifications, and auto-save stay live.
+
+  /** Lightweight runtime cursor for a thread that is not the current view. */
+  private backgroundThreads = new Map<string, BackgroundThreadState>();
+  /** One SSE subscription per watched background thread. */
+  private watchControllers = new Map<string, AbortController>();
+  /** User inputs pending on background threads, answerable cross-thread
+   *  (`POST /v1/user-input/{threadId}/{inputId}` names the thread). Unlike
+   *  sessionState.pendingUserInputs this map survives view switches. */
+  private backgroundUserInputs = new Map<string, UserInputState>();
+  /** Latest summary titles, for notification wording. */
+  private threadTitles = new Map<string, string>();
+  /** Debounced thread-list refresh driven by watcher events. */
+  private threadListRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Threads with an in-flight background auto-save. */
+  private backgroundSavingThreads = new Set<string>();
 
   // Convenience accessors for session state
   public get currentThread(): ThreadRecord | null { return this.sessionState.data.currentThread; }
@@ -545,7 +587,17 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         await this.handleFleetOpenSession(msg.sessionId as string);
         break;
       case "setGoal":
-        await this.handleSetGoal(msg.objective as string, msg.tokenBudget as number | undefined);
+        await this.handleSetGoal(
+          msg.objective as string,
+          msg.tokenBudget as number | undefined,
+          msg.background === true,
+        );
+        break;
+      case "resumeGoal":
+        await this.handleResumeGoal();
+        break;
+      case "showThreadAttention":
+        await this.handleShowThreadAttention(msg.threadId as string);
         break;
       case "completeGoal":
         await this.handleCompleteGoal();
@@ -979,6 +1031,19 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       }
       await this.refreshThreadUsage(id);
 
+      // Switching back into a thread whose turn is still running server-side:
+      // re-align the view with that turn so live SSE routes correctly, the
+      // Stop/Steer controls work, and turn.completed bookkeeping (usage,
+      // auto-save) applies. The runtime kept the turn alive while we were
+      // away; we only resume observing it.
+      const lastTurn = detail.turns[detail.turns.length - 1];
+      if (lastTurn && (lastTurn.status === "in_progress" || lastTurn.status === "queued")) {
+        this.currentTurnId = lastTurn.id;
+        this.ensureAssistantPlaceholderForExternalTurn();
+        this.startPeriodicTaskRefresh();
+        this.postMessage({ type: "turnStarted", turnId: lastTurn.id });
+      }
+
       this.postMessage({ type: "loadHistory", messages: this.messages });
       this.postMessage({ type: "status", text: `Loaded ${this.messages.length / 2} turns` });
       return this.lastEventSeq;
@@ -992,12 +1057,11 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
   }
 
   public async loadSessionMessages(sessionId: string): Promise<void> {
-    if (!(await this.confirmSwitchWhenActive())) return;
+    this.parkCurrentThread();
     try {
       const session = await this.api.getSession(sessionId);
       const title = session.metadata.title || "Session";
 
-      this.cleanup();
       this.sessionState.reset();
       this.viewingSessionId = sessionId;
       this.viewingSessionWorkspace = session.metadata.workspace || null;
@@ -1345,8 +1409,15 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
   }
 
   private async loadThread(threadId: string): Promise<void> {
-    if (!(await this.confirmSwitchWhenActive())) return;
-    this.cleanup();
+    // Switching parks the outgoing thread instead of interrupting it: the
+    // runtime keeps the turn running server-side and the background watcher
+    // keeps its badges/notifications alive (upstream web client behaviour).
+    this.parkCurrentThread();
+    // The thread we are about to view is no longer background: drop the
+    // watcher it may still have, or its stream keeps delivering the same
+    // events a second time (duplicate notifications, duplicate auto-saves).
+    this.stopBackgroundWatch(threadId);
+    this.backgroundThreads.delete(threadId);
     this.sessionState.reset();
 
     try {
@@ -1998,7 +2069,9 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
   }
 
   private async handleNewThread(): Promise<void> {
-    this.cleanup();
+    // A running turn keeps running server-side; park it for the watcher
+    // instead of clearing it with the view.
+    this.parkCurrentThread();
     this.sessionState.reset();
     this.postMessage({ type: "clearChat" });
     // Clear stale sidebar data
@@ -2075,11 +2148,26 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     }
   }
 
-  /** Refresh the thread list shown in the sidebar (legacy threads) */
+  /** Refresh the thread list shown in the sidebar. Also drives the background
+   *  watcher reconciliation (threads with running turns / pending attention
+   *  get a lightweight SSE stream) and the toolbar Agent badge total. */
   private async refreshThreadList(): Promise<void> {
     try {
       const threads = await this.api.listThreadsSummary({ limit: 100 });
-      this.postMessage({ type: "threadList", threads, showAllWorkspaces: this.showAllWorkspaces });
+      this.threadTitles.clear();
+      let attentionTotal = 0;
+      const currentId = this.currentThread?.id;
+      for (const s of threads) {
+        if (s.title) this.threadTitles.set(s.id, s.title);
+        if (s.id !== currentId) attentionTotal += s.pending_attention_count || 0;
+      }
+      this.syncBackgroundWatchers(threads);
+      this.postMessage({
+        type: "threadList",
+        threads,
+        showAllWorkspaces: this.showAllWorkspaces,
+        attentionTotal,
+      });
     } catch {
       // best-effort, silent fail
     }
@@ -2441,33 +2529,101 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
 
   // ── Thread Goal (control plane) ──
 
-  /** Push the active thread's goal (or null) to the webview. The Work panel's
-   *  goal slot renders from this same message, so the goal is stated once. */
+  /** Push the active thread's goal (or null) plus any background goals to the
+   *  webview. The Work panel's goal slot renders from this same message, so
+   *  the goal is stated once. Background goals come from the watcher's
+   *  per-thread cache (threads with active goals that are not the view). */
   public async refreshGoal(): Promise<void> {
     const threadId = this.currentThread?.id;
-    if (!threadId) {
-      this.postMessage({ type: "goalState", goal: null });
-      return;
+    let goal: ThreadGoal | null = null;
+    if (threadId) {
+      try {
+        goal = await this.api.getThreadGoal(threadId);
+      } catch {
+        // Goal endpoint may not exist on older TUI versions — leave panel empty.
+      }
     }
-    try {
-      const goal = await this.api.getThreadGoal(threadId);
-      this.postMessage({ type: "goalState", goal });
-    } catch {
-      // Goal endpoint may not exist on older TUI versions — leave panel empty.
-      this.postMessage({ type: "goalState", goal: null });
+    const backgroundGoals: Array<ThreadGoal & { threadId: string }> = [];
+    for (const [id, st] of this.backgroundThreads) {
+      if (id === threadId) continue;
+      if (st.goal && st.goal.status === "active") {
+        backgroundGoals.push({ ...st.goal, threadId: id });
+      }
     }
+    this.postMessage({ type: "goalState", goal, backgroundGoals });
   }
 
-  private async handleSetGoal(objective: string, tokenBudget: number | undefined): Promise<void> {
-    const threadId = this.currentThread?.id;
-    if (!threadId || !objective || !objective.trim()) {
+  private async handleSetGoal(
+    objective: string,
+    tokenBudget: number | undefined,
+    background = false,
+  ): Promise<void> {
+    const trimmed = objective?.trim();
+    if (!trimmed) {
       return;
     }
     try {
-      await this.api.upsertThreadGoal(threadId, objective.trim(), tokenBudget);
+      if (background && this.currentThread) {
+        // Run the goal on a dedicated background thread: the runtime kicks
+        // off the goal turn server-side on PUT and drives every continuation
+        // itself (activate_thread_goal / settle_thread_goal_after_turn), so
+        // the loop keeps running while the user works elsewhere. We stay on
+        // the current thread and just watch the new one.
+        //
+        // The posture is pinned to the one the warning below talks about: a
+        // new thread created without it takes the runtime's configured
+        // default, which is not necessarily what the user runs here.
+        const posture = this.getEffectivePosture();
+        const thread = await this.api.createThread({
+          model: this.currentThread.model || this.getCurrentModel(),
+          mode: this.currentThread.mode || this.getCurrentMode(),
+          workspace: this.currentThread.workspace,
+          title: trimmed.slice(0, 80),
+          permission_posture: POSTURE_WIRE[posture],
+          auto_approve: posture === "full_access",
+          trust_mode: posture === "full_access",
+        });
+        await this.api.upsertThreadGoal(thread.id, trimmed, tokenBudget);
+        const st = this.ensureBackgroundState(thread.id);
+        st.lastEventSeq = 0;
+        // Arming the watch also fetches the new thread's goal state.
+        this.startBackgroundWatch(thread.id, ChatProvider.UNWATCHED_SINCE_SEQ);
+        let message = t().backgroundGoalStarted;
+        // Posture decides how autonomous the loop is: under Ask, every tool
+        // approval blocks the background turn and auto-denies after the
+        // engine's timeout — warn instead of failing silently.
+        if (posture === "ask") {
+          message += "\n" + t().backgroundGoalAskHint;
+        }
+        this.postMessage({ type: "info", message });
+        this.scheduleThreadListRefresh(0);
+        return;
+      }
+      const threadId = this.currentThread?.id;
+      if (!threadId) {
+        return;
+      }
+      await this.api.upsertThreadGoal(threadId, trimmed, tokenBudget);
       await this.refreshGoal();
     } catch (err) {
       vscode.window.showErrorMessage(`Failed to set goal: ${(err as Error).message}`);
+    }
+  }
+
+  /** Re-arm the current thread's goal. The runtime drives goal continuations
+   *  on its own, but a Runtime restart leaves an Active goal parked until an
+   *  explicit PUT or a user turn re-triggers it (activate_thread_goal has no
+   *  startup sweep) — this button is that explicit trigger. */
+  private async handleResumeGoal(): Promise<void> {
+    const threadId = this.currentThread?.id;
+    if (!threadId) return;
+    try {
+      const goal = await this.api.getThreadGoal(threadId);
+      if (!goal?.objective) return;
+      await this.api.upsertThreadGoal(threadId, goal.objective, goal.token_budget || undefined);
+      await this.refreshGoal();
+    } catch (err) {
+      vscode.window.showErrorMessage(`Failed to resume goal: ${(err as Error).message}`);
     }
   }
 
@@ -3119,21 +3275,302 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     }, 2500);
   }
 
-  private startPeriodicThreadAttentionRefresh(): void {
-    this.stopPeriodicThreadAttentionRefresh();
-    // Background threads waiting on approvals/user input emit no SSE here
-    // (we only subscribe to the active thread's events), so poll the thread
-    // summary's pending_attention_count at a low cadence while a turn runs.
-    this.threadAttentionTimer = setInterval(() => {
-      this.refreshThreadList();
-    }, 30000);
+  // ── Background thread watcher ──
+  // The runtime allows any number of concurrent per-thread event streams
+  // (`GET /v1/threads/{id}/events?since_seq=N`), so instead of polling the
+  // summary we open one lightweight SSE per background thread that has a
+  // running turn or pending attention. Only lifecycle/approval/user-input
+  // events are processed here — item deltas for a non-viewed thread are
+  // dropped (its transcript is rebuilt from the server on switch-back).
+
+  /** since_seq for a thread we have never watched: skip the durable replay
+   *  entirely and only receive live events. Attention counts for the badge
+   *  come from the summary refresh, so nothing is lost. */
+  private static readonly UNWATCHED_SINCE_SEQ = Number.MAX_SAFE_INTEGER;
+
+  private ensureBackgroundState(threadId: string): BackgroundThreadState {
+    let st = this.backgroundThreads.get(threadId);
+    if (!st) {
+      st = {
+        lastEventSeq: 0,
+        currentTurnId: null,
+        running: false,
+        attention: 0,
+        sessionId: null,
+        goal: null,
+        goalChecked: false,
+        notifiedAttention: false,
+      };
+      this.backgroundThreads.set(threadId, st);
+    }
+    return st;
   }
 
-  private stopPeriodicThreadAttentionRefresh(): void {
-    if (this.threadAttentionTimer) {
-      clearInterval(this.threadAttentionTimer);
-      this.threadAttentionTimer = null;
+  /**
+   * Open the watch for one background thread.
+   *
+   * `parked` is true when the caller is parking the thread it is leaving: at
+   * that moment `currentThread` still names it, so the "never watch the thread
+   * the view is on" rule has to be waived for that one call. Every other
+   * caller relies on the rule. */
+  private startBackgroundWatch(threadId: string, sinceSeq: number, parked = false): void {
+    if (this.watchControllers.has(threadId)) return;
+    if (!parked && threadId === this.currentThread?.id) return;
+    const controller = this.api.streamEvents(
+      threadId,
+      sinceSeq,
+      (event: RuntimeEvent) => this.handleBackgroundEvent(threadId, event),
+      () => {
+        // Drop the stream on error; the next summary refresh re-arms it if
+        // the thread still needs watching (fresh cursor from the summary).
+        this.stopBackgroundWatch(threadId);
+        this.scheduleThreadListRefresh();
+      },
+    );
+    this.watchControllers.set(threadId, controller);
+    // One hook for "learn this thread's goal": goal state decides whether the
+    // watch outlives the turn (an Active goal keeps continuing on its own).
+    const st = this.backgroundThreads.get(threadId);
+    if (st && !st.goalChecked) void this.refreshBackgroundGoal(threadId);
+  }
+
+  private stopBackgroundWatch(threadId: string): void {
+    const controller = this.watchControllers.get(threadId);
+    if (controller) controller.abort();
+    this.watchControllers.delete(threadId);
+  }
+
+  private stopAllBackgroundWatches(): void {
+    for (const controller of this.watchControllers.values()) controller.abort();
+    this.watchControllers.clear();
+  }
+
+  /** Reconcile the watch set with a fresh summary list. Called from
+   *  refreshThreadList — the summary is the authority for which threads
+   *  are running or need attention; watcher events refine it in between. */
+  private syncBackgroundWatchers(threads: ThreadSummary[]): void {
+    const currentId = this.currentThread?.id;
+    const wanted = new Set<string>();
+    for (const sum of threads) {
+      if (sum.id === currentId) continue;
+      const status = String(sum.latest_turn_status || "");
+      // The runtime's Debug-lowercased status spells "inprogress" without
+      // the underscore; the turn record spells it "in_progress". Accept both.
+      const running = status === "in_progress" || status === "inprogress" || status === "queued";
+      const attention = (sum.pending_attention_count || 0) > 0;
+      if (!running && !attention) continue;
+      wanted.add(sum.id);
+      const st = this.ensureBackgroundState(sum.id);
+      st.running = running || st.running;
+      st.attention = Math.max(st.attention, sum.pending_attention_count || 0);
     }
+    for (const id of wanted) {
+      const st = this.backgroundThreads.get(id)!;
+      this.startBackgroundWatch(id, st.lastEventSeq > 0 ? st.lastEventSeq : ChatProvider.UNWATCHED_SINCE_SEQ);
+    }
+    for (const [id, controller] of this.watchControllers) {
+      if (wanted.has(id)) continue;
+      const st = this.backgroundThreads.get(id);
+      // Keep watching a thread whose goal is still active so continuation
+      // turns and completion are observed (the runtime drives them alone).
+      if (st?.goalChecked && st.goal?.status === "active") continue;
+      controller.abort();
+      this.watchControllers.delete(id);
+    }
+    // Drop cursor state for threads the summary no longer reports as busy and
+    // that have no live stream: an aborted watcher or a park that never armed
+    // one otherwise leaves its entry (and its sticky `running`) behind for the
+    // rest of the session.
+    for (const [id, st] of this.backgroundThreads) {
+      if (wanted.has(id) || this.watchControllers.has(id)) continue;
+      if (st.goalChecked && st.goal?.status === "active") continue;
+      this.backgroundThreads.delete(id);
+    }
+  }
+
+  private handleBackgroundEvent(threadId: string, event: RuntimeEvent): void {
+    const st = this.backgroundThreads.get(threadId);
+    if (!st) {
+      this.stopBackgroundWatch(threadId);
+      return;
+    }
+    st.lastEventSeq = event.seq;
+    switch (event.event) {
+      case "turn.lifecycle": {
+        const pl = event.payload as { status?: string };
+        if (pl.status === "running" || pl.status === "in_progress" || pl.status === "queued") {
+          st.running = true;
+          if (event.turn_id) st.currentTurnId = event.turn_id;
+        }
+        break;
+      }
+      case "turn.completed": {
+        st.running = false;
+        st.currentTurnId = null;
+        void this.autoSaveSessionForThread(threadId);
+        if (st.goalChecked && st.goal) void this.refreshBackgroundGoal(threadId);
+        this.scheduleThreadListRefresh();
+        this.refreshSessionList();
+        break;
+      }
+      case "approval.required":
+      case "user_input.required": {
+        st.attention += 1;
+        this.notifyBackgroundAttention(threadId);
+        this.scheduleThreadListRefresh();
+        break;
+      }
+      case "approval.decided":
+      case "approval.timeout":
+      case "user_input.answered":
+      case "user_input.canceled": {
+        st.attention = Math.max(0, st.attention - 1);
+        if (st.attention <= 0) st.notifiedAttention = false;
+        // Only the user-input events carry an id from the map we keep here;
+        // approval ids belong to a different namespace and are never cached.
+        if (event.event === "user_input.answered" || event.event === "user_input.canceled") {
+          const inputId = (event.payload as { id?: string }).id;
+          if (inputId) this.backgroundUserInputs.delete(inputId);
+        }
+        this.scheduleThreadListRefresh();
+        break;
+      }
+      case "thread_goal_updated": {
+        void this.refreshBackgroundGoal(threadId);
+        break;
+      }
+      default:
+        // item.* deltas for a non-viewed thread are intentionally ignored.
+        break;
+    }
+    if (!st.running && st.attention <= 0 && !(st.goalChecked && st.goal?.status === "active")) {
+      this.stopBackgroundWatch(threadId);
+      this.backgroundThreads.delete(threadId);
+    }
+  }
+
+  /** VS Code-native attention notice for a background thread. Fired once per
+   *  "attention episode" (reset when the thread's attention returns to 0). */
+  private notifyBackgroundAttention(threadId: string): void {
+    const enabled = vscode.workspace
+      .getConfiguration("brotherwhale")
+      .get("backgroundThreadNotifications", true);
+    if (!enabled) return;
+    const st = this.backgroundThreads.get(threadId);
+    if (!st || st.notifiedAttention) return;
+    st.notifiedAttention = true;
+    const title = this.threadTitles.get(threadId) || threadId.slice(0, 8);
+    const open = t().backgroundAttentionOpen;
+    vscode.window
+      .showInformationMessage(
+        t().backgroundAttentionNotification.replace("{title}", title),
+        open,
+      )
+      .then((choice) => {
+        if (choice === open) void this.loadThread(threadId);
+      });
+  }
+
+  /** Debounced refresh so a burst of watcher events costs one summary fetch. */
+  private scheduleThreadListRefresh(delayMs = 500): void {
+    if (this.threadListRefreshTimer) return;
+    this.threadListRefreshTimer = setTimeout(() => {
+      this.threadListRefreshTimer = null;
+      void this.refreshThreadList();
+    }, delayMs);
+  }
+
+  /** Auto-save a background thread's completed turn as a session (same
+   *  thread → same session via PUT with session_id, mirroring the current
+   *  view's autoSaveSession). Best-effort: the durable transcript lives in
+   *  the runtime thread store either way — this only keeps the Sessions
+   *  list fresh. */
+  private async autoSaveSessionForThread(threadId: string): Promise<void> {
+    if (!this.apiCapabilities.saveSession) return;
+    if (this.backgroundSavingThreads.has(threadId)) return;
+    this.backgroundSavingThreads.add(threadId);
+    try {
+      const st = this.backgroundThreads.get(threadId);
+      const result = await this.api.saveCurrentSession(threadId, st?.sessionId ?? undefined);
+      if (st) st.sessionId = result.session_id;
+    } catch {
+      // best-effort
+    } finally {
+      this.backgroundSavingThreads.delete(threadId);
+    }
+  }
+
+  private async refreshBackgroundGoal(threadId: string): Promise<void> {
+    const st = this.backgroundThreads.get(threadId);
+    if (!st) return;
+    try {
+      st.goal = await this.api.getThreadGoal(threadId);
+    } catch {
+      st.goal = null;
+    }
+    st.goalChecked = true;
+    // Republish the goal panel so background goal cards stay current.
+    if (this.currentThread && this.currentThread.id !== threadId) {
+      void this.refreshGoal();
+    }
+  }
+
+  /** Fetch a background thread's pending approvals / user inputs for inline
+   *  answering from the sidebar. Approval ids are global one-shot
+   *  capabilities (`POST /v1/approvals/{id}` has no thread dimension), and
+   *  user inputs name their thread, so both are answerable without
+   *  switching. */
+  private async handleShowThreadAttention(threadId: string): Promise<void> {
+    if (threadId === this.currentThread?.id) return;
+    try {
+      const detail = await this.api.getThreadDetail(threadId);
+      const approvals = detail.pending_approvals || [];
+      const inputs = detail.pending_user_inputs || [];
+      for (const req of inputs) {
+        this.backgroundUserInputs.set(req.id, {
+          threadId,
+          questions: req.request.questions,
+          answers: [],
+          answeredQuestions: new Set(),
+        });
+      }
+      this.postMessage({ type: "threadAttention", threadId, approvals, inputs });
+    } catch (err) {
+      this.postMessage({
+        type: "error",
+        message: formatError("Failed to load thread attention", err),
+      });
+    }
+  }
+
+  /** Park the outgoing thread instead of interrupting it: the runtime keeps
+   *  the turn running server-side, so record the cursor + pending counts and
+   *  open a background watch. Mirrors the upstream web client's switch
+   *  behaviour (selectThread → stopStream, never interrupt). */
+  private parkCurrentThread(): void {
+    const thread = this.currentThread;
+    if (thread && (this.currentTurnId || this.pendingApprovals.size > 0 || this.pendingUserInputs.size > 0)) {
+      const st = this.ensureBackgroundState(thread.id);
+      st.lastEventSeq = this.lastEventSeq;
+      if (this.currentTurnId) {
+        st.currentTurnId = this.currentTurnId;
+        st.running = true;
+      }
+      st.attention = Math.max(st.attention, this.pendingApprovals.size + this.pendingUserInputs.size);
+      // `parked: true` — currentThread still names this thread until the
+      // caller resets it, and the whole point of parking is to keep watching.
+      this.startBackgroundWatch(thread.id, this.lastEventSeq, true);
+      if (this.currentTurnId) {
+        this.postMessage({ type: "status", text: t().turnContinuesInBackground });
+      }
+    }
+    this.abortEventStream();
+    this.stopPeriodicTaskRefresh();
+  }
+
+  private abortEventStream(): void {
+    this.eventController?.abort();
+    this.eventController = null;
   }
 
   private stopPeriodicTaskRefresh(): void {
@@ -3170,31 +3607,10 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     }
   }
 
-  /** Show confirmation dialog if a turn is currently in progress.
-   *  Returns true if it's safe to proceed (no active turn or user confirmed). */
-  private async confirmSwitchWhenActive(): Promise<boolean> {
-    if (!this.currentTurnId) return true;
-
-    const confirm = await vscode.window.showWarningMessage(
-      t().switchSessionActiveTurnTitle,
-      { modal: true },
-      t().switchSessionActiveTurnButton,
-    );
-    if (confirm !== t().switchSessionActiveTurnButton) return false;
-
-    // Interrupt the current turn before switching
-    if (this.currentThread && this.currentTurnId) {
-      try {
-        await this.api.interruptTurn(this.currentThread.id, this.currentTurnId);
-      } catch {
-        // ignore
-      }
-      this.currentTurnId = null;
-      this.pendingApprovals.clear();
-      this.postMessage({ type: "turnInterrupted" });
-    }
-    return true;
-  }
+  // confirmSwitchWhenActive was removed: switching no longer interrupts a
+  // running turn. The runtime owns every turn and keeps it running when the
+  // client walks away, so there is nothing to confirm — parkCurrentThread()
+  // opens a background watch instead. Interruption stays explicit (Stop).
 
   /**
    * Undo the last turn, fully aligned with TUI's `/undo` command:
@@ -3747,7 +4163,14 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     _optionIdx: number,
     optionLabel: string
   ): Promise<void> {
-    const pending = this.pendingUserInputs.get(inputId);
+    // Background threads register their pending inputs in a separate map
+    // that survives view switches; the view's map is checked first.
+    let pending = this.pendingUserInputs.get(inputId);
+    let owner: "view" | "background" = "view";
+    if (!pending) {
+      pending = this.backgroundUserInputs.get(inputId);
+      owner = "background";
+    }
     if (!pending) return;
 
     pending.answers.push({
@@ -3757,11 +4180,12 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     });
     pending.answeredQuestions.add(questionId);
 
-    const allAnswered = pending.questions.every(q => pending.answeredQuestions.has(q.id));
+    const allAnswered = pending.questions.every(q => pending!.answeredQuestions.has(q.id));
     if (allAnswered) {
       try {
         await this.api.submitUserInput(pending.threadId, inputId, pending.answers);
-        this.pendingUserInputs.delete(inputId);
+        if (owner === "view") this.pendingUserInputs.delete(inputId);
+        else this.backgroundUserInputs.delete(inputId);
         this.postMessage({
           type: "userInputResolved",
           inputId,
@@ -3775,13 +4199,14 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
           type: "error",
           message: `${formatError("Failed to submit user input", err)}. Use /interrupt to clear the stuck turn.`,
         });
-        this.pendingUserInputs.delete(inputId);
+        if (owner === "view") this.pendingUserInputs.delete(inputId);
+        else this.backgroundUserInputs.delete(inputId);
       }
     }
   }
 
   private async handleUserInputCancel(inputId: string): Promise<void> {
-    const pending = this.pendingUserInputs.get(inputId);
+    const pending = this.pendingUserInputs.get(inputId) ?? this.backgroundUserInputs.get(inputId);
     try {
       if (pending) {
         await this.api.submitUserInput(pending.threadId, inputId, []);
@@ -3790,6 +4215,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       // ignore cancellation errors
     }
     this.pendingUserInputs.delete(inputId);
+    this.backgroundUserInputs.delete(inputId);
     this.postMessage({
       type: "userInputResolved",
       inputId,
@@ -4005,6 +4431,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
           // placeholder exists so the work is visible instead of the goal
           // appearing to stay "active" without running.
           this.ensureAssistantPlaceholderForExternalTurn();
+          this.scheduleThreadListRefresh();
         }
         this.postMessage({ type: "status", text: `Turn: ${pl.status || "unknown"}` });
         break;
@@ -4111,6 +4538,9 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         this.stopPeriodicTaskRefresh();
         this.refreshTaskList();
         this.refreshWorkPanel();
+        // Refresh the thread list too so running badges / groups update when
+        // the current thread's turn ends.
+        this.scheduleThreadListRefresh();
         // The runtime writes goal usage back at the terminal-turn boundary,
         // so re-fetch the goal to surface updated tokens_used/status instead
         // of leaving the panel on its pre-turn value.
@@ -4824,10 +5254,8 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
   }
 
   private cleanup(): void {
-    this.eventController?.abort();
-    this.eventController = null;
+    this.abortEventStream();
     this.stopPeriodicTaskRefresh();
-    this.stopPeriodicThreadAttentionRefresh();
     this.stopActiveTaskDetailRefresh();
     this.activeTaskDetailId = null;
     this.stopFleetEventStream();
@@ -4839,6 +5267,13 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
 
   dispose(): void {
     this.cleanup();
+    if (this.threadListRefreshTimer) {
+      clearTimeout(this.threadListRefreshTimer);
+      this.threadListRefreshTimer = null;
+    }
+    this.stopAllBackgroundWatches();
+    this.backgroundThreads.clear();
+    this.backgroundUserInputs.clear();
     for (const d of this._disposables) {
       d.dispose();
     }
