@@ -1567,7 +1567,6 @@ export function getWebviewCss(): string {
     }
 
     #toolbar .agent-panel-toggle {
-      margin-left: auto;
       font-size: 0.75em;
       color: var(--muted);
       cursor: pointer;
@@ -1577,6 +1576,67 @@ export function getWebviewCss(): string {
     #toolbar .agent-panel-toggle:hover { color: var(--fg); background: var(--card-bg); }
     /* Pending cross-thread approvals/inputs badge (needs-you total) */
     #toolbar .agent-panel-toggle.has-attention { color: var(--status-warn, #e2b93d); font-weight: 600; }
+
+    #toolbar .setting-item {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 0.75em;
+      color: var(--muted);
+    }
+    #toolbar .setting-item.toolbar-settings {
+      margin-left: auto;
+    }
+    #toolbar .setting-label {
+      font-weight: 600;
+    }
+    #toolbar .setting-value {
+      color: var(--fg);
+      cursor: pointer;
+      padding: 1px 4px;
+      border-radius: 2px;
+    }
+    #toolbar .setting-value::after {
+      content: ' ▾';
+      font-size: 0.7em;
+      opacity: 0.5;
+    }
+    #toolbar .setting-value:hover {
+      background: var(--brand-primary);
+      color: var(--brand-primary-foreground);
+    }
+    #toolbar .setting-dropdown {
+      position: relative;
+    }
+    #toolbar .dropdown-menu {
+      display: none;
+      position: absolute;
+      bottom: 100%;
+      left: 0;
+      margin-bottom: 2px;
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      min-width: 100%;
+      z-index: 1000;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+      overflow: hidden;
+    }
+    #toolbar .dropdown-menu.open {
+      display: block;
+    }
+    #toolbar .dropdown-item {
+      padding: 4px 12px;
+      white-space: nowrap;
+      cursor: pointer;
+      font-size: 0.95em;
+      color: var(--fg);
+    }
+    #toolbar .dropdown-item:hover,
+    #toolbar .dropdown-item.selected {
+      background: var(--brand-primary);
+      color: var(--brand-primary-foreground);
+    }
 
     #settings-bar {
       padding: 4px 8px;

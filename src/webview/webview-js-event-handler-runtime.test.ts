@@ -507,7 +507,7 @@ describe("webview-js-event-handler runtime", () => {
 
   it("posts setPosture when the permission dropdown selects a posture", () => {
     const harness = createRuntimeHarness();
-    const settingsBar = harness.getElement("settings-bar");
+    const toolbar = harness.getElement("toolbar");
 
     const item = new FakeElement();
     item.classList.add("dropdown-item");
@@ -518,7 +518,7 @@ describe("webview-js-event-handler runtime", () => {
     menu.parentElement = wrapper;
     item.parentElement = menu;
 
-    settingsBar.dispatch("click", { target: item, stopPropagation: () => {} });
+    toolbar.dispatch("click", { target: item, stopPropagation: () => {} });
 
     expect(harness.postMessages).toContainEqual({
       type: "setPosture",
@@ -671,7 +671,7 @@ describe("webview-js-event-handler runtime", () => {
 
   it("routes mode dropdown selections through /mode with the canonical value", () => {
     const harness = createRuntimeHarness();
-    const settingsBar = harness.getElement("settings-bar");
+    const toolbar = harness.getElement("toolbar");
 
     const item = new FakeElement();
     item.classList.add("dropdown-item");
@@ -682,7 +682,7 @@ describe("webview-js-event-handler runtime", () => {
     menu.parentElement = wrapper;
     item.parentElement = menu;
 
-    settingsBar.dispatch("click", { target: item, stopPropagation: () => {} });
+    toolbar.dispatch("click", { target: item, stopPropagation: () => {} });
 
     expect(harness.postMessages).toContainEqual({
       type: "slashCommand",

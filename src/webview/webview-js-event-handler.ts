@@ -276,12 +276,16 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
 
   // ── Settings dropdown handlers ──
   (function(){
-    var settingsBar = document.getElementById('settings-bar');
-    if (!settingsBar) return;
+    var settingBars = ['settings-bar', 'toolbar']
+      .map(function(id){ return document.getElementById(id); })
+      .filter(Boolean);
+    if (!settingBars.length) return;
 
     function closeAllDropdowns() {
-      var menus = settingsBar.querySelectorAll('.dropdown-menu');
-      for (var i = 0; i < menus.length; i++) { menus[i].classList.remove('open'); }
+      for (var i = 0; i < settingBars.length; i++) {
+        var menus = settingBars[i].querySelectorAll('.dropdown-menu');
+        for (var j = 0; j < menus.length; j++) { menus[j].classList.remove('open'); }
+      }
     }
 
     function highlightCurrent(dropdown) {
@@ -297,7 +301,7 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
       }
     }
 
-    settingsBar.addEventListener('click', function(e) {
+    function onClick(e) {
       var target = e.target;
 
       // Toggle dropdown on setting-value click
@@ -317,8 +321,8 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
       // Select item from dropdown
       if (target.classList.contains('dropdown-item')) {
         var val = target.getAttribute('data-value');
-        var dropdown = target.parentElement;
-        var setting = dropdown.parentElement.getAttribute('data-setting');
+        var dd = target.parentElement;
+        var setting = dd.parentElement.getAttribute('data-setting');
         closeAllDropdowns();
         if (val && setting) {
           // Map setting to slash command
@@ -337,15 +341,22 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
           }
         }
       }
-    });
+    }
+
+    for (var k = 0; k < settingBars.length; k++) {
+      settingBars[k].addEventListener('click', onClick);
+    }
   })();
 
   // Close dropdowns when clicking elsewhere
   document.addEventListener('click', function() {
-    var settingsBar = document.getElementById('settings-bar');
-    if (!settingsBar) return;
-    var menus = settingsBar.querySelectorAll('.dropdown-menu');
-    for (var i = 0; i < menus.length; i++) { menus[i].classList.remove('open'); }
+    var containers = ['settings-bar', 'toolbar'];
+    for (var c = 0; c < containers.length; c++) {
+      var bar = document.getElementById(containers[c]);
+      if (!bar) continue;
+      var menus = bar.querySelectorAll('.dropdown-menu');
+      for (var i = 0; i < menus.length; i++) { menus[i].classList.remove('open'); }
+    }
   });
 
   // ── Keyboard shortcuts for global navigation ──

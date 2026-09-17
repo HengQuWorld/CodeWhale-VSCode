@@ -435,24 +435,6 @@ ${css}
       <div id="settings-bar">
         <button id="btn-threads" title="${tr.toggleHistory}">📋</button>
         <div class="setting-item">
-          <span class="setting-label">${tr.modeLabel}:</span>
-          <div class="setting-dropdown" data-setting="mode">
-            <span class="setting-value" id="current-mode" data-value="${MODE_VALUES[0]}">${MODE_LABELS[MODE_VALUES[0]]}</span>
-            <div class="dropdown-menu" id="dropdown-mode">
-              ${MODE_DROPDOWN_ITEMS}
-            </div>
-          </div>
-        </div>
-        <div class="setting-item">
-          <span class="setting-label">${tr.permissionLabel}:</span>
-          <div class="setting-dropdown" data-setting="posture">
-            <span class="setting-value" id="current-posture" data-value="${POSTURE_VALUES[0]}">${POSTURE_LABELS[POSTURE_VALUES[0]]}</span>
-            <div class="dropdown-menu" id="dropdown-posture">
-              ${POSTURE_DROPDOWN_ITEMS}
-            </div>
-          </div>
-        </div>
-        <div class="setting-item">
           <span class="setting-label">Provider:</span>
           <div class="setting-dropdown" data-setting="provider">
             <span class="setting-value" id="current-provider">deepseek</span>
@@ -498,6 +480,24 @@ ${css}
         <button id="btn-compact">${tr.compact}</button>
         <button id="btn-undo" title="${tr.undoLastTurn}">↩ ${tr.undoLabel}</button>
         <button id="btn-retry" title="${tr.retryLastTurn}">🔁 ${tr.retryLabel}</button>
+        <div class="setting-item toolbar-settings">
+          <span class="setting-label">${tr.modeLabel}:</span>
+          <div class="setting-dropdown" data-setting="mode">
+            <span class="setting-value" id="current-mode" data-value="${MODE_VALUES[0]}">${MODE_LABELS[MODE_VALUES[0]]}</span>
+            <div class="dropdown-menu" id="dropdown-mode">
+              ${MODE_DROPDOWN_ITEMS}
+            </div>
+          </div>
+        </div>
+        <div class="setting-item">
+          <span class="setting-label">${tr.permissionLabel}:</span>
+          <div class="setting-dropdown" data-setting="posture">
+            <span class="setting-value" id="current-posture" data-value="${POSTURE_VALUES[0]}">${POSTURE_LABELS[POSTURE_VALUES[0]]}</span>
+            <div class="dropdown-menu" id="dropdown-posture">
+              ${POSTURE_DROPDOWN_ITEMS}
+            </div>
+          </div>
+        </div>
         <span class="agent-panel-toggle" id="agent-panel-toggle" title="${tr.agentStatusTitle}">${tr.agentStatus}</span>
       </div>
       <div id="input-resize-handle" title="Drag to resize input area"></div>
