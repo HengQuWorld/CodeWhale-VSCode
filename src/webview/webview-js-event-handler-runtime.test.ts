@@ -38,15 +38,29 @@ class FakeClassList {
 
 class FakeElement {
   public textContent = "";
-  public innerHTML = "";
   public value = "";
   public scrollTop = 0;
   public scrollHeight = 0;
+  public clientHeight = 0;
   public focusCount = 0;
+  public className = "";
   public classList = new FakeClassList();
   public parentElement: FakeElement | null = null;
+  public children: FakeElement[] = [];
+  private html = "";
   private listeners = new Map<string, (event: unknown) => void>();
   private attributes = new Map<string, string>();
+
+  /** Assigning innerHTML drops the children, the way the DOM does. */
+  get innerHTML(): string {
+    return this.html;
+  }
+
+  set innerHTML(value: string) {
+    for (const child of this.children) child.parentElement = null;
+    this.children = [];
+    this.html = value;
+  }
 
   addEventListener(name: string, handler: (event: unknown) => void): void {
     this.listeners.set(name, handler);
@@ -57,23 +71,58 @@ class FakeElement {
     if (handler) handler(event);
   }
 
-  querySelector(): FakeElement | null {
-    return null;
+  querySelector(selector?: string): FakeElement | null {
+    const matches = this.querySelectorAll(selector);
+    return matches.length > 0 ? matches[0] : null;
   }
 
   closest(): FakeElement | null {
     return null;
   }
 
-  querySelectorAll(): FakeElement[] {
-    return [];
+  /**
+   * Just enough selector support for the approval panel: class selectors and a
+   * trailing class[attr="value"] pair, over direct children. Anything else
+   * answers nothing, as this stand-in always did.
+   */
+  querySelectorAll(selector?: string): FakeElement[] {
+    if (!selector) return [];
+    const attrMatch = selector.match(/\[([\w-]+)="([^"]*)"\]/);
+    const classPart = attrMatch ? selector.slice(0, attrMatch.index) : selector;
+    const classes = classPart.split(".").filter((part) => part.length > 0);
+    if (classes.length === 0) return [];
+    return this.children.filter((child) => {
+      const childClasses = child.className.split(/\s+/).filter(Boolean);
+      if (!classes.every((name) => childClasses.includes(name))) return false;
+      if (attrMatch && child.getAttribute(attrMatch[1]) !== attrMatch[2]) return false;
+      return true;
+    });
   }
 
-  appendChild(_child: unknown): void {}
+  appendChild(child: FakeElement): void {
+    this.detach(child);
+    child.parentElement = this;
+    this.children.push(child);
+  }
 
-  insertBefore(_child: unknown, _before: unknown): void {}
+  insertBefore(child: FakeElement, before: FakeElement | null): void {
+    this.detach(child);
+    child.parentElement = this;
+    const index = before ? this.children.indexOf(before) : -1;
+    if (index >= 0) this.children.splice(index, 0, child);
+    else this.children.push(child);
+  }
 
-  remove(): void {}
+  remove(): void {
+    if (this.parentElement) this.parentElement.detach(this);
+    this.parentElement = null;
+  }
+
+  private detach(child: FakeElement): void {
+    const index = this.children.indexOf(child);
+    if (index >= 0) this.children.splice(index, 1);
+    child.parentElement = null;
+  }
 
   focus(): void {
     this.focusCount += 1;
@@ -87,6 +136,10 @@ class FakeElement {
 
   setAttribute(name: string, value: string): void {
     this.attributes.set(name, value);
+  }
+
+  removeAttribute(name: string): void {
+    this.attributes.delete(name);
   }
 }
 
@@ -222,6 +275,16 @@ function createRuntimeHarness() {
       const handler = windowListeners.get("message");
       if (!handler) throw new Error("message handler not registered");
       handler({ data: msg });
+    },
+    /** Ids of the approvals the floating panel is currently offering. */
+    approvalItemIds(): string[] {
+      return getEl("approval-float").children
+        .filter((child) => child.className.split(/\s+/).includes("approval-item"))
+        .map((child) => child.getAttribute("data-approval-id") || "");
+    },
+    /** A global the script published for the other scripts (window.__wv...). */
+    windowApi(name: string): any {
+      return windowObj[name];
     },
     getElement: getEl,
     postMessages,
@@ -517,6 +580,45 @@ describe("webview-js-event-handler runtime", () => {
 
     expect(harness.sendStopCalls).toEqual([true, false]);
     expect(harness.getElement("status-text").textContent).toBe("Error");
+  });
+
+  it("keeps the other pending approvals when one of them is answered", () => {
+    const harness = createRuntimeHarness();
+
+    harness.dispatchMessage({ type: "approvalRequired", approvalId: "a1", messageId: "m1", summary: "run the tests" });
+    harness.dispatchMessage({ type: "approvalRequired", approvalId: "a2", messageId: "m1", summary: "push the branch" });
+
+    expect(harness.approvalItemIds()).toEqual(["a1", "a2"]);
+
+    // Answering one approval is not an answer to the others: the provider keeps
+    // them in its pending map, so the panel has to keep offering them.
+    harness.dispatchMessage({ type: "approvalResolved", approvalId: "a1", decision: "allow" });
+
+    expect(harness.approvalItemIds()).toEqual(["a2"]);
+    expect(harness.getElement("approval-float").getAttribute("hidden")).toBeNull();
+
+    harness.dispatchMessage({ type: "approvalResolved", approvalId: "a2", decision: "deny" });
+
+    expect(harness.approvalItemIds()).toEqual([]);
+    expect(harness.getElement("approval-float").getAttribute("hidden")).toBe("");
+  });
+
+  it("does not offer the same approval twice when it is announced again", () => {
+    const harness = createRuntimeHarness();
+
+    harness.dispatchMessage({ type: "approvalRequired", approvalId: "a1", messageId: "m1", summary: "run the tests" });
+    harness.dispatchMessage({ type: "approvalRequired", approvalId: "a1", messageId: "m1", summary: "run the tests" });
+
+    expect(harness.approvalItemIds()).toEqual(["a1"]);
+  });
+
+  it("keeps the panel reachable for a session that will never see the original event", () => {
+    const harness = createRuntimeHarness();
+
+    // The message renderer asks for the panel by state (window.__wvApproval) so
+    // a rebuilt conversation offers the same buttons the event originally did.
+    expect(harness.windowApi("__wvApproval" ).show).toBeTypeOf("function");
+    expect(harness.windowApi("__wvApproval").remove).toBeTypeOf("function");
   });
 
   it("routes mode dropdown selections through /mode with the canonical value", () => {

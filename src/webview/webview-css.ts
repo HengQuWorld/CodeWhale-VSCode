@@ -913,7 +913,10 @@ export function getWebviewCss(): string {
       max-height: 200px;
       overflow-y: hidden;
     }
-    .tool-call .tool-output::after {
+    /* The veil claims there is more content than fits, so it is only drawn on a
+       block that actually clips (markClippedBlocks measures it after layout).
+       A one-line output dimmed for no reason reads as a rendering fault. */
+    .tool-call .tool-output.is-clipped::after {
       content: '';
       position: absolute;
       inset: 0;
@@ -923,6 +926,11 @@ export function getWebviewCss(): string {
     }
     .tool-call .tool-output.scrollable { overflow-y: auto; }
     .tool-call .tool-output.scrollable::after { display: none; }
+    .tool-call .tool-output:focus-visible,
+    .tool-call .tool-input-command:focus-visible {
+      outline: 1px solid var(--vscode-focusBorder, #007fd4);
+      outline-offset: 1px;
+    }
     .tool-call .tool-input {
       margin-top: 6px;
       display: flex;
@@ -943,7 +951,7 @@ export function getWebviewCss(): string {
       max-height: 200px;
       overflow-y: hidden;
     }
-    .tool-call .tool-input-command::after {
+    .tool-call .tool-input-command.is-clipped::after {
       content: '';
       position: absolute;
       inset: 0;
@@ -1102,12 +1110,23 @@ export function getWebviewCss(): string {
       border-radius: 8px;
       background: var(--card-bg);
       box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+      /* Approvals can pile up here, and the panel is anchored to the bottom of
+         a messages area that clips (overflow: hidden): scroll instead of
+         growing past the top, where the oldest items would be unreachable. */
+      max-height: 50%;
+      overflow-y: auto;
+      overscroll-behavior: contain;
     }
     .approval-float[hidden] { display: none; }
     .approval-float-header {
+      position: sticky;
+      top: -10px;
+      z-index: 1;
       display: flex;
       align-items: center;
       gap: 6px;
+      padding: 4px 0;
+      background: var(--card-bg);
       font-size: 0.8em;
       font-weight: 700;
       text-transform: uppercase;

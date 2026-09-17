@@ -204,6 +204,40 @@ describe("webview-js-event-handler.ts", () => {
     expect(script).toContain("case 'approvalResolved'");
   });
 
+  it("offers one way to answer an approval, in the floating panel", () => {
+    const script = getEventHandlerScript(makeTr());
+    expect(script).toContain("window.__wvApproval = {");
+    // The panel is the only builder of allow/deny buttons for a message: the
+    // inline card keeps a read-only line so one request cannot be answered in
+    // two places.
+    expect((script.match(/approval-buttons/g) || []).length).toBe(1);
+    expect(script).toContain("bar.setAttribute('data-approval-id', msg.approvalId)");
+  });
+
+  it("retires one answered approval instead of clearing the panel", () => {
+    const script = getEventHandlerScript(makeTr());
+    expect(script).toContain("function removeApprovalItem(approvalId)");
+    expect(script).toContain("removeApprovalItem(msg.approvalId)");
+    // Scoped to the card that was waiting on this id, and to its status line:
+    // every other card showing "awaiting approval" is still waiting.
+    expect(script).toContain('.approval-bar[data-approval-id="');
+    expect(script).toContain("var answeredCards = []");
+    // A blank id is a no-op, not a request to wipe every pending approval.
+    expect(script).toContain("if (!approvalFloatEl || !approvalId) return;");
+  });
+
+  it("measures a tool card only once it is in the document", () => {
+    const script = getEventHandlerScript(makeTr());
+    const start = script.indexOf("case 'addToolCall'");
+    const body = script.slice(start, script.indexOf("case 'updateToolCall'", start));
+    // A detached node has no layout, so measuring before the insert answered
+    // nothing and silently dropped the only clipped-content affordance.
+    const lastInsert = Math.max(body.lastIndexOf("appendChild(child)"), body.lastIndexOf("insertBefore(child"));
+    const measured = body.indexOf("markClippedBlocks(child)");
+    expect(lastInsert).toBeGreaterThan(-1);
+    expect(measured).toBeGreaterThan(lastInsert);
+  });
+
   it("handles user input messages", () => {
     const script = getEventHandlerScript(makeTr());
     expect(script).toContain("case 'userInputRequired'");

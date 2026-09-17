@@ -23,6 +23,27 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
   var SCROLL_BOTTOM_THRESHOLD = 80;
   var _navScrollTimer = null;
 
+  // ── Approval handoff ──
+  // An approval is state, not a one-shot event: every render that draws a tool
+  // call still waiting for a decision hands it to the floating panel that owns
+  // the buttons (window.__wvApproval, defined by the event-handler script).
+  // That is what keeps a rebuilt conversation — view switch, reopened sidebar,
+  // restored session — answerable instead of showing a request with nothing to
+  // click.
+  function flushPendingApprovals(toolCalls) {
+    if (!toolCalls || toolCalls.length === 0) return;
+    if (!window.__wvApproval || !window.__wvApproval.show) return;
+    for (var i = 0; i < toolCalls.length; i++) {
+      var tc = toolCalls[i];
+      window.__wvApproval.show(
+        tc.approvalId,
+        __wvEscapeHtml(tc.approvalSummary || __i18n.approvalRequired),
+        tc.name,
+        tc.input
+      );
+    }
+  }
+
   // ── Thinking block rendering (collapsed by default; preview clipped via CSS) ──
   function thinkingPlainText(content, contentHtml) {
     if (typeof content === 'string' && content !== '') return content;
@@ -307,7 +328,7 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
 
     var html = '<div class="tool-input">';
     if (commandKey) {
-      html += '<div class="tool-input-command">$ ' + __wvEscapeHtml(formatToolInputValue(input[commandKey])) + '</div>';
+      html += '<div class="tool-input-command" tabindex="0">$ ' + __wvEscapeHtml(formatToolInputValue(input[commandKey])) + '</div>';
     }
     for (var i = 0; i < keys.length; i++) {
       var key = keys[i];
@@ -358,16 +379,16 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
     if (tc.fileChange) {
       html += renderFileChangeCard(tc.fileChange);
     } else if (tc.output) {
-      html += '<div class="tool-output">' + __wvEscapeHtml(tc.output) + '</div>';
+      html += '<div class="tool-output" tabindex="0">' + __wvEscapeHtml(tc.output) + '</div>';
     }
     if (tc.status === 'awaiting_approval' && tc.approvalId) {
-      html += '<div class="approval-bar">';
+      // Read-only, on purpose: this names what is waiting where it waits, and
+      // the floating panel carries the buttons (see flushPendingApprovals). One
+      // approval must not offer two sets of allow/deny. The id travels with the
+      // line so the resolve path can retarget exactly this card.
+      html += '<div class="approval-bar" data-approval-id="' + tc.approvalId + '">';
       html += '<div class="approval-text">\\u26A0 ' + __wvEscapeHtml(tc.approvalSummary || __i18n.approvalRequired) + '</div>';
-      html += '<label class="approval-remember"><input type="checkbox" data-approval-id="' + tc.approvalId + '" class="remember-check" /> Remember for this tool</label>';
-      html += '<div class="approval-buttons">';
-      html += '<button class="btn-allow" data-approval-id="' + tc.approvalId + '" data-decision="allow">' + __i18n.allow + '</button>';
-      html += '<button class="btn-deny" data-approval-id="' + tc.approvalId + '" data-decision="deny">' + __i18n.deny + '</button>';
-      html += '</div></div>';
+      html += '</div>';
     }
     html += '</div>';
     return html;
@@ -442,6 +463,7 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
     smartScrollToBottom();
 
     var bodyEl = el.querySelector('.message-body');
+    var pendingApprovals = [];
 
     if (msg.blocks && msg.blocks.length > 0) {
       for (var bi = 0; bi < msg.blocks.length; bi++) {
@@ -459,6 +481,7 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
             var child = tcEl.firstElementChild;
             child.setAttribute('data-block-idx', String(bi));
             bodyEl.appendChild(child);
+            if (tc.status === 'awaiting_approval' && tc.approvalId) pendingApprovals.push(tc);
           }
         } else if (b.type === 'text') {
           var content = b.contentHtml !== undefined ? b.contentHtml : __wvEscapeHtml(b.content || '');
@@ -483,6 +506,7 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
           var tcEl = document.createElement('div');
           tcEl.innerHTML = renderToolCall(msg.id, tc, i);
           bodyEl.appendChild(tcEl.firstElementChild);
+          if (tc.status === 'awaiting_approval' && tc.approvalId) pendingApprovals.push(tc);
         }
       }
 
@@ -510,6 +534,8 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
 
     smartScrollToBottom();
     scheduleNavUpdate();
+    flushPendingApprovals(pendingApprovals);
+    markClippedBlocks(el);
   }
 
   // ── Thinking Toggle ──
@@ -536,6 +562,50 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
     if (!checkbox) checkbox = document.querySelector('.remember-check[data-approval-id="' + approvalId + '"]');
     var remember = checkbox ? checkbox.checked : false;
     vscode.postMessage({ type: 'approvalDecision', approvalId: approvalId, decision: decision, remember: remember });
+  }
+
+  // ── Clipped blocks and their single scrollable window ──
+  //
+  // A tool output / command block is longer than it looks whenever its content
+  // exceeds max-height, and CSS cannot ask whether it does. markClippedBlocks
+  // measures after layout and records the answer as .is-clipped, which is what
+  // draws the "there is more here" veil: an unconditional veil dimmed one-line
+  // outputs that hid nothing and read as a rendering fault.
+  function markClippedBlocks(root) {
+    var scope = root || messagesEl;
+    if (!scope || !scope.querySelectorAll) return;
+    var blocks = scope.querySelectorAll('.tool-output, .tool-input-command');
+    for (var i = 0; i < blocks.length; i++) {
+      var el = blocks[i];
+      // Not laid out (the view is hidden): measuring would answer "everything
+      // is clipped". Leave the answer it already has.
+      if (!el.clientHeight) continue;
+      if (el.scrollHeight - el.clientHeight > 2) el.classList.add('is-clipped');
+      else el.classList.remove('is-clipped');
+    }
+  }
+
+  // A resize re-wraps the text, so the answer markClippedBlocks measured can
+  // stop being true (the panel is resizable). Re-measure instead of leaving a
+  // veil that is no longer earned, or missing one that is.
+  var _clipMeasureTimer = null;
+  window.addEventListener('resize', function() {
+    if (_clipMeasureTimer) clearTimeout(_clipMeasureTimer);
+    _clipMeasureTimer = setTimeout(function() {
+      _clipMeasureTimer = null;
+      markClippedBlocks();
+    }, 150);
+  });
+
+  // Only one block scrolls at a time and the chat keeps the wheel until the
+  // user picks one. Picking means clicking it or focusing it with the keyboard
+  // — a clipped block is focusable (tabindex in the markup) so both ways in.
+  function setActiveScrollable(target) {
+    var scrollables = messagesEl.querySelectorAll('.tool-output.scrollable, .tool-input-command.scrollable');
+    for (var si = 0; si < scrollables.length; si++) {
+      if (scrollables[si] !== target) scrollables[si].classList.remove('scrollable');
+    }
+    if (target) target.classList.add('scrollable');
   }
 
   // ── Event delegation for message area clicks ──
@@ -631,14 +701,19 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
 
     // Scrollable tool/command output windows: don't let the wheel steal focus
     // from the chat while browsing history. They stay clipped (overflow hidden)
-    // until the user clicks one, at which point it becomes the single active
-    // scrollable window; clicking anywhere else blurs it.
-    var scrollableTarget = target.closest('.tool-output, .tool-input-command');
-    var scrollables = messagesEl.querySelectorAll('.tool-output.scrollable, .tool-input-command.scrollable');
-    for (var si = 0; si < scrollables.length; si++) {
-      if (scrollables[si] !== scrollableTarget) scrollables[si].classList.remove('scrollable');
+    // until the user picks one, at which point it becomes the single active
+    // scrollable window; picking another (or empty space) moves it.
+    setActiveScrollable(target.closest ? target.closest('.tool-output, .tool-input-command') : null);
+  });
+
+  // Tabbing into a clipped block makes it the active scrollable window too, so
+  // a keyboard user can read a 200px window's worth of output without a mouse.
+  messagesEl.addEventListener('focusin', function(e) {
+    var el = e.target;
+    if (!el || !el.classList || typeof el.classList.contains !== 'function') return;
+    if (el.classList.contains('tool-output') || el.classList.contains('tool-input-command')) {
+      setActiveScrollable(el);
     }
-    if (scrollableTarget) scrollableTarget.classList.toggle('scrollable');
   });
 
   var approvalFloatEl = document.getElementById('approval-float');
@@ -824,6 +899,7 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
     scrollToMessage: scrollToMessage,
     createThinkingBlock: createThinkingBlock,
     updateThinkingBlock: updateThinkingBlock,
+    markClippedBlocks: markClippedBlocks,
   };
 
   renderWelcome();

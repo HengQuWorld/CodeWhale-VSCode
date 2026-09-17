@@ -3683,6 +3683,17 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         // event (which may be delayed or missed if the SSE stream
         // reconnects).  The turn.completed handler also clears these,
         // but this ensures the UI is responsive right away.
+        //
+        // Retiring the status on the way out is part of that: the webview
+        // draws an approval's buttons from the tool call's own state, so a
+        // re-render before turn.completed lands (view switch, reopened
+        // sidebar, restored session) would otherwise offer buttons for an
+        // approval this client has already dropped. Same retirement the
+        // terminal path does, and the same the approval timeout does.
+        this.pendingApprovals.forEach((tc) => {
+          tc.status = "error";
+          tc.approvalId = undefined;
+        });
         this.pendingApprovals.clear();
         this.postMessage({ type: "turnInterrupted" });
       } catch {

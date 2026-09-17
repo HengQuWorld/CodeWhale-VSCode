@@ -110,6 +110,43 @@ describe("webview-js-messages.ts", () => {
     expect(script).toContain("approval-bar");
   });
 
+  it("draws the pending approval read-only and keyed by id", () => {
+    const script = getMessagesScript(makeTr());
+    // The card names what is waiting in place; the floating panel owns the
+    // allow/deny buttons, so a card must not carry a second set of them.
+    expect(script).toContain('class="approval-bar" data-approval-id="');
+    expect(script).not.toContain("approval-buttons");
+    expect(script).not.toContain('class="approval-remember"');
+  });
+
+  it("hands every rendered pending approval back to the panel", () => {
+    const script = getMessagesScript(makeTr());
+    // State, not a one-shot event: a rebuilt conversation must still offer the
+    // buttons it never saw the original event for.
+    expect(script).toContain("window.__wvApproval.show(");
+    expect(script).toContain("flushPendingApprovals(pendingApprovals)");
+  });
+
+  it("only claims a block is clipped once it has been measured", () => {
+    const script = getMessagesScript(makeTr());
+    expect(script).toContain("function markClippedBlocks(root)");
+    expect(script).toContain("markClippedBlocks: markClippedBlocks");
+    expect(script).toContain("classList.add('is-clipped')");
+    // The panel is resizable, and a width change re-wraps the text the answer
+    // was measured from, so the measurement is repeated.
+    expect(script).toContain("window.addEventListener('resize'");
+    expect(script).toContain("markClippedBlocks();");
+  });
+
+  it("makes a clipped block scrollable by click and by focus", () => {
+    const script = getMessagesScript(makeTr());
+    expect(script).toContain("function setActiveScrollable(target)");
+    expect(script).toContain("messagesEl.addEventListener('focusin'");
+    // A focused block gets the same access a clicked one does, so keyboard
+    // users are not locked out of output clipped at 200px.
+    expect(script).toContain("tabindex=\"0\"");
+  });
+
   it("contains thinking block rendering", () => {
     const script = getMessagesScript(makeTr());
     expect(script).toContain("thinking-block");

@@ -75,6 +75,24 @@ describe("webview-css.ts", () => {
     expect(css).toContain(".tool-call .tool-output.scrollable { overflow-y: auto; }");
   });
 
+  it("draws the clipped-content veil only on a block that measured as clipped", () => {
+    const css = getWebviewCss();
+    expect(css).toContain(".tool-call .tool-output.is-clipped::after");
+    expect(css).toContain(".tool-call .tool-input-command.is-clipped::after");
+    // An unconditional veil dimmed one-line outputs that hid nothing.
+    expect(css).not.toContain(".tool-call .tool-output::after {");
+    expect(css).not.toContain(".tool-call .tool-input-command::after {");
+    expect(css).toContain("focus-visible");
+  });
+
+  it("bounds the approval panel so stacked approvals stay reachable", () => {
+    const css = getWebviewCss();
+    const match = css.match(/\.approval-float \{([^}]*)\}/);
+    expect(match).not.toBeNull();
+    expect(match![1]).toContain("max-height");
+    expect(match![1]).toContain("overflow-y: auto");
+  });
+
   it("contains welcome screen styles", () => {
     const css = getWebviewCss();
     expect(css).toContain(".welcome-screen");

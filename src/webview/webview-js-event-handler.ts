@@ -33,7 +33,7 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
   var approvalFloatEl = document.getElementById('approval-float');
 
   function showApprovalFloat(approvalId, summaryText, rawToolName, toolInput) {
-    if (!approvalFloatEl) return;
+    if (!approvalFloatEl || !approvalId) return;
     if (approvalFloatEl.querySelector('.approval-item[data-approval-id="' + approvalId + '"]')) return;
     approvalFloatEl.removeAttribute('hidden');
     if (!approvalFloatEl.querySelector('.approval-float-header')) {
@@ -55,6 +55,25 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
       '<label class="approval-remember"><input type="checkbox" data-approval-id="' + approvalId + '" class="remember-check" /> Remember for this tool</label>' +
       '<div class="approval-buttons"><button class="btn-allow" data-approval-id="' + approvalId + '" data-decision="allow">' + __i18n.allow + '</button><button class="btn-deny" data-approval-id="' + approvalId + '" data-decision="deny">' + __i18n.deny + '</button></div>';
     approvalFloatEl.appendChild(item);
+    // More than one approval can be outstanding and the newest is the one the
+    // user has to see, so keep the panel scrolled to it.
+    approvalFloatEl.scrollTop = approvalFloatEl.scrollHeight;
+  }
+
+  /**
+   * Retire exactly one answered approval. Approvals are keyed by id in the
+   * provider's pending map and several can be outstanding at once (a turn with
+   * two tool calls, a parked thread's approval), so clearing the whole panel
+   * here would leave the others pending with nothing left to click.
+   */
+  function removeApprovalItem(approvalId) {
+    // A blank id is not an instruction to wipe the panel — that is what the
+    // explicit clear() is for; this is the exported contract, so it must not
+    // re-create the cleared-others bug for a future caller.
+    if (!approvalFloatEl || !approvalId) return;
+    var item = approvalFloatEl.querySelector('.approval-item[data-approval-id="' + approvalId + '"]');
+    if (item) item.remove();
+    if (!approvalFloatEl.querySelector('.approval-item')) hideApprovalFloat();
   }
 
   function hideApprovalFloat() {
@@ -62,6 +81,16 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
     approvalFloatEl.innerHTML = '';
     approvalFloatEl.setAttribute('hidden', '');
   }
+
+  // The panel is the only place an approval can be answered, so the message
+  // renderer re-shows every approval that is still pending after it rebuilds a
+  // conversation (view switch, reopened sidebar, restored session) — buttons
+  // must not vanish just because the DOM was redrawn.
+  window.__wvApproval = {
+    show: showApprovalFloat,
+    remove: removeApprovalItem,
+    clear: hideApprovalFloat,
+  };
 
   // Mode / permission-posture display maps, mirroring the TUI's
   // AppMode::display_name() and ApprovalMode::permission_chip_label().
@@ -725,6 +754,9 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
               bodyEl.appendChild(child);
             }
           }
+          // Measured only now that the card is in the document: a detached node
+          // has no layout, so measuring it there answered nothing at all.
+          if (window.__wvMessages.markClippedBlocks) window.__wvMessages.markClippedBlocks(child);
           window.__wvMessages.smartScrollToBottom();
         }
         if (msg.toolCall && msg.toolCall.displayName) {
@@ -751,9 +783,11 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
             if (!outputEl) {
               outputEl = document.createElement('div');
               outputEl.className = 'tool-output';
+              outputEl.setAttribute('tabindex', '0');
               tcEl.appendChild(outputEl);
             }
             outputEl.textContent = msg.output;
+            if (window.__wvMessages.markClippedBlocks) window.__wvMessages.markClippedBlocks(tcEl);
           }
           window.__wvMessages.smartScrollToBottom();
         }
@@ -784,7 +818,9 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
 
       case 'approvalRequired': {
         var summaryText = __wvEscapeHtml(msg.summary || __i18n.approvalRequired);
-        var rememberLabel = '<label class="approval-remember"><input type="checkbox" data-approval-id="' + msg.approvalId + '" class="remember-check" /> Remember for this tool</label>';
+        // The card keeps a read-only line naming the request. The allow/deny
+        // buttons live in the panel only: one approval, one way to answer it.
+        var approvalLine = '<div class="approval-text">\\u26A0 ' + summaryText + '</div>';
         if (msg.toolCallIdx !== undefined) {
           var tcEl = document.getElementById('tc-' + msg.messageId + '-' + msg.toolCallIdx);
           if (tcEl) {
@@ -792,26 +828,24 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
             if (nameSpan && msg.toolName) nameSpan.textContent = '\\uD83D\\uDD27 ' + msg.toolName;
             var statusSpan = tcEl.querySelector('.tool-status');
             if (statusSpan) statusSpan.textContent = '\\u26A0 ' + __i18n.approvalAwaiting;
-            var existing = tcEl.querySelector('.approval-bar');
-            if (!existing) {
+            if (!tcEl.querySelector('.approval-bar')) {
               var bar = document.createElement('div');
               bar.className = 'approval-bar';
-              bar.innerHTML = '<div class="approval-text">\\u26A0 ' + summaryText + '</div>' + rememberLabel + '<div class="approval-buttons"><button class="btn-allow" data-approval-id="' + msg.approvalId + '" data-decision="allow">' + __i18n.allow + '</button><button class="btn-deny" data-approval-id="' + msg.approvalId + '" data-decision="deny">' + __i18n.deny + '</button></div>';
+              bar.setAttribute('data-approval-id', msg.approvalId);
+              bar.innerHTML = approvalLine;
               tcEl.appendChild(bar);
               window.__wvMessages.smartScrollToBottom();
             }
           }
         } else {
           var bodyEl = document.getElementById('body-' + msg.messageId);
-          if (bodyEl) {
-            var existing = bodyEl.querySelector('.approval-bar');
-            if (!existing) {
-              var bar = document.createElement('div');
-              bar.className = 'approval-bar';
-              bar.innerHTML = '<div class="approval-text">\\u26A0 ' + summaryText + '</div>' + rememberLabel + '<div class="approval-buttons"><button class="btn-allow" data-approval-id="' + msg.approvalId + '" data-decision="allow">' + __i18n.allow + '</button><button class="btn-deny" data-approval-id="' + msg.approvalId + '" data-decision="deny">' + __i18n.deny + '</button></div>';
-              bodyEl.appendChild(bar);
-              window.__wvMessages.smartScrollToBottom();
-            }
+          if (bodyEl && !bodyEl.querySelector('.approval-bar')) {
+            var bar = document.createElement('div');
+            bar.className = 'approval-bar';
+            bar.setAttribute('data-approval-id', msg.approvalId);
+            bar.innerHTML = approvalLine;
+            bodyEl.appendChild(bar);
+            window.__wvMessages.smartScrollToBottom();
           }
         }
         setStreamingState(true, __i18n.approvalAwaiting);
@@ -819,29 +853,48 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
         break;
       }
 
-      case 'approvalResolved':
-        hideApprovalFloat();
-        document.querySelectorAll('.approval-bar').forEach(function(bar) { bar.remove(); });
+      case 'approvalResolved': {
+        // One answer retires one request. Several approvals can be pending at
+        // once, so neither the panel nor the cards' status lines may be cleared
+        // wholesale here — that is how the remaining ones lost their only way
+        // to be answered.
+        var answeredCards = [];
+        if (msg.approvalId) {
+          document.querySelectorAll('.approval-bar[data-approval-id="' + msg.approvalId + '"]').forEach(function(bar) {
+            var card = bar.closest ? bar.closest('.tool-call') : null;
+            if (card) answeredCards.push(card);
+            bar.remove();
+          });
+          removeApprovalItem(msg.approvalId);
+        } else {
+          hideApprovalFloat();
+          document.querySelectorAll('.approval-bar').forEach(function(bar) { bar.remove(); });
+        }
         // Also retire the inline sidebar card for a background thread's
         // approval (answered without switching) — keyed by approval id.
         if (window.__wvSidebar && window.__wvSidebar.removeThreadAttentionApproval) {
           window.__wvSidebar.removeThreadAttentionApproval(msg.approvalId);
         }
-        if (msg.decision === 'allow') {
-          document.querySelectorAll('.tool-status').forEach(function(span) {
-            if (span.textContent && span.textContent.includes(__i18n.approvalAwaiting)) {
-              span.textContent = '\\u27F3 running...';
+        var resolvedStatus = msg.decision === 'allow' ? '\\u27F3 running...' : (msg.decision === 'deny' ? '\\u2717 denied' : '');
+        if (resolvedStatus) {
+          if (msg.approvalId) {
+            // Only the card that was waiting on this id moves on; every other
+            // card still showing "awaiting approval" is still waiting.
+            for (var ai = 0; ai < answeredCards.length; ai++) {
+              var answeredSpans = answeredCards[ai].querySelectorAll('.tool-status');
+              for (var aj = 0; aj < answeredSpans.length; aj++) answeredSpans[aj].textContent = resolvedStatus;
             }
-          });
-        } else if (msg.decision === 'deny') {
-          document.querySelectorAll('.tool-status').forEach(function(span) {
-            if (span.textContent && span.textContent.includes(__i18n.approvalAwaiting)) {
-              span.textContent = '\\u2717 denied';
-            }
-          });
+          } else {
+            document.querySelectorAll('.tool-status').forEach(function(span) {
+              if (span.textContent && span.textContent.includes(__i18n.approvalAwaiting)) {
+                span.textContent = resolvedStatus;
+              }
+            });
+          }
         }
         setStreamingState(true, __i18n.streaming);
         break;
+      }
 
       case 'userInputRequired': {
         var inputId = msg.inputId;
