@@ -62,6 +62,22 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
   // ── Streaming state helpers ──
   var statusBarEl = document.getElementById('status');
 
+  // Toolbar Agent badge: base label cached on first paint so the count can be
+  // appended/removed without losing the localized "Agent" wording.
+  var agentBadgeEl = document.getElementById('agent-panel-toggle');
+  var agentBadgeBaseLabel = agentBadgeEl ? agentBadgeEl.textContent : '';
+
+  function updateAgentAttentionBadge(total) {
+    if (!agentBadgeEl) return;
+    if (total > 0) {
+      agentBadgeEl.textContent = agentBadgeBaseLabel + ' · ' + total;
+      agentBadgeEl.classList.add('has-attention');
+    } else {
+      agentBadgeEl.textContent = agentBadgeBaseLabel;
+      agentBadgeEl.classList.remove('has-attention');
+    }
+  }
+
   function setStreamingState(streaming, label) {
     if (statusBarEl) {
       if (streaming) {
@@ -382,6 +398,16 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
         window.__wvSidebar.setThreads(msg.threads || []);
         window.__wvSidebar.setShowAllWorkspaces(!!msg.showAllWorkspaces);
         window.__wvSidebar.renderThreads();
+        // Toolbar Agent badge: total pending attention on background threads
+        // (the active view shows its own cards inline, so it is excluded
+        // server-side). Clicking the badge still opens the panel.
+        updateAgentAttentionBadge(msg.attentionTotal || 0);
+        break;
+
+      case 'threadAttention':
+        if (window.__wvSidebar && window.__wvSidebar.showThreadAttention) {
+          window.__wvSidebar.showThreadAttention(msg);
+        }
         break;
 
       case 'sessionLoaded':
@@ -453,6 +479,7 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
       case 'goalState':
         if (window.__wvGoal) {
           window.__wvGoal.setGoal(msg.goal || null);
+          window.__wvGoal.setBackgroundGoals(msg.backgroundGoals || []);
           window.__wvGoal.setEditing(false);
           window.__wvGoal.renderGoal();
         }
@@ -754,6 +781,11 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
 
       case 'approvalResolved':
         document.querySelectorAll('.approval-bar').forEach(function(bar) { bar.remove(); });
+        // Also retire the inline sidebar card for a background thread's
+        // approval (answered without switching) — keyed by approval id.
+        if (window.__wvSidebar && window.__wvSidebar.removeThreadAttentionApproval) {
+          window.__wvSidebar.removeThreadAttentionApproval(msg.approvalId);
+        }
         if (msg.decision === 'allow') {
           document.querySelectorAll('.tool-status').forEach(function(span) {
             if (span.textContent && span.textContent.includes(__i18n.approvalAwaiting)) {
@@ -801,6 +833,11 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
 
       case 'userInputResolved':
         document.querySelectorAll('.user-input-bar').forEach(function(bar) { bar.remove(); });
+        // Also retire the inline sidebar card for a background thread's
+        // input (answered without switching) — keyed by input id.
+        if (window.__wvSidebar && window.__wvSidebar.removeThreadAttentionInput) {
+          window.__wvSidebar.removeThreadAttentionInput(msg.inputId);
+        }
         if (!msg.cancelled) {
           document.querySelectorAll('.tool-status').forEach(function(span) {
             if (span.textContent && span.textContent.includes(__i18n.userInputAwaiting)) {

@@ -162,6 +162,43 @@ describe("webview-js-sidebar.ts", () => {
     expect(script).not.toContain("__wvFormatThreadsCount");
   });
 
+  it("groups the thread rail by attention and run state", () => {
+    const script = getSidebarScript(makeTr());
+    // Grouping authority is the server-typed pending count, never status prose;
+    // "Running" tolerates the server's two turn-status spellings.
+    expect(script).toContain("function threadIsRunning");
+    expect(script).toContain("pending_attention_count");
+    expect(script).toContain("thread-group-header");
+    expect(script).toContain("s === 'in_progress' || s === 'inprogress' || s === 'queued'");
+  });
+
+  it("renders cross-thread attention inline inside the thread card", () => {
+    const script = getSidebarScript(makeTr());
+    expect(script).toContain("thread-attention-count");
+    expect(script).toContain("showThreadAttention: showThreadAttention");
+    expect(script).toContain("thread-attention-approval");
+    expect(script).toContain("thread-attention-input");
+    // Approval ids are global one-shot capabilities; user inputs carry their
+    // thread — both are answerable without switching threads.
+    expect(script).toContain("approvalDecision");
+    expect(script).toContain("userInputSelect");
+    expect(script).toContain("userInputCancel");
+    // Panel clicks must not bubble into the item's loadThread handler.
+    expect(script).toContain("panel.addEventListener('click', function(e) { e.stopPropagation(); })");
+  });
+
+  it("falls back to opening a thread whose card is not in the rail", () => {
+    const script = getSidebarScript(makeTr());
+    // A thread outside the rendered rail (another workspace, or past the
+    // summary limit) has no card to hang the inline panel on — switching to it
+    // is the only way left to reach its approvals.
+    expect(script).toContain("if (msg.threadId && msg.threadId !== activeThreadId)");
+    // Both row removals share one helper.
+    expect(script).toContain("function removeThreadAttentionRow");
+    expect(script).toContain("removeThreadAttentionRow('.thread-attention-approval");
+    expect(script).toContain("removeThreadAttentionRow('.thread-attention-input");
+  });
+
   it("does not render file changes in work panel (TUI design: file changes are shown inline, not in Work sidebar)", () => {
     const script = getSidebarScript(makeTr());
     expect(script).not.toContain("workState.fileChanges");

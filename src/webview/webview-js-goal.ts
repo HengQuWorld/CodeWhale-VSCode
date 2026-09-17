@@ -17,6 +17,10 @@ export function getGoalScript(_tr: WebviewTranslations): string {
   var editorMode = 'create';
   var draftObjective = '';
   var draftBudget = '';
+  var draftBackground = false;
+  // Goals owned by other (background/parked) threads; pushed by the backend
+  // alongside the current thread's goal so the Work panel shows them too.
+  var backgroundGoals = [];
 
   function titleCase(status) {
     if (!status) return 'unknown';
@@ -69,7 +73,11 @@ export function getGoalScript(_tr: WebviewTranslations): string {
     if (!container) return;
     container.innerHTML = '';
 
-    if (editing) { renderEditor(container); return; }
+    if (editing) {
+      renderEditor(container);
+      renderBackgroundGoals(container);
+      return;
+    }
 
     if (!goal) {
       // Compact, not a full-height empty state: this sits at the top of the Work
@@ -82,6 +90,7 @@ export function getGoalScript(_tr: WebviewTranslations): string {
         '<button class="goal-set-btn" type="button"><span class="goal-btn-icon">＋</span>' + __wvEscapeHtml(__i18n.goalSet) + '</button>';
       empty.querySelector('.goal-set-btn').onclick = function() { openEditor('create'); };
       container.appendChild(empty);
+      renderBackgroundGoals(container);
       return;
     }
 
@@ -124,6 +133,11 @@ export function getGoalScript(_tr: WebviewTranslations): string {
     if (goal.thread_id) {
       html += '<button class="goal-action-btn" data-goal-action="open-thread"><span class="goal-btn-icon">🔗</span>' + __wvEscapeHtml(__i18n.taskOpenThread) + '</button>';
     }
+    if (status === 'active') {
+      // A Runtime restart leaves an Active goal parked (no startup sweep);
+      // Resume re-PUTs the goal as the explicit re-arm trigger.
+      html += '<button class="goal-action-btn" data-goal-action="resume" title="' + __wvEscapeHtml(__i18n.goalResume) + '"><span class="goal-btn-icon">▶</span>' + __wvEscapeHtml(__i18n.goalResume) + '</button>';
+    }
     html += '<button class="goal-action-btn" data-goal-action="edit"><span class="goal-btn-icon">✏️</span>' + __wvEscapeHtml(__i18n.goalEdit) + '</button>';
     if (status === 'complete') {
       html += '<button class="goal-action-btn primary" data-goal-action="new"><span class="goal-btn-icon">＋</span>' + __wvEscapeHtml(__i18n.goalSet) + '</button>';
@@ -147,9 +161,63 @@ export function getGoalScript(_tr: WebviewTranslations): string {
         if (action === 'edit') openEditor('edit');
         else if (action === 'new') openEditor('create');
         else if (action === 'open-thread') vscode.postMessage({ type: 'loadThread', threadId: goal.thread_id });
+        else if (action === 'resume') vscode.postMessage({ type: 'resumeGoal' });
         else if (action === 'complete') vscode.postMessage({ type: 'completeGoal' });
         else if (action === 'block') vscode.postMessage({ type: 'blockGoal' });
         else if (action === 'delete') vscode.postMessage({ type: 'deleteGoal' });
+      };
+    });
+
+    renderBackgroundGoals(container);
+  }
+
+  // ── Background goal cards ──
+  // Rendered below the current thread's goal so the Work panel also surfaces
+  // goals running on other threads. Open Thread parks this thread and switches
+  // (the same message the thread rail uses).
+  function renderBackgroundGoals(container) {
+    if (!backgroundGoals || backgroundGoals.length === 0) return;
+    var html = '<div class="goal-bg-section">';
+    html += '<div class="goal-bg-header">' + __wvEscapeHtml(__i18n.goalBackgroundSection) + '</div>';
+    for (var i = 0; i < backgroundGoals.length; i++) {
+      var bg = backgroundGoals[i];
+      var st = bg.status || 'active';
+      // Server payloads name it thread_id; the backend cache re-tags it as
+      // threadId when re-broadcasting — accept either.
+      var tid = bg.thread_id || bg.threadId;
+      html += '<div class="goal-bg-card">';
+      html += '<div class="goal-bg-top">';
+      html += '<span class="fleet-status-icon ' + statusClass(st) + '">' + statusIcon(st) + '</span>';
+      html += '<span class="fleet-status-badge ' + statusClass(st) + '">' + __wvEscapeHtml(titleCase(st)) + '</span>';
+      if (tid) {
+        html += '<span class="goal-bg-thread" title="' + __wvEscapeHtml(tid) + '">' + __wvEscapeHtml(shortId(tid)) + '</span>';
+      }
+      html += '</div>';
+      html += '<div class="goal-bg-objective">' + __wvEscapeHtml(bg.objective || '') + '</div>';
+      html += '<div class="goal-bg-meta">';
+      if (bg.token_budget && bg.token_budget > 0) {
+        html += '<span>🪙 ' + formatNumber(bg.tokens_used) + ' / ' + formatNumber(bg.token_budget) + '</span>';
+      } else if (bg.tokens_used) {
+        html += '<span>🪙 ' + formatNumber(bg.tokens_used) + '</span>';
+      }
+      html += '<span>⏱ ' + __wvEscapeHtml(formatDuration(bg.time_used_seconds)) + '</span>';
+      html += '</div>';
+      if (tid) {
+        html += '<div class="goal-bg-actions">';
+        html += '<button class="goal-action-btn" data-bg-action="open" data-bg-index="' + i + '"><span class="goal-btn-icon">🔗</span>' + __wvEscapeHtml(__i18n.taskOpenThread) + '</button>';
+        html += '</div>';
+      }
+      html += '</div>';
+    }
+    html += '</div>';
+    container.insertAdjacentHTML('beforeend', html);
+    container.querySelectorAll('.goal-action-btn[data-bg-action]').forEach(function(btn) {
+      btn.onclick = function() {
+        var bg = backgroundGoals[parseInt(btn.getAttribute('data-bg-index'), 10)];
+        var tid = bg && (bg.thread_id || bg.threadId);
+        if (tid && btn.getAttribute('data-bg-action') === 'open') {
+          vscode.postMessage({ type: 'loadThread', threadId: tid });
+        }
       };
     });
   }
@@ -160,6 +228,14 @@ export function getGoalScript(_tr: WebviewTranslations): string {
     html += '<div class="goal-editor-title">' + __wvEscapeHtml(isEdit ? __i18n.goalEdit : __i18n.goalSet) + '</div>';
     html += '<textarea class="goal-editor-textarea" placeholder="' + __wvEscapeHtml(__i18n.goalObjectivePlaceholder) + '">' + __wvEscapeHtml(draftObjective) + '</textarea>';
     html += '<div class="goal-editor-budget"><label>' + __wvEscapeHtml(__i18n.goalTokenBudgetLabel) + '</label><input class="goal-editor-input" type="number" min="0" placeholder="0" value="' + __wvEscapeHtml(draftBudget) + '" /></div>';
+    if (!isEdit) {
+      // Only offered on create: a background goal spins up a NEW thread
+      // (inheriting model/mode), so it is not a switch for an existing goal.
+      html += '<div class="goal-editor-bg">';
+      html += '<label class="goal-editor-bg-label"><input class="goal-editor-bg-check" type="checkbox"' + (draftBackground ? ' checked' : '') + ' /><span>' + __wvEscapeHtml(__i18n.goalBackgroundRun) + '</span></label>';
+      html += '<div class="goal-editor-bg-hint">' + __wvEscapeHtml(__i18n.goalBackgroundHint) + '</div>';
+      html += '</div>';
+    }
     html += '<div class="goal-editor-actions">';
     html += '<button class="goal-action-btn" data-goal-editor-action="cancel"><span class="goal-btn-icon">✕</span>' + __wvEscapeHtml(__i18n.cancel) + '</button>';
     html += '<button class="goal-action-btn primary" data-goal-editor-action="save"><span class="goal-btn-icon">✓</span>' + __wvEscapeHtml(isEdit ? __i18n.goalEdit : __i18n.goalSet) + '</button>';
@@ -190,12 +266,14 @@ export function getGoalScript(_tr: WebviewTranslations): string {
         var parsed = parseInt(rawBudget, 10);
         if (!isNaN(parsed)) tokenBudget = parsed;
       }
-      vscode.postMessage({ type: 'setGoal', objective: objective, tokenBudget: tokenBudget });
+      var bgCheck = container.querySelector('.goal-editor-bg-check');
+      vscode.postMessage({ type: 'setGoal', objective: objective, tokenBudget: tokenBudget, background: !!(bgCheck && bgCheck.checked) });
       editing = false;
     }
     function cancel() {
       draftObjective = '';
       draftBudget = '';
+      draftBackground = false;
       editing = false;
       renderGoal();
     }
@@ -213,6 +291,7 @@ export function getGoalScript(_tr: WebviewTranslations): string {
     editing = true;
     draftObjective = (editorMode === 'edit' && goal) ? goal.objective : '';
     draftBudget = (editorMode === 'edit' && goal && goal.token_budget) ? String(goal.token_budget) : '';
+    draftBackground = false;
     renderGoal();
   }
 
@@ -222,6 +301,7 @@ export function getGoalScript(_tr: WebviewTranslations): string {
     setGoal: function(v) { goal = v; },
     getGoal: function() { return goal; },
     setEditing: function(v) { editing = v; },
+    setBackgroundGoals: function(list) { backgroundGoals = Array.isArray(list) ? list : []; },
   };
   })();`;
 }

@@ -54,6 +54,13 @@ export interface WebviewTranslations {
   approvalAwaiting: string;
   noConversations: string;
   threadAttention: string;
+  threadsNeedsYou: string;
+  threadsRunning: string;
+  threadsRecent: string;
+  goalBackgroundRun: string;
+  goalBackgroundHint: string;
+  goalBackgroundSection: string;
+  goalResume: string;
   noTasks: string;
   taskCreate: string;
   taskCreateTitle: string;

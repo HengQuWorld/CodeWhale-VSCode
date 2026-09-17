@@ -317,6 +317,66 @@ export function getWebviewCss(): string {
     .thread-item .turn-status.completed { color: #4caf50; }
     .thread-item .turn-status.failed { color: #f44336; }
     .thread-item .turn-status.in_progress { color: #ff9800; }
+
+    /* Thread rail groups: Needs you / Running / Recent */
+    .thread-group-header {
+      padding: 8px 10px 4px;
+      font-size: 0.72em;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--muted);
+    }
+    .thread-head-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      min-width: 0;
+    }
+    .thread-head-row .thread-title { flex: 1 1 auto; min-width: 0; }
+    .thread-attention-count {
+      flex: 0 0 auto;
+      min-width: 18px;
+      height: 18px;
+      padding: 0 5px;
+      border-radius: 9px;
+      border: none;
+      cursor: pointer;
+      font-size: 0.85em;
+      font-weight: 700;
+      line-height: 18px;
+      text-align: center;
+      color: #fff;
+      background: var(--status-warn, #e2b93d);
+    }
+    .thread-attention-count:hover { filter: brightness(1.15); }
+    /* Inline approval / user-input panel inside a background thread card */
+    .thread-item .thread-attention {
+      margin: 6px 0 2px;
+      padding: 6px 8px;
+      border: 1px solid rgba(226, 185, 61, 0.4);
+      border-radius: 6px;
+      background: rgba(226, 185, 61, 0.08);
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .thread-attention-text { font-size: 0.82em; color: var(--fg); }
+    .thread-attention-buttons { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+    .thread-attention-btn {
+      border: 1px solid rgba(128,128,128,0.3);
+      border-radius: 4px;
+      background: var(--card-bg);
+      color: var(--fg);
+      font: inherit;
+      font-size: 0.8em;
+      padding: 2px 8px;
+      cursor: pointer;
+    }
+    .thread-attention-btn:hover { border-color: var(--accent); }
+    .thread-attention-btn.allow { color: #4caf50; border-color: rgba(76,175,80,0.5); }
+    .thread-attention-btn.deny { color: #f44336; border-color: rgba(244,67,54,0.5); }
+    .thread-attention-btn.cancel { color: var(--muted); }
     .session-workspace {
       color: var(--accent);
       font-size: 0.9em;
@@ -1335,6 +1395,8 @@ export function getWebviewCss(): string {
       border-radius: 3px;
     }
     #toolbar .agent-panel-toggle:hover { color: var(--fg); background: var(--card-bg); }
+    /* Pending cross-thread approvals/inputs badge (needs-you total) */
+    #toolbar .agent-panel-toggle.has-attention { color: var(--status-warn, #e2b93d); font-weight: 600; }
 
     #settings-bar {
       padding: 4px 8px;
@@ -2827,6 +2889,50 @@ export function getWebviewCss(): string {
     .goal-editor-input:focus { outline: none; border-color: var(--accent); }
     .goal-editor-actions { display: flex; justify-content: flex-end; gap: 6px; }
     .goal-btn-icon { margin-right: 4px; }
+    .goal-editor-bg {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      font-size: 0.75em;
+      color: var(--muted);
+    }
+    .goal-editor-bg-label { display: flex; align-items: center; gap: 6px; cursor: pointer; color: var(--fg); }
+    .goal-editor-bg-check { accent-color: var(--accent); }
+    .goal-editor-bg-hint { font-size: 0.92em; color: var(--muted); opacity: 0.85; }
+
+    /* ── Background goal cards (goals on other threads) ── */
+    .goal-bg-section { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
+    .goal-bg-header {
+      font-size: 0.72em;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--muted);
+    }
+    .goal-bg-card {
+      padding: 6px 8px;
+      border: 1px solid rgba(128,128,128,0.2);
+      border-radius: 6px;
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+    .goal-bg-top { display: flex; align-items: center; gap: 6px; }
+    .goal-bg-thread {
+      margin-left: auto;
+      font-size: 0.75em;
+      color: var(--muted);
+      font-family: var(--vscode-editor-font-family, monospace);
+    }
+    .goal-bg-objective {
+      font-size: 0.82em;
+      color: var(--fg);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .goal-bg-meta { display: flex; gap: 8px; font-size: 0.75em; color: var(--muted); }
+    .goal-bg-actions { display: flex; justify-content: flex-end; }
 
     /* ── Fleet run creation dialog ── */
 

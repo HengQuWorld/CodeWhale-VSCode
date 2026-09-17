@@ -388,13 +388,104 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
   }
 
   // ── Render Threads ──
+  // Threads are grouped like the upstream web client's rail: "Needs you"
+  // (pending_attention_count > 0, excluding the active view which shows its
+  // cards inline), "Running" (turn in progress), then "Recent". The server's
+  // typed pending count is the only attention authority — status prose never
+  // participates in the grouping decision.
+  function threadIsRunning(t) {
+    var s = String(t.latest_turn_status || '');
+    return s === 'in_progress' || s === 'inprogress' || s === 'queued';
+  }
+
+  function renderThreadItem(t) {
+    var el = document.createElement('div');
+    el.className = 'thread-item' + (t.id === activeThreadId ? ' active' : '');
+    el.setAttribute('data-thread-id', t.id);
+
+    var headRow = document.createElement('div');
+    headRow.className = 'thread-head-row';
+
+    var titleEl = document.createElement('div');
+    titleEl.className = 'thread-title';
+    titleEl.textContent = t.title || t.id.slice(0, 8);
+    headRow.appendChild(titleEl);
+
+    // Attention badge: a background thread is waiting for an approval or
+    // user input. The active thread already shows its own approval card
+    // inline, so skip it there.
+    var attention = t.pending_attention_count;
+    if (attention && attention > 0 && t.id !== activeThreadId) {
+      el.classList.add('has-attention');
+      el.title = __i18n.threadAttention;
+      var badge = document.createElement('button');
+      badge.className = 'thread-attention-count';
+      badge.type = 'button';
+      badge.title = __i18n.threadAttention;
+      badge.textContent = String(attention);
+      (function(threadId) {
+        badge.addEventListener('click', function(e) {
+          e.stopPropagation();
+          vscode.postMessage({ type: 'showThreadAttention', threadId: threadId });
+        });
+      })(t.id);
+      headRow.appendChild(badge);
+    }
+
+    el.appendChild(headRow);
+
+    if (t.preview) {
+      var previewEl = document.createElement('div');
+      previewEl.className = 'thread-preview';
+      previewEl.textContent = t.preview;
+      el.appendChild(previewEl);
+    }
+
+    var metaEl = document.createElement('div');
+    metaEl.className = 'thread-meta';
+
+    if (t.latest_turn_status) {
+      var statusEl = document.createElement('span');
+      statusEl.className = 'turn-status ' + t.latest_turn_status;
+      statusEl.textContent = t.latest_turn_status;
+      metaEl.appendChild(statusEl);
+    }
+
+    var modeEl = document.createElement('span');
+    modeEl.textContent = t.mode || '';
+    metaEl.appendChild(modeEl);
+
+    if (t.updated_at) {
+      var timeEl = document.createElement('span');
+      timeEl.textContent = __wvFormatRelativeTime(t.updated_at);
+      metaEl.appendChild(timeEl);
+    }
+
+    el.appendChild(metaEl);
+
+    (function(threadId) {
+      el.addEventListener('click', function() {
+        vscode.postMessage({ type: 'loadThread', threadId: threadId });
+      });
+    })(t.id);
+
+    return el;
+  }
+
+  function renderThreadGroupHeader(label) {
+    var header = document.createElement('div');
+    header.className = 'thread-group-header';
+    header.textContent = label;
+    return header;
+  }
+
   function renderThreads() {
     var container = document.getElementById('tab-threads-list');
     if (!container) return;
     var count = threads.length;
 
     // Preserve the hint header; remove only thread items and the empty placeholder.
-    var existing = container.querySelectorAll('.thread-item, .work-empty');
+    var existing = container.querySelectorAll('.thread-item, .work-empty, .thread-group-header');
     for (var r = 0; r < existing.length; r++) {
       existing[r].remove();
     }
@@ -407,62 +498,156 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
       return;
     }
 
+    var needsYou = [], running = [], recent = [];
     for (var i = 0; i < threads.length; i++) {
       var t = threads[i];
-      var el = document.createElement('div');
-      el.className = 'thread-item' + (t.id === activeThreadId ? ' active' : '');
-
-      // Attention badge: a background thread (e.g. a goal loop) is waiting
-      // for an approval or user input. The active thread already shows its
-      // own approval card inline, so skip it there.
-      var attention = t.pending_attention_count;
-      if (attention && attention > 0 && t.id !== activeThreadId) {
-        el.classList.add('has-attention');
-        el.title = __i18n.threadAttention;
-      }
-
-      var titleEl = document.createElement('div');
-      titleEl.className = 'thread-title';
-      titleEl.textContent = t.title || t.id.slice(0, 8);
-      el.appendChild(titleEl);
-
-      if (t.preview) {
-        var previewEl = document.createElement('div');
-        previewEl.className = 'thread-preview';
-        previewEl.textContent = t.preview;
-        el.appendChild(previewEl);
-      }
-
-      var metaEl = document.createElement('div');
-      metaEl.className = 'thread-meta';
-
-      if (t.latest_turn_status) {
-        var statusEl = document.createElement('span');
-        statusEl.className = 'turn-status ' + t.latest_turn_status;
-        statusEl.textContent = t.latest_turn_status;
-        metaEl.appendChild(statusEl);
-      }
-
-      var modeEl = document.createElement('span');
-      modeEl.textContent = t.mode || '';
-      metaEl.appendChild(modeEl);
-
-      if (t.updated_at) {
-        var timeEl = document.createElement('span');
-        timeEl.textContent = __wvFormatRelativeTime(t.updated_at);
-        metaEl.appendChild(timeEl);
-      }
-
-      el.appendChild(metaEl);
-
-      (function(threadId) {
-        el.addEventListener('click', function() {
-          vscode.postMessage({ type: 'loadThread', threadId: threadId });
-        });
-      })(t.id);
-
-      container.appendChild(el);
+      var attention = (t.pending_attention_count || 0) > 0 && t.id !== activeThreadId;
+      if (attention) needsYou.push(t);
+      else if (threadIsRunning(t)) running.push(t);
+      else recent.push(t);
     }
+
+    var groups = [
+      { label: __i18n.threadsNeedsYou, items: needsYou },
+      { label: __i18n.threadsRunning, items: running },
+      { label: __i18n.threadsRecent, items: recent },
+    ];
+    for (var g = 0; g < groups.length; g++) {
+      if (groups[g].items.length === 0) continue;
+      container.appendChild(renderThreadGroupHeader(groups[g].label));
+      for (var j = 0; j < groups[g].items.length; j++) {
+        container.appendChild(renderThreadItem(groups[g].items[j]));
+      }
+    }
+  }
+
+  // ── Inline background-thread attention ──
+  // Renders a background thread's pending approvals / user inputs inside its
+  // thread card so they can be answered without switching. Buttons reuse the
+  // approvalDecision / userInputSelect / userInputCancel messages; approval
+  // ids are global one-shot capabilities and user inputs name their thread,
+  // so both are answerable cross-thread.
+  function showThreadAttention(msg) {
+    var container = document.getElementById('tab-threads-list');
+    if (!container) return;
+    var item = container.querySelector('.thread-item[data-thread-id="' + (msg.threadId || '') + '"]');
+    if (!item) {
+      // The card is not in the rendered rail (another workspace, or past the
+      // summary limit). Switching to the thread is the only way left to reach
+      // its approvals, so fall back to opening it rather than doing nothing.
+      if (msg.threadId && msg.threadId !== activeThreadId) {
+        vscode.postMessage({ type: 'loadThread', threadId: msg.threadId });
+      }
+      return;
+    }
+
+    var existingPanel = item.querySelector('.thread-attention');
+    if (existingPanel) existingPanel.remove();
+
+    var approvals = msg.approvals || [];
+    var inputs = msg.inputs || [];
+    if (approvals.length === 0 && inputs.length === 0) return;
+
+    var panel = document.createElement('div');
+    panel.className = 'thread-attention';
+    // Clicks on the panel must not bubble to the thread item's own click
+    // handler (which switches threads).
+    panel.addEventListener('click', function(e) { e.stopPropagation(); });
+
+    for (var a = 0; a < approvals.length; a++) {
+      var approval = approvals[a];
+      var row = document.createElement('div');
+      row.className = 'thread-attention-approval';
+      row.setAttribute('data-approval-id', approval.id || '');
+      row.innerHTML =
+        '<div class="thread-attention-text"><strong>' + __wvEscapeHtml(approval.tool_name || 'tool') + '</strong> ' +
+        __wvEscapeHtml(approval.description || approval.intent_summary || '') + '</div>';
+      var btns = document.createElement('div');
+      btns.className = 'thread-attention-buttons';
+      (function(approvalId) {
+        var allow = document.createElement('button');
+        allow.className = 'thread-attention-btn allow';
+        allow.type = 'button';
+        allow.textContent = __i18n.allow;
+        allow.addEventListener('click', function(e) { e.stopPropagation(); vscode.postMessage({ type: 'approvalDecision', approvalId: approvalId, decision: 'allow', remember: false }); });
+        var deny = document.createElement('button');
+        deny.className = 'thread-attention-btn deny';
+        deny.type = 'button';
+        deny.textContent = __i18n.deny;
+        deny.addEventListener('click', function(e) { e.stopPropagation(); vscode.postMessage({ type: 'approvalDecision', approvalId: approvalId, decision: 'deny', remember: false }); });
+        btns.appendChild(allow);
+        btns.appendChild(deny);
+      })(approval.id || '');
+      row.appendChild(btns);
+      panel.appendChild(row);
+    }
+
+    for (var u = 0; u < inputs.length; u++) {
+      var pending = inputs[u];
+      var questions = pending.request && Array.isArray(pending.request.questions) ? pending.request.questions : [];
+      var inputRow = document.createElement('div');
+      inputRow.className = 'thread-attention-input';
+      inputRow.setAttribute('data-input-id', pending.id || '');
+      for (var q = 0; q < questions.length; q++) {
+        var question = questions[q];
+        var qEl = document.createElement('div');
+        qEl.className = 'thread-attention-question';
+        qEl.innerHTML = '<div class="thread-attention-text"><strong>' + __wvEscapeHtml(question.header || '') + '</strong> ' + __wvEscapeHtml(question.question || '') + '</div>';
+        var opts = document.createElement('div');
+        opts.className = 'thread-attention-buttons';
+        for (var o = 0; o < (question.options || []).length; o++) {
+          (function(inputId, questionId, optIdx, optLabel) {
+            var btn = document.createElement('button');
+            btn.className = 'thread-attention-btn';
+            btn.type = 'button';
+            btn.textContent = optLabel.label;
+            btn.title = optLabel.description || '';
+            btn.addEventListener('click', function(e) {
+              e.stopPropagation();
+              vscode.postMessage({ type: 'userInputSelect', inputId: inputId, questionId: questionId, optionIdx: optIdx, optionLabel: optLabel.label });
+            });
+            opts.appendChild(btn);
+          })(pending.id || '', question.id, o, question.options[o]);
+        }
+        qEl.appendChild(opts);
+        inputRow.appendChild(qEl);
+      }
+      (function(inputId) {
+        var cancel = document.createElement('button');
+        cancel.className = 'thread-attention-btn cancel';
+        cancel.type = 'button';
+        cancel.textContent = __i18n.cancel;
+        cancel.addEventListener('click', function(e) { e.stopPropagation(); vscode.postMessage({ type: 'userInputCancel', inputId: inputId }); });
+        inputRow.appendChild(cancel);
+      })(pending.id || '');
+      panel.appendChild(inputRow);
+    }
+
+    item.appendChild(panel);
+  }
+
+  /** Remove one inline attention row, plus any panel it leaves empty. */
+  function removeThreadAttentionRow(rowSelector) {
+    var container = document.getElementById('tab-threads-list');
+    if (!container) return;
+    var row = container.querySelector(rowSelector);
+    if (row) row.remove();
+    var panels = container.querySelectorAll('.thread-attention');
+    for (var i = 0; i < panels.length; i++) {
+      if (!panels[i].querySelector('.thread-attention-approval, .thread-attention-input')) {
+        panels[i].remove();
+      }
+    }
+  }
+
+  function removeThreadAttentionApproval(approvalId) {
+    if (!approvalId) return;
+    removeThreadAttentionRow('.thread-attention-approval[data-approval-id="' + approvalId + '"]');
+  }
+
+  function removeThreadAttentionInput(inputId) {
+    if (!inputId) return;
+    removeThreadAttentionRow('.thread-attention-input[data-input-id="' + inputId + '"]');
   }
 
   // ── Switch Sidebar Tab ──
@@ -1322,6 +1507,9 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
   window.__wvSidebar = {
     renderSessions: renderSessions,
     renderThreads: renderThreads,
+    showThreadAttention: showThreadAttention,
+    removeThreadAttentionApproval: removeThreadAttentionApproval,
+    removeThreadAttentionInput: removeThreadAttentionInput,
     renderTasks: renderTasks,
     renderAgents: renderAgents,
     renderWork: renderWork,
