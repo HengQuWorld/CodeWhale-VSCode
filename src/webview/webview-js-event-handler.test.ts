@@ -60,6 +60,14 @@ describe("webview-js-event-handler.ts", () => {
     expect(script).toContain("case 'threadList'");
   });
 
+  it("drives the rail's fetch status from 'threadListLoading'", () => {
+    const script = getEventHandlerScript(makeTr());
+    expect(script).toContain("case 'threadListLoading'");
+    expect(script).toContain("renderThreadListStatus");
+    // failed wins over loading, and a resolved fetch clears the row.
+    expect(script).toContain("msg.failed ? 'failed' : (msg.loading ? 'loading' : null)");
+  });
+
   it("handles 'taskList' message type", () => {
     const script = getEventHandlerScript(makeTr());
     expect(script).toContain("case 'taskList'");

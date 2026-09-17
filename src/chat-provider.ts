@@ -187,8 +187,48 @@ interface BackgroundThreadState {
   notifiedAttention: boolean;
 }
 
+/** Socket-level failures that mean "the engine is not there right now".
+ *  A webview reload relaunches the Runtime on a fresh port, so a request
+ *  issued in that window hits a dead listener and is worth one retry. */
+const TRANSIENT_SOCKET_CODES = new Set([
+  "ECONNREFUSED",
+  "ECONNRESET",
+  "EPIPE",
+  "EHOSTUNREACH",
+  "ENETUNREACH",
+]);
+
+/**
+ * Whether a failed thread-list fetch is worth retrying.
+ *
+ * A timeout is not transient here: `GET /v1/threads/summary` builds every row
+ * from a full thread-detail read, so it legitimately takes seconds-per-thread
+ * and a second attempt would just spend the same time again. A refused or
+ * reset connection is transient, because the engine is coming back.
+ */
+function isTransientFetchError(err: unknown): boolean {
+  if (err instanceof Error && err.message.startsWith("Request timed out")) return false;
+  const code = (err as NodeJS.ErrnoException | null | undefined)?.code;
+  return typeof code === "string" && TRANSIENT_SOCKET_CODES.has(code);
+}
+
 export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandContext {
   public static readonly viewType = "brotherwhale.chat";
+
+  /**
+   * Socket timeout for `GET /v1/threads/summary`.
+   *
+   * The runtime builds every summary row from a full thread-detail read, so
+   * this endpoint costs roughly a quarter-second per thread (25.4s at 72
+   * threads, 189MB store, measured 2026-09-17). It needs real headroom over
+   * that — the point of this constant is that the timeout should not be the
+   * thing that breaks the rail.
+   */
+  private static readonly THREAD_SUMMARY_TIMEOUT_MS = 60_000;
+
+  /** Fetch attempts per refresh. Only a transient (connection-level) failure
+   *  is retried inside `fetchThreadSummaries`; a timeout is not. */
+  private static readonly THREAD_LIST_ATTEMPTS = 2;
 
   private view?: vscode.WebviewView;
   public readonly api: CodeWhaleApiClient;
@@ -212,6 +252,10 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
   private tuiWorkspace: string | null = null;
   /** Monotonic task-list refresh token used to drop stale async enrichment results. */
   private taskListRefreshToken: number = 0;
+  /** Monotonic thread-list refresh token. The summary endpoint takes ~25s on a
+   *  large store, so overlapping refreshes (sidebar opens, watcher errors) do
+   *  finish out of order and a stale list must not clobber a newer one. */
+  private threadListRefreshToken: number = 0;
   private runtimeVersion: string | null = null;
   /** Cached provider list from `GET /v1/providers`. Refreshed on init and
    * after the active provider changes so the webview picker stays in sync. */
@@ -477,6 +521,11 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
           void this.refreshFleetRuns();
           void this.refreshGoal();
         }
+        break;
+      case "retryThreadList":
+        // The rail's manual retry after a failed fetch. Unlike the automatic
+        // refreshes this one is the user asking, so it always runs.
+        await this.refreshThreadList();
         break;
       case "openDiff":
         this.handleOpenDiff(msg.filePath as string, msg.diff as string | undefined, msg.changeIndex as number | undefined);
@@ -2116,25 +2165,74 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
    *  watcher reconciliation (threads with running turns / pending attention
    *  get a lightweight SSE stream) and the toolbar Agent badge total. */
   private async refreshThreadList(): Promise<void> {
-    try {
-      const threads = await this.api.listThreadsSummary({ limit: 100 });
-      this.threadTitles.clear();
-      let attentionTotal = 0;
-      const currentId = this.currentThread?.id;
-      for (const s of threads) {
-        if (s.title) this.threadTitles.set(s.id, s.title);
-        if (s.id !== currentId) attentionTotal += s.pending_attention_count || 0;
-      }
-      this.syncBackgroundWatchers(threads);
-      this.postMessage({
-        type: "threadList",
-        threads,
-        showAllWorkspaces: this.showAllWorkspaces,
-        attentionTotal,
-      });
-    } catch {
-      // best-effort, silent fail
+    const token = ++this.threadListRefreshToken;
+    // The fetch below takes seconds-to-tens-of-seconds on a large store. A
+    // silent wait behind an empty rail reads as "you have no threads", so the
+    // rail is told a fetch is in flight and can say so.
+    this.postMessage({ type: "threadListLoading", loading: true });
+
+    const threads = await this.fetchThreadSummaries(token);
+    // A newer refresh owns the rail now; let it publish instead.
+    if (token !== this.threadListRefreshToken) return;
+    if (threads === null) {
+      // Never fail to silence again: an unexplained empty rail is
+      // indistinguishable from a dead panel. The rail offers a manual retry.
+      this.postMessage({ type: "threadListLoading", loading: false, failed: true });
+      return;
     }
+
+    this.threadTitles.clear();
+    let attentionTotal = 0;
+    const currentId = this.currentThread?.id;
+    for (const s of threads) {
+      if (s.title) this.threadTitles.set(s.id, s.title);
+      if (s.id !== currentId) attentionTotal += s.pending_attention_count || 0;
+    }
+    try {
+      this.syncBackgroundWatchers(threads);
+    } catch (err) {
+      // A watcher problem must not cost the user the list itself, which is
+      // exactly what the shared silent catch used to do.
+      this.debugLog(`syncBackgroundWatchers failed: ${getErrorMessage(err)}`);
+    }
+    this.postMessage({
+      type: "threadList",
+      threads,
+      showAllWorkspaces: this.showAllWorkspaces,
+      attentionTotal,
+    });
+  }
+
+  /**
+   * Fetch the thread summaries for one refresh.
+   *
+   * Returns `null` when the fetch failed after its one transient retry, or
+   * when a newer refresh superseded this one (the caller distinguishes the two
+   * by the token). The per-call timeout is deliberately not the client default:
+   * `GET /v1/threads/summary` cost 25.4s against a 72-thread / 189MB store
+   * (measured 2026-09-17), which sat inside a 30s default and crossed it as
+   * soon as a turn was writing to the store.
+   */
+  private async fetchThreadSummaries(token: number): Promise<ThreadSummary[] | null> {
+    let lastError: unknown = null;
+    for (let attempt = 1; attempt <= ChatProvider.THREAD_LIST_ATTEMPTS; attempt++) {
+      try {
+        return await this.api.listThreadsSummary({
+          limit: 100,
+          timeoutMs: ChatProvider.THREAD_SUMMARY_TIMEOUT_MS,
+        });
+      } catch (err) {
+        lastError = err;
+        if (token !== this.threadListRefreshToken) return null;
+        if (attempt >= ChatProvider.THREAD_LIST_ATTEMPTS || !isTransientFetchError(err)) break;
+        // The engine is mid-restart; give it the same moment the next health
+        // probe waits for before asking again.
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        if (token !== this.threadListRefreshToken) return null;
+      }
+    }
+    this.debugLog(`refreshThreadList failed: ${getErrorMessage(lastError)}`);
+    return null;
   }
 
   /** Delete a session with confirmation dialog */

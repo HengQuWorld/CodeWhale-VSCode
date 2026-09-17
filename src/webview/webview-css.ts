@@ -319,6 +319,47 @@ export function getWebviewCss(): string {
       letter-spacing: 0.04em;
       color: var(--muted);
     }
+    /* Fetch status for the thread rail. The summary call behind it can take
+       tens of seconds on a large store, so the rail says what it is doing
+       instead of presenting an empty list as the whole truth. */
+    .thread-list-status {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 10px;
+      font-size: 0.8em;
+      color: var(--muted);
+    }
+    .thread-list-status.failed { color: var(--status-warn, #e2b93d); }
+    .thread-list-status-text {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .thread-list-spinner {
+      flex: 0 0 auto;
+      width: 10px;
+      height: 10px;
+      border: 2px solid var(--muted);
+      border-top-color: transparent;
+      border-radius: 50%;
+      animation: thread-list-spin 0.8s linear infinite;
+    }
+    @keyframes thread-list-spin {
+      to { transform: rotate(360deg); }
+    }
+    .thread-list-retry {
+      flex: 0 0 auto;
+      margin-left: auto;
+      padding: 2px 8px;
+      font-size: 0.95em;
+      color: var(--fg);
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    .thread-list-retry:hover { background: var(--brand-primary); color: white; }
     .thread-head-row {
       display: flex;
       align-items: center;

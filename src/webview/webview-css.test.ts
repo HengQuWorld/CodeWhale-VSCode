@@ -119,6 +119,13 @@ describe("webview-css.ts", () => {
     expect(css).toContain(".work-section");
   });
 
+  it("styles the thread rail's fetch status", () => {
+    const css = getWebviewCss();
+    expect(css).toContain(".thread-list-status");
+    expect(css).toContain(".thread-list-spinner");
+    expect(css).toContain(".thread-list-retry");
+  });
+
   it("contains input and attachment styles", () => {
     const css = getWebviewCss();
     expect(css).toContain(".attachment-chip");

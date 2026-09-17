@@ -479,13 +479,74 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
     return header;
   }
 
+  // ── Thread rail fetch status ──
+  // The summary fetch behind this rail costs roughly a quarter-second per
+  // thread on the runtime, so an empty rail is normally "still loading", not
+  // "you have no threads". Say which one it is, and when the fetch failed say
+  // that too instead of leaving the rail blank.
+  function renderThreadListStatus(kind) {
+    var container = document.getElementById('tab-threads-list');
+    if (!container) return;
+    var stale = container.querySelectorAll('.thread-list-status');
+    for (var s = 0; s < stale.length; s++) {
+      stale[s].remove();
+    }
+    // Any other value is a clear: the caller has real content to show instead.
+    if (kind !== 'loading' && kind !== 'failed') return;
+    // A populated rail already answers the question, so a refresh behind it is
+    // invisible on purpose — a spinner under the list on every panel open would
+    // be noise. The empty rail is the case that misleads.
+    if (kind === 'loading' && container.querySelectorAll('.thread-item').length > 0) {
+      return;
+    }
+    // While a fetch is in flight, "no conversations yet" is a guess, not a fact.
+    if (kind === 'loading') {
+      var guesses = container.querySelectorAll('.work-empty');
+      for (var g = 0; g < guesses.length; g++) {
+        guesses[g].remove();
+      }
+    }
+
+    var el = document.createElement('div');
+    el.className = 'thread-list-status ' + kind;
+
+    if (kind === 'failed') {
+      var failedText = document.createElement('span');
+      failedText.className = 'thread-list-status-text';
+      failedText.textContent = __i18n.threadsLoadFailed;
+      el.appendChild(failedText);
+
+      var retry = document.createElement('button');
+      retry.className = 'thread-list-retry';
+      retry.type = 'button';
+      retry.textContent = __i18n.threadsRetry;
+      retry.addEventListener('click', function(e) {
+        e.stopPropagation();
+        vscode.postMessage({ type: 'retryThreadList' });
+      });
+      el.appendChild(retry);
+    } else {
+      var spinner = document.createElement('span');
+      spinner.className = 'thread-list-spinner';
+      el.appendChild(spinner);
+
+      var loadingText = document.createElement('span');
+      loadingText.className = 'thread-list-status-text';
+      loadingText.textContent = __i18n.threadsLoading;
+      el.appendChild(loadingText);
+    }
+
+    container.appendChild(el);
+  }
+
   function renderThreads() {
     var container = document.getElementById('tab-threads-list');
     if (!container) return;
     var count = threads.length;
 
-    // Preserve the hint header; remove only thread items and the empty placeholder.
-    var existing = container.querySelectorAll('.thread-item, .work-empty, .thread-group-header');
+    // Preserve the hint header; remove only thread items, the fetch status and
+    // the empty placeholder.
+    var existing = container.querySelectorAll('.thread-item, .work-empty, .thread-group-header, .thread-list-status');
     for (var r = 0; r < existing.length; r++) {
       existing[r].remove();
     }
@@ -1507,6 +1568,7 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
   window.__wvSidebar = {
     renderSessions: renderSessions,
     renderThreads: renderThreads,
+    renderThreadListStatus: renderThreadListStatus,
     showThreadAttention: showThreadAttention,
     removeThreadAttentionApproval: removeThreadAttentionApproval,
     removeThreadAttentionInput: removeThreadAttentionInput,

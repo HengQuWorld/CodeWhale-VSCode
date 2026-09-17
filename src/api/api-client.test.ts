@@ -944,3 +944,4 @@ describe("CodeWhaleApiClient - per-file revert", () => {
     expect(result.snapshot_label).toBe("tool:call_abc123");
   });
 });
+

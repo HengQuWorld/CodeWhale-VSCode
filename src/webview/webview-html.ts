@@ -57,6 +57,9 @@ export interface WebviewTranslations {
   threadsNeedsYou: string;
   threadsRunning: string;
   threadsRecent: string;
+  threadsLoading: string;
+  threadsLoadFailed: string;
+  threadsRetry: string;
   goalBackgroundRun: string;
   goalBackgroundHint: string;
   goalBackgroundSection: string;

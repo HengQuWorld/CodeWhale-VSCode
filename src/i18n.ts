@@ -36,6 +36,11 @@ interface Translations {
   threadsNeedsYou: string;
   threadsRunning: string;
   threadsRecent: string;
+  /** Rail status while `GET /v1/threads/summary` is in flight. */
+  threadsLoading: string;
+  /** Rail status when that fetch failed and the user can retry. */
+  threadsLoadFailed: string;
+  threadsRetry: string;
   turnContinuesInBackground: string;
   backgroundAttentionNotification: string;
   backgroundAttentionOpen: string;
@@ -396,6 +401,7 @@ const en: Translations = {
   userInputRequired: "Input required",
   userInputAwaiting: "⏳ Awaiting your input...",
   noConversations: "No conversations yet", threadAttention: "Waiting for your approval or input — click to open", threadsNeedsYou: "Needs you", threadsRunning: "Running", threadsRecent: "Recent",
+  threadsLoading: "Loading threads…", threadsLoadFailed: "Couldn't load the thread list", threadsRetry: "Retry",
   turnContinuesInBackground: "Turn continues running in the background",
   backgroundAttentionNotification: "Thread \"{title}\" is waiting for your approval or input", backgroundAttentionOpen: "Open",
   backgroundGoalStarted: "Background goal started on its own thread — it keeps running while you work elsewhere.",
@@ -728,6 +734,7 @@ const zhCn: Translations = {
   userInputRequired: "需要输入",
   userInputAwaiting: "⏳ 等待您的输入...",
   noConversations: "暂无会话", threadAttention: "等待你的审批或输入——点击打开", threadsNeedsYou: "等你处理", threadsRunning: "运行中", threadsRecent: "最近",
+  threadsLoading: "正在加载线程…", threadsLoadFailed: "线程列表加载失败", threadsRetry: "重试",
   turnContinuesInBackground: "回合将在后台继续运行",
   backgroundAttentionNotification: "线程「{title}」正在等待你的审批或输入", backgroundAttentionOpen: "打开",
   backgroundGoalStarted: "后台目标已在独立线程启动——你在别处工作时它会持续运行。",
@@ -1105,6 +1112,9 @@ export function webviewTranslations(tr: Translations) {
     threadsNeedsYou: tr.threadsNeedsYou,
     threadsRunning: tr.threadsRunning,
     threadsRecent: tr.threadsRecent,
+    threadsLoading: tr.threadsLoading,
+    threadsLoadFailed: tr.threadsLoadFailed,
+    threadsRetry: tr.threadsRetry,
     goalBackgroundRun: tr.goalBackgroundRun,
     goalBackgroundHint: tr.goalBackgroundHint,
     goalBackgroundSection: tr.goalBackgroundSection,

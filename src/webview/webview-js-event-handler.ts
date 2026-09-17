@@ -466,6 +466,17 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
         updateAgentAttentionBadge(msg.attentionTotal || 0);
         break;
 
+      case 'threadListLoading':
+        // The summary fetch is the slow part of the rail (seconds, not
+        // milliseconds), so the rail shows what it is doing instead of an
+        // empty list that reads as "no threads".
+        if (window.__wvSidebar && window.__wvSidebar.renderThreadListStatus) {
+          window.__wvSidebar.renderThreadListStatus(
+            msg.failed ? 'failed' : (msg.loading ? 'loading' : null),
+          );
+        }
+        break;
+
       case 'threadAttention':
         if (window.__wvSidebar && window.__wvSidebar.showThreadAttention) {
           window.__wvSidebar.showThreadAttention(msg);

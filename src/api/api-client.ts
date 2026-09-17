@@ -69,6 +69,14 @@ import type {
   RevertThreadFileResponse,
 } from "../types";
 
+/**
+ * Per-request socket timeout for Runtime API calls. Sized for the ordinary
+ * local endpoints, which answer in milliseconds; the few endpoints that are
+ * genuinely expensive (thread summaries) pass their own `timeoutMs` instead
+ * of raising this floor for everyone.
+ */
+const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
+
 // Re-export types for backward compatibility
 export type {
   ThreadRecord,
@@ -251,15 +259,27 @@ export class CodeWhaleApiClient {
     return (await this.get(`/v1/threads${qs}`)) as ThreadRecord[];
   }
 
+  /**
+   * `GET /v1/threads/summary`
+   *
+   * The runtime builds every row from a full thread-detail read
+   * (`get_thread_detail` per thread, a whole-store turns+items walk), so this
+   * is the one listing whose cost is seconds-per-thread: ~25s for 72 threads
+   * against a 189MB store, measured 2026-09-17. It therefore takes its own
+   * timeout rather than the 30s default, because a store busy with a running
+   * turn used to push it past that default and the rail went blank.
+   */
   async listThreadsSummary(opts?: {
     limit?: number;
     search?: string;
+    /** Overrides `DEFAULT_REQUEST_TIMEOUT_MS` for this call. */
+    timeoutMs?: number;
   }): Promise<ThreadSummary[]> {
     const params = new URLSearchParams();
     if (opts?.limit) params.set("limit", String(opts.limit));
     if (opts?.search) params.set("search", opts.search);
     const qs = params.toString() ? `?${params.toString()}` : "";
-    return (await this.get(`/v1/threads/summary${qs}`)) as ThreadSummary[];
+    return (await this.get(`/v1/threads/summary${qs}`, opts?.timeoutMs)) as ThreadSummary[];
   }
 
   async getThread(threadId: string): Promise<ThreadRecord> {
@@ -1040,8 +1060,8 @@ export class CodeWhaleApiClient {
 
   // ── HTTP helpers ──
 
-  private async get(path: string): Promise<unknown> {
-    return this.request("GET", path, undefined);
+  private async get(path: string, timeoutMs?: number): Promise<unknown> {
+    return this.request("GET", path, undefined, timeoutMs);
   }
 
   private async post(path: string, body: unknown): Promise<unknown> {
@@ -1076,9 +1096,10 @@ export class CodeWhaleApiClient {
   private request(
     method: string,
     path: string,
-    body: unknown
+    body: unknown,
+    timeoutMs?: number
   ): Promise<unknown> {
-    return this.requestRaw(method, path, body).then(({ statusCode, data }) => {
+    return this.requestRaw(method, path, body, timeoutMs).then(({ statusCode, data }) => {
       if (statusCode >= 400) {
         throw new Error(`API error ${statusCode}: ${extractApiErrorMessage(data)}`);
       }
@@ -1093,7 +1114,8 @@ export class CodeWhaleApiClient {
   private requestRaw(
     method: string,
     path: string,
-    body: unknown
+    body: unknown,
+    timeoutMs: number = DEFAULT_REQUEST_TIMEOUT_MS
   ): Promise<{ statusCode: number; data: string }> {
     return new Promise((resolve, reject) => {
       const url = new URL(path, this.baseUrl);
@@ -1125,8 +1147,8 @@ export class CodeWhaleApiClient {
       );
 
       req.on("error", reject);
-      req.setTimeout(30000, () => {
-        req.destroy(new Error("Request timed out (30s)"));
+      req.setTimeout(timeoutMs, () => {
+        req.destroy(new Error(`Request timed out (${timeoutMs}ms)`));
       });
       if (payload) {
         req.write(payload);
