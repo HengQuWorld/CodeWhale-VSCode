@@ -277,7 +277,7 @@ Project layout: `src/extension.ts` (entry) → `src/chat-provider.ts` (orchestra
 
 Thanks to everyone who has improved this extension through pull requests:
 
-- **[@eoli](https://github.com/eoli)** — [#9](https://github.com/HengQuWorld/CodeWhale-VSCode/pull/9) restored the sidebar resize handle with a hardened drag, redesigned the composer with a bottom toolbar, and moved the settings entry to the sidebar title-bar gear (after iterations in #4–#8); [#10](https://github.com/HengQuWorld/CodeWhale-VSCode/pull/10) added the sidebar **Activity** tab and per-tab hints, and gave the panel an agent status label and a close button
+- **[@eoli](https://github.com/eoli)** — [#9](https://github.com/HengQuWorld/CodeWhale-VSCode/pull/9) restored the sidebar resize handle with a hardened drag, redesigned the composer with a bottom toolbar, and moved the settings entry to the sidebar title-bar gear (after iterations in #4–#8); [#10](https://github.com/HengQuWorld/CodeWhale-VSCode/pull/10) added the sidebar **Activity** tab and per-tab hints, and gave the panel an agent status label and a close button; [#11](https://github.com/HengQuWorld/CodeWhale-VSCode/pull/11) added the floating approval panel with tool input details, the thinking tail preview with tool blocks clipped by default, and removed smooth scrolling so programmatic scrolls land reliably
 - **[@Hmbown](https://github.com/Hmbown)** — [#2](https://github.com/HengQuWorld/CodeWhale-VSCode/pull/2) made each window own and authenticate its Runtime, and guarded per-file restore
 
 ## License

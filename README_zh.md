@@ -279,7 +279,7 @@ npx @vscode/vsce package --no-dependencies   # 打包 VSIX
 
 感谢通过 Pull Request 改进本扩展的每一位贡献者：
 
-- **[@eoli](https://github.com/eoli)** —— [#9](https://github.com/HengQuWorld/CodeWhale-VSCode/pull/9) 恢复并加固了侧边栏拖拽手柄、把输入区重构为带底栏的输入框、并将设置入口迁移到侧边栏标题栏齿轮（历经 #4–#8 数轮迭代）；[#10](https://github.com/HengQuWorld/CodeWhale-VSCode/pull/10) 新增侧边栏 **Activity** 标签页与各标签说明文字，并为其加上智能体状态标签与关闭按钮
+- **[@eoli](https://github.com/eoli)** —— [#9](https://github.com/HengQuWorld/CodeWhale-VSCode/pull/9) 恢复并加固了侧边栏拖拽手柄、把输入区重构为带底栏的输入框、并将设置入口迁移到侧边栏标题栏齿轮（历经 #4–#8 数轮迭代）；[#10](https://github.com/HengQuWorld/CodeWhale-VSCode/pull/10) 新增侧边栏 **Activity** 标签页与各标签说明文字，并为其加上智能体状态标签与关闭按钮；[#11](https://github.com/HengQuWorld/CodeWhale-VSCode/pull/11) 新增带工具输入明细的悬浮审批面板、thinking 尾部预览与默认裁剪的工具块，并移除 smooth scrolling 让程序化滚动可靠落位
 - **[@Hmbown](https://github.com/Hmbown)** —— [#2](https://github.com/HengQuWorld/CodeWhale-VSCode/pull/2) 让每个窗口独立持有并认证自己的 Runtime，并为按文件恢复加了防护
 
 ## 许可证
