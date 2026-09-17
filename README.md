@@ -270,6 +270,13 @@ Project layout: `src/extension.ts` (entry) → `src/chat-provider.ts` (orchestra
 
 - **[CodeWhale](https://github.com/Hmbown/CodeWhale)** — the open-source coding agent this extension fronts. Engine docs, releases, and provider setup live there.
 
+## Contributors
+
+Thanks to everyone who has improved this extension through pull requests:
+
+- **[@eoli](https://github.com/eoli)** — [#9](https://github.com/HengQuWorld/CodeWhale-VSCode/pull/9) restored the sidebar resize handle with a hardened drag, redesigned the composer with a bottom toolbar, and moved the settings entry to the sidebar title-bar gear (after iterations in #4–#8)
+- **[@Hmbown](https://github.com/Hmbown)** — [#2](https://github.com/HengQuWorld/CodeWhale-VSCode/pull/2) made each window own and authenticate its Runtime, and guarded per-file restore
+
 ## License
 
 [MIT](LICENSE)
