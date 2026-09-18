@@ -3914,10 +3914,45 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     if (!this.attentionDiscoveryActive || this.attentionDiscoveryTimer) return;
     this.attentionDiscoveryTimer = setTimeout(() => {
       this.attentionDiscoveryTimer = null;
-      void this.refreshThreadList(true)
+      void this.discoverBackgroundAttention()
         .catch(() => undefined)
         .then(() => this.scheduleAttentionDiscovery());
     }, delayMs);
+  }
+
+  /**
+   * One discovery pass, gated on there being anything it could find.
+   *
+   * The summary walk is the expensive half (25s measured on a large store), so
+   * it only runs when a thread this window already tracks exists, or when the
+   * task list — small, and shared with every window on this workspace — still
+   * holds something unfinished. An idle window with neither spends one small
+   * request per tick and never touches the summary store.
+   *
+   * What the gate gives up: a window that knows of no thread and no task cannot
+   * discover one that was started elsewhere in the meantime. That case waits for
+   * the next foreground refresh (a user action, or a turn of this window) — the
+   * alternative is walking the summary store every 30 seconds, forever.
+   */
+  private async discoverBackgroundAttention(): Promise<void> {
+    if (this.backgroundThreads.size === 0 && !(await this.hasUnfinishedTask())) return;
+    await this.refreshThreadList(true);
+  }
+
+  private async hasUnfinishedTask(): Promise<boolean> {
+    try {
+      const currentWorkspace =
+        vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? this.tuiWorkspace ?? undefined;
+      const result = await this.api.listTasks({
+        limit: 50,
+        workspace: !this.showAllWorkspaces ? currentWorkspace : undefined,
+      });
+      return result.tasks.some((task) => !this.isTerminalTaskStatus(task.status));
+    } catch {
+      // A gate that cannot be read must not become a silent skip: one summary
+      // fetch costs less than never noticing that something needs the user.
+      return true;
+    }
   }
 
   /** Auto-save a background thread's completed turn as a session (same

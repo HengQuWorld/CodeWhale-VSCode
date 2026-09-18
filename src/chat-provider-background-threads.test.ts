@@ -291,6 +291,12 @@ describe("background thread watching", () => {
       vi.useFakeTimers();
       try {
         provider.currentThread = makeThread("thread-mine");
+        // A task is still unfinished somewhere, which is what makes the sweep
+        // worth its summary fetch at all.
+        api.listTasks.mockResolvedValue({
+          tasks: [{ id: "task-1", status: "running", prompt_summary: "ship it" }],
+          counts: { active: 1, completed: 0, failed: 0 },
+        });
         api.listThreadsSummary.mockResolvedValue([
           makeSummary("thread-elsewhere", { pending_attention_count: 1 }),
         ]);
@@ -304,6 +310,26 @@ describe("background thread watching", () => {
         // A discovery pass is not a repaint: the rail keeps whatever the user
         // is looking at instead of being rebuilt under the pointer.
         expect(messagesOf(provider, "threadList")).toHaveLength(0);
+      } finally {
+        (provider as any).stopAttentionDiscoveryPoll();
+        vi.useRealTimers();
+      }
+    });
+
+    it("skips the summary walk when nothing could need the user", async () => {
+      const { provider, api } = newProvider();
+      vi.useFakeTimers();
+      try {
+        provider.currentThread = makeThread("thread-mine");
+        // The default mocks: no task anywhere, no thread tracked here.
+
+        (provider as any).startAttentionDiscoveryPoll();
+        await vi.advanceTimersByTimeAsync(30_000);
+
+        // The gate is the point: an idle window must not walk the summary store
+        // (25s on a large one) every 30 seconds for nothing.
+        expect(api.listTasks).toHaveBeenCalled();
+        expect(api.listThreadsSummary).not.toHaveBeenCalled();
       } finally {
         (provider as any).stopAttentionDiscoveryPoll();
         vi.useRealTimers();
