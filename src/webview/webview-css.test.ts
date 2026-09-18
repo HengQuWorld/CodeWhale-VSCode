@@ -41,6 +41,19 @@ describe("webview-css.ts", () => {
     expect(css).toContain("#ui-tooltip");
   });
 
+  it("shares one copy of the setting-dropdown rules and lets each bar pick its opening side", () => {
+    const css = getWebviewCss();
+
+    // The two bars are named on the shared declarations instead of each
+    // carrying its own copy of them.
+    expect(css).toContain("#settings-bar .setting-value,\n    #toolbar .setting-value {");
+    expect(css).toContain("#settings-bar .dropdown-item,\n    #toolbar .dropdown-item {");
+    // The settings bar sits at the top of the chat area and the toolbar below
+    // the messages, so the open direction is the one thing that differs.
+    expect(css).toContain("#settings-bar .dropdown-menu { top: 100%; margin-top: 2px; }");
+    expect(css).toContain("#toolbar .dropdown-menu { bottom: 100%; margin-bottom: 2px; }");
+  });
+
   it("hides the sidebar resize grip while the threads panel is collapsed", () => {
     const css = getWebviewCss();
 

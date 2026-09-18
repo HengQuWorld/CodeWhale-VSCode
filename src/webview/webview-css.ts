@@ -1592,43 +1592,53 @@ export function getWebviewCss(): string {
     /* Pending cross-thread approvals/inputs badge (needs-you total) */
     #toolbar .agent-panel-toggle.has-attention { color: var(--status-warn, #e2b93d); font-weight: 600; }
 
+    /* ── Setting dropdowns (settings bar and toolbar share these) ── */
+    #settings-bar .setting-item,
     #toolbar .setting-item {
       display: flex;
       align-items: center;
       gap: 4px;
+    }
+    /* #settings-bar sets the text size and colour on the bar itself; #toolbar
+       does not, so its setting items carry their own. */
+    #toolbar .setting-item {
       font-size: 0.75em;
       color: var(--muted);
     }
     #toolbar .setting-item.toolbar-settings {
       margin-left: auto;
     }
+    #settings-bar .setting-label,
     #toolbar .setting-label {
       font-weight: 600;
     }
+    #settings-bar .setting-value,
     #toolbar .setting-value {
       color: var(--fg);
       cursor: pointer;
       padding: 1px 4px;
       border-radius: 2px;
     }
+    #settings-bar .setting-value::after,
     #toolbar .setting-value::after {
       content: ' ▾';
       font-size: 0.7em;
       opacity: 0.5;
     }
+    #settings-bar .setting-value:hover,
     #toolbar .setting-value:hover {
       background: var(--brand-primary);
       color: var(--brand-primary-foreground);
     }
+    #settings-bar .setting-dropdown,
     #toolbar .setting-dropdown {
       position: relative;
     }
+    #settings-bar .dropdown-menu,
     #toolbar .dropdown-menu {
       display: none;
       position: absolute;
-      bottom: 100%;
       left: 0;
-      margin-bottom: 2px;
       background: var(--card-bg);
       border: 1px solid var(--border);
       border-radius: 4px;
@@ -1637,9 +1647,16 @@ export function getWebviewCss(): string {
       box-shadow: 0 4px 12px rgba(0,0,0,0.25);
       overflow: hidden;
     }
+    /* The bar decides which way its menus open: the settings bar sits at the
+       top of the chat area, the toolbar below the messages, so each opens
+       toward the room it has. */
+    #settings-bar .dropdown-menu { top: 100%; margin-top: 2px; }
+    #toolbar .dropdown-menu { bottom: 100%; margin-bottom: 2px; }
+    #settings-bar .dropdown-menu.open,
     #toolbar .dropdown-menu.open {
       display: block;
     }
+    #settings-bar .dropdown-item,
     #toolbar .dropdown-item {
       padding: 4px 12px;
       white-space: nowrap;
@@ -1647,6 +1664,8 @@ export function getWebviewCss(): string {
       font-size: 0.95em;
       color: var(--fg);
     }
+    #settings-bar .dropdown-item:hover,
+    #settings-bar .dropdown-item.selected,
     #toolbar .dropdown-item:hover,
     #toolbar .dropdown-item.selected {
       background: var(--brand-primary);
@@ -1663,63 +1682,6 @@ export function getWebviewCss(): string {
       font-size: 0.75em;
       color: var(--muted);
       background: var(--card-bg);
-    }
-    #settings-bar .setting-item {
-      display: flex;
-      align-items: center;
-      gap: 4px;
-    }
-    #settings-bar .setting-label {
-      font-weight: 600;
-    }
-    #settings-bar .setting-value {
-      color: var(--fg);
-      cursor: pointer;
-      padding: 1px 4px;
-      border-radius: 2px;
-    }
-    #settings-bar .setting-value::after {
-      content: ' ▾';
-      font-size: 0.7em;
-      opacity: 0.5;
-    }
-    #settings-bar .setting-value:hover {
-      background: var(--brand-primary);
-      color: var(--brand-primary-foreground);
-    }
-
-    /* ── Settings Dropdown ── */
-    #settings-bar .setting-dropdown {
-      position: relative;
-    }
-    #settings-bar .dropdown-menu {
-      display: none;
-      position: absolute;
-      top: 100%;
-      left: 0;
-      margin-top: 2px;
-      background: var(--card-bg);
-      border: 1px solid var(--border);
-      border-radius: 4px;
-      min-width: 100%;
-      z-index: 1000;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.25);
-      overflow: hidden;
-    }
-    #settings-bar .dropdown-menu.open {
-      display: block;
-    }
-    #settings-bar .dropdown-item {
-      padding: 4px 12px;
-      white-space: nowrap;
-      cursor: pointer;
-      font-size: 0.95em;
-      color: var(--fg);
-    }
-    #settings-bar .dropdown-item:hover,
-    #settings-bar .dropdown-item.selected {
-      background: var(--brand-primary);
-      color: var(--brand-primary-foreground);
     }
 
     #settings-bar #btn-threads {
