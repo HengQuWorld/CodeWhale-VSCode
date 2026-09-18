@@ -57,7 +57,7 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
     item.innerHTML =
       '<div class="approval-text">\\u26A0 ' + summaryText + '</div>' +
       inputHtml +
-      '<label class="approval-remember"><input type="checkbox" data-approval-id="' + approvalId + '" class="remember-check" /> Remember for this tool</label>' +
+      '<label class="approval-remember"><input type="checkbox" data-approval-id="' + approvalId + '" class="remember-check" /> ' + __wvEscapeHtml(__i18n.approvalRemember) + '</label>' +
       '<div class="approval-buttons"><button class="btn-allow" data-approval-id="' + approvalId + '" data-decision="allow">' + __i18n.allow + '</button><button class="btn-deny" data-approval-id="' + approvalId + '" data-decision="deny">' + __i18n.deny + '</button></div>';
     approvalFloatEl.appendChild(item);
     // More than one approval can be outstanding and the newest is the one the

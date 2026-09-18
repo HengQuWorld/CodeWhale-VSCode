@@ -399,6 +399,28 @@ describe("background thread watching", () => {
       expect(vscodeMock.showInformationMessage).not.toHaveBeenCalled();
     });
 
+    it("refreshes the task list when a watched thread asks for the user", async () => {
+      const { api, emit } = await watch();
+      api.listTasks.mockClear();
+
+      emit(makeEvent(1, "approval.required", { id: "approval-1" }));
+
+      // A task's pending approvals are read off its own thread (enrichTaskSummary),
+      // so the Tasks panel has to move when the watch sees the very request the
+      // rail card is showing — otherwise the badge stays stale exactly when a
+      // background task needs an answer.
+      expect(api.listTasks).toHaveBeenCalled();
+    });
+
+    it("refreshes the task list when a watched turn completes", async () => {
+      const { api, emit } = await watch();
+      api.listTasks.mockClear();
+
+      emit(makeEvent(1, "turn.completed"));
+
+      expect(api.listTasks).toHaveBeenCalled();
+    });
+
     it("notifies once per attention episode, and again after it clears", async () => {
       // Running thread: the watch survives an answered approval, so the next
       // episode is observed on the same stream.

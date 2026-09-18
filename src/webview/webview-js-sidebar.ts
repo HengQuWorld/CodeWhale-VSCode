@@ -221,7 +221,12 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
         var approvalId = approvalBtn.getAttribute('data-approval-id');
         var decision = approvalBtn.getAttribute('data-decision');
         if (approvalId && decision) {
-          vscode.postMessage({ type: 'approvalDecision', approvalId: approvalId, decision: decision, remember: false });
+          // Read the box from this row, never from the document: the same
+          // approval can be on a rail card at the same time, and the first
+          // match in DOM order would decide for the user without being asked.
+          var approvalRow = approvalBtn.closest ? approvalBtn.closest('.detail-list-item') : null;
+          var rememberBox = approvalRow ? approvalRow.querySelector('.remember-check[data-approval-id="' + approvalId + '"]') : null;
+          vscode.postMessage({ type: 'approvalDecision', approvalId: approvalId, decision: decision, remember: !!(rememberBox && rememberBox.checked) });
         }
         return;
       }
@@ -1216,12 +1221,18 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
         html += '<div class="detail-subsection"><div class="detail-sublabel">' + __wvEscapeHtml(__i18n.taskPendingApprovals || 'Pending Approvals') + '</div>';
         for (var pa = 0; pa < pendingApprovals.length; pa++) {
           var approval = pendingApprovals[pa];
+          var approvalIdAttr = __wvEscapeHtml(approval.id || '');
           html += '<div class="detail-list-item">';
           html += '<div><strong>' + __wvEscapeHtml(approval.tool_name || 'tool') + '</strong></div>';
           html += '<div class="detail-subtle">' + __wvEscapeHtml(approval.description || approval.intent_summary || '') + '</div>';
+          // The same remember box the approval float offers. Allowing with it
+          // flips the whole thread to Full Access (the runtime's
+          // remember_thread_auto_approve), which is what makes a background
+          // task workable without answering every tool call by hand.
+          html += '<label class="approval-remember"><input type="checkbox" class="remember-check" data-approval-id="' + approvalIdAttr + '" /> ' + __wvEscapeHtml(__i18n.approvalRemember) + '</label>';
           html += '<div class="detail-actions">';
-          html += '<button class="detail-action-btn detail-approval-action" data-approval-id="' + __wvEscapeHtml(approval.id || '') + '" data-decision="allow">Allow</button>';
-          html += '<button class="detail-action-btn detail-approval-action" data-approval-id="' + __wvEscapeHtml(approval.id || '') + '" data-decision="deny">Deny</button>';
+          html += '<button class="detail-action-btn detail-approval-action" data-approval-id="' + approvalIdAttr + '" data-decision="allow">' + __wvEscapeHtml(__i18n.allow) + '</button>';
+          html += '<button class="detail-action-btn detail-approval-action" data-approval-id="' + approvalIdAttr + '" data-decision="deny">' + __wvEscapeHtml(__i18n.deny) + '</button>';
           html += '</div></div>';
         }
         html += '</div>';

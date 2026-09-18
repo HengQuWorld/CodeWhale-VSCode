@@ -92,6 +92,7 @@ export interface WebviewTranslations {
   taskPendingApprovals: string;
   taskPendingInputs: string;
   taskContinueInThread: string;
+  approvalRemember: string;
   threadsCountPattern: string; // "{n} threads" / "{n} 个会话"
   modelLabel: string;
   workspaceLabel: string;

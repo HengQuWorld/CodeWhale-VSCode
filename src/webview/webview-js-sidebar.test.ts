@@ -100,6 +100,18 @@ describe("webview-js-sidebar.ts", () => {
     expect(script).toContain("type: 'closeTaskDetail'");
   });
 
+  it("offers the remember box on a task's pending approval, read from that row", () => {
+    const script = getSidebarScript(makeTr());
+    // Answering every tool call by hand is what makes a background task
+    // unusable, so the box the approval float shows has to be here too.
+    expect(script).toContain('class="approval-remember"');
+    expect(script).toContain("__i18n.approvalRemember");
+    expect(script).toContain("remember: !!(rememberBox && rememberBox.checked)");
+    // Read from the row it belongs to: the same approval can also be sitting on
+    // a rail card, and the first match in the document would decide for the user.
+    expect(script).toContain("approvalBtn.closest('.detail-list-item')");
+  });
+
   it("renders richer task process sections and overlay actions", () => {
     const script = getSidebarScript(makeTr());
     expect(script).toContain("Full Result");

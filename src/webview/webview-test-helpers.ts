@@ -66,6 +66,7 @@ export function makeTr(overrides?: Partial<WebviewTranslations>): WebviewTransla
     taskPendingApprovals: "Pending Approvals",
     taskPendingInputs: "Pending Inputs",
     taskContinueInThread: "Continue in thread",
+    approvalRemember: "Always allow this thread",
     threadsCountPattern: "{n} threads",
     modelLabel: "Model",
     workspaceLabel: "Workspace",

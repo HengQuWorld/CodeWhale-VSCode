@@ -2671,6 +2671,16 @@ export function getWebviewCss(): string {
       font-size: 12px;
       margin-top: 4px;
     }
+    .task-detail-panel .approval-remember {
+      font-size: 0.8em;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      margin-top: 6px;
+      color: var(--muted);
+      cursor: pointer;
+    }
+    .task-detail-panel .approval-remember input { cursor: pointer; }
     .task-detail-panel .detail-list-item {
       padding: 10px 0;
       border-top: 1px solid rgba(128,128,128,0.12);

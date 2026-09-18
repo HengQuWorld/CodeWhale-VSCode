@@ -29,6 +29,10 @@ interface Translations {
   processing: string;
   error: string;
   approvalAwaiting: string;
+  /** Checkbox label on an approval: allowing with it flips the whole thread
+   *  to Full Access (runtime_threads.rs `remember_thread_auto_approve`), so the
+   *  wording must not promise a per-tool memory. */
+  approvalRemember: string;
   userInputRequired: string;
   userInputAwaiting: string;
   noConversations: string;
@@ -404,7 +408,7 @@ const en: Translations = {
   inputPlaceholder: "Ask CodeWhale...",
   initializing: "Initializing...", ready: "Ready",
   thinking: "Thinking...", streaming: "Streaming...", processing: "Processing...",
-  error: "Error", approvalAwaiting: "⏳ Awaiting approval...",
+  error: "Error", approvalAwaiting: "⏳ Awaiting approval...", approvalRemember: "Always allow this thread",
   userInputRequired: "Input required",
   userInputAwaiting: "⏳ Awaiting your input...",
   noConversations: "No conversations yet", threadAttention: "Waiting for your approval or input — click to open", threadsNeedsYou: "Needs you", threadsRunning: "Running", threadsRecent: "Recent",
@@ -742,7 +746,7 @@ const zhCn: Translations = {
   inputPlaceholder: "向 CodeWhale 提问...",
   initializing: "初始化中...", ready: "就绪",
   thinking: "思考中...", streaming: "输出中...", processing: "处理中...",
-  error: "错误", approvalAwaiting: "⏳ 等待审批...",
+  error: "错误", approvalAwaiting: "⏳ 等待审批...", approvalRemember: "始终允许此线程",
   userInputRequired: "需要输入",
   userInputAwaiting: "⏳ 等待您的输入...",
   noConversations: "暂无会话", threadAttention: "等待你的审批或输入——点击打开", threadsNeedsYou: "等你处理", threadsRunning: "运行中", threadsRecent: "最近",
@@ -1122,6 +1126,7 @@ export function webviewTranslations(tr: Translations) {
     processing: tr.processing,
     error: tr.error,
     approvalAwaiting: tr.approvalAwaiting,
+    approvalRemember: tr.approvalRemember,
     userInputRequired: tr.userInputRequired,
     userInputAwaiting: tr.userInputAwaiting,
     noConversations: tr.noConversations,

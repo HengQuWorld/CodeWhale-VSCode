@@ -3094,6 +3094,11 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         auto_approve: taskCfg.get<boolean>("autoApprove", false),
       });
       await this.refreshTaskList();
+      // Every task runs on a runtime thread of its own, and the watcher
+      // reconciles threads: without a list refresh nothing watches the new one,
+      // so an approval it needs would sit unanswered with no notice and no
+      // inline card. Refresh now, while we still know which thread to look for.
+      this.scheduleThreadListRefresh();
       await this.handleShowTaskDetail(task.id);
     } catch (err) {
       vscode.window.showErrorMessage(`Failed to create task: ${(err as Error).message}`);
@@ -3762,6 +3767,8 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         if (st.goalChecked && st.goal) void this.refreshBackgroundGoal(threadId);
         this.scheduleThreadListRefresh();
         this.refreshSessionList();
+        // A finished task turn changes the Tasks panel too.
+        this.refreshTaskList();
         break;
       }
       case "approval.required":
@@ -3771,6 +3778,11 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         // syncBackgroundWatchers — see the note there.
         st.attention += 1;
         this.scheduleThreadListRefresh();
+        // The rail card is not the only surface: the Tasks panel reads the same
+        // pending approvals off the task's thread (enrichTaskSummary), so a
+        // background task must not keep showing a stale badge while the watch
+        // is already telling the user it needs them.
+        this.refreshTaskList();
         break;
       }
       case "approval.decided":
@@ -3791,6 +3803,8 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
           if (inputId) this.backgroundUserInputs.delete(inputId);
         }
         this.scheduleThreadListRefresh();
+        // The badge has to come down the same way it went up.
+        this.refreshTaskList();
         break;
       }
       case "thread_goal_updated": {
