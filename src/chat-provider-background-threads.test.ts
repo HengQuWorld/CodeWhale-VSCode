@@ -345,25 +345,66 @@ describe("background thread watching", () => {
       return { ...harness, emit: streamFor(harness.streams, watchedId)!.emit };
     }
 
+    it("stays silent for approvals the runtime resolves by itself", async () => {
+      // The runtime's auto-approve path (a remembered "always allow", Full
+      // Access) emits `approval.required` and then `approval.decided` with
+      // `auto: true`, registering nothing as pending in between. Ten of those
+      // used to be ten VS Code notices for a thread that never needed the user.
+      const { provider, api, emit } = await watch({
+        pending_attention_count: 0,
+        latest_turn_status: "inprogress",
+      });
+      expect(vscodeMock.showInformationMessage).not.toHaveBeenCalled();
+
+      for (let i = 0; i < 10; i += 1) {
+        emit(makeEvent(i * 2 + 1, "approval.required", { id: `approval-auto-${i}` }));
+        emit(makeEvent(i * 2 + 2, "approval.decided", { id: `approval-auto-${i}` }));
+      }
+      // The authoritative count never moves: nothing was ever registered.
+      api.listThreadsSummary.mockResolvedValue([
+        makeSummary(watchedId, { pending_attention_count: 0, latest_turn_status: "inprogress" }),
+      ]);
+      await (provider as any).refreshThreadList();
+
+      expect(vscodeMock.showInformationMessage).not.toHaveBeenCalled();
+    });
+
     it("notifies once per attention episode, and again after it clears", async () => {
       // Running thread: the watch survives an answered approval, so the next
       // episode is observed on the same stream.
-      const { emit } = await watch({ pending_attention_count: 0, latest_turn_status: "inprogress" });
+      const { provider, api, emit } = await watch({
+        pending_attention_count: 0,
+        latest_turn_status: "inprogress",
+      });
 
+      // A real request: the runtime registers it before sequencing the event,
+      // so the summary the refresh fetches reports it.
       emit(makeEvent(1, "approval.required", { id: "approval-1" }));
-      await vi.waitFor(() => expect(vscodeMock.showInformationMessage).toHaveBeenCalledTimes(1));
+      api.listThreadsSummary.mockResolvedValue([
+        makeSummary(watchedId, { pending_attention_count: 1, latest_turn_status: "inprogress" }),
+      ]);
+      await (provider as any).refreshThreadList();
+      expect(vscodeMock.showInformationMessage).toHaveBeenCalledTimes(1);
       expect(String(vscodeMock.showInformationMessage.mock.calls[0][0])).toContain("Thread thread-busy");
 
       // Same episode → no second toast.
-      emit(makeEvent(2, "approval.required", { id: "approval-2" }));
-      await Promise.resolve();
+      await (provider as any).refreshThreadList();
       expect(vscodeMock.showInformationMessage).toHaveBeenCalledTimes(1);
 
       // Episode over, then a fresh one → notifies again.
-      emit(makeEvent(3, "approval.decided", { id: "approval-1" }));
-      emit(makeEvent(4, "approval.decided", { id: "approval-2" }));
-      emit(makeEvent(5, "approval.required", { id: "approval-3" }));
-      await vi.waitFor(() => expect(vscodeMock.showInformationMessage).toHaveBeenCalledTimes(2));
+      emit(makeEvent(2, "approval.decided", { id: "approval-1" }));
+      api.listThreadsSummary.mockResolvedValue([
+        makeSummary(watchedId, { pending_attention_count: 0, latest_turn_status: "inprogress" }),
+      ]);
+      await (provider as any).refreshThreadList();
+      expect(vscodeMock.showInformationMessage).toHaveBeenCalledTimes(1);
+
+      emit(makeEvent(3, "approval.required", { id: "approval-2" }));
+      api.listThreadsSummary.mockResolvedValue([
+        makeSummary(watchedId, { pending_attention_count: 1, latest_turn_status: "inprogress" }),
+      ]);
+      await (provider as any).refreshThreadList();
+      expect(vscodeMock.showInformationMessage).toHaveBeenCalledTimes(2);
     });
 
     it("re-arms from the summary after an idle thread goes quiet", async () => {
@@ -389,10 +430,17 @@ describe("background thread watching", () => {
       vscodeMock.configGet.mockImplementation((key: string, fallback?: unknown) =>
         key === "backgroundThreadNotifications" ? false : fallback,
       );
-      const { emit } = await watch();
+      const { provider, api, emit } = await watch({
+        pending_attention_count: 0,
+        latest_turn_status: "inprogress",
+      });
 
+      // A genuinely pending approval still respects the setting.
       emit(makeEvent(1, "approval.required", { id: "approval-1" }));
-      await Promise.resolve();
+      api.listThreadsSummary.mockResolvedValue([
+        makeSummary(watchedId, { pending_attention_count: 1, latest_turn_status: "inprogress" }),
+      ]);
+      await (provider as any).refreshThreadList();
 
       expect(vscodeMock.showInformationMessage).not.toHaveBeenCalled();
     });

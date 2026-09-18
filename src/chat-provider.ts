@@ -3626,12 +3626,39 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       // The runtime's Debug-lowercased status spells "inprogress" without
       // the underscore; the turn record spells it "in_progress". Accept both.
       const running = status === "in_progress" || status === "inprogress" || status === "queued";
-      const attention = (sum.pending_attention_count || 0) > 0;
+      const authoritativeAttention = sum.pending_attention_count || 0;
+      const attention = authoritativeAttention > 0;
       if (!running && !attention) continue;
       wanted.add(sum.id);
       const st = this.ensureBackgroundState(sum.id);
       st.running = running || st.running;
-      st.attention = Math.max(st.attention, sum.pending_attention_count || 0);
+      // The summary is the authority, so assign instead of ratcheting. The old
+      // `Math.max` could only ever raise the count, so one lost decrement
+      // pinned the badge (and the notification latch) for the rest of the
+      // session.
+      st.attention = authoritativeAttention;
+      // Attention -> notification is decided here, off the authoritative
+      // count, and never off a raw `approval.required` event.
+      //
+      // The runtime emits `approval.required` on its auto-approve path too
+      // (runtime_threads.rs), where it registers *no* pending approval and
+      // follows the event immediately with `approval.decided` (`"auto": true`).
+      // Nothing in that path needs the user, so an event-driven notice fired
+      // once per auto-approved tool call — a background thread running shell
+      // commands under a remembered "always allow" became an endless stream of
+      // notices. The runtime's own notifier already guards on
+      // `detail.pending_approvals` (runtime_api/notification_delivery.rs);
+      // this is that same guard on the GUI side.
+      //
+      // Reading it from the summary cannot miss a *real* request: the runtime
+      // registers the pending approval before it sequences the event
+      // ("Register before sequencing the event" in runtime_threads.rs), so any
+      // event we have already seen is visible to a fetch issued afterwards.
+      if (authoritativeAttention > 0) {
+        this.notifyBackgroundAttention(sum.id);
+      } else {
+        st.notifiedAttention = false;
+      }
     }
     for (const id of wanted) {
       const st = this.backgroundThreads.get(id)!;
@@ -3684,8 +3711,10 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       }
       case "approval.required":
       case "user_input.required": {
+        // Fast path for the rail badge only. Whether this is really the user's
+        // turn to act is decided from the authoritative pending count in
+        // syncBackgroundWatchers — see the note there.
         st.attention += 1;
-        this.notifyBackgroundAttention(threadId);
         this.scheduleThreadListRefresh();
         break;
       }
@@ -3694,7 +3723,12 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       case "user_input.answered":
       case "user_input.canceled": {
         st.attention = Math.max(0, st.attention - 1);
-        if (st.attention <= 0) st.notifiedAttention = false;
+        // `notifiedAttention` is deliberately NOT cleared here. Clearing it on
+        // an event-derived zero re-armed the notice while a real approval was
+        // still unanswered: one auto-approved tool call in between would drop
+        // the latch to false, and the next summary refresh would then announce
+        // the same still-pending approval a second time. The latch is owned by
+        // the summary, which is the only place that knows the truth.
         // Only the user-input events carry an id from the map we keep here;
         // approval ids belong to a different namespace and are never cached.
         if (event.event === "user_input.answered" || event.event === "user_input.canceled") {
@@ -3718,8 +3752,11 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     }
   }
 
-  /** VS Code-native attention notice for a background thread. Fired once per
-   *  "attention episode" (reset when the thread's attention returns to 0). */
+  /** VS Code-native attention notice for a background thread. Called only from
+   *  `syncBackgroundWatchers`, and only with an authoritative nonzero pending
+   *  count, so it fires once per "attention episode" (the latch clears when
+   *  that count returns to 0). Never call this from a raw `approval.required`
+   *  event: the runtime emits those for approvals it resolves itself. */
   private notifyBackgroundAttention(threadId: string): void {
     const enabled = vscode.workspace
       .getConfiguration("brotherwhale")
@@ -4419,14 +4456,16 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
   ): Promise<void> {
     try {
       await this.api.decideApproval(approvalId, decision, remember);
-      // When the user checks "remember" and allows, the TUI flips
-      // thread.auto_approve to true (see runtime_threads.rs
-      // remember_thread_auto_approve).  Update our local cache immediately
-      // so subsequent approval.required events are correctly filtered out
-      // — otherwise the stale cache causes the GUI to show approval
-      // dialogs for tools the TUI has already auto-approved server-side,
-      // leading to a frozen UI (no approval.decided event arrives for
-      // auto-approved calls, so the dialog never clears).
+      // When the user checks "remember" and allows, the runtime flips the
+      // thread to Full Access (see runtime_threads.rs
+      // remember_thread_auto_approve).  Mirror that locally, because the
+      // foreground `approval.required` handler below decides whether to open a
+      // dialog from *this* thread's posture (postureFromThread), never from the
+      // runtime's — a local copy still reading "ask" would open a dialog for a
+      // tool the runtime is already resolving on its own. The runtime does emit
+      // a matching `approval.decided` (`"auto": true`) on that path, so such a
+      // dialog would close again rather than hang; keeping the two views in
+      // step is what stops the flicker.
       if (remember && decision === "allow" && this.currentThread) {
         // The runtime persists Full Access for the thread (see
         // runtime_threads.rs remember_thread_auto_approve); mirror both the
