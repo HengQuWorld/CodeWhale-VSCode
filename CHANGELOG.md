@@ -1,5 +1,23 @@
 # Change Log
 
+## Unreleased
+
+### New Features
+
+- **A finished plan can be approved and executed in one click** — A successful Plan-mode turn now carries a **Switch to Act & execute** action on the message that holds the plan. Taking it switches the thread *and* the startup default to Act through the same `/mode agent` path the command uses, then sends a follow-up turn so the agent runs the plan already in the conversation, instead of making the user switch modes and restate the go-ahead. ([#12](https://github.com/HengQuWorld/CodeWhale-VSCode/pull/12) by [@eoli](https://github.com/eoli))
+
+### Improvements
+
+- **Mode and Permission moved down to the toolbar** — The two dropdowns sat in the settings bar, the row that describes the request (Provider, Model, Reasoning Effort); they decide *how* a turn runs, so they now sit beside the controls that steer it — new thread, compact, undo, retry — right-aligned at the end of the toolbar, and open upward because the toolbar sits below the messages area. The dropdown handler binds both bars instead of one, so the menus that stayed in the settings bar keep working. ([#12](https://github.com/HengQuWorld/CodeWhale-VSCode/pull/12) by [@eoli](https://github.com/eoli))
+
+### Bug Fixes
+
+- **Approving a plan no longer executes it under a mode that never changed** — The approval action sent its follow-up turn unconditionally, but `/mode` reports a failed thread patch as a message instead of throwing: when the switch failed the thread stayed in Plan, so the "execute" turn drew a second plan underneath a button that had just promised Act. The approval path now re-reads the thread's mode after the switch and stops with an error while it is still Plan, rather than sending the turn.
+
+- **The Threads rail no longer goes blank when its fetch is slow** — `GET /v1/threads/summary` builds every row from a full thread-detail read (`get_thread_detail` per thread, a whole-store turns+items walk), so it costs roughly a quarter-second per thread: 25.4s against a 72-thread / 189MB store, measured. That sat just inside the client's hard-coded 30s socket default and crossed it as soon as a turn was writing to the store. The failure then landed in a silent `catch` — no error, no retry, no `threadList` message — so the rail stayed empty until an unrelated watcher event happened to refresh it, which is what made it look intermittent rather than broken. The summary call now carries its own 60s timeout (`DEFAULT_REQUEST_TIMEOUT_MS` stays 30s for every other endpoint) and the catch reports instead of swallowing: one retry, but only for a failure that is actually transient — a refused or reset connection, which is what a request issued while the engine is relaunching on a fresh port sees — plus a `debugLog` line for either outcome. Overlapping refreshes are ordered by a generation token, so the slow fetch that started first can no longer publish its stale list over a newer one, or mark the rail failed after a newer fetch already succeeded.
+
+- **The rail says what it is doing instead of presenting an empty list as the answer** — An empty rail while the fetch above was in flight was indistinguishable from "you have no threads". `refreshThreadList()` now announces the fetch with a `threadListLoading` message, and the rail renders a spinner and *Loading threads…* in place of the empty state, since "no conversations yet" is a guess until the fetch answers. The hint is scoped to the case that misleads — an empty rail: a rail that already lists threads refreshes behind them rather than putting a spinner under the list on every panel open. A fetch that failed says *Couldn't load the thread list* with a **Retry** button (`retryThreadList`) rather than sitting blank, over a populated rail too, since that list may be stale; a published list clears the row it replaces. New `threadsLoading` / `threadsLoadFailed` / `threadsRetry` strings in both languages, plus `webview-js-sidebar-runtime.test.ts`, which drives the real sidebar IIFE in a DOM stand-in — so it also guards the whole script block against the initialisation failure that takes the entire webview down with it.
+
 ## 0.7.0
 
 ### New Features
