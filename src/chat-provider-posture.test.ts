@@ -197,4 +197,56 @@ describe("ChatProvider permission posture", () => {
     expect((provider as any).currentThread.permission_posture).toBeUndefined();
     expect(messagesOf(provider).some((msg) => msg.type === "settingsUpdated")).toBe(false);
   });
+
+  it("asks under Ask even when the thread still carries trust_mode from Full Access", async () => {
+    // trust_mode governs the sandbox, never the approval decision: the engine
+    // resolves that from the posture alone. A thread moved from Full Access to
+    // Ask keeps trust_mode = true (a posture patch touches permission_posture
+    // only), so gating the dialog on it dropped every request while the engine
+    // sat waiting for an answer — the approval then expired as a timeout.
+    const api = makeApi();
+    const provider = makeProvider(api);
+    (provider as any).currentThread = {
+      ...thread("agent"),
+      permission_posture: "ask",
+      trust_mode: true,
+      auto_approve: false,
+    };
+
+    (provider as any).handleRuntimeEvent({
+      seq: 1,
+      event: "approval.required",
+      turn_id: "turn-1",
+      payload: { approval_id: "appr-1", tool_name: "exec_shell", description: "rm -rf build" },
+    });
+
+    expect(messagesOf(provider)).toContainEqual(
+      expect.objectContaining({ type: "approvalRequired", approvalId: "appr-1" }),
+    );
+  });
+
+  it("leaves the decision to the engine when the posture is not Ask", async () => {
+    // Full Access auto-approves and Auto-Review auto-denies server-side, both
+    // emitting the decision alongside the request — there is nothing to answer,
+    // so a dialog here would ask for a decision the engine already made.
+    for (const posture of ["full_access", "auto_review"]) {
+      const api = makeApi();
+      const provider = makeProvider(api);
+      (provider as any).currentThread = {
+        ...thread("agent"),
+        permission_posture: posture,
+        trust_mode: false,
+        auto_approve: false,
+      };
+
+      (provider as any).handleRuntimeEvent({
+        seq: 1,
+        event: "approval.required",
+        turn_id: "turn-1",
+        payload: { approval_id: "appr-1", tool_name: "exec_shell", description: "rm -rf build" },
+      });
+
+      expect(messagesOf(provider).some((msg) => msg.type === "approvalRequired")).toBe(false);
+    }
+  });
 });

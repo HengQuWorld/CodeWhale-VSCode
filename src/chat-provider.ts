@@ -4823,13 +4823,18 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         const toolInput = (request || pl) as Record<string, unknown>;
         if (!approvalId) break;
 
-        // In YOLO/auto-approve mode, the TUI runtime auto-approves after
-        // emitting this event (see runtime_threads.rs:2748-2761).  Mirror
-        // the TUI UI behaviour (ui.rs:2427) and skip the approval dialog
-        // entirely so the user isn't shown a confusing confirmation that
-        // has already been decided server-side.
-        const thread = this.currentThread;
-        if (thread?.auto_approve || thread?.trust_mode) {
+        // Only Ask reaches a client: the engine resolves the other postures
+        // itself (Full Access auto-approves, Auto-Review auto-denies) and emits
+        // the decision along with the request, so there is nothing to answer.
+        // Ask registers a waiter and nothing but this client can answer it.
+        // Decide from the posture for the same reason the engine does — the
+        // legacy auto_approve / trust_mode bits outlive a posture switch
+        // (handleSetPosture patches permission_posture alone), so a thread that
+        // was in Full Access, or once remembered an allow, still reports
+        // auto_approve: true while the engine is waiting on a dialog that this
+        // guard would drop.
+        const posture = this.currentThread ? postureFromThread(this.currentThread) : "ask";
+        if (posture !== "ask") {
           break;
         }
 
