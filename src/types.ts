@@ -61,6 +61,10 @@ export interface TurnRecord {
   error?: string | null;
   item_ids: string[];
   steer_count: number;
+  /** Mode this turn ran in (`agent` / `plan` / `operate`). Recorded per turn
+   *  because the thread's own `mode` may have been switched while the turn was
+   *  running; runtimes older than this field omit it. */
+  mode?: string | null;
 }
 
 export interface TurnItemRecord {

@@ -220,4 +220,30 @@ describe("ChatProvider mode regression", () => {
       expect.objectContaining({ type: "messageComplete", planApproval: true }),
     );
   });
+
+  it("takes the mode the runtime reports on the turn over the one it recorded itself", async () => {
+    const { provider, postMessage } = createProvider();
+
+    await (provider as any).handleWebviewMessage({ type: "sendMessage", text: "plan it" });
+    (provider as any).handleRuntimeEvent({
+      seq: 2,
+      event: "item.delta",
+      turn_id: "turn-1",
+      item_id: "i1",
+      payload: { kind: "agent_message", delta: "an answer" },
+    } as any);
+
+    // The runtime says this turn ran in Act, whatever this client recorded.
+    (provider as any).handleRuntimeEvent({
+      seq: 3,
+      event: "turn.completed",
+      turn_id: "turn-1",
+      payload: { turn: { id: "turn-1", status: "completed", mode: "agent" } },
+    } as any);
+
+    const completion = postMessage.mock.calls
+      .map(([msg]: [any]) => msg)
+      .find((msg: any) => msg?.type === "messageComplete");
+    expect(completion?.planApproval).toBe(false);
+  });
 });

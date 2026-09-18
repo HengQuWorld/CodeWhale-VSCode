@@ -138,6 +138,30 @@ describe("ChatProvider thread history rendering", () => {
     );
   });
 
+  it("names the plan-approval message by the mode the last turn ran in", async () => {
+    const detail = {
+      latest_seq: 1,
+      // The thread has since been switched to Act; the turn still ran in Plan.
+      thread: { id: "thread-1", model: "deepseek-v4-pro", mode: "agent" },
+      turns: [
+        { id: "turn-1", input_summary: "plan it", status: "completed", item_ids: ["a1"], mode: "plan" },
+      ],
+      items: [
+        { id: "a1", kind: "agent_message", summary: "1. do x", detail: "1. do x", status: "completed" },
+      ],
+    };
+
+    const { provider, postMessage } = createProvider(detail);
+    provider.currentThread = detail.thread as any;
+
+    await (provider as any).loadHistory("thread-1");
+
+    const last = provider.messages[provider.messages.length - 1];
+    expect(postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "loadHistory", planApprovalFor: last.id }),
+    );
+  });
+
   it("renders steered turns as interleaved segments, not one merged bubble", async () => {
     const detail = {
       latest_seq: 20,

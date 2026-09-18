@@ -302,10 +302,8 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
   private threadListRefreshTimer: ReturnType<typeof setTimeout> | null = null;
   /** Threads with an in-flight background auto-save. */
   private backgroundSavingThreads = new Set<string>();
-  /** The mode the turn in `currentTurnId` was started with. The turn record the
-   *  runtime reports back carries no mode, so "how did *this* turn run" has to
-   *  be remembered here — reading the thread's mode at completion answers a
-   *  different question once the user switches mode mid-turn. */
+  /** The mode the turn in `currentTurnId` was started with, used only when the
+   *  runtime does not report a mode on the turn record itself (see `turnMode`). */
   private activeTurnMode: { turnId: string; mode: TuiMode } | null = null;
 
   // Convenience accessors for session state
@@ -1105,7 +1103,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       this.postMessage({
         type: "loadHistory",
         messages: this.messages,
-        planApprovalFor: this.planApprovalTargetId(),
+        planApprovalFor: this.planApprovalTargetId(this.turnMode(lastTurn)),
       });
       this.postMessage({ type: "status", text: `Loaded ${this.messages.length / 2} turns` });
       return this.lastEventSeq;
@@ -2002,23 +2000,24 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     }
   }
 
-  /** The mode a turn ran in: the one it was started with when this client
-   *  started it, otherwise the thread's mode now. A turn started elsewhere
-   *  (retry, a background kickoff, a thread adopted mid-turn) leaves no record
-   *  here, and the thread's mode is the best answer available for it. */
-  private turnMode(turnId: string | undefined): TuiMode {
-    if (turnId && this.activeTurnMode?.turnId === turnId) return this.activeTurnMode.mode;
+  /** The mode a turn ran in. The runtime records it on the turn itself, which
+   *  is the only source that also answers for turns this client did not start
+   *  (a retry, a background kickoff, a thread adopted mid-turn); the mode
+   *  recorded here when the turn was started stands in for runtimes that
+   *  predate the field, and the thread's mode for turns it never started. */
+  private turnMode(turn: { id?: string; mode?: string | null } | undefined): TuiMode {
+    if (turn?.mode) return normalizeMode(turn.mode);
+    if (turn?.id && this.activeTurnMode?.turnId === turn.id) return this.activeTurnMode.mode;
     return normalizeMode(this.currentThread?.mode);
   }
 
   /** The message a rebuilt conversation should hang the plan-approval action on:
-   *  the last one, when it is a finished assistant turn and the thread is in
-   *  plan mode. Without this the action only exists on the live turn-complete
-   *  event, so reopening the thread silently loses it while the plan it belongs
-   *  to is still the last thing in the conversation. A rebuilt history has no
-   *  turn id to match `activeTurnMode` against, so the thread's mode decides. */
-  private planApprovalTargetId(): string | undefined {
-    if (normalizeMode(this.currentThread?.mode) !== "plan") return undefined;
+   *  the last one, when it is a finished assistant turn and the turn that
+   *  produced it ran in plan mode. Without this the action only exists on the
+   *  live turn-complete event, so reopening the thread silently loses it while
+   *  the plan it belongs to is still the last thing in the conversation. */
+  private planApprovalTargetId(mode: TuiMode): string | undefined {
+    if (mode !== "plan") return undefined;
     const last = this.messages[this.messages.length - 1];
     if (!last || last.role !== "assistant" || last.status !== "complete") return undefined;
     return last.id;
@@ -4785,11 +4784,12 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
                 // In plan mode a successfully completed turn is the plan the
                 // agent just produced; surface an "approve & execute" action
                 // so the user can switch to Act and continue in one click.
-                // Known limitation: the runtime reports nothing that marks a
-                // message as *a plan*, so this offers the action on any
-                // successful plan-mode turn, an answer included; narrowing it
-                // needs a plan marker on the turn from the TUI side.
-                planApproval: !isTerminalError && this.turnMode(pl.turn?.id) === "plan",
+                // The turn's own mode decides (the thread's may have moved on
+                // since), but that is still "ran in Plan mode", not "is a
+                // plan": the runtime reports nothing that marks a message as
+                // *a plan* and Plan mode produces ordinary prose, so an answer
+                // given in Plan mode offers the action too.
+                planApproval: !isTerminalError && this.turnMode(pl.turn) === "plan",
               },
             );
             this.postMessage(payload);
