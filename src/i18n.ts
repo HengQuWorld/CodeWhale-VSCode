@@ -74,6 +74,7 @@ interface Translations {
   reasoningEffortLabel: string;
   planApproveButton: string;
   planApproveProceed: string;
+  planApproveWithPrompt: string;
   planApproveModeFailed: string;
   welcomeTitle: string;
   welcomeSubtitle: string;
@@ -422,6 +423,7 @@ const en: Translations = {
   scopeThreadLabel: "This thread", scopeDefaultLabel: "New threads",
   scopeDefaultTitle: "New conversations start here; this one keeps its own setting.",
   planApproveButton: "Switch to Act & execute", planApproveProceed: "Plan approved. Mode is now Act — proceed with the plan above.",
+  planApproveWithPrompt: "Plan approved. Mode is now Act. The instruction below takes precedence over the plan above:",
   planApproveModeFailed: "Couldn't switch the thread to Act — it is still in Plan mode, so the plan was not executed.",
   welcomeTitle: "CodeWhale",
   welcomeSubtitle: "Technology serves the enduring mission of civilization",
@@ -759,6 +761,7 @@ const zhCn: Translations = {
   scopeThreadLabel: "当前会话", scopeDefaultLabel: "新会话默认",
   scopeDefaultTitle: "新会话以此启动；当前会话保持自己的设置。",
   planApproveButton: "切换到 Act 并执行", planApproveProceed: "计划已确认，模式已切换为 Act。请按上面的计划开始执行。",
+  planApproveWithPrompt: "计划已确认，模式已切换为 Act。以下指示优先于上面的计划：",
   planApproveModeFailed: "无法把当前会话切换到 Act（仍处于 Plan 模式），计划未执行。",
   welcomeTitle: "CodeWhale",
   welcomeSubtitle: "科技服务文明传承的长线使命",

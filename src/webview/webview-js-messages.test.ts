@@ -175,12 +175,18 @@ describe("webview-js-messages.ts", () => {
     expect(script).toContain("smartScrollToBottom: smartScrollToBottom");
   });
 
-  it("renders the plan-approve button and posts approvePlan on click", () => {
+  it("renders the plan-approve button and posts approvePlan with the composer text on click", () => {
     const script = getMessagesScript(makeTr());
     expect(script).toContain("function renderPlanApproveButton");
     expect(script).toContain("plan-approve-btn");
     expect(script).toContain("renderPlanApproveButton: renderPlanApproveButton");
-    expect(script).toContain("{ type: 'approvePlan' }");
+    // The instruction typed in the composer before clicking rides along, and
+    // the field is cleared so the same text cannot also start its own turn.
+    expect(script).toContain("var planPrompt = inputEl ? inputEl.value.trim() : ''");
+    expect(script).toContain("vscode.postMessage({ type: 'approvePlan', text: planPrompt })");
+    // Clearing the field has to re-run the input listener, or a slash menu a
+    // `/…` draft had opened stays open and eats the next Enter.
+    expect(script).toContain("inputEl.dispatchEvent(new Event('input'))");
   });
 
   it("contains streaming state management", () => {

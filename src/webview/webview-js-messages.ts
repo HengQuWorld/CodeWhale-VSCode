@@ -683,7 +683,19 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
     if (target.classList.contains('plan-approve-btn')) {
       if (!target.disabled) {
         target.disabled = true;
-        vscode.postMessage({ type: 'approvePlan' });
+        // The plan is rarely executed verbatim, so whatever the user already
+        // typed in the composer travels with the approval: it becomes the
+        // instruction for the Act turn instead of a second send. Read and
+        // clear here so the text cannot also be sent again as its own turn.
+        var planPrompt = inputEl ? inputEl.value.trim() : '';
+        if (inputEl) {
+          inputEl.value = '';
+          // Clearing the field by hand skips the input listener that owns the
+          // slash menu, so a menu a slash draft had opened would stay open with
+          // stale entries and swallow the next Enter. Fire it ourselves.
+          inputEl.dispatchEvent(new Event('input'));
+        }
+        vscode.postMessage({ type: 'approvePlan', text: planPrompt });
       }
       return;
     }

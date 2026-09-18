@@ -451,7 +451,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         await this.handleSetDefaultPosture(msg.posture as string);
         break;
       case "approvePlan":
-        await this.handleApprovePlan();
+        await this.handleApprovePlan(msg.text as string | undefined);
         break;
       case "switchProvider":
         await this.handleSwitchProvider(msg.provider as string, msg.model as string | undefined);
@@ -4425,8 +4425,14 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
 
   /** Approve the plan produced in plan mode: switch the thread (and the
    *  startup default) to Act, then send a follow-up turn telling the agent
-   *  the mode changed so it executes the plan already in the conversation. */
-  private async handleApprovePlan(): Promise<void> {
+   *  the mode changed so it executes the plan already in the conversation.
+   *  `prompt` is whatever the user had typed in the composer when they clicked:
+   *  a plan is rarely executed verbatim, so that instruction rides along with
+   *  the approval instead of forcing a separate send afterwards. */
+  private async handleApprovePlan(prompt?: string): Promise<void> {
+    // Normalized once: it is both the instruction for the Act turn and the
+    // text handed back to the composer when the approval does not go through.
+    const instruction = (prompt || "").trim();
     try {
       // Switch to Act through the same path as `/mode agent` so the config
       // default and the current thread stay in sync, then let the follow-up
@@ -4438,15 +4444,41 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       // another plan, under an "approve & execute" button that promised Act.
       if (this.currentThread && normalizeMode(this.currentThread.mode) !== "agent") {
         this.postMessage({ type: "error", message: t().planApproveModeFailed });
+        this.restoreComposerText(instruction);
         return;
       }
-      await this.handleSendMessage(t().planApproveProceed);
+      // Two shapes, because one sentence cannot serve both: with no user
+      // input the proceed line is the whole instruction ("execute the plan
+      // above"), but appending a user override to that imperative would put
+      // two conflicting orders in one message. When the user wrote something,
+      // the plan stops being the order and becomes the default that their
+      // instruction takes precedence over.
+      await this.handleSendMessage(
+        instruction
+          ? `${t().planApproveWithPrompt}\n\n${instruction}`
+          : t().planApproveProceed
+      );
     } catch (err) {
       this.postMessage({
         type: "error",
         message: formatError("Failed to approve plan", err),
       });
+      // Restoring here can leave the text in the composer as well as in the
+      // transcript if the turn had already started and only the send failed.
+      // That is recoverable — losing the instruction is not.
+      this.restoreComposerText(instruction);
     }
+  }
+
+  /** Hand text back to the composer after a send that never happened. The
+   *  webview clears its own input the moment the plan-approve button is
+   *  clicked, so anything that stops the Act turn has to give the text back:
+   *  otherwise the failure costs the user their instruction as well as the
+   *  turn. No-op when the composer was empty, and harmless for a webview that
+   *  cleared nothing. */
+  private restoreComposerText(text: string): void {
+    if (!text) return;
+    this.postMessage({ type: "setInputText", text });
   }
 
   private async handleApprovalDecision(

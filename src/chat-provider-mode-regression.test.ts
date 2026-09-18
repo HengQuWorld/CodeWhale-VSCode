@@ -182,6 +182,68 @@ describe("ChatProvider mode regression", () => {
     });
   });
 
+  it("carries the composer text typed before clicking approve into the Act turn", async () => {
+    const { api, provider } = createProvider();
+
+    await (provider as any).handleWebviewMessage({
+      type: "approvePlan",
+      text: "  only do steps 1 and 3  ",
+    });
+
+    expect(api.startTurn).toHaveBeenCalledWith(
+      "thread-1",
+      "Plan approved. Mode is now Act. The instruction below takes precedence over the plan above:\n\nonly do steps 1 and 3",
+      expect.objectContaining({ mode: "agent" })
+    );
+  });
+
+  it("falls back to the plain proceed message when the composer was empty", async () => {
+    const { api, provider } = createProvider();
+
+    await (provider as any).handleWebviewMessage({ type: "approvePlan", text: "   " });
+
+    expect(api.startTurn).toHaveBeenCalledWith(
+      "thread-1",
+      "Plan approved. Mode is now Act — proceed with the plan above.",
+      expect.objectContaining({ mode: "agent" })
+    );
+  });
+
+  it("hands the composer text back when the approval could not go through", async () => {
+    const { api, provider, postMessage } = createProvider();
+    api.updateThread = vi.fn(async () => {
+      throw new Error("engine refused the mode patch");
+    });
+
+    await (provider as any).handleWebviewMessage({
+      type: "approvePlan",
+      text: "  only do steps 1 and 3  ",
+    });
+
+    expect(api.startTurn).not.toHaveBeenCalled();
+    // The webview cleared its input the moment the button was clicked, so a
+    // refused approval must not also cost the user their instruction.
+    expect(postMessage).toHaveBeenCalledWith({
+      type: "setInputText",
+      text: "only do steps 1 and 3",
+    });
+  });
+
+  it("restores nothing when the composer was already empty", async () => {
+    const { api, provider, postMessage } = createProvider();
+    api.updateThread = vi.fn(async () => {
+      throw new Error("engine refused the mode patch");
+    });
+
+    await (provider as any).handleWebviewMessage({ type: "approvePlan", text: "   " });
+
+    // Nothing was typed, so nothing may be pushed back (the handler focuses
+    // the composer, which would be a stray focus grab on a failed approval).
+    expect(
+      postMessage.mock.calls.some(([msg]: [any]) => msg?.type === "setInputText")
+    ).toBe(false);
+  });
+
   it("does not execute the plan when the thread could not be switched to Act", async () => {
     const { api, provider, postMessage } = createProvider();
     api.updateThread = vi.fn(async () => {
