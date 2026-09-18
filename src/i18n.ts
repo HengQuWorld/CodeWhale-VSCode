@@ -294,6 +294,10 @@ interface Translations {
   agentRole: string;
   agentArtifacts: string;
   agentUsage: string;
+  agentStartTime: string;
+  agentCreatedAt: string;
+  agentElapsed: string;
+  agentDuration: string;
   agentSpawned: string;
   agentDelegating: string;
   agentFanout: string;
@@ -632,6 +636,10 @@ const en: Translations = {
   agentRole: "Role",
   agentArtifacts: "Artifacts",
   agentUsage: "Token usage",
+  agentStartTime: "Started",
+  agentCreatedAt: "Created",
+  agentElapsed: "Elapsed",
+  agentDuration: "Duration",
   agentSpawned: "Spawned",
   agentDelegating: "Delegating",
   agentFanout: "Fan-out",
@@ -970,6 +978,10 @@ const zhCn: Translations = {
   agentRole: "角色",
   agentArtifacts: "产物",
   agentUsage: "Token 用量",
+  agentStartTime: "运行时刻",
+  agentCreatedAt: "创建于",
+  agentElapsed: "已运行",
+  agentDuration: "耗时",
   agentSpawned: "已启动",
   agentDelegating: "委派中",
   agentFanout: "扇出",
@@ -1355,6 +1367,10 @@ export function webviewTranslations(tr: Translations) {
     agentRole: tr.agentRole,
     agentArtifacts: tr.agentArtifacts,
     agentUsage: tr.agentUsage,
+    agentStartTime: tr.agentStartTime,
+    agentCreatedAt: tr.agentCreatedAt,
+    agentElapsed: tr.agentElapsed,
+    agentDuration: tr.agentDuration,
     agentSpawned: tr.agentSpawned,
     agentDelegating: tr.agentDelegating,
     agentFanout: tr.agentFanout,

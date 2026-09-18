@@ -264,4 +264,22 @@ describe("webview-js-sidebar.ts", () => {
     // The webview scripts are string-built, so nothing else type-checks them.
     expect(() => new Function(getSidebarScript(makeTr()))).not.toThrow();
   });
+
+  describe("agent run time", () => {
+    it("formats a clock moment and a compact duration", () => {
+      const script = getSidebarScript(makeTr());
+      expect(script).toContain("function formatAgentClock");
+      expect(script).toContain("function formatAgentDuration");
+      expect(script).toContain("function formatAgentRunTime");
+    });
+
+    it("renders the run-time line on every agent card", () => {
+      const script = getSidebarScript(makeTr());
+      expect(script).toContain("agent-detail agent-runtime");
+      expect(script).toContain("__i18n.agentStartTime");
+      expect(script).toContain("__i18n.agentElapsed");
+      expect(script).toContain("__i18n.agentDuration");
+      expect(script).toContain("__i18n.agentCreatedAt");
+    });
+  });
 });

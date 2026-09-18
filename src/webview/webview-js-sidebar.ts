@@ -97,6 +97,58 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
     return date.toLocaleString();
   }
 
+  function agentIsRunning(status) {
+    return status === 'running' || status === 'starting' || status === 'running_tool' || status === 'model_wait';
+  }
+
+  function agentIsLive(status) {
+    return agentIsRunning(status) || status === 'queued' || status === 'waiting_for_user';
+  }
+
+  function pad2(n) { return (n < 10 ? '0' : '') + n; }
+
+  /** Wall-clock HH:MM:SS for an epoch-ms instant; '' when the instant is absent. */
+  function formatAgentClock(ms) {
+    if (typeof ms !== 'number' || !isFinite(ms) || ms <= 0) return '';
+    var date = new Date(ms);
+    if (isNaN(date.getTime())) return '';
+    return pad2(date.getHours()) + ':' + pad2(date.getMinutes()) + ':' + pad2(date.getSeconds());
+  }
+
+  /** Compact elapsed time: 12s, 3m07s, 2h14m. */
+  function formatAgentDuration(ms) {
+    if (typeof ms !== 'number' || !isFinite(ms) || ms < 0) return '';
+    var total = Math.floor(ms / 1000);
+    var hours = Math.floor(total / 3600);
+    var minutes = Math.floor((total % 3600) / 60);
+    var seconds = total % 60;
+    if (hours > 0) return hours + 'h' + pad2(minutes) + 'm';
+    if (minutes > 0) return minutes + 'm' + pad2(seconds) + 's';
+    return seconds + 's';
+  }
+
+  /** Run-time line for one agent: the clock moment it started running, plus
+   *  how long it has run (still live) or took (settled). Records that never
+   *  started — queued, or waiting on the user — fall back to their creation
+   *  time so the card still answers "when?". Values are read from the run
+   *  record at render time; the panel re-renders as runs change. */
+  function formatAgentRunTime(r) {
+    var startedMs = typeof r.started_at_ms === 'number' ? r.started_at_ms : 0;
+    var completedMs = typeof r.completed_at_ms === 'number' ? r.completed_at_ms : 0;
+    var startClock = formatAgentClock(startedMs);
+    if (startClock) {
+      var parts = [__i18n.agentStartTime + ' ' + startClock];
+      var endMs = completedMs > 0 ? completedMs : (agentIsRunning(r.status) ? Date.now() : 0);
+      var duration = endMs > startedMs ? formatAgentDuration(endMs - startedMs) : '';
+      if (duration) {
+        parts.push((completedMs > 0 ? __i18n.agentDuration : __i18n.agentElapsed) + ' ' + duration);
+      }
+      return parts.join(' \\u00B7 ');
+    }
+    var createdClock = formatAgentClock(typeof r.created_at_ms === 'number' ? r.created_at_ms : 0);
+    return createdClock ? (__i18n.agentCreatedAt + ' ' + createdClock) : '';
+  }
+
   function hasOwnData(value) {
     if (!value) return false;
     if (Array.isArray(value)) return value.length > 0;
@@ -936,8 +988,8 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
     }
     // Sort: running first, then by updated_at desc
     var sorted = runs.slice().sort(function(a, b) {
-      var aActive = (a.status === 'running' || a.status === 'starting' || a.status === 'running_tool' || a.status === 'model_wait' || a.status === 'queued' || a.status === 'waiting_for_user') ? 0 : 1;
-      var bActive = (b.status === 'running' || b.status === 'starting' || b.status === 'running_tool' || b.status === 'model_wait' || b.status === 'queued' || b.status === 'waiting_for_user') ? 0 : 1;
+      var aActive = agentIsLive(a.status) ? 0 : 1;
+      var bActive = agentIsLive(b.status) ? 0 : 1;
       if (aActive !== bActive) return aActive - bActive;
       return (b.updated_at_ms || 0) - (a.updated_at_ms || 0);
     });
@@ -945,7 +997,7 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
       var r = sorted[i];
       var spec = r.spec || {};
       var card = document.createElement('div');
-      card.className = 'agent-card' + (r.status === 'running' || r.status === 'starting' || r.status === 'running_tool' || r.status === 'model_wait' ? ' agent-active' : '');
+      card.className = 'agent-card' + (agentIsRunning(r.status) ? ' agent-active' : '');
       var icon = agentStatusIcon(r.status);
       var statusClass = agentStatusClass(r.status);
       var statusLabel = agentStatusLabel(r.status);
@@ -973,6 +1025,12 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
         html += ' \\u00B7 ' + __i18n.agentUsage + ': ' + __wvEscapeHtml(tokenUsage);
       }
       html += '</div>';
+      // Run time — the clock moment this agent started running and how long
+      // it has been at it.
+      var runTime = formatAgentRunTime(r);
+      if (runTime) {
+        html += '<div class="agent-detail agent-runtime">' + __wvEscapeHtml(runTime) + '</div>';
+      }
       // Result or error
       if (r.status === 'completed' && r.result_summary) {
         html += '<div class="agent-result">' + __wvEscapeHtml(r.result_summary.slice(0, 120)) + '</div>';

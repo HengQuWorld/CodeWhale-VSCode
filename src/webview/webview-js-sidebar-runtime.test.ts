@@ -156,6 +156,7 @@ function createHarness() {
   const rail = getEl("tab-threads-list");
   return {
     rail,
+    agentsPanel: getEl("tab-agents"),
     postMessages,
     sidebar: windowObj.__wvSidebar as Record<string, any>,
   };
@@ -270,5 +271,86 @@ describe("thread rail fetch status", () => {
     sidebar.renderThreadListStatus(null);
 
     expect(rowsMatching(rail, "thread-list-status")).toHaveLength(0);
+  });
+});
+
+// ── Agent run time ──
+
+/** Local HH:MM:SS, the same reading the card renders for an epoch-ms instant. */
+function clockOf(ms: number): string {
+  const d = new Date(ms);
+  const pad = (n: number) => (n < 10 ? "0" : "") + n;
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
+function agentRun(overrides: Record<string, unknown> = {}) {
+  return {
+    spec: { worker_id: "worker-1", run_id: "run-1", objective: "Do the thing", role: "implement", model: "m" },
+    status: "running",
+    created_at_ms: 0,
+    updated_at_ms: 0,
+    started_at_ms: null as number | null,
+    completed_at_ms: null as number | null,
+    latest_message: null,
+    result_summary: null,
+    error: null,
+    steps_taken: 3,
+    usage: null,
+    artifacts: [],
+    events: [],
+    ...overrides,
+  };
+}
+
+/** The rendered HTML of the single card in the agents panel. */
+function agentCardHtml(sidebar: Record<string, any>, panel: FakeElement): string {
+  sidebar.renderAgents(sidebar.getAgentRuns());
+  expect(panel.children).toHaveLength(1);
+  return panel.children[0].innerHTML;
+}
+
+describe("agent cards show when each agent ran", () => {
+  it("shows the start moment and elapsed time for a running agent", () => {
+    const { sidebar, agentsPanel } = createHarness();
+    const startedAt = Date.now() - 125_000;
+    sidebar.setAgentRuns([
+      agentRun({ status: "running_tool", started_at_ms: startedAt, created_at_ms: startedAt - 10_000 }),
+    ]);
+    const html = agentCardHtml(sidebar, agentsPanel);
+
+    expect(html).toContain(`Started ${clockOf(startedAt)}`);
+    // Elapsed is measured against the render instant, so only its shape is fixed.
+    expect(html).toMatch(/Elapsed \d+s|Elapsed \d+m\d+s|Elapsed \d+h\d+m/);
+    expect(html).toContain("agent-runtime");
+  });
+
+  it("shows the total duration once an agent has settled", () => {
+    const { sidebar, agentsPanel } = createHarness();
+    const startedAt = Date.now() - 600_000;
+    sidebar.setAgentRuns([
+      agentRun({ status: "completed", started_at_ms: startedAt, completed_at_ms: startedAt + 192_000 }),
+    ]);
+    const html = agentCardHtml(sidebar, agentsPanel);
+
+    expect(html).toContain(`Started ${clockOf(startedAt)}`);
+    expect(html).toContain("Duration 3m12s");
+  });
+
+  it("falls back to the creation moment for an agent that has not started", () => {
+    const { sidebar, agentsPanel } = createHarness();
+    const createdAt = Date.now() - 30_000;
+    sidebar.setAgentRuns([agentRun({ status: "queued", created_at_ms: createdAt })]);
+    const html = agentCardHtml(sidebar, agentsPanel);
+
+    expect(html).toContain(`Created ${clockOf(createdAt)}`);
+    expect(html).not.toContain("Started");
+  });
+
+  it("omits the run-time line when the record carries no time at all", () => {
+    const { sidebar, agentsPanel } = createHarness();
+    sidebar.setAgentRuns([agentRun({ status: "queued" })]);
+    const html = agentCardHtml(sidebar, agentsPanel);
+
+    expect(html).not.toContain("agent-runtime");
   });
 });

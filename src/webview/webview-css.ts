@@ -2111,6 +2111,9 @@ export function getWebviewCss(): string {
       color: var(--muted);
       margin-top: 2px;
     }
+    .agent-card .agent-runtime {
+      font-variant-numeric: tabular-nums;
+    }
     .agent-card .agent-result {
       font-size: 0.78em;
       color: #4caf50;

@@ -258,6 +258,10 @@ export interface WebviewTranslations {
   agentRole: string;
   agentArtifacts: string;
   agentUsage: string;
+  agentStartTime: string;
+  agentCreatedAt: string;
+  agentElapsed: string;
+  agentDuration: string;
   agentSpawned: string;
   agentDelegating: string;
   agentFanout: string;
