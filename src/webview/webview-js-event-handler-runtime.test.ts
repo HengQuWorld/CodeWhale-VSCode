@@ -174,6 +174,7 @@ function createRuntimeHarness() {
   const agentDetailCalls: unknown[] = [];
   const attachmentPreviewCalls: Array<{ id: string; previewUrl: string }> = [];
   const goalCalls: Array<{ method: string; args: unknown[] }> = [];
+  const planApproveCalls: string[] = [];
 
   const windowObj: Record<string, any> = {
     __wvI18n: makeTr(),
@@ -246,6 +247,9 @@ function createRuntimeHarness() {
       renderWelcome: () => {},
       createThinkingBlock: () => new FakeElement(),
       updateThinkingBlock: () => {},
+      renderPlanApproveButton: (messageId: string) => {
+        planApproveCalls.push(messageId);
+      },
     },
     __wvInput: {
       updateSendStopButton: (streaming: boolean) => {
@@ -316,6 +320,7 @@ function createRuntimeHarness() {
     agentDetailCalls,
     attachmentPreviewCalls,
     goalCalls,
+    planApproveCalls,
   };
 }
 
@@ -492,6 +497,16 @@ describe("webview-js-event-handler runtime", () => {
     expect(harness.getElement("status").classList.contains("is-streaming")).toBe(false);
   });
 
+  it("renders the plan-approve action only when messageComplete carries planApproval", () => {
+    const harness = createRuntimeHarness();
+
+    harness.dispatchMessage({ type: "messageComplete", messageId: "msg-1" });
+    expect(harness.planApproveCalls).toEqual([]);
+
+    harness.dispatchMessage({ type: "messageComplete", messageId: "msg-2", planApproval: true });
+    expect(harness.planApproveCalls).toEqual(["msg-2"]);
+  });
+
   it("routes taskDetail and agentDetail messages to the sidebar detail views", () => {
     const harness = createRuntimeHarness();
 
@@ -507,7 +522,7 @@ describe("webview-js-event-handler runtime", () => {
 
   it("posts setPosture when the permission dropdown selects a posture", () => {
     const harness = createRuntimeHarness();
-    const settingsBar = harness.getElement("settings-bar");
+    const toolbar = harness.getElement("toolbar");
 
     const item = new FakeElement();
     item.classList.add("dropdown-item");
@@ -518,7 +533,7 @@ describe("webview-js-event-handler runtime", () => {
     menu.parentElement = wrapper;
     item.parentElement = menu;
 
-    settingsBar.dispatch("click", { target: item, stopPropagation: () => {} });
+    toolbar.dispatch("click", { target: item, stopPropagation: () => {} });
 
     expect(harness.postMessages).toContainEqual({
       type: "setPosture",
@@ -671,7 +686,7 @@ describe("webview-js-event-handler runtime", () => {
 
   it("routes mode dropdown selections through /mode with the canonical value", () => {
     const harness = createRuntimeHarness();
-    const settingsBar = harness.getElement("settings-bar");
+    const toolbar = harness.getElement("toolbar");
 
     const item = new FakeElement();
     item.classList.add("dropdown-item");
@@ -682,7 +697,7 @@ describe("webview-js-event-handler runtime", () => {
     menu.parentElement = wrapper;
     item.parentElement = menu;
 
-    settingsBar.dispatch("click", { target: item, stopPropagation: () => {} });
+    toolbar.dispatch("click", { target: item, stopPropagation: () => {} });
 
     expect(harness.postMessages).toContainEqual({
       type: "slashCommand",

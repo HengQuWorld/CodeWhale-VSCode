@@ -175,6 +175,14 @@ describe("webview-js-messages.ts", () => {
     expect(script).toContain("smartScrollToBottom: smartScrollToBottom");
   });
 
+  it("renders the plan-approve button and posts approvePlan on click", () => {
+    const script = getMessagesScript(makeTr());
+    expect(script).toContain("function renderPlanApproveButton");
+    expect(script).toContain("plan-approve-btn");
+    expect(script).toContain("renderPlanApproveButton: renderPlanApproveButton");
+    expect(script).toContain("{ type: 'approvePlan' }");
+  });
+
   it("contains streaming state management", () => {
     const script = getMessagesScript(makeTr());
     expect(script).toContain("isStreaming");
