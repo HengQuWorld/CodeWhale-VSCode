@@ -34,6 +34,7 @@ import {
   normalizePosture,
   postureFromThread,
   type PermissionPosture,
+  type TuiMode,
 } from "./utils/modes";
 import {
   parseDiffToSides,
@@ -301,6 +302,11 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
   private threadListRefreshTimer: ReturnType<typeof setTimeout> | null = null;
   /** Threads with an in-flight background auto-save. */
   private backgroundSavingThreads = new Set<string>();
+  /** The mode the turn in `currentTurnId` was started with. The turn record the
+   *  runtime reports back carries no mode, so "how did *this* turn run" has to
+   *  be remembered here — reading the thread's mode at completion answers a
+   *  different question once the user switches mode mid-turn. */
+  private activeTurnMode: { turnId: string; mode: TuiMode } | null = null;
 
   // Convenience accessors for session state
   public get currentThread(): ThreadRecord | null { return this.sessionState.data.currentThread; }
@@ -1096,7 +1102,11 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         this.postMessage({ type: "turnStarted", turnId: lastTurn.id });
       }
 
-      this.postMessage({ type: "loadHistory", messages: this.messages });
+      this.postMessage({
+        type: "loadHistory",
+        messages: this.messages,
+        planApprovalFor: this.planApprovalTargetId(),
+      });
       this.postMessage({ type: "status", text: `Loaded ${this.messages.length / 2} turns` });
       return this.lastEventSeq;
     } catch (err) {
@@ -1982,6 +1992,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         trust_mode: this.currentThread.trust_mode,
       });
       this.currentTurnId = result.turn.id;
+      this.activeTurnMode = { turnId: result.turn.id, mode };
       this.postMessage({ type: "turnStarted", turnId: result.turn.id });
     } catch (err) {
       this.postMessage({
@@ -1989,6 +2000,28 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         message: formatError("Failed to send message", err),
       });
     }
+  }
+
+  /** The mode a turn ran in: the one it was started with when this client
+   *  started it, otherwise the thread's mode now. A turn started elsewhere
+   *  (retry, a background kickoff, a thread adopted mid-turn) leaves no record
+   *  here, and the thread's mode is the best answer available for it. */
+  private turnMode(turnId: string | undefined): TuiMode {
+    if (turnId && this.activeTurnMode?.turnId === turnId) return this.activeTurnMode.mode;
+    return normalizeMode(this.currentThread?.mode);
+  }
+
+  /** The message a rebuilt conversation should hang the plan-approval action on:
+   *  the last one, when it is a finished assistant turn and the thread is in
+   *  plan mode. Without this the action only exists on the live turn-complete
+   *  event, so reopening the thread silently loses it while the plan it belongs
+   *  to is still the last thing in the conversation. A rebuilt history has no
+   *  turn id to match `activeTurnMode` against, so the thread's mode decides. */
+  private planApprovalTargetId(): string | undefined {
+    if (normalizeMode(this.currentThread?.mode) !== "plan") return undefined;
+    const last = this.messages[this.messages.length - 1];
+    if (!last || last.role !== "assistant" || last.status !== "complete") return undefined;
+    return last.id;
   }
 
   /** Steer the active turn: append mid-turn user guidance without starting a
@@ -4752,7 +4785,11 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
                 // In plan mode a successfully completed turn is the plan the
                 // agent just produced; surface an "approve & execute" action
                 // so the user can switch to Act and continue in one click.
-                planApproval: !isTerminalError && normalizeMode(this.currentThread?.mode) === "plan",
+                // Known limitation: the runtime reports nothing that marks a
+                // message as *a plan*, so this offers the action on any
+                // successful plan-mode turn, an answer included; narrowing it
+                // needs a plan marker on the turn from the TUI side.
+                planApproval: !isTerminalError && this.turnMode(pl.turn?.id) === "plan",
               },
             );
             this.postMessage(payload);
@@ -4761,6 +4798,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         // Auto-save session after each completed turn (mirrors TUI's
         // build_session_snapshot → SessionSnapshot). Same thread always
         // saves to the same session via PUT with session_id.
+        if (this.activeTurnMode?.turnId === pl.turn?.id) this.activeTurnMode = null;
         this.autoSaveSession();
         this.refreshSessionList();
         this.stopPeriodicTaskRefresh();

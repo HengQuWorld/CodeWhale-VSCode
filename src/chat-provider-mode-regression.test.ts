@@ -194,4 +194,30 @@ describe("ChatProvider mode regression", () => {
     expect(api.startTurn).not.toHaveBeenCalled();
     expect(postMessage.mock.calls.some(([msg]: [any]) => msg?.type === "error")).toBe(true);
   });
+
+  it("decides the plan approval by the mode the turn ran in, not the thread's mode now", async () => {
+    const { provider, postMessage } = createProvider();
+
+    await (provider as any).handleWebviewMessage({ type: "sendMessage", text: "plan it" });
+    (provider as any).handleRuntimeEvent({
+      seq: 2,
+      event: "item.delta",
+      turn_id: "turn-1",
+      item_id: "i1",
+      payload: { kind: "agent_message", delta: "1. do the thing" },
+    } as any);
+    // The user switches the thread to Act while the plan turn is still running.
+    provider.currentThread!.mode = "agent";
+
+    (provider as any).handleRuntimeEvent({
+      seq: 3,
+      event: "turn.completed",
+      turn_id: "turn-1",
+      payload: { turn: { id: "turn-1", status: "completed" } },
+    } as any);
+
+    expect(postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "messageComplete", planApproval: true }),
+    );
+  });
 });

@@ -114,6 +114,30 @@ describe("ChatProvider thread history rendering", () => {
     });
   });
 
+  it("names the plan-approval message when the rebuilt thread is in plan mode", async () => {
+    const detail = {
+      latest_seq: 1,
+      thread: { id: "thread-1", model: "deepseek-v4-pro", mode: "plan" },
+      turns: [
+        { id: "turn-1", input_summary: "plan it", status: "completed", item_ids: ["a1"] },
+      ],
+      items: [
+        { id: "a1", kind: "agent_message", summary: "1. do x", detail: "1. do x", status: "completed" },
+      ],
+    };
+
+    const { provider, postMessage } = createProvider(detail);
+    provider.currentThread = detail.thread as any;
+
+    await (provider as any).loadHistory("thread-1");
+
+    const last = provider.messages[provider.messages.length - 1];
+    expect(last.role).toBe("assistant");
+    expect(postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "loadHistory", planApprovalFor: last.id }),
+    );
+  });
+
   it("renders steered turns as interleaved segments, not one merged bubble", async () => {
     const detail = {
       latest_seq: 20,

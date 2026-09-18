@@ -642,6 +642,11 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
           var showRole = !msg.compactMode || !!m._realContent;
           window.__wvMessages.addMessage(m, showRole);
         }
+        // A rebuilt plan-mode conversation keeps the approve action it had
+        // live: the backend names the message that should carry it.
+        if (msg.planApprovalFor && window.__wvMessages.renderPlanApproveButton) {
+          window.__wvMessages.renderPlanApproveButton(msg.planApprovalFor);
+        }
         // Nav dots are rebuilt by addMessage() via scheduleNavUpdate(); no
         // explicit call needed here.
         break;

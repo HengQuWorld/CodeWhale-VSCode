@@ -507,6 +507,16 @@ describe("webview-js-event-handler runtime", () => {
     expect(harness.planApproveCalls).toEqual(["msg-2"]);
   });
 
+  it("puts the plan-approve action back when a rebuilt history names its message", () => {
+    const harness = createRuntimeHarness();
+
+    harness.dispatchMessage({ type: "loadHistory", messages: [] });
+    expect(harness.planApproveCalls).toEqual([]);
+
+    harness.dispatchMessage({ type: "loadHistory", messages: [], planApprovalFor: "msg-9" });
+    expect(harness.planApproveCalls).toEqual(["msg-9"]);
+  });
+
   it("routes taskDetail and agentDetail messages to the sidebar detail views", () => {
     const harness = createRuntimeHarness();
 
@@ -538,6 +548,28 @@ describe("webview-js-event-handler runtime", () => {
     expect(harness.postMessages).toContainEqual({
       type: "setPosture",
       posture: "full_access",
+    });
+  });
+
+  it("still acts on the dropdowns that stayed in the settings bar", () => {
+    const harness = createRuntimeHarness();
+    const settingsBar = harness.getElement("settings-bar");
+
+    const item = new FakeElement();
+    item.classList.add("dropdown-item");
+    item.setAttribute("data-value", "high");
+    const menu = new FakeElement();
+    const wrapper = new FakeElement();
+    wrapper.setAttribute("data-setting", "reasoning");
+    menu.parentElement = wrapper;
+    item.parentElement = menu;
+
+    settingsBar.dispatch("click", { target: item, stopPropagation: () => {} });
+
+    expect(harness.postMessages).toContainEqual({
+      type: "slashCommand",
+      command: "/reasoning",
+      args: "high",
     });
   });
 
