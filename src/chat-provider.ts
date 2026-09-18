@@ -720,6 +720,26 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     });
   }
 
+  /** Publish the active thread's mode, permission, model, and reasoning.
+   *
+   *  Every path that assigns `currentThread` from `createThread` has to call
+   *  this. The status-bar chips describe the *active thread*, so a thread the
+   *  webview was never told about leaves them describing the one before it —
+   *  and the disagreement stays invisible until a turn runs under the mode the
+   *  chips do not show.
+   *
+   *  With no active thread (新建会话 has just cleared one) this publishes the
+   *  startup defaults, which is exactly what the next thread will inherit. */
+  private postCurrentSettings(): void {
+    this.postMessage({
+      type: "settingsUpdated",
+      mode: normalizeMode(this.currentThread?.mode || this.getCurrentMode()),
+      posture: this.getEffectivePosture(),
+      model: this.currentThread?.model || this.getCurrentModel(),
+      reasoningEffort: this.getCurrentReasoningEffort(),
+    });
+  }
+
   /** Change the startup mode for new threads only: the active thread keeps its
    *  own mode, which is the scope the dropdown's second group promises. */
   private async handleSetDefaultMode(mode: string): Promise<void> {
@@ -1574,6 +1594,12 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         thread: this.currentThread,
         messages: this.messages,
       });
+      // threadLoaded carries the thread itself, but nothing reads mode or
+      // permission out of it, so the chips would otherwise keep naming the
+      // thread we just left. Every switch lands here — the Threads rail, a
+      // resumed session, undo's and retry's forked threads — which makes this
+      // the one place the change has to be published.
+      this.postCurrentSettings();
       this.postMessage({
         type: "status",
         text: `Thread ${threadId.slice(0, 12)}: ${this.messages.length} messages`,
@@ -1956,6 +1982,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         });
         this.subscribeToEvents();
         this.refreshSessionList();
+        this.postCurrentSettings();
       }
 
       this.activeItems.clear();
@@ -1989,20 +2016,32 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       let threadOk = true;
       try { await this.api.getThread(this.currentThread.id); } catch { threadOk = false; }
       if (!threadOk) {
-        const cfg = vscode.workspace.getConfiguration("brotherwhale");
-        const mode = normalizeMode(cfg.get<string>("defaultMode", "agent"));
-        const posture = this.getCurrentPosture();
-        const autoApprove = posture === "full_access" || cfg.get<boolean>("autoApprove", false);
+        // The engine no longer has this thread (an empty thread is discarded,
+        // a cleared runtime store loses it). This is a *recovery* of the
+        // conversation the user is already in, so it must carry that thread's
+        // mode and permission: rebuilding from the startup defaults would
+        // silently re-mode and re-permission a conversation the user had
+        // already configured. The chips are republished below, so they follow
+        // whatever this recovery produces instead of disagreeing with it.
+        const replaced = this.currentThread;
+        const mode = normalizeMode(replaced.mode);
+        const posture = postureFromThread(replaced);
         this.currentThread = await this.api.createThread({
-          model: this.getCurrentModel(),
+          model: replaced.model || this.getCurrentModel(),
           mode,
           workspace: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
           permission_posture: POSTURE_WIRE[posture],
-          auto_approve: autoApprove,
+          // Derived from the posture, like every other create site: the engine
+          // reads `auto_approve` only when no posture is given, and never reads
+          // `trust_mode` at all, so copying the replaced record's bits would
+          // carry dead state — including the `trust_mode` + non-full posture
+          // pairing that already cost this surface an approval bug.
+          auto_approve: posture === "full_access",
           trust_mode: posture === "full_access",
         });
         this.subscribeToEvents();
         this.refreshSessionList();
+        this.postCurrentSettings();
       }
 
       // Ensure thread workspace matches current workspace before starting turn
@@ -2174,6 +2213,11 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     this.parkCurrentThread();
     this.sessionState.reset();
     this.postMessage({ type: "clearChat" });
+    // clearChat resets the conversation, not the mode and permission chips, so
+    // they would otherwise keep showing the thread that was just cleared. With
+    // no active thread this republishes the startup defaults — what the new
+    // thread actually inherits, which is what the chips should describe.
+    this.postCurrentSettings();
     // Clear stale sidebar data
     this.postMessage({ type: "taskList", tasks: [] });
     this.postMessage({ type: "agentRunList", runs: [] });
@@ -2854,6 +2898,10 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     });
     this.subscribeToEvents();
     await this.refreshSessionList();
+    // This thread did not exist a moment ago and the webview has never been
+    // told about it: without this the chips keep describing whatever the view
+    // showed before the goal created one.
+    this.postCurrentSettings();
   }
 
   /** Re-arm the current thread's goal. The runtime drives goal continuations

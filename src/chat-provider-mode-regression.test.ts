@@ -72,12 +72,20 @@ function createProvider() {
     thread: currentThread,
     turn: { id: "turn-1" },
   }));
+  const streamEvents = vi.fn(() => ({ abort: vi.fn() }));
+  const createThread = vi.fn(async (opts: Record<string, unknown>) => ({
+    ...currentThread,
+    id: "thread-created",
+    ...opts,
+  }));
   const api = {
     bindEngine: vi.fn(),
     ensureReady: vi.fn(async () => undefined),
     updateThread,
     getThread: vi.fn(async () => currentThread),
     startTurn,
+    streamEvents,
+    createThread,
   };
   const provider = new ChatProvider({} as any, {} as any, api as any);
 
@@ -307,5 +315,110 @@ describe("ChatProvider mode regression", () => {
       .map(([msg]: [any]) => msg)
       .find((msg: any) => msg?.type === "messageComplete");
     expect(completion?.planApproval).toBe(false);
+  });
+
+  it("republishes the startup defaults when 新建会话 clears the active thread", async () => {
+    vscodeState.configValues.set("defaultPermissionPosture", "auto_review");
+    const { provider, postMessage } = createProvider();
+
+    await (provider as any).handleWebviewMessage({ type: "newThread" });
+
+    expect(provider.currentThread).toBeNull();
+    // clearChat resets the conversation and nothing else, so without this the
+    // chips keep naming the mode of the thread that was just cleared. With no
+    // thread the honest value is the startup default the next one inherits.
+    expect(postMessage).toHaveBeenCalledWith({
+      type: "settingsUpdated",
+      mode: "plan",
+      posture: "auto_review",
+      model: "deepseek-v4-pro",
+      reasoningEffort: "auto",
+    });
+  });
+
+  it("recreates a discarded thread with its own mode and permission, not the startup defaults", async () => {
+    const { api, provider } = createProvider();
+    // The user's conversation is Act + Full Access; the startup defaults this
+    // fixture configures are Plan + Ask. Rebuilding from the defaults here would
+    // silently re-mode and re-permission a conversation already configured.
+    provider.currentThread = {
+      ...provider.currentThread!,
+      mode: "agent",
+      permission_posture: "full_access",
+      auto_approve: true,
+      trust_mode: true,
+    } as any;
+    api.getThread = vi.fn(async () => {
+      throw new Error("Thread not found: thread-1");
+    });
+
+    await (provider as any).handleWebviewMessage({
+      type: "sendMessage",
+      text: "carry on",
+    });
+
+    expect(api.createThread).toHaveBeenCalledWith({
+      model: "deepseek-v4-pro",
+      mode: "agent",
+      workspace: undefined,
+      permission_posture: "full_access",
+      auto_approve: true,
+      trust_mode: true,
+    });
+    expect(api.startTurn).toHaveBeenCalledWith(
+      "thread-created",
+      "carry on",
+      expect.objectContaining({
+        mode: "agent",
+        permission_posture: "full_access",
+      }),
+    );
+  });
+
+  it("publishes the thread it just created when a threadless view sends its first message", async () => {
+    const { api, provider, postMessage } = createProvider();
+    provider.currentThread = null;
+
+    await (provider as any).handleWebviewMessage({
+      type: "sendMessage",
+      text: "hello",
+    });
+
+    // The webview has never been told about this thread, so the chips would
+    // otherwise still describe whatever the view showed before it existed.
+    expect(api.createThread).toHaveBeenCalledWith(
+      expect.objectContaining({ mode: "plan" }),
+    );
+    expect(postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "settingsUpdated", mode: "plan" }),
+    );
+  });
+
+  it("carries a loaded thread's mode and permission to the chips that replaced the previous one", async () => {
+    const { api, provider, postMessage } = createProvider();
+    // The thread left behind is Plan + Ask (this fixture); the one being opened
+    // is Act + Full Access, and the chips have to follow it.
+    api.getThread = vi.fn(async () => ({
+      ...(provider.currentThread as any),
+      id: "thread-2",
+      mode: "agent",
+      permission_posture: "full_access",
+      auto_approve: true,
+      trust_mode: true,
+    })) as any;
+
+    await (provider as any).handleWebviewMessage({
+      type: "loadThread",
+      threadId: "thread-2",
+    });
+
+    expect(provider.currentThread?.id).toBe("thread-2");
+    expect(postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "settingsUpdated",
+        mode: "agent",
+        posture: "full_access",
+      }),
+    );
   });
 });
