@@ -395,6 +395,15 @@ export function getWebviewCss(): string {
       gap: 6px;
     }
     .thread-attention-text { font-size: 0.82em; color: var(--fg); }
+    .thread-item .thread-attention .approval-remember {
+      font-size: 0.78em;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      color: var(--muted);
+      cursor: pointer;
+    }
+    .thread-item .thread-attention .approval-remember input { cursor: pointer; }
     .thread-attention-buttons { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
     .thread-attention-btn {
       border: 1px solid rgba(128,128,128,0.3);

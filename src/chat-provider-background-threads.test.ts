@@ -285,6 +285,32 @@ describe("background thread watching", () => {
     });
   });
 
+  describe("attention discovery poll", () => {
+    it("watches a thread that started somewhere else, without repainting the rail", async () => {
+      const { provider, api, streams } = newProvider();
+      vi.useFakeTimers();
+      try {
+        provider.currentThread = makeThread("thread-mine");
+        api.listThreadsSummary.mockResolvedValue([
+          makeSummary("thread-elsewhere", { pending_attention_count: 1 }),
+        ]);
+
+        (provider as any).startAttentionDiscoveryPoll();
+        await vi.advanceTimersByTimeAsync(30_000);
+
+        // Nothing in this window had ever heard of this thread, so no event
+        // could open a watch for it: the sweep is the only way it gets one.
+        expect(streamFor(streams, "thread-elsewhere")).toBeDefined();
+        // A discovery pass is not a repaint: the rail keeps whatever the user
+        // is looking at instead of being rebuilt under the pointer.
+        expect(messagesOf(provider, "threadList")).toHaveLength(0);
+      } finally {
+        (provider as any).stopAttentionDiscoveryPoll();
+        vi.useRealTimers();
+      }
+    });
+  });
+
   describe("loadThread()", () => {
     it("drops the background watch of the thread it adopts", async () => {
       const { provider, streams } = newProvider();

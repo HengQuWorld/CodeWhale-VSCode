@@ -307,6 +307,13 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
   private threadTitles = new Map<string, string>();
   /** Debounced thread-list refresh driven by watcher events. */
   private threadListRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+  /** True while a summary fetch is in flight, so a quiet discovery pass can
+   *  yield to it instead of superseding the refresh that owns the rail. */
+  private threadListFetchInFlight = false;
+  /** Slow discovery sweep for attention nothing is watching yet. Chained, never
+   *  fixed-interval, and cleared with the view. */
+  private attentionDiscoveryTimer: ReturnType<typeof setTimeout> | null = null;
+  private attentionDiscoveryActive = false;
   /** Threads with an in-flight background auto-save. */
   private backgroundSavingThreads = new Set<string>();
   /** The mode the turn in `currentTurnId` was started with, used only when the
@@ -420,6 +427,8 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     );
 
     webviewView.onDidDispose(() => this.cleanup());
+
+    this.startAttentionDiscoveryPoll();
 
     this.initializeThread().catch((err) => {
       this.debugLog(`initializeThread FAILED: ${getErrorMessage(err)}`);
@@ -2301,20 +2310,32 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
   /** Refresh the thread list shown in the sidebar. Also drives the background
    *  watcher reconciliation (threads with running turns / pending attention
    *  get a lightweight SSE stream) and the toolbar Agent badge total. */
-  private async refreshThreadList(): Promise<void> {
+  private async refreshThreadList(quiet = false): Promise<void> {
+    // A quiet pass exists to discover attention nothing is watching yet. It
+    // must never take the rail over from a refresh that will publish, so it
+    // yields to one already in flight.
+    if (quiet && this.threadListFetchInFlight) return;
     const token = ++this.threadListRefreshToken;
     // The fetch below takes seconds-to-tens-of-seconds on a large store. A
     // silent wait behind an empty rail reads as "you have no threads", so the
-    // rail is told a fetch is in flight and can say so.
-    this.postMessage({ type: "threadListLoading", loading: true });
+    // rail is told a fetch is in flight and can say so. A quiet pass stays off
+    // the rail entirely: it is a discovery sweep, not a repaint.
+    if (!quiet) this.postMessage({ type: "threadListLoading", loading: true });
 
-    const threads = await this.fetchThreadSummaries(token);
+    this.threadListFetchInFlight = true;
+    let threads: ThreadSummary[] | null;
+    try {
+      threads = await this.fetchThreadSummaries(token);
+    } finally {
+      this.threadListFetchInFlight = false;
+    }
     // A newer refresh owns the rail now; let it publish instead.
     if (token !== this.threadListRefreshToken) return;
     if (threads === null) {
       // Never fail to silence again: an unexplained empty rail is
       // indistinguishable from a dead panel. The rail offers a manual retry.
-      this.postMessage({ type: "threadListLoading", loading: false, failed: true });
+      // A quiet pass has nothing to report to, so it just tries again later.
+      if (!quiet) this.postMessage({ type: "threadListLoading", loading: false, failed: true });
       return;
     }
 
@@ -2332,6 +2353,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       // exactly what the shared silent catch used to do.
       this.debugLog(`syncBackgroundWatchers failed: ${getErrorMessage(err)}`);
     }
+    if (quiet) return;
     this.postMessage({
       type: "threadList",
       threads,
@@ -3617,6 +3639,11 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
    *  come from the summary refresh, so nothing is lost. */
   private static readonly UNWATCHED_SINCE_SEQ = Number.MAX_SAFE_INTEGER;
 
+  /** Gap between quiet discovery sweeps (see startAttentionDiscoveryPoll).
+   *  Long on purpose: this is a bootstrap for attention the watchers cannot
+   *  see, not a live feed — a watch covers everything the moment it exists. */
+  private static readonly ATTENTION_DISCOVERY_MS = 30_000;
+
   private ensureBackgroundState(threadId: string): BackgroundThreadState {
     let st = this.backgroundThreads.get(threadId);
     if (!st) {
@@ -3852,6 +3879,44 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     this.threadListRefreshTimer = setTimeout(() => {
       this.threadListRefreshTimer = null;
       void this.refreshThreadList();
+    }, delayMs);
+  }
+
+  /**
+   * Discover attention that no watch can see yet.
+   *
+   * Everything else in this file reacts: a watch exists because a summary
+   * refresh said the thread was busy, and the events that would open one only
+   * arrive on a watch we already hold. A task or a goal started somewhere else
+   * — the CLI, another window, the TUI — can therefore be waiting on an
+   * approval that nothing here observes, and no amount of listening fixes it.
+   * This sweep is that bootstrap: one quiet summary fetch, no rail republish,
+   * and the next pass is chained after the previous one finishes rather than
+   * fired on a fixed interval (the fetch has been measured at 25s on a large
+   * store, so a fixed interval would stack them).
+   */
+  private startAttentionDiscoveryPoll(): void {
+    this.attentionDiscoveryActive = true;
+    this.scheduleAttentionDiscovery();
+  }
+
+  private stopAttentionDiscoveryPoll(): void {
+    this.attentionDiscoveryActive = false;
+    if (this.attentionDiscoveryTimer) {
+      clearTimeout(this.attentionDiscoveryTimer);
+      this.attentionDiscoveryTimer = null;
+    }
+  }
+
+  private scheduleAttentionDiscovery(
+    delayMs: number = ChatProvider.ATTENTION_DISCOVERY_MS,
+  ): void {
+    if (!this.attentionDiscoveryActive || this.attentionDiscoveryTimer) return;
+    this.attentionDiscoveryTimer = setTimeout(() => {
+      this.attentionDiscoveryTimer = null;
+      void this.refreshThreadList(true)
+        .catch(() => undefined)
+        .then(() => this.scheduleAttentionDiscovery());
     }, delayMs);
   }
 
@@ -5738,6 +5803,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     this.abortEventStream();
     this.stopPeriodicTaskRefresh();
     this.stopActiveTaskDetailRefresh();
+    this.stopAttentionDiscoveryPoll();
     this.activeTaskDetailId = null;
     this.stopFleetEventStream();
     this.activeFleetRunId = null;

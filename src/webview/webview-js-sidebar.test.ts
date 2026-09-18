@@ -107,6 +107,8 @@ describe("webview-js-sidebar.ts", () => {
     expect(script).toContain('class="approval-remember"');
     expect(script).toContain("__i18n.approvalRemember");
     expect(script).toContain("remember: !!(rememberBox && rememberBox.checked)");
+    // The same box on a rail card's inline approval panel.
+    expect(script).toContain("remember: !!box.checked");
     // Read from the row it belongs to: the same approval can also be sitting on
     // a rail card, and the first match in the document would decide for the user.
     expect(script).toContain("approvalBtn.closest('.detail-list-item')");

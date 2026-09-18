@@ -628,22 +628,35 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
       row.innerHTML =
         '<div class="thread-attention-text"><strong>' + __wvEscapeHtml(approval.tool_name || 'tool') + '</strong> ' +
         __wvEscapeHtml(approval.description || approval.intent_summary || '') + '</div>';
+      // The same remember box the approval float and the task detail panel
+      // offer: allowing with it flips this thread to Full Access, so a card the
+      // user is not even looking at stops asking once per tool call.
+      var rememberLabel = document.createElement('label');
+      rememberLabel.className = 'approval-remember';
+      var rememberBox = document.createElement('input');
+      rememberBox.type = 'checkbox';
+      rememberBox.className = 'remember-check';
+      rememberBox.setAttribute('data-approval-id', approval.id || '');
+      rememberLabel.appendChild(rememberBox);
+      rememberLabel.appendChild(document.createTextNode(' ' + __i18n.approvalRemember));
+
       var btns = document.createElement('div');
       btns.className = 'thread-attention-buttons';
-      (function(approvalId) {
+      (function(approvalId, box) {
         var allow = document.createElement('button');
         allow.className = 'thread-attention-btn allow';
         allow.type = 'button';
         allow.textContent = __i18n.allow;
-        allow.addEventListener('click', function(e) { e.stopPropagation(); vscode.postMessage({ type: 'approvalDecision', approvalId: approvalId, decision: 'allow', remember: false }); });
+        allow.addEventListener('click', function(e) { e.stopPropagation(); vscode.postMessage({ type: 'approvalDecision', approvalId: approvalId, decision: 'allow', remember: !!box.checked }); });
         var deny = document.createElement('button');
         deny.className = 'thread-attention-btn deny';
         deny.type = 'button';
         deny.textContent = __i18n.deny;
-        deny.addEventListener('click', function(e) { e.stopPropagation(); vscode.postMessage({ type: 'approvalDecision', approvalId: approvalId, decision: 'deny', remember: false }); });
+        deny.addEventListener('click', function(e) { e.stopPropagation(); vscode.postMessage({ type: 'approvalDecision', approvalId: approvalId, decision: 'deny', remember: !!box.checked }); });
         btns.appendChild(allow);
         btns.appendChild(deny);
-      })(approval.id || '');
+      })(approval.id || '', rememberBox);
+      row.appendChild(rememberLabel);
       row.appendChild(btns);
       panel.appendChild(row);
     }
