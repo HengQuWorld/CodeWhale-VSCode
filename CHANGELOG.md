@@ -1,6 +1,6 @@
 # Change Log
 
-## Unreleased
+## 0.7.1
 
 ### New Features
 
@@ -23,6 +23,10 @@
 - **The Threads rail no longer goes blank when its fetch is slow** — `GET /v1/threads/summary` builds every row from a full thread-detail read (`get_thread_detail` per thread, a whole-store turns+items walk), so it costs roughly a quarter-second per thread: 25.4s against a 72-thread / 189MB store, measured. That sat just inside the client's hard-coded 30s socket default and crossed it as soon as a turn was writing to the store. The failure then landed in a silent `catch` — no error, no retry, no `threadList` message — so the rail stayed empty until an unrelated watcher event happened to refresh it, which is what made it look intermittent rather than broken. The summary call now carries its own 60s timeout (`DEFAULT_REQUEST_TIMEOUT_MS` stays 30s for every other endpoint) and the catch reports instead of swallowing: one retry, but only for a failure that is actually transient — a refused or reset connection, which is what a request issued while the engine is relaunching on a fresh port sees — plus a `debugLog` line for either outcome. Overlapping refreshes are ordered by a generation token, so the slow fetch that started first can no longer publish its stale list over a newer one, or mark the rail failed after a newer fetch already succeeded.
 
 - **The rail says what it is doing instead of presenting an empty list as the answer** — An empty rail while the fetch above was in flight was indistinguishable from "you have no threads". `refreshThreadList()` now announces the fetch with a `threadListLoading` message, and the rail renders a spinner and *Loading threads…* in place of the empty state, since "no conversations yet" is a guess until the fetch answers. The hint is scoped to the case that misleads — an empty rail: a rail that already lists threads refreshes behind them rather than putting a spinner under the list on every panel open. A fetch that failed says *Couldn't load the thread list* with a **Retry** button (`retryThreadList`) rather than sitting blank, over a populated rail too, since that list may be stale; a published list clears the row it replaces. New `threadsLoading` / `threadsLoadFailed` / `threadsRetry` strings in both languages, plus `webview-js-sidebar-runtime.test.ts`, which drives the real sidebar IIFE in a DOM stand-in — so it also guards the whole script block against the initialisation failure that takes the entire webview down with it.
+
+### Upstream TUI PRs
+
+- [Codewhale#6321](https://github.com/Hmbown/Codewhale/pull/6321) — feat(tui): record the mode each turn ran in on the turn (backs the plan-approval action deciding by the turn's own mode rather than the thread's current mode; older runtimes fall back to the client's recorded turn-start mode)
 
 ## 0.7.0
 
