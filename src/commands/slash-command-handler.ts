@@ -143,7 +143,11 @@ async function handleAuto(ctx: SlashCommandContext, args: string): Promise<void>
   await applyPosture(ctx, "auto_review");
 }
 
-/** Apply a TUI mode to the current thread and the startup default.
+/** Apply a TUI mode to the current thread.
+ *
+ * Thread-scoped: the startup default new threads inherit is a separate setting
+ * (`setDefaultMode`, the dropdown's second group), so a command cannot move it
+ * behind the user's back.
  *
  * Patch only `mode` unless a posture is explicitly requested: the runtime
  * preserves the thread's effective posture when `auto_approve` is absent
@@ -157,17 +161,23 @@ async function applyMode(
   const model = ctx.currentThread?.model || cfg().get<string>("defaultModel", "deepseek-v4-pro");
   const reasoningEffort = cfg().get<string>("reasoningEffort", "auto");
   const posture = opts?.posture;
-  await cfg().update("defaultMode", mode, vscode.ConfigurationTarget.Global);
-  if (posture) {
-    await cfg().update("defaultPermissionPosture", POSTURE_WIRE[posture], vscode.ConfigurationTarget.Global);
-  }
 
   let modeForUi = mode;
   let postureForUi = posture ?? effectivePosture(ctx);
   let modelForUi = model;
   let infoMessage = `Mode changed to ${MODE_LABELS[mode]}`;
 
-  if (ctx.currentThread) {
+  if (!ctx.currentThread) {
+    // Threadless view (a new chat, or a saved session being viewed): there is no
+    // conversation to scope a mode to, so the startup default is the only thing
+    // this can move. Say which scope moved instead of letting the click land
+    // nowhere.
+    await cfg().update("defaultMode", mode, vscode.ConfigurationTarget.Global);
+    if (posture) {
+      await cfg().update("defaultPermissionPosture", POSTURE_WIRE[posture], vscode.ConfigurationTarget.Global);
+    }
+    infoMessage = `No conversation yet — new threads will start in ${MODE_LABELS[mode]}`;
+  } else {
     try {
       const updates: { mode: string; permission_posture?: string } = { mode };
       if (posture) updates.permission_posture = POSTURE_WIRE[posture];
@@ -179,29 +189,36 @@ async function applyMode(
     } catch (err) {
       ctx.postMessage({
         type: "error",
-        message: `Mode changed in settings but failed to update current thread: ${getErrorMessage(err)}`,
+        message: `Failed to change this thread's mode: ${getErrorMessage(err)}`,
       });
       modeForUi = normalizeMode(ctx.currentThread.mode);
       postureForUi = effectivePosture(ctx);
       modelForUi = ctx.currentThread.model;
-      infoMessage = `Default mode changed to ${MODE_LABELS[mode]}; current thread remains ${modeLabel(ctx.currentThread.mode)}`;
+      infoMessage = `This thread remains in ${modeLabel(ctx.currentThread.mode)} mode`;
     }
   }
   ctx.postMessage({ type: "settingsUpdated", mode: modeForUi, posture: postureForUi, model: modelForUi, reasoningEffort });
   ctx.postMessage({ type: "info", message: infoMessage });
 }
 
-/** Apply a permission posture to the current thread and the startup default. */
+/** Apply a permission posture to the current thread.
+ *
+ * Thread-scoped for the same reason as `applyMode`: the startup default for new
+ * threads is its own setting and its own dropdown group (`setDefaultPosture`). */
 async function applyPosture(ctx: SlashCommandContext, posture: PermissionPosture): Promise<void> {
   const model = ctx.currentThread?.model || cfg().get<string>("defaultModel", "deepseek-v4-pro");
   const reasoningEffort = cfg().get<string>("reasoningEffort", "auto");
   const mode = normalizeMode(ctx.currentThread?.mode || cfg().get<string>("defaultMode", "agent"));
   const wire = POSTURE_WIRE[posture];
-  await cfg().update("defaultPermissionPosture", wire, vscode.ConfigurationTarget.Global);
 
   let postureForUi = posture;
   let infoMessage = `Permission posture changed to ${POSTURE_LABELS[posture]}`;
-  if (ctx.currentThread) {
+  if (!ctx.currentThread) {
+    // Same threadless case as applyMode: the startup default is the only scope
+    // available, and the toast names it.
+    await cfg().update("defaultPermissionPosture", wire, vscode.ConfigurationTarget.Global);
+    infoMessage = `No conversation yet — new threads will start with ${POSTURE_LABELS[posture]}`;
+  } else {
     try {
       const updatedThread = await ctx.api.updateThread(ctx.currentThread.id, {
         permission_posture: wire,
@@ -211,10 +228,10 @@ async function applyPosture(ctx: SlashCommandContext, posture: PermissionPosture
     } catch (err) {
       ctx.postMessage({
         type: "error",
-        message: `Permission posture changed in settings but failed to update current thread: ${getErrorMessage(err)}`,
+        message: `Failed to change this thread's permission posture: ${getErrorMessage(err)}`,
       });
       postureForUi = effectivePosture(ctx);
-      infoMessage = `Default permission posture changed to ${POSTURE_LABELS[posture]}; current thread remains ${postureLabel(postureForUi)}`;
+      infoMessage = `This thread remains on ${postureLabel(postureForUi)}`;
     }
   }
   ctx.postMessage({ type: "settingsUpdated", mode, posture: postureForUi, model, reasoningEffort });

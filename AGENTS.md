@@ -264,7 +264,7 @@ TUI 把「对话模式」和「权限姿态」当作**两个独立维度**，GUI
 - 三套拼法不要混用：`POSTURE_WIRE`（线程/Runtime 请求体，snake_case）、`POSTURE_CONFIG`（引擎配置 `approval_mode`，hyphenated）、`POSTURE_LABELS`（UI 显示名）。配置面板的姿态下拉只提供 `ask`/`auto-review`/`full-access`：`use-tui-default` 属于另一个 key `approval_policy`，`never` 是托管策略值，两者都不是 `approval_mode` 的合法取值。
 - 改模式时只 PATCH `{ mode }`，改姿态时只 PATCH `{ permission_posture }`；运行时会自行推导 `auto_approve` / `trust_mode`（`runtime_policy_with_overrides`）。把 GUI 缓存的 `auto_approve: false` 一起发出去（且不带显式姿态）会把 Auto-Review 姿态重新推导成 Ask。
 - 兼容旧记录的姿态推导必须与引擎的 `RuntimePolicyProjection::from_persisted` 一致：`permission_posture` 优先，其次看 mode 的 `yolo` 别名与 `auto_approve`；**不要**参考 `trust_mode`（引擎会忽略它）。
-- 启动默认值：`brotherwhale.defaultMode`（`agent|plan|operate`）与 `brotherwhale.defaultPermissionPosture`（`ask|auto_review|full_access`）。
+- 启动默认值：`brotherwhale.defaultMode`（`agent|plan|operate`）与 `brotherwhale.defaultPermissionPosture`（`ask|auto_review|full_access`）。它们只作用于**新建**线程；下拉把两个作用域分开列出（item 带 `data-scope="thread|default"`，由 `scopedDropdownItems()` 生成），第二组才写这两个配置项。`/mode`、`/auto` 与计划确认只作用于当前线程；无当前线程时（新会话视图、浏览已保存会话）它们落到启动默认值并在提示里说明作用域。默认值的当前值经 `scopedDefaults` 消息推给 webview 用于打勾。
 - `resume-thread` 请求体只有 `model`/`mode`（`runtime_api/sessions.rs`），**不支持** `permission_posture`；恢复的线程姿态由引擎从会话本身推导。
 
 > 注意：模式可选 `operate` 与 `/v1/operate` 编排面（operate run / plan / keepalive）是两回事；后者仍未对接。

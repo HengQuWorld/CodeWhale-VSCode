@@ -551,6 +551,47 @@ describe("webview-js-event-handler runtime", () => {
     });
   });
 
+  it("routes the dropdown's default group to the startup defaults, not the thread", () => {
+    const harness = createRuntimeHarness();
+    const toolbar = harness.getElement("toolbar");
+
+    const modeItem = new FakeElement();
+    modeItem.classList.add("dropdown-item");
+    modeItem.setAttribute("data-scope", "default");
+    modeItem.setAttribute("data-value", "operate");
+    const modeMenu = new FakeElement();
+    const modeWrapper = new FakeElement();
+    modeWrapper.setAttribute("data-setting", "mode");
+    modeMenu.parentElement = modeWrapper;
+    modeItem.parentElement = modeMenu;
+
+    const postureItem = new FakeElement();
+    postureItem.classList.add("dropdown-item");
+    postureItem.setAttribute("data-scope", "default");
+    postureItem.setAttribute("data-value", "auto_review");
+    const postureMenu = new FakeElement();
+    const postureWrapper = new FakeElement();
+    postureWrapper.setAttribute("data-setting", "posture");
+    postureMenu.parentElement = postureWrapper;
+    postureItem.parentElement = postureMenu;
+
+    toolbar.dispatch("click", { target: modeItem, stopPropagation: () => {} });
+    toolbar.dispatch("click", { target: postureItem, stopPropagation: () => {} });
+
+    expect(harness.postMessages).toContainEqual({ type: "setDefaultMode", mode: "operate" });
+    expect(harness.postMessages).toContainEqual({
+      type: "setDefaultPosture",
+      posture: "auto_review",
+    });
+    // The upper group is the one that patches the thread; this click must not
+    // reach it, or the two scopes would be the same control again.
+    expect(
+      harness.postMessages.some(
+        (msg: any) => msg.type === "slashCommand" || msg.type === "setPosture",
+      ),
+    ).toBe(false);
+  });
+
   it("still acts on the dropdowns that stayed in the settings bar", () => {
     const harness = createRuntimeHarness();
     const settingsBar = harness.getElement("settings-bar");

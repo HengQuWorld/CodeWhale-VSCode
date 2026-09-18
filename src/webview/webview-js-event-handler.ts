@@ -29,6 +29,11 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
   var apiCapabilities = window.__wvApiCapabilities || {};
   var runtimeVersion = '';
   var sessionStats = null;
+  // Startup defaults for new threads, seeded by the backend's scopedDefaults
+  // message. They are process-scoped, so they never ride settingsUpdated
+  // (which describes the active thread) — the mode/permission dropdowns show
+  // both scopes and each group is marked against its own source.
+  var scopedDefaults = { mode: '', posture: '' };
 
   var approvalFloatEl = document.getElementById('approval-float');
 
@@ -289,15 +294,26 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
     }
 
     function highlightCurrent(dropdown) {
-      var valueEl = dropdown.parentElement.querySelector('.setting-value');
+      var wrapper = dropdown.parentElement;
+      var valueEl = wrapper.querySelector('.setting-value');
       // Prefer the canonical data-value (mode/posture show friendly labels);
       // fall back to the visible text for dropdowns whose value is its label.
       var currentVal = valueEl
         ? (valueEl.getAttribute('data-value') || valueEl.textContent).trim()
         : '';
+      var setting = wrapper.getAttribute('data-setting');
       var items = dropdown.querySelectorAll('.dropdown-item');
       for (var i = 0; i < items.length; i++) {
-        items[i].classList.toggle('selected', items[i].getAttribute('data-value') === currentVal);
+        // A dropdown holds the same roster twice, scoped: the top group is this
+        // thread's value, the bottom one the startup default. Each group is
+        // compared against its own source, so the two marks can differ without
+        // either of them lying.
+        var scope = items[i].getAttribute('data-scope') || 'thread';
+        var expected = scope === 'default' ? (scopedDefaults[setting] || '') : currentVal;
+        items[i].classList.toggle(
+          'selected',
+          !!expected && items[i].getAttribute('data-value') === expected,
+        );
       }
     }
 
@@ -325,8 +341,15 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
         var setting = dd.parentElement.getAttribute('data-setting');
         closeAllDropdowns();
         if (val && setting) {
-          // Map setting to slash command
-          if (setting === 'mode') {
+          var scope = target.getAttribute('data-scope') || 'thread';
+          if (scope === 'default' && (setting === 'mode' || setting === 'posture')) {
+            // The lower group sets the startup default only. The active thread
+            // keeps its own value, so nothing here patches it — that is the
+            // whole point of splitting the two scopes apart.
+            vscode.postMessage(setting === 'mode'
+              ? { type: 'setDefaultMode', mode: val }
+              : { type: 'setDefaultPosture', posture: val });
+          } else if (setting === 'mode') {
             vscode.postMessage({ type: 'slashCommand', command: '/mode', args: val });
           } else if (setting === 'posture') {
             vscode.postMessage({ type: 'setPosture', posture: val });
@@ -406,6 +429,14 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
           currentProviderEl.textContent = msg.provider;
           currentProviderEl.setAttribute('data-provider-id', msg.provider);
         }
+        break;
+
+      case 'scopedDefaults':
+        // Startup defaults for new threads — the lower half of the mode and
+        // permission dropdowns. The menus close the moment a value is picked,
+        // so caching is enough: highlightCurrent re-marks every time one opens.
+        scopedDefaults.mode = msg.mode || '';
+        scopedDefaults.posture = msg.posture || '';
         break;
 
       case 'providersUpdated':

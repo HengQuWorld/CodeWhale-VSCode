@@ -375,7 +375,9 @@ describe("SlashCommandHandler - Dispatcher Pattern", () => {
 
       await handler.handle("/mode", "agent");
 
-      expect(vscodeState.updateMock).toHaveBeenCalledWith("defaultMode", "agent", "global");
+      // Thread-scoped: the startup default for new threads has its own control
+      // (the dropdown's second group), so a thread's mode command must not move it.
+      expect(vscodeState.updateMock).not.toHaveBeenCalled();
       // Mode-only patch: sending auto_approve would let the runtime re-derive
       // (and possibly downgrade) the thread's permission posture.
       expect(updateThread).toHaveBeenCalledWith("thread-1", { mode: "agent" });
@@ -462,12 +464,9 @@ describe("SlashCommandHandler - Dispatcher Pattern", () => {
 
       await handler.handle("/mode", "yolo");
 
-      expect(vscodeState.updateMock).toHaveBeenCalledWith("defaultMode", "agent", "global");
-      expect(vscodeState.updateMock).toHaveBeenCalledWith(
-        "defaultPermissionPosture",
-        "full_access",
-        "global"
-      );
+      // Thread-scoped, legacy alias included: both halves of "Act + Full Access"
+      // land on the thread, and neither touches the startup defaults.
+      expect(vscodeState.updateMock).not.toHaveBeenCalled();
       expect(updateThread).toHaveBeenCalledWith("thread-1", {
         mode: "agent",
         permission_posture: "full_access",
@@ -516,11 +515,9 @@ describe("SlashCommandHandler - Dispatcher Pattern", () => {
 
       await handler.handle("/auto", "");
 
-      expect(vscodeState.updateMock).toHaveBeenCalledWith(
-        "defaultPermissionPosture",
-        "auto_review",
-        "global"
-      );
+      // Thread-scoped: the startup posture for new threads is set from the
+      // dropdown's second group, never as a side effect of a thread's posture.
+      expect(vscodeState.updateMock).not.toHaveBeenCalled();
       // Posture-only patch: the mode (and therefore the thread's mode) is untouched.
       expect(updateThread).toHaveBeenCalledWith("thread-1", {
         permission_posture: "auto_review",

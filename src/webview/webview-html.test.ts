@@ -79,6 +79,9 @@ function makeTr(): WebviewTranslations {
     steerBadgeTitle: "Sent as mid-turn steering",
     modeLabel: "Mode",
     permissionLabel: "Permission",
+    scopeThreadLabel: "This thread",
+    scopeDefaultLabel: "New threads",
+    scopeDefaultTitle: "New conversations start here; this one keeps its own setting.",
     reasoningEffortLabel: "Reasoning",
     planApproveButton: "Switch to Act & execute",
     welcomeTitle: "CodeWhale",
@@ -654,6 +657,24 @@ describe("webview-html.ts assembler", () => {
     expect(html).toContain('data-value="full_access"');
     expect(html).toContain('>Auto-Review<');
     expect(html).toContain('>Full Access<');
+  });
+
+  it("offers the mode and permission roster under both scopes", () => {
+    const html = getWebviewHtml(makeMockWebview(), makeMockExtensionUri(), makeTr());
+
+    // Each roster appears twice: once for this thread, once as the startup
+    // default new threads inherit. The scope is on the item so a click can be
+    // addressed to one of them instead of inferred.
+    expect(html).toContain("This thread");
+    expect(html).toContain("New threads");
+    for (const scope of ["thread", "default"]) {
+      for (const value of ["agent", "plan", "operate", "ask", "auto_review", "full_access"]) {
+        expect(html).toContain(`data-scope="${scope}" data-value="${value}"`);
+      }
+    }
+    // The label alone does not say what the second group changes, so it carries
+    // a title.
+    expect(html).toContain("New conversations start here");
   });
 
   it("contains status bar with status text and stats", () => {

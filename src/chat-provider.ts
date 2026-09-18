@@ -27,6 +27,7 @@ import { renderMarkdown } from "./utils/markdown";
 import { finalizeAssistantMessage } from "./utils/event-helpers";
 import { formatCostAmount, resolveCostCurrency } from "./utils/cost-calculator";
 import {
+  MODE_LABELS,
   POSTURE_LABELS,
   POSTURE_WIRE,
   isYoloAlias,
@@ -443,6 +444,12 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       case "setPosture":
         await this.handleSetPosture(msg.posture as string);
         break;
+      case "setDefaultMode":
+        await this.handleSetDefaultMode(msg.mode as string);
+        break;
+      case "setDefaultPosture":
+        await this.handleSetDefaultPosture(msg.posture as string);
+        break;
       case "approvePlan":
         await this.handleApprovePlan();
         break;
@@ -697,6 +704,51 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         provider: this.currentProvider || undefined,
         runtimeVersion: this.runtimeVersion,
       });
+    this.postScopedDefaults();
+  }
+
+  /** The startup defaults new threads inherit. They are process-scoped, not
+   *  thread state, so they travel on their own message instead of riding
+   *  `settingsUpdated` — the webview marks each dropdown group against its own
+   *  source, and this is the source for the "new threads" group. */
+  private postScopedDefaults(): void {
+    const cfg = vscode.workspace.getConfiguration("brotherwhale");
+    this.postMessage({
+      type: "scopedDefaults",
+      mode: normalizeMode(cfg.get<string>("defaultMode", "agent")),
+      posture: normalizePosture(cfg.get<string>("defaultPermissionPosture", "ask")),
+    });
+  }
+
+  /** Change the startup mode for new threads only: the active thread keeps its
+   *  own mode, which is the scope the dropdown's second group promises. */
+  private async handleSetDefaultMode(mode: string): Promise<void> {
+    const resolved = normalizeMode(mode);
+    await vscode.workspace.getConfiguration("brotherwhale").update(
+      "defaultMode",
+      resolved,
+      vscode.ConfigurationTarget.Global,
+    );
+    this.postScopedDefaults();
+    this.postMessage({
+      type: "info",
+      message: `New threads will start in ${MODE_LABELS[resolved]}`,
+    });
+  }
+
+  /** Change the startup permission posture for new threads only. */
+  private async handleSetDefaultPosture(posture: string): Promise<void> {
+    const resolved = normalizePosture(posture);
+    await vscode.workspace.getConfiguration("brotherwhale").update(
+      "defaultPermissionPosture",
+      POSTURE_WIRE[resolved],
+      vscode.ConfigurationTarget.Global,
+    );
+    this.postScopedDefaults();
+    this.postMessage({
+      type: "info",
+      message: `New threads will start with ${POSTURE_LABELS[resolved]}`,
+    });
   }
 
   // ── Initialization ──
@@ -4283,20 +4335,31 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     await this.slashHandler.handle(command, args);
   }
 
-  /** Switch the permission posture (Shift+Tab equivalent). Patches only
+  /** Switch this thread's permission posture. Patches only
    *  `permission_posture` so the runtime derives `auto_approve` / `trust_mode`
-   *  from the posture instead of the GUI sending stale cached booleans. */
+   *  from the posture instead of the GUI sending stale cached booleans.
+   *
+   *  Thread-scoped on purpose: the startup default for *new* threads is a
+   *  separate setting with its own dropdown group (`setDefaultPosture`), so a
+   *  change here cannot silently move it. */
   private async handleSetPosture(posture: string): Promise<void> {
     const normalized = normalizePosture(posture);
     const wire = POSTURE_WIRE[normalized];
-    await vscode.workspace.getConfiguration("brotherwhale").update(
-      "defaultPermissionPosture",
-      wire,
-      vscode.ConfigurationTarget.Global,
-    );
 
     let effective: PermissionPosture = normalized;
-    if (this.currentThread) {
+    let infoMessage: string;
+    if (!this.currentThread) {
+      // Threadless view (a new chat, or a saved session being viewed): the
+      // startup default is the only scope a posture choice can move, and the
+      // toast names it instead of letting the click land nowhere.
+      await vscode.workspace.getConfiguration("brotherwhale").update(
+        "defaultPermissionPosture",
+        wire,
+        vscode.ConfigurationTarget.Global,
+      );
+      this.postScopedDefaults();
+      infoMessage = `No conversation yet — new threads will start with ${POSTURE_LABELS[normalized]}`;
+    } else {
       try {
         const updated = await this.api.updateThread(this.currentThread.id, {
           permission_posture: wire,
@@ -4304,14 +4367,14 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         this.currentThread = mergeThreadRecord(this.currentThread, updated, {
           permission_posture: wire,
         });
-        effective = postureFromThread(this.currentThread);
       } catch (err) {
         this.postMessage({
           type: "error",
           message: formatError("Failed to update permission posture", err),
         });
-        effective = postureFromThread(this.currentThread);
       }
+      effective = postureFromThread(this.currentThread);
+      infoMessage = `Permission posture changed to ${POSTURE_LABELS[effective]}`;
     }
     this.postMessage({
       type: "settingsUpdated",
@@ -4320,10 +4383,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       model: this.currentThread?.model || this.getCurrentModel(),
       reasoningEffort: this.getCurrentReasoningEffort(),
     });
-    this.postMessage({
-      type: "info",
-      message: `Permission posture changed to ${POSTURE_LABELS[effective]}`,
-    });
+    this.postMessage({ type: "info", message: infoMessage });
   }
 
   /** Approve the plan produced in plan mode: switch the thread (and the

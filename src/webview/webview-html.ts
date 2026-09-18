@@ -17,13 +17,28 @@ import {
 } from "../utils/modes";
 
 /** Status-bar dropdown options, generated from the single source of truth in
- *  `utils/modes.ts` so a roster change cannot drift between engine and UI. */
-const MODE_DROPDOWN_ITEMS = MODE_VALUES.map(
-  (value) => `<div class="dropdown-item" data-value="${value}">${MODE_LABELS[value]}</div>`,
-).join("\n              ");
-const POSTURE_DROPDOWN_ITEMS = POSTURE_VALUES.map(
-  (value) => `<div class="dropdown-item" data-value="${value}">${POSTURE_LABELS[value]}</div>`,
-).join("\n              ");
+ *  `utils/modes.ts` so a roster change cannot drift between engine and UI.
+ *
+ *  Mode and permission carry two scopes and the roster alone says nothing about
+ *  which one a row belongs to, so each dropdown lists the same values twice:
+ *  the top group is what *this* thread runs with, the bottom group the startup
+ *  default new threads inherit. The items carry `data-scope` so the click
+ *  handler addresses one without inferring it, and the two groups are compared
+ *  against their own source when the current value is marked. */
+function scopedDropdownItems(
+  values: readonly string[],
+  labels: Record<string, string>,
+  tr: WebviewTranslations,
+): string {
+  const item = (value: string, scope: "thread" | "default") =>
+    `<div class="dropdown-item" data-scope="${scope}" data-value="${value}">${labels[value]}</div>`;
+  return [
+    `<div class="dropdown-group">${tr.scopeThreadLabel}</div>`,
+    ...values.map((value) => item(value, "thread")),
+    `<div class="dropdown-group dropdown-group-default" title="${tr.scopeDefaultTitle}">${tr.scopeDefaultLabel}</div>`,
+    ...values.map((value) => item(value, "default")),
+  ].join("\n              ");
+}
 
 export interface WebviewTranslations {
   locale: string; // "en" or "zh-cn"
@@ -94,6 +109,9 @@ export interface WebviewTranslations {
   steerBadgeTitle: string;
   modeLabel: string;
   permissionLabel: string;
+  scopeThreadLabel: string;
+  scopeDefaultLabel: string;
+  scopeDefaultTitle: string;
   reasoningEffortLabel: string;
   planApproveButton: string;
   welcomeTitle: string;
@@ -486,7 +504,7 @@ ${css}
           <div class="setting-dropdown" data-setting="mode">
             <span class="setting-value" id="current-mode" data-value="${MODE_VALUES[0]}">${MODE_LABELS[MODE_VALUES[0]]}</span>
             <div class="dropdown-menu" id="dropdown-mode">
-              ${MODE_DROPDOWN_ITEMS}
+              ${scopedDropdownItems(MODE_VALUES, MODE_LABELS, tr)}
             </div>
           </div>
         </div>
@@ -495,7 +513,7 @@ ${css}
           <div class="setting-dropdown" data-setting="posture">
             <span class="setting-value" id="current-posture" data-value="${POSTURE_VALUES[0]}">${POSTURE_LABELS[POSTURE_VALUES[0]]}</span>
             <div class="dropdown-menu" id="dropdown-posture">
-              ${POSTURE_DROPDOWN_ITEMS}
+              ${scopedDropdownItems(POSTURE_VALUES, POSTURE_LABELS, tr)}
             </div>
           </div>
         </div>

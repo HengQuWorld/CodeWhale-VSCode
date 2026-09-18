@@ -1671,6 +1671,26 @@ export function getWebviewCss(): string {
       background: var(--brand-primary);
       color: var(--brand-primary-foreground);
     }
+    /* A dropdown lists its roster twice — this thread, then the startup default
+       for new threads — so the group has to read as a scope, not as one more
+       value: no hover, no pointer, and a rule before the second group. */
+    #settings-bar .dropdown-group,
+    #toolbar .dropdown-group {
+      padding: 5px 12px 2px;
+      font-size: 0.78em;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--muted);
+      cursor: default;
+      white-space: nowrap;
+    }
+    #settings-bar .dropdown-group-default,
+    #toolbar .dropdown-group-default {
+      margin-top: 3px;
+      border-top: 1px solid var(--border);
+      padding-top: 6px;
+    }
 
     #settings-bar {
       padding: 4px 8px;

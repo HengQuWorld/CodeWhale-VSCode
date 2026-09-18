@@ -4,9 +4,11 @@
 
 ### New Features
 
-- **A finished plan can be approved and executed in one click** — A successful Plan-mode turn now carries a **Switch to Act & execute** action on the message that holds the plan. Taking it switches the thread *and* the startup default to Act through the same `/mode agent` path the command uses, then sends a follow-up turn so the agent runs the plan already in the conversation, instead of making the user switch modes and restate the go-ahead. ([#12](https://github.com/HengQuWorld/CodeWhale-VSCode/pull/12) by [@eoli](https://github.com/eoli))
+- **A finished plan can be approved and executed in one click** — A successful Plan-mode turn now carries a **Switch to Act & execute** action on the message that holds the plan. Taking it switches the thread to Act through the same `/mode agent` path the command uses, then sends a follow-up turn so the agent runs the plan already in the conversation, instead of making the user switch modes and restate the go-ahead. ([#12](https://github.com/HengQuWorld/CodeWhale-VSCode/pull/12) by [@eoli](https://github.com/eoli))
 
 ### Improvements
+
+- **Mode and permission say which scope they change** — Both dropdowns used to move two things at once: the active thread *and* the startup default every new thread inherits. Each menu now lists its roster twice under two labels — **This thread**, then **New threads** below a rule — and only the second group writes `brotherwhale.defaultMode` / `defaultPermissionPosture`. `/mode`, `/auto` and the plan-approval action are thread-scoped for the same reason, so no command can move a default behind the user's back. In a view with no conversation yet (a new chat, a viewed session) a mode or permission choice still lands on the startup default, and the toast says so rather than letting the click go nowhere.
 
 - **Mode and Permission moved down to the toolbar** — The two dropdowns sat in the settings bar, the row that describes the request (Provider, Model, Reasoning Effort); they decide *how* a turn runs, so they now sit beside the controls that steer it — new thread, compact, undo, retry — right-aligned at the end of the toolbar, and open upward because the toolbar sits below the messages area. The dropdown handler binds both bars instead of one, so the menus that stayed in the settings bar keep working. ([#12](https://github.com/HengQuWorld/CodeWhale-VSCode/pull/12) by [@eoli](https://github.com/eoli))
 

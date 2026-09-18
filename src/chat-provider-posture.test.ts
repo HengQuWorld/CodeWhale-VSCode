@@ -108,11 +108,9 @@ describe("ChatProvider permission posture", () => {
 
     await (provider as any).handleWebviewMessage({ type: "setPosture", posture: "full_access" });
 
-    expect(vscodeState.updateMock).toHaveBeenCalledWith(
-      "defaultPermissionPosture",
-      "full_access",
-      "global"
-    );
+    // Thread-scoped: the startup default for new threads is its own control
+    // (the dropdown's second group), so this must not move it.
+    expect(vscodeState.updateMock).not.toHaveBeenCalled();
     // Posture-only patch: sending cached auto_approve/trust_mode would make the
     // runtime re-derive (and possibly downgrade) the thread's posture.
     expect(api.updateThread).toHaveBeenCalledWith("thread-1", {
@@ -149,6 +147,36 @@ describe("ChatProvider permission posture", () => {
       posture: "auto_review",
       model: "deepseek-v4-pro",
       reasoningEffort: "auto",
+    });
+  });
+
+  it("answers the dropdown's second group with the startup default only", async () => {
+    const api = makeApi();
+    const provider = makeProvider(api);
+    (provider as any).currentThread = thread("plan");
+
+    await (provider as any).handleWebviewMessage({ type: "setDefaultMode", mode: "operate" });
+    await (provider as any).handleWebviewMessage({
+      type: "setDefaultPosture",
+      posture: "auto_review",
+    });
+
+    expect(vscodeState.updateMock).toHaveBeenCalledWith("defaultMode", "operate", "global");
+    expect(vscodeState.updateMock).toHaveBeenCalledWith(
+      "defaultPermissionPosture",
+      "auto_review",
+      "global"
+    );
+    // Nothing here patches the thread: a default is for the conversations that do
+    // not exist yet.
+    expect(api.updateThread).not.toHaveBeenCalled();
+    expect((provider as any).currentThread.mode).toBe("plan");
+    // The webview marks the second group from this message, so it has to carry
+    // what the setting now is.
+    expect(messagesOf(provider)).toContainEqual({
+      type: "scopedDefaults",
+      mode: "operate",
+      posture: "auto_review",
     });
   });
 
