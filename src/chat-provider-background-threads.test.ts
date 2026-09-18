@@ -253,6 +253,36 @@ describe("background thread watching", () => {
       expect(streams).toHaveLength(0);
       expect((provider as any).backgroundThreads.size).toBe(0);
     });
+
+    it("arms a watch for a parked thread whose goal is still Active, with no turn in flight", async () => {
+      const { provider, api, streams } = newProvider();
+      provider.currentThread = makeThread("thread-A");
+      api.getThreadGoal.mockResolvedValue(makeGoal({ objective: "keep going" }));
+      (provider as any).lastEventSeq = 42;
+
+      // The view learned the goal while it was on this thread.
+      await provider.refreshGoal();
+      expect((provider as any).currentTurnId).toBeNull();
+
+      (provider as any).parkCurrentThread();
+
+      // The runtime arms the next continuation pass itself, so an Active goal
+      // is work in flight even when no turn happens to be running right now.
+      expect(streamFor(streams, "thread-A")!.sinceSeq).toBe(42);
+      const st = (provider as any).backgroundThreads.get("thread-A");
+      expect(st.running).toBe(false);
+    });
+
+    it("parks nothing when the goal is not Active", async () => {
+      const { provider, api, streams } = newProvider();
+      provider.currentThread = makeThread("thread-A");
+      api.getThreadGoal.mockResolvedValue(makeGoal({ status: "paused" }));
+
+      await provider.refreshGoal();
+      (provider as any).parkCurrentThread();
+
+      expect(streams).toHaveLength(0);
+    });
   });
 
   describe("loadThread()", () => {

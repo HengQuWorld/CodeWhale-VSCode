@@ -291,6 +291,12 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
 
   /** Lightweight runtime cursor for a thread that is not the current view. */
   private backgroundThreads = new Map<string, BackgroundThreadState>();
+  /** The goal of the thread the view is on, as last read by refreshGoal().
+   *  parkCurrentThread() reads it: an Active goal keeps the runtime working on
+   *  that thread after the view leaves — the continuations are armed by the
+   *  runtime, not by this stream — so the goal alone needs a watch, including
+   *  between two passes when no turn is in flight. */
+  private currentGoal: ThreadGoal | null = null;
   /** One SSE subscription per watched background thread. */
   private watchControllers = new Map<string, AbortController>();
   /** User inputs pending on background threads, answerable cross-thread
@@ -2794,6 +2800,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         backgroundGoals.push({ ...st.goal, threadId: id });
       }
     }
+    this.currentGoal = goal;
     this.postMessage({ type: "goalState", goal, backgroundGoals });
   }
 
@@ -3903,7 +3910,15 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
    *  behaviour (selectThread → stopStream, never interrupt). */
   private parkCurrentThread(): void {
     const thread = this.currentThread;
-    if (thread && (this.currentTurnId || this.pendingApprovals.size > 0 || this.pendingUserInputs.size > 0)) {
+    // A thread whose goal is still Active keeps working after the view leaves
+    // it, and not only while a turn is in flight: the runtime arms the next
+    // continuation pass itself (it is what keeps the loop alive for a thread
+    // nobody is watching). The watcher already keeps such a watch — it is only
+    // dropped when the thread is neither running, nor waiting, nor goal-active
+    // — so arming it here is the other half of that same rule.
+    const goalActive =
+      !!thread && this.currentGoal?.status === "active" && this.currentGoal.thread_id === thread.id;
+    if (thread && (this.currentTurnId || this.pendingApprovals.size > 0 || this.pendingUserInputs.size > 0 || goalActive)) {
       const st = this.ensureBackgroundState(thread.id);
       st.lastEventSeq = this.lastEventSeq;
       if (this.currentTurnId) {
