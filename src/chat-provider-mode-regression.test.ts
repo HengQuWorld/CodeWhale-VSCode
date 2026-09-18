@@ -165,4 +165,33 @@ describe("ChatProvider mode regression", () => {
       trust_mode: false,
     });
   });
+
+  it("approving a plan executes it in Act mode once the thread switched", async () => {
+    const { api, provider } = createProvider();
+
+    await (provider as any).handleWebviewMessage({ type: "approvePlan" });
+
+    expect(provider.currentThread?.mode).toBe("agent");
+    expect(api.startTurn).toHaveBeenCalledWith("thread-1", expect.any(String), {
+      mode: "agent",
+      model: "deepseek-v4-pro",
+      reasoning_effort: "auto",
+      permission_posture: "ask",
+      auto_approve: false,
+      trust_mode: false,
+    });
+  });
+
+  it("does not execute the plan when the thread could not be switched to Act", async () => {
+    const { api, provider, postMessage } = createProvider();
+    api.updateThread = vi.fn(async () => {
+      throw new Error("engine refused the mode patch");
+    });
+
+    await (provider as any).handleWebviewMessage({ type: "approvePlan" });
+
+    expect(provider.currentThread?.mode).toBe("plan");
+    expect(api.startTurn).not.toHaveBeenCalled();
+    expect(postMessage.mock.calls.some(([msg]: [any]) => msg?.type === "error")).toBe(true);
+  });
 });

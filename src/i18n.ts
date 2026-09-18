@@ -71,6 +71,7 @@ interface Translations {
   reasoningEffortLabel: string;
   planApproveButton: string;
   planApproveProceed: string;
+  planApproveModeFailed: string;
   welcomeTitle: string;
   welcomeSubtitle: string;
   welcomeQuote: string;
@@ -416,6 +417,7 @@ const en: Translations = {
   modelLabel: "Model", workspaceLabel: "Workspace",
   modeLabel: "Mode", permissionLabel: "Permission", reasoningEffortLabel: "Reasoning Effort",
   planApproveButton: "Switch to Act & execute", planApproveProceed: "Plan approved. Mode is now Act — proceed with the plan above.",
+  planApproveModeFailed: "Couldn't switch the thread to Act — it is still in Plan mode, so the plan was not executed.",
   welcomeTitle: "CodeWhale",
   welcomeSubtitle: "Technology serves the enduring mission of civilization",
   welcomeQuote: "To establish the heart for heaven and earth, to secure life for the people, to continue the lost learning of past sages, and to establish peace for all generations.",
@@ -750,6 +752,7 @@ const zhCn: Translations = {
   modelLabel: "模型", workspaceLabel: "工作区",
   modeLabel: "模式", permissionLabel: "权限", reasoningEffortLabel: "思考深度",
   planApproveButton: "切换到 Act 并执行", planApproveProceed: "计划已确认，模式已切换为 Act。请按上面的计划开始执行。",
+  planApproveModeFailed: "无法把当前会话切换到 Act（仍处于 Plan 模式），计划未执行。",
   welcomeTitle: "CodeWhale",
   welcomeSubtitle: "科技服务文明传承的长线使命",
   welcomeQuote: "为天地立心，为生民立命，为往圣继绝学，为万世开太平。",

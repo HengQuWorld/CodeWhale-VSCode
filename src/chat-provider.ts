@@ -4303,6 +4303,14 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       // default and the current thread stay in sync, then let the follow-up
       // turn start with the thread's now-Act mode.
       await this.handleSlashCommand("/mode", "agent");
+      // `/mode` reports a failed thread PATCH by message only and returns
+      // normally, so confirm the thread actually switched before executing:
+      // sending the follow-up turn while it is still in Plan mode produces
+      // another plan, under an "approve & execute" button that promised Act.
+      if (this.currentThread && normalizeMode(this.currentThread.mode) !== "agent") {
+        this.postMessage({ type: "error", message: t().planApproveModeFailed });
+        return;
+      }
       await this.handleSendMessage(t().planApproveProceed);
     } catch (err) {
       this.postMessage({
