@@ -276,11 +276,12 @@ describe("thread rail fetch status", () => {
 
 // ── Agent run time ──
 
-/** Local HH:MM:SS, the same reading the card renders for an epoch-ms instant. */
-function clockOf(ms: number): string {
+/** Local YYYY-MM-DD HH:MM:SS, the same reading the card renders for an epoch-ms
+ *  instant. */
+function stampOf(ms: number): string {
   const d = new Date(ms);
   const pad = (n: number) => (n < 10 ? "0" : "") + n;
-  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
 function agentRun(overrides: Record<string, unknown> = {}) {
@@ -310,7 +311,7 @@ function agentCardHtml(sidebar: Record<string, any>, panel: FakeElement): string
 }
 
 describe("agent cards show when each agent ran", () => {
-  it("shows the start moment and elapsed time for a running agent", () => {
+  it("shows the start timestamp and elapsed time for a running agent", () => {
     const { sidebar, agentsPanel } = createHarness();
     const startedAt = Date.now() - 125_000;
     sidebar.setAgentRuns([
@@ -318,7 +319,7 @@ describe("agent cards show when each agent ran", () => {
     ]);
     const html = agentCardHtml(sidebar, agentsPanel);
 
-    expect(html).toContain(`Started ${clockOf(startedAt)}`);
+    expect(html).toContain(`Started ${stampOf(startedAt)}`);
     // Elapsed is measured against the render instant, so only its shape is fixed.
     expect(html).toMatch(/Elapsed \d+s|Elapsed \d+m\d+s|Elapsed \d+h\d+m/);
     expect(html).toContain("agent-runtime");
@@ -332,17 +333,32 @@ describe("agent cards show when each agent ran", () => {
     ]);
     const html = agentCardHtml(sidebar, agentsPanel);
 
-    expect(html).toContain(`Started ${clockOf(startedAt)}`);
+    expect(html).toContain(`Started ${stampOf(startedAt)}`);
     expect(html).toContain("Duration 3m12s");
   });
 
-  it("falls back to the creation moment for an agent that has not started", () => {
+  it("dates a run that started on an earlier day", () => {
+    const { sidebar, agentsPanel } = createHarness();
+    // 30h back: a bare clock reading would not say which day the agent ran.
+    const startedAt = Date.now() - 30 * 60 * 60 * 1000;
+    const startedDay = stampOf(startedAt).split(" ")[0];
+    expect(startedDay).not.toBe(stampOf(Date.now()).split(" ")[0]);
+    sidebar.setAgentRuns([
+      agentRun({ status: "completed", started_at_ms: startedAt, completed_at_ms: startedAt + 60_000 }),
+    ]);
+    const html = agentCardHtml(sidebar, agentsPanel);
+
+    expect(html).toContain(`Started ${stampOf(startedAt)}`);
+    expect(html).toContain(startedDay);
+  });
+
+  it("falls back to the creation timestamp for an agent that has not started", () => {
     const { sidebar, agentsPanel } = createHarness();
     const createdAt = Date.now() - 30_000;
     sidebar.setAgentRuns([agentRun({ status: "queued", created_at_ms: createdAt })]);
     const html = agentCardHtml(sidebar, agentsPanel);
 
-    expect(html).toContain(`Created ${clockOf(createdAt)}`);
+    expect(html).toContain(`Created ${stampOf(createdAt)}`);
     expect(html).not.toContain("Started");
   });
 

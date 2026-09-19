@@ -266,9 +266,9 @@ describe("webview-js-sidebar.ts", () => {
   });
 
   describe("agent run time", () => {
-    it("formats a clock moment and a compact duration", () => {
+    it("formats a full timestamp and a compact duration", () => {
       const script = getSidebarScript(makeTr());
-      expect(script).toContain("function formatAgentClock");
+      expect(script).toContain("function formatAgentTimestamp");
       expect(script).toContain("function formatAgentDuration");
       expect(script).toContain("function formatAgentRunTime");
     });

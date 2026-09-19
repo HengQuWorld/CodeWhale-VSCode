@@ -107,12 +107,16 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
 
   function pad2(n) { return (n < 10 ? '0' : '') + n; }
 
-  /** Wall-clock HH:MM:SS for an epoch-ms instant; '' when the instant is absent. */
-  function formatAgentClock(ms) {
+  /** Full local timestamp — YYYY-MM-DD HH:MM:SS — for an epoch-ms instant,
+   *  or '' when the instant is absent. The date belongs in it: an agent can
+   *  outlive the session it was started from, so a bare clock time cannot say
+   *  which day it ran. */
+  function formatAgentTimestamp(ms) {
     if (typeof ms !== 'number' || !isFinite(ms) || ms <= 0) return '';
     var date = new Date(ms);
     if (isNaN(date.getTime())) return '';
-    return pad2(date.getHours()) + ':' + pad2(date.getMinutes()) + ':' + pad2(date.getSeconds());
+    return date.getFullYear() + '-' + pad2(date.getMonth() + 1) + '-' + pad2(date.getDate()) +
+      ' ' + pad2(date.getHours()) + ':' + pad2(date.getMinutes()) + ':' + pad2(date.getSeconds());
   }
 
   /** Compact elapsed time: 12s, 3m07s, 2h14m. */
@@ -127,17 +131,17 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
     return seconds + 's';
   }
 
-  /** Run-time line for one agent: the clock moment it started running, plus
-   *  how long it has run (still live) or took (settled). Records that never
+  /** Run-time line for one agent: the moment it started running, plus how
+   *  long it has run (still live) or took (settled). Records that never
    *  started — queued, or waiting on the user — fall back to their creation
    *  time so the card still answers "when?". Values are read from the run
    *  record at render time; the panel re-renders as runs change. */
   function formatAgentRunTime(r) {
     var startedMs = typeof r.started_at_ms === 'number' ? r.started_at_ms : 0;
     var completedMs = typeof r.completed_at_ms === 'number' ? r.completed_at_ms : 0;
-    var startClock = formatAgentClock(startedMs);
-    if (startClock) {
-      var parts = [__i18n.agentStartTime + ' ' + startClock];
+    var startedAt = formatAgentTimestamp(startedMs);
+    if (startedAt) {
+      var parts = [__i18n.agentStartTime + ' ' + startedAt];
       var endMs = completedMs > 0 ? completedMs : (agentIsRunning(r.status) ? Date.now() : 0);
       var duration = endMs > startedMs ? formatAgentDuration(endMs - startedMs) : '';
       if (duration) {
@@ -145,8 +149,8 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
       }
       return parts.join(' \\u00B7 ');
     }
-    var createdClock = formatAgentClock(typeof r.created_at_ms === 'number' ? r.created_at_ms : 0);
-    return createdClock ? (__i18n.agentCreatedAt + ' ' + createdClock) : '';
+    var createdAt = formatAgentTimestamp(typeof r.created_at_ms === 'number' ? r.created_at_ms : 0);
+    return createdAt ? (__i18n.agentCreatedAt + ' ' + createdAt) : '';
   }
 
   function hasOwnData(value) {
