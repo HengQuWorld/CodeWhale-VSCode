@@ -175,6 +175,7 @@ function createHarness() {
     receive,
     input: getEl("input"),
     attachmentsArea: getEl("attachments-area"),
+    getElement: getEl,
     readAsDataUrlCalls,
     windowListeners,
     documentListeners,
@@ -463,5 +464,48 @@ describe("webview-js-input runtime: typing never resizes the textarea", () => {
 
     expect(h.postMessages).toEqual([{ type: "sendMessage", text: "hello" }]);
     expect(h.input.style.height).toBe("150px");
+  });
+});
+
+describe("webview-js-input runtime: the send button is the Stop button mid-turn", () => {
+  // A thread can be running a turn this client did not start (another client,
+  // or a turn this view parked). The host adopts it and says so with
+  // `turnStarted`; what must hold is that the same button then stops it
+  // instead of sending, or the adopted turn has no way out from the composer.
+  it("posts interrupt when the button is clicked while a turn is streaming", () => {
+    const h = createHarness();
+    h.windowObj.__wvMessages.isStreaming = () => true;
+    h.input.value = "a new prompt that must not be sent";
+
+    h.getElement("btn-send-stop").dispatch("click", syntheticEvent());
+
+    expect(h.postMessages).toEqual([{ type: "interrupt" }]);
+  });
+
+  it("posts the prompt when no turn is streaming", () => {
+    const h = createHarness();
+    h.input.value = "hello";
+
+    h.getElement("btn-send-stop").dispatch("click", syntheticEvent());
+
+    expect(h.postMessages).toEqual([{ type: "sendMessage", text: "hello" }]);
+  });
+
+  it("names the button for the action it will take", () => {
+    const h = createHarness();
+    const btn = h.getElement("btn-send-stop");
+    const tr = makeTr();
+
+    h.windowObj.__wvInput.updateSendStopButton(true);
+
+    expect(btn.getAttribute("title")).toBe(tr.interrupt);
+    expect(btn.getAttribute("aria-label")).toBe(tr.interrupt);
+    expect(btn.classList.contains("streaming")).toBe(true);
+
+    h.windowObj.__wvInput.updateSendStopButton(false);
+
+    expect(btn.getAttribute("title")).toBe(tr.send);
+    expect(btn.getAttribute("aria-label")).toBe(tr.send);
+    expect(btn.classList.contains("streaming")).toBe(false);
   });
 });

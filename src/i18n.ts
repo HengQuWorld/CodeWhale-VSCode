@@ -107,6 +107,9 @@ interface Translations {
   contextCompacted: string;
   compactFailed: string;
   sendFailed: string;
+  /** Guidance for a send the engine refused because the thread already has a
+   *  turn running: it names the way out (Stop) rather than the refusal. */
+  sendRefusedActiveTurn: string;
   initFailed: string;
   eventStreamError: string;
   steerNoActiveTurn: string;
@@ -460,6 +463,7 @@ const en: Translations = {
   loadedThread: (title) => `Loaded: ${title}`,
   contextCompacted: "Context compacted", compactFailed: "Compact failed",
   sendFailed: "Failed to send message", initFailed: "Failed to initialize",
+  sendRefusedActiveTurn: "This thread is already running a turn, so this message was not sent. It is back in the input box — press Stop to interrupt the running turn, then send it again.",
   eventStreamError: "Event stream error",
   steerNoActiveTurn: "No running turn to steer",
   steerUnsupported: "Steering is not supported by this engine version",
@@ -803,6 +807,7 @@ const zhCn: Translations = {
   loadedThread: (title) => `已加载: ${title}`,
   contextCompacted: "上下文已压缩", compactFailed: "压缩失败",
   sendFailed: "发送消息失败", initFailed: "初始化失败",
+  sendRefusedActiveTurn: "该会话已有正在运行的回合，这条消息未发送。已放回输入框——点击停止按钮中断正在运行的回合后，再重新发送。",
   eventStreamError: "事件流错误",
   steerNoActiveTurn: "当前没有进行中的回复可引导",
   steerUnsupported: "当前引擎版本不支持引导",

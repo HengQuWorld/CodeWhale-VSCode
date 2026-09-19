@@ -1958,6 +1958,11 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     this.currentAttachments = [];
     this.postAttachmentsChanged();
 
+    // The optimistic user bubble is created inside the try block below, but a
+    // refusal has to retract that exact bubble by id — so the id is minted
+    // here, where the catch can still see it.
+    const userMsgId = `user-${Date.now()}`;
+
     let fullText = text;
     if (attachments.length > 0) {
       const attachmentLines = attachments.map((a) => {
@@ -2006,7 +2011,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       this.turnFileChanges = [];
 
       const userMsg: ChatMessage = {
-        id: `user-${Date.now()}`,
+        id: userMsgId,
         role: "user",
         content: fullText,
         status: "complete",
@@ -2099,6 +2104,14 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       this.activeTurnMode = { turnId: result.turn.id, mode };
       this.postMessage({ type: "turnStarted", turnId: result.turn.id });
     } catch (err) {
+      // A thread that already has a turn running is a state to recover from
+      // rather than a send to report as failed: the prompt was refused
+      // *because* there is a turn to stop, and stopping it is what unblocks
+      // the user. See `recoverRefusedSend`.
+      const recovered =
+        this.isActiveTurnRefusal(err) &&
+        (await this.recoverRefusedSend(userMsgId, text, attachments));
+      if (recovered) return;
       this.postMessage({
         type: "error",
         message: formatError("Failed to send message", err),
@@ -4068,9 +4081,15 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       try {
         await this.api.ensureReady();
 
-        if (this.currentTurnId) {
+        // A Stop the client cannot attribute to a turn id still has to reach
+        // the engine. The id is missing exactly when the turn was not started
+        // here — another client started it, or this view parked the thread and
+        // left it running — and in those cases clearing only the view would
+        // leave the thread busy, which is the state that refuses the next send.
+        const turnId = this.currentTurnId ?? (await this.activeTurnFromEngine())?.id;
+        if (turnId) {
           try {
-            await this.api.interruptTurn(this.currentThread.id, this.currentTurnId);
+            await this.api.interruptTurn(this.currentThread.id, turnId);
           } catch {
             // ignore - turn may already be completed
           }
@@ -4099,6 +4118,103 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         // ignore
       }
     }
+  }
+
+  /** The engine's refusal to start a turn on a thread that already has one
+   *  (runtime_threads.rs `start_turn` → 409 "Thread already has an active
+   *  turn"). Unlike the other refusals on the send path it names a state the
+   *  user can act on, so it is recovered from instead of reported: the turn it
+   *  refuses the prompt for is still there, and it is the way out. */
+  private isActiveTurnRefusal(err: unknown): boolean {
+    const message = getErrorMessage(err);
+    return message.includes("API error 409") && message.includes("already has an active turn");
+  }
+
+  /** The turn the engine currently holds for this thread, as the engine sees
+   *  it.
+   *
+   *  The GUI only knows turn ids for turns it started or adopted; a turn that
+   *  another client started, or that this view parked and left running, lives
+   *  only in the engine's active slot. Both Stop and the refusal recovery need
+   *  that id, and the thread record is where the runtime publishes it — the
+   *  same `in_progress`/`queued` rule `loadHistory` adopts a running turn by.
+   *
+   *  Returns undefined when the thread has no running turn and when the read
+   *  itself failed: a read that answers nothing leaves callers on the state
+   *  they already had rather than reporting a second failure. */
+  private async activeTurnFromEngine(): Promise<TurnRecord | undefined> {
+    const thread = this.currentThread;
+    if (!thread) return undefined;
+    try {
+      const detail = await this.api.getThreadDetail(thread.id);
+      const lastTurn = detail.turns[detail.turns.length - 1];
+      if (lastTurn && (lastTurn.status === "in_progress" || lastTurn.status === "queued")) {
+        return lastTurn;
+      }
+    } catch {
+      // best-effort read
+    }
+    return undefined;
+  }
+
+  /** Resume observing a turn the engine is already running on this thread:
+   *  record its id so Stop can interrupt it, give its output a streaming
+   *  message to land in, and tell the webview the turn is live (the send/stop
+   *  button follows that message). Without the id, `handleInterrupt` has
+   *  nothing to interrupt, so the composer would offer a Stop button that
+   *  cannot stop anything and a Send button the engine keeps refusing. */
+  private adoptActiveTurn(turn: TurnRecord): void {
+    this.currentTurnId = turn.id;
+    this.activeTurnMode = { turnId: turn.id, mode: this.turnMode(turn) };
+    this.ensureAssistantPlaceholderForExternalTurn();
+    this.startPeriodicTaskRefresh();
+    // An open stream for this thread is already delivering this turn's events;
+    // re-subscribing would only re-read what it is about to deliver. With no
+    // stream (a parked thread, an engine restarted under us) the turn would
+    // otherwise never report its completion.
+    if (!this.eventController) this.subscribeToEvents();
+    this.postMessage({ type: "turnStarted", turnId: turn.id });
+  }
+
+  /** Recover a send the engine refused for the thread's own running turn.
+   *
+   *  The refusal happens before the engine creates a turn, so the prompt was
+   *  never accepted: the optimistic user bubble has to be retracted and the
+   *  text (and its attachments) handed back, because the transcript must not
+   *  claim a message the thread does not have, and the user's next move is to
+   *  stop the turn that blocked them rather than retype what they wrote. The
+   *  streaming placeholder stays — it is where the running turn's output
+   *  lands, and `adoptActiveTurn` turns the composer's send button into a Stop
+   *  button that this turn answers to.
+   *
+   *  Returns true when a running turn was adopted. False means the turn ended
+   *  between the refusal and the read — there is nothing left to stop, so the
+   *  caller reports the refusal with the text already restored. */
+  private async recoverRefusedSend(
+    userMsgId: string,
+    text: string,
+    attachments: readonly AttachmentRecord[]
+  ): Promise<boolean> {
+    // Read the running turn before touching the transcript: this await is the
+    // window in which the turn can still finish, and the retraction below is
+    // the same either way.
+    const turn = await this.activeTurnFromEngine();
+
+    const idx = this.messages.findIndex((m) => m.id === userMsgId);
+    if (idx >= 0) {
+      this.messages.splice(idx, 1);
+      this.postMessage({ type: "removeMessage", messageId: userMsgId });
+    }
+    this.restoreComposerText(text);
+    if (attachments.length > 0) {
+      this.currentAttachments = [...attachments];
+      this.postAttachmentsChanged();
+    }
+
+    if (!turn) return false;
+    this.adoptActiveTurn(turn);
+    this.postMessage({ type: "info", message: t().sendRefusedActiveTurn });
+    return true;
   }
 
   // confirmSwitchWhenActive was removed: switching no longer interrupts a
