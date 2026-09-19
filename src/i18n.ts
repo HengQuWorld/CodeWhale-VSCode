@@ -77,6 +77,7 @@ interface Translations {
   scopeDefaultTitle: string;
   reasoningEffortLabel: string;
   planApproveButton: string;
+  planApproveButtonHint: string;
   planApproveProceed: string;
   planApproveWithPrompt: string;
   planApproveModeFailed: string;
@@ -431,6 +432,7 @@ const en: Translations = {
   scopeThreadLabel: "This thread", scopeDefaultLabel: "New threads",
   scopeDefaultTitle: "New conversations start here; this one keeps its own setting.",
   planApproveButton: "Switch to Act & execute", planApproveProceed: "Plan approved. Mode is now Act — proceed with the plan above.",
+  planApproveButtonHint: "Switch to Act & execute. Anything you type in the box below first goes with this approval and takes precedence over the plan.",
   planApproveWithPrompt: "Plan approved. Mode is now Act. The instruction below takes precedence over the plan above:",
   planApproveModeFailed: "Couldn't switch the thread to Act — it is still in Plan mode, so the plan was not executed.",
   welcomeTitle: "CodeWhale",
@@ -773,6 +775,7 @@ const zhCn: Translations = {
   scopeThreadLabel: "当前会话", scopeDefaultLabel: "新会话默认",
   scopeDefaultTitle: "新会话以此启动；当前会话保持自己的设置。",
   planApproveButton: "切换到 Act 并执行", planApproveProceed: "计划已确认，模式已切换为 Act。请按上面的计划开始执行。",
+  planApproveButtonHint: "切换到 Act 并执行。先在下面输入框写下的内容会随本次批准一起发送，并优先于上面的计划。",
   planApproveWithPrompt: "计划已确认，模式已切换为 Act。以下指示优先于上面的计划：",
   planApproveModeFailed: "无法把当前会话切换到 Act（仍处于 Plan 模式），计划未执行。",
   welcomeTitle: "CodeWhale",
@@ -1196,6 +1199,7 @@ export function webviewTranslations(tr: Translations) {
     scopeDefaultTitle: tr.scopeDefaultTitle,
     reasoningEffortLabel: tr.reasoningEffortLabel,
     planApproveButton: tr.planApproveButton,
+    planApproveButtonHint: tr.planApproveButtonHint,
     welcomeTitle: tr.welcomeTitle,
     welcomeSubtitle: tr.welcomeSubtitle,
     welcomeQuote: tr.welcomeQuote,

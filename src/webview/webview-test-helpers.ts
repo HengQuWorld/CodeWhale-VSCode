@@ -89,6 +89,8 @@ export function makeTr(overrides?: Partial<WebviewTranslations>): WebviewTransla
     scopeDefaultTitle: "New conversations start here; this one keeps its own setting.",
     reasoningEffortLabel: "Reasoning",
     planApproveButton: "Switch to Act & execute",
+    planApproveButtonHint:
+      "Switch to Act & execute. Anything you type in the box below first goes with this approval and takes precedence over the plan.",
     welcomeTitle: "CodeWhale",
     welcomeSubtitle: "Your AI coding partner",
     welcomeQuote: "The best way to predict the future is to invent it.",

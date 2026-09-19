@@ -187,6 +187,11 @@ describe("webview-js-messages.ts", () => {
     // Clearing the field has to re-run the input listener, or a slash menu a
     // `/…` draft had opened stays open and eats the next Enter.
     expect(script).toContain("inputEl.dispatchEvent(new Event('input'))");
+    // The tooltip is not just the label repeated: the click consumes whatever
+    // the composer holds, so the hint is what tells the user the input option
+    // exists at all. Assert the two are separate keys rather than the same one.
+    expect(script).toContain("btn.title = __i18n.planApproveButtonHint");
+    expect(script).not.toContain("btn.title = __i18n.planApproveButton;");
   });
 
   it("contains streaming state management", () => {

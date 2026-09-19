@@ -546,7 +546,11 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
     var btn = document.createElement('button');
     btn.className = 'plan-approve-btn';
     btn.textContent = __i18n.planApproveButton;
-    btn.title = __i18n.planApproveButton;
+    // The title says more than the label it used to repeat: the click reads
+    // whatever is in the composer as the instruction for the Act turn, and the
+    // label never mentioned it — so a user with something to add had no way to
+    // learn that typing it first carries it into the execution.
+    btn.title = __i18n.planApproveButtonHint;
     msgEl.appendChild(btn);
   }
 

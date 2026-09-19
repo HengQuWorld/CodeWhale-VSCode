@@ -115,6 +115,7 @@ export interface WebviewTranslations {
   scopeDefaultTitle: string;
   reasoningEffortLabel: string;
   planApproveButton: string;
+  planApproveButtonHint: string;
   welcomeTitle: string;
   welcomeSubtitle: string;
   welcomeQuote: string;

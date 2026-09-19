@@ -85,6 +85,8 @@ function makeTr(): WebviewTranslations {
     scopeDefaultTitle: "New conversations start here; this one keeps its own setting.",
     reasoningEffortLabel: "Reasoning",
     planApproveButton: "Switch to Act & execute",
+    planApproveButtonHint:
+      "Switch to Act & execute. Anything you type in the box below first goes with this approval and takes precedence over the plan.",
     welcomeTitle: "CodeWhale",
     welcomeSubtitle: "Your AI coding partner",
     welcomeQuote: "The best way to predict the future is to invent it.",
@@ -541,6 +543,15 @@ describe("webview-html.ts assembler", () => {
     expect(html).toContain("window.__wvEscapeHtml");
     expect(html).toContain("window.__wvFormatRelativeTime");
     expect(html).toContain("window.__wvI18n");
+  });
+
+  it("embeds the plan-approve tooltip that states the input option", () => {
+    const tr = makeTr();
+    const html = getWebviewHtml(makeMockWebview(), makeMockExtensionUri(), tr);
+    // The hint has to survive the JSON embedding: `webviewTranslations()` could
+    // drop it while `WebviewTranslations` still declared it, and the button
+    // would then render a tooltip reading "undefined".
+    expect(html).toContain(tr.planApproveButtonHint);
   });
 
   it("contains debug module output", () => {
