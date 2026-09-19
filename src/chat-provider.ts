@@ -1187,11 +1187,22 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         this.postMessage({ type: "turnStarted", turnId: lastTurn.id });
       }
 
+      // A conversation rebuilt from history keeps what it is still waiting on.
+      // The runtime holds a pending approval across a view switch, but the
+      // `approval.required` event that announced it sits behind the cursor this
+      // view resumes from, so the stream never repeats it — without this a
+      // thread the rail calls "needs you" opens looking idle, with no card and
+      // no panel. Seeded *before* the rebuild so the webview's own copy of the
+      // tool row carries it, which is what lets a later re-render redraw it.
+      this.seedPendingApprovals(detail);
       this.postMessage({
         type: "loadHistory",
         messages: this.messages,
         planApprovalFor: this.planApprovalTargetId(this.turnMode(lastTurn)),
       });
+      // After the rebuild, never before: it clears the approval panel, so a
+      // prompt offered ahead of it would be wiped by its own history draw.
+      this.postPendingPrompts(id, detail);
       this.postMessage({ type: "status", text: `Loaded ${this.messages.length / 2} turns` });
       return this.lastEventSeq;
     } catch (err) {
@@ -1201,6 +1212,121 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       });
       return this.lastEventSeq;
     }
+  }
+
+  /** Re-attach the approvals a rebuilt conversation is still waiting on.
+   *
+   *  An approval outlives the view that raised it: the runtime keeps the
+   *  waiter across a view switch, but the event that announced it is behind
+   *  the cursor this view resumes from (`replay_events` skips
+   *  `seq <= since_seq`), so the stream never repeats it. The typed pending
+   *  list is the authority instead, and the tool row — not just the panel — is
+   *  seeded with it: the renderer draws the request's line from the tool
+   *  call's own state and re-hands every still-pending approval to the panel
+   *  on each rebuild, so a re-render cannot quietly drop a request nobody
+   *  answered.
+   *
+   *  `tool_call_id` is the correlator the runtime documents for exactly this
+   *  ("a client resuming from a snapshot needs it to attach the prompt to the
+   *  tool row it belongs to"), and it is the id history restores onto the row
+   *  from the item's `tool_use_id`. */
+  private seedPendingApprovals(detail: ThreadDetailResponse): void {
+    for (const req of detail.pending_approvals || []) {
+      const tc = req.tool_call_id ? this.findToolCall(req.tool_call_id) : undefined;
+      if (!tc) continue;
+      tc.status = "awaiting_approval";
+      tc.displayName = friendlyToolName(req.tool_name);
+      tc.approvalId = req.id;
+      tc.approvalSummary =
+        req.description || req.intent_summary || friendlyToolName(req.tool_name);
+    }
+  }
+
+  /** Offer the prompts the message list cannot carry.
+   *
+   *  A user-input question is drawn into a message body by its own message
+   *  rather than by the renderer, and an approval whose tool row never made it
+   *  into the conversation has no card to hang a line on. The panel is the only
+   *  place either can be answered, and a question has to sit in one of the maps
+   *  `handleUserInputSelect` reads — an input the rail never expanded is in
+   *  neither of them, so its buttons would post an answer nowhere. */
+  private postPendingPrompts(threadId: string, detail: ThreadDetailResponse): void {
+    for (const req of detail.pending_user_inputs || []) {
+      // A rail card may already hold this question, with answers collected
+      // there. Leave that state where it is — `handleUserInputSelect` reads both
+      // maps — instead of registering a second, blank copy that would win the
+      // lookup and throw the collected answers away. The bar is posted either
+      // way: the question is on screen now, so it has to be answerable here.
+      if (!this.pendingUserInputs.has(req.id) && !this.backgroundUserInputs.has(req.id)) {
+        this.pendingUserInputs.set(req.id, {
+          threadId,
+          questions: req.request.questions,
+          answers: [],
+          answeredQuestions: new Set(),
+        });
+      }
+      this.postMessage({
+        type: "userInputRequired",
+        messageId: this.messageIdForTurn(req.turn_id),
+        inputId: req.id,
+        questions: req.request.questions,
+      });
+    }
+    for (const req of detail.pending_approvals || []) {
+      // A row that rendered already carries this one; posting it again would
+      // only re-open a panel that is already open.
+      if (req.tool_call_id && this.findToolCall(req.tool_call_id)) continue;
+      this.postMessage({
+        type: "approvalRequired",
+        approvalId: req.id,
+        toolName: friendlyToolName(req.tool_name),
+        rawToolName: req.tool_name,
+        summary: req.description || req.intent_summary || friendlyToolName(req.tool_name),
+      });
+    }
+  }
+
+  /** Retire an approval everywhere this client still holds it: the live entry
+   *  it was registered under, and every rebuilt tool row the same id was seeded
+   *  onto (`seedPendingApprovals`). Passing null retires all of them, which is
+   *  the interrupt case — nothing this client is holding is still pending then.
+   *
+   *  The rows need this as much as the live entry does: the webview draws a
+   *  pending approval's line, and hands the request to the panel, from the tool
+   *  call's own state, so a row still naming an answered approval would offer
+   *  buttons for it again the next time the conversation is rebuilt from that
+   *  state. */
+  private retireApproval(approvalId: string | null, status: "running" | "error"): void {
+    if (approvalId === null) this.pendingApprovals.clear();
+    else this.pendingApprovals.delete(approvalId);
+    // The map's entry is one of these calls (it is resolved out of
+    // `this.messages`), so the scan retires it along with the seeded rows.
+    for (const msg of this.messages) {
+      for (const tc of msg.toolCalls || []) {
+        if (!tc.approvalId) continue;
+        if (approvalId !== null && tc.approvalId !== approvalId) continue;
+        tc.status = status;
+        tc.approvalId = undefined;
+      }
+    }
+  }
+
+  /** The rebuilt tool row a pending approval gates, by provider call id. */
+  private findToolCall(toolCallId: string): ToolCallInfo | undefined {
+    for (const msg of this.messages) {
+      for (const tc of msg.toolCalls || []) {
+        if (tc.itemId === toolCallId) return tc;
+      }
+    }
+    return undefined;
+  }
+
+  /** The message a turn's output rendered into, so a prompt belonging to that
+   *  turn lands on it instead of on whatever came last. */
+  private messageIdForTurn(turnId: string | undefined): string | undefined {
+    const id = turnId ? `assistant-${turnId}` : "";
+    if (id && this.messages.some((msg) => msg.id === id)) return id;
+    return this.messages[this.messages.length - 1]?.id;
   }
 
   public async loadSessionMessages(sessionId: string): Promise<void> {
@@ -2353,11 +2479,8 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     }
 
     this.threadTitles.clear();
-    let attentionTotal = 0;
-    const currentId = this.currentThread?.id;
     for (const s of threads) {
       if (s.title) this.threadTitles.set(s.id, s.title);
-      if (s.id !== currentId) attentionTotal += s.pending_attention_count || 0;
     }
     try {
       this.syncBackgroundWatchers(threads);
@@ -2367,11 +2490,14 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       this.debugLog(`syncBackgroundWatchers failed: ${getErrorMessage(err)}`);
     }
     if (quiet) return;
+    // The list is the whole story: the rail and the toolbar's Agent chip both
+    // count attention off these summaries themselves (excluding the thread on
+    // screen, whose cards are inline), so a second total computed here could
+    // only ever disagree with what that chip says is waiting.
     this.postMessage({
       type: "threadList",
       threads,
       showAllWorkspaces: this.showAllWorkspaces,
-      attentionTotal,
     });
   }
 
@@ -4107,12 +4233,9 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         // re-render before turn.completed lands (view switch, reopened
         // sidebar, restored session) would otherwise offer buttons for an
         // approval this client has already dropped. Same retirement the
-        // terminal path does, and the same the approval timeout does.
-        this.pendingApprovals.forEach((tc) => {
-          tc.status = "error";
-          tc.approvalId = undefined;
-        });
-        this.pendingApprovals.clear();
+        // terminal path does, and the same the approval timeout does —
+        // including rows a rebuilt conversation still names.
+        this.retireApproval(null, "error");
         this.postMessage({ type: "turnInterrupted" });
       } catch {
         // ignore
@@ -4810,12 +4933,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
           reasoningEffort: this.getCurrentReasoningEffort(),
         });
       }
-      const tc = this.pendingApprovals.get(approvalId);
-      if (tc) {
-        tc.status = decision === "allow" ? "running" : "error";
-        tc.approvalId = undefined;
-      }
-      this.pendingApprovals.delete(approvalId);
+      this.retireApproval(approvalId, decision === "allow" ? "running" : "error");
       this.postMessage({ type: "approvalResolved", approvalId, decision });
       await this.refreshActiveTaskDetail();
       await this.refreshTaskList();
@@ -5325,12 +5443,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         if (pl.remember && pl.decision === "allow" && this.currentThread) {
           this.currentThread = { ...this.currentThread, auto_approve: true };
         }
-        const tc = this.pendingApprovals.get(approvalId);
-        if (tc) {
-          tc.status = pl.decision === "allow" ? "running" : "error";
-          tc.approvalId = undefined;
-        }
-        this.pendingApprovals.delete(approvalId);
+        this.retireApproval(approvalId, pl.decision === "allow" ? "running" : "error");
         this.postMessage({
           type: "approvalResolved",
           approvalId,
@@ -5346,12 +5459,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         };
         const approvalId = pl.approval_id;
         if (!approvalId) break;
-        const tc = this.pendingApprovals.get(approvalId);
-        if (tc) {
-          tc.status = "error";
-          tc.approvalId = undefined;
-        }
-        this.pendingApprovals.delete(approvalId);
+        this.retireApproval(approvalId, "error");
         this.postMessage({
           type: "approvalResolved",
           approvalId,

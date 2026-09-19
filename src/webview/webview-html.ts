@@ -50,6 +50,14 @@ export interface WebviewTranslations {
   activity: string;
   agentStatus: string;
   agentStatusTitle: string;
+  /** Chip suffix while other threads wait on the user: "{count} waiting". */
+  agentStatusWaiting: string;
+  /** Chip tooltip with one waiting thread; `{title}` names the thread the
+   *  click expands, and the answer is given where the click lands. */
+  agentStatusWaitingOne: string;
+  /** Chip tooltip with several waiting threads; `{count}` threads need you and
+   *  `{title}` names the longest-waiting one the click expands. */
+  agentStatusWaitingMany: string;
   closePanel: string;
   sessionsTabHint: string;
   threadsTabHint: string;
@@ -57,7 +65,9 @@ export interface WebviewTranslations {
   newThread: string;
   compact: string;
   interrupt: string;
-  toggleHistory: string;
+  /** Toolbar panel toggle (📋): what the panel holds, and the fact that a
+   *  thread waiting on the user is answered inside it. */
+  togglePanel: string;
   send: string;
   inputPlaceholder: string;
   initializing: string;
@@ -458,7 +468,7 @@ ${css}
 
     <div id="chat-area">
       <div id="settings-bar">
-        <button id="btn-threads" title="${tr.toggleHistory}">📋</button>
+        <button id="btn-threads" title="${tr.togglePanel}">📋</button>
         <div class="setting-item">
           <span class="setting-label">Provider:</span>
           <div class="setting-dropdown" data-setting="provider">
@@ -523,7 +533,7 @@ ${css}
             </div>
           </div>
         </div>
-        <span class="agent-panel-toggle" id="agent-panel-toggle" title="${tr.agentStatusTitle}">${tr.agentStatus}</span>
+        <span class="agent-panel-toggle" id="agent-panel-toggle" role="button" tabindex="0" title="${tr.agentStatusTitle}" aria-label="${tr.agentStatusTitle}">${tr.agentStatus}</span>
       </div>
       <div id="input-resize-handle" title="Drag to resize input area"></div>
       <div id="input-area">

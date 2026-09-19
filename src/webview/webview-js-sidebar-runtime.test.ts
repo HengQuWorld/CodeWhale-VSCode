@@ -39,14 +39,26 @@ class FakeClassList {
   }
 }
 
-/** `.a.b` or a comma-separated list of those; anything else answers nothing. */
+/** `.a.b`, optionally followed by an attribute test, or a comma-separated list
+ *  of those; anything else answers nothing. The rail turns out to mix the two
+ *  ('.thread-item[data-thread-id="x"]'), so a stand-in that only understood
+ *  classes would answer null and silently skip the branch under test. */
 function matchesSelector(element: FakeElement, selector?: string): boolean {
   if (!selector) return false;
-  return selector.split(",").some((part) => {
-    const classes = part.trim().replace(/^\./, "").split(".").filter(Boolean);
-    if (classes.length === 0) return false;
+  const attributes = /\[([^\]="[\]]+)="([^"]*)"\]/g;
+  return selector.split(",").some((raw) => {
+    const part = raw.trim();
+    const wanted: Array<[string, string]> = [];
+    for (const match of part.matchAll(attributes)) wanted.push([match[1], match[2]]);
+    const classes = part
+      .replace(attributes, "")
+      .replace(/^\./, "")
+      .split(".")
+      .filter(Boolean);
+    if (classes.length === 0 && wanted.length === 0) return false;
     const elementClasses = element.className.split(/\s+/).filter(Boolean);
-    return classes.every((name) => elementClasses.includes(name));
+    if (!classes.every((name) => elementClasses.includes(name))) return false;
+    return wanted.every(([name, value]) => element.getAttribute(name) === value);
   });
 }
 
@@ -104,7 +116,18 @@ class FakeElement {
   }
 
   querySelectorAll(selector?: string): FakeElement[] {
-    return this.children.filter((child) => matchesSelector(child, selector));
+    // Descendant-scoped, like the real thing: the rail's own row removal looks
+    // for a row inside the card inside the item, and a stand-in that only
+    // matched children would answer null and leave the row standing.
+    const found: FakeElement[] = [];
+    const walk = (parent: FakeElement): void => {
+      for (const child of parent.children) {
+        if (matchesSelector(child, selector)) found.push(child);
+        walk(child);
+      }
+    };
+    walk(this);
+    return found;
   }
 
   querySelector(selector?: string): FakeElement | null {
@@ -140,6 +163,14 @@ function createHarness() {
   const documentObj = {
     getElementById: (id: string) => getEl(id),
     createElement: () => new FakeElement(),
+    // The inline attention card labels its remember box with a text node; a
+    // bare element carrying the text stands in well enough for a child count
+    // and a click to be asserted.
+    createTextNode: (text: string) => {
+      const node = new FakeElement();
+      node.textContent = text;
+      return node;
+    },
     querySelectorAll: () => [] as FakeElement[],
     addEventListener: () => {},
   };
@@ -156,6 +187,9 @@ function createHarness() {
   const rail = getEl("tab-threads-list");
   return {
     rail,
+    chip: getEl("agent-panel-toggle"),
+    panel: getEl("threads-panel"),
+    sidebarSection: getEl("sidebar-threads"),
     agentsPanel: getEl("tab-agents"),
     postMessages,
     sidebar: windowObj.__wvSidebar as Record<string, any>,
@@ -368,5 +402,273 @@ describe("agent cards show when each agent ran", () => {
     const html = agentCardHtml(sidebar, agentsPanel);
 
     expect(html).not.toContain("agent-runtime");
+  });
+});
+
+// ── Toolbar Agent chip ──
+//
+// The chip is the one place that says another thread is waiting on the user.
+// "Agent · 1" read as an agent count, and its tooltip was a fixed list of the
+// panel's three tabs, so a yellow chip never explained itself. These tests pin
+// both halves of the fix: the chip says what it counts and names the thread it
+// expands, and the click expands it in the panel rather than switching threads
+// out from under the conversation the user is in the middle of.
+
+function waitingThread(id: string, updatedAt: string, pending = 1, title?: string) {
+  return {
+    ...threadSummary(id),
+    title: title || `Thread ${id}`,
+    updated_at: updatedAt,
+    pending_attention_count: pending,
+  };
+}
+
+function chipHint(chip: FakeElement): string {
+  return chip.getAttribute("data-tooltip") || "";
+}
+
+describe("toolbar Agent chip", () => {
+  it("says what it counts and names the thread the click expands", () => {
+    const { chip, sidebar } = createHarness();
+    sidebar.setThreads([
+      waitingThread("thread-a", "2026-09-17T00:00:00Z", 1, "Fix the login timeout"),
+    ]);
+    sidebar.renderThreads();
+
+    // The suffix carries its noun: the number is a work queue, not agents.
+    expect(chip.textContent).toBe("Agent \u00b7 1 waiting");
+    expect(chip.classList.contains("has-attention")).toBe(true);
+    expect(chipHint(chip)).toContain("Fix the login timeout");
+  });
+
+  it("expands the waiting thread in the panel instead of leaving the conversation", () => {
+    const { chip, panel, postMessages, sidebar, sidebarSection } = createHarness();
+    sidebar.setThreads([waitingThread("thread-a", "2026-09-17T00:00:00Z")]);
+    sidebar.renderThreads();
+
+    // The user is already in the panel, on another tab: the click has to bring
+    // them to this one rather than toggle the panel shut under them.
+    panel.classList.add("open");
+    sidebar.switchSidebarTab("sessions");
+
+    chip.dispatch("click");
+
+    // The request is answered where it already has a card — the panel, on the
+    // tab that holds it. Going to the thread would take the conversation the
+    // user is in the middle of away from them; the card itself still offers it.
+    expect(postMessages).toContainEqual({ type: "showThreadAttention", threadId: "thread-a" });
+    expect(postMessages.some((m) => m.type === "loadThread")).toBe(false);
+    expect(panel.classList.contains("open")).toBe(true);
+    expect(sidebarSection.getAttribute("data-active-tab")).toBe("threads");
+  });
+
+  it("expands the longest-waiting thread when several wait", () => {
+    const { chip, postMessages, sidebar } = createHarness();
+    sidebar.setThreads([
+      waitingThread("thread-new", "2026-09-18T00:00:00Z"),
+      waitingThread("thread-old", "2026-09-16T00:00:00Z"),
+    ]);
+    sidebar.renderThreads();
+
+    expect(chipHint(chip)).toContain("2");
+    expect(chipHint(chip)).toContain("Thread thread-old");
+
+    chip.dispatch("click");
+
+    expect(postMessages).toContainEqual({ type: "showThreadAttention", threadId: "thread-old" });
+  });
+
+  it("counts one thread's two pending items as two", () => {
+    const { chip, sidebar } = createHarness();
+    sidebar.setThreads([waitingThread("thread-a", "2026-09-17T00:00:00Z", 2)]);
+    sidebar.renderThreads();
+
+    // One thread, two things waiting; the chip counts the things, and the
+    // tooltip still names the single destination.
+    expect(chip.textContent).toBe("Agent \u00b7 2 waiting");
+    expect(chipHint(chip)).toContain("Thread thread-a");
+  });
+
+  it("drops the thread already on screen from the count", () => {
+    const { chip, sidebar } = createHarness();
+    sidebar.setThreads([waitingThread("thread-a", "2026-09-17T00:00:00Z")]);
+    sidebar.setActiveThreadId("thread-a");
+    sidebar.renderThreads();
+
+    // Its cards render inline where the user already is: not "elsewhere".
+    expect(chip.textContent).toBe("Agent");
+    expect(chip.classList.contains("has-attention")).toBe(false);
+    expect(chipHint(chip)).not.toContain("Thread thread-a");
+  });
+
+  it("stays the panel's entry point when nothing is waiting", () => {
+    const { chip, postMessages, sidebar } = createHarness();
+    sidebar.setThreads([threadSummary("thread-a")]);
+    sidebar.renderThreads();
+
+    chip.dispatch("click");
+
+    // Nothing to expand: the click opens the panel rather than doing nothing.
+    expect(postMessages.some((m) => m.type === "showThreadAttention")).toBe(false);
+    expect(postMessages.some((m) => m.type === "refreshSidebar")).toBe(true);
+  });
+
+  it("answers Enter the way a pointer click does", () => {
+    const { chip, postMessages, sidebar } = createHarness();
+    sidebar.setThreads([waitingThread("thread-a", "2026-09-17T00:00:00Z")]);
+    sidebar.renderThreads();
+
+    chip.dispatch("keydown", { key: "Enter", preventDefault: () => undefined });
+
+    expect(postMessages).toContainEqual({ type: "showThreadAttention", threadId: "thread-a" });
+  });
+});
+
+// ── Inline thread attention ──
+//
+// The card is where a background thread's approval is answered without
+// switching, and it is what the chip's click opens. It lives as the payload
+// rather than as whatever DOM is on screen: the rail is rebuilt out of every
+// thread list, and a card that existed only in the DOM would vanish under the
+// pointer of someone about to click Allow.
+
+function railItem(rail: FakeElement, threadId: string): FakeElement | null {
+  return rail.querySelector(`.thread-item[data-thread-id="${threadId}"]`);
+}
+
+function attentionCard(rail: FakeElement, threadId: string): FakeElement | null {
+  return railItem(rail, threadId)?.querySelector(".thread-attention") ?? null;
+}
+
+function attentionButton(card: FakeElement, kind: string): FakeElement {
+  const row = card.querySelector(".thread-attention-buttons")!;
+  return row.children.find((child) => child.className === `thread-attention-btn ${kind}`)!;
+}
+
+function pendingApproval(id: string) {
+  return { id, tool_name: "shell", description: "run the tests" };
+}
+
+describe("inline thread attention", () => {
+  it("keeps the expanded card on its row across a rail rebuild", () => {
+    const { postMessages, rail, sidebar } = createHarness();
+    sidebar.setThreads([waitingThread("thread-a", "2026-09-17T00:00:00Z")]);
+    sidebar.renderThreads();
+
+    sidebar.showThreadAttention({
+      threadId: "thread-a",
+      approvals: [pendingApproval("approval-1")],
+      inputs: [],
+    });
+    expect(attentionCard(rail, "thread-a")).toBeTruthy();
+
+    // A thread list arriving mid-answer rebuilds every row, which is exactly
+    // when the card used to disappear.
+    sidebar.renderThreads();
+
+    const card = attentionCard(rail, "thread-a");
+    expect(card).toBeTruthy();
+    attentionButton(card!, "allow").dispatch("click", { stopPropagation: () => undefined });
+    expect(postMessages).toContainEqual({
+      type: "approvalDecision",
+      approvalId: "approval-1",
+      decision: "allow",
+      remember: false,
+    });
+  });
+
+  it("retires an answered row and does not put it back on the next rebuild", () => {
+    const { rail, sidebar } = createHarness();
+    sidebar.setThreads([waitingThread("thread-a", "2026-09-17T00:00:00Z")]);
+    sidebar.renderThreads();
+    sidebar.showThreadAttention({
+      threadId: "thread-a",
+      approvals: [pendingApproval("approval-1")],
+      inputs: [],
+    });
+
+    sidebar.removeThreadAttentionApproval("approval-1");
+    expect(attentionCard(rail, "thread-a")).toBeNull();
+
+    sidebar.renderThreads();
+    expect(attentionCard(rail, "thread-a")).toBeNull();
+  });
+
+  it("leaves the other rows standing when one is answered", () => {
+    const { rail, sidebar } = createHarness();
+    sidebar.setThreads([waitingThread("thread-a", "2026-09-17T00:00:00Z")]);
+    sidebar.renderThreads();
+    sidebar.showThreadAttention({
+      threadId: "thread-a",
+      approvals: [pendingApproval("approval-1"), pendingApproval("approval-2")],
+      inputs: [],
+    });
+
+    sidebar.removeThreadAttentionApproval("approval-1");
+
+    const card = attentionCard(rail, "thread-a");
+    expect(card).toBeTruthy();
+    expect(card!.querySelectorAll(".thread-attention-approval")).toHaveLength(1);
+    sidebar.renderThreads();
+    expect(attentionCard(rail, "thread-a")!.querySelectorAll(".thread-attention-approval")).toHaveLength(1);
+  });
+
+  it("keeps one card expanded at a time", () => {
+    const { rail, sidebar } = createHarness();
+    sidebar.setThreads([
+      waitingThread("thread-a", "2026-09-17T00:00:00Z"),
+      waitingThread("thread-b", "2026-09-17T00:00:00Z"),
+    ]);
+    sidebar.renderThreads();
+
+    sidebar.showThreadAttention({
+      threadId: "thread-a",
+      approvals: [pendingApproval("approval-a")],
+      inputs: [],
+    });
+    sidebar.showThreadAttention({
+      threadId: "thread-b",
+      approvals: [pendingApproval("approval-b")],
+      inputs: [],
+    });
+
+    // The payload names one card, so the rail shows one: two expanded cards
+    // would be a state the next rebuild could not put back.
+    expect(attentionCard(rail, "thread-a")).toBeNull();
+    expect(attentionCard(rail, "thread-b")).toBeTruthy();
+  });
+
+  it("opens the thread when the rail cannot hold the card", () => {
+    const { postMessages, sidebar } = createHarness();
+    // Another workspace, or past the summary limit: the thread is not in the
+    // rail at all, so opening it is the only way left to reach the approval.
+    sidebar.setThreads([threadSummary("thread-someone-else")]);
+    sidebar.renderThreads();
+
+    sidebar.showThreadAttention({
+      threadId: "thread-elsewhere",
+      approvals: [pendingApproval("approval-1")],
+      inputs: [],
+    });
+
+    expect(postMessages).toContainEqual({ type: "loadThread", threadId: "thread-elsewhere" });
+  });
+
+  it("stops expanding a thread once it is the one on screen", () => {
+    const { rail, sidebar } = createHarness();
+    sidebar.setThreads([waitingThread("thread-a", "2026-09-17T00:00:00Z")]);
+    sidebar.renderThreads();
+    sidebar.showThreadAttention({
+      threadId: "thread-a",
+      approvals: [pendingApproval("approval-1")],
+      inputs: [],
+    });
+
+    // The user took the card's own offer and opened the thread: its request is
+    // answered in the conversation now, and one request has one place to answer
+    // it — not two.
+    sidebar.setActiveThreadId("thread-a");
+    sidebar.renderThreads();
+    expect(attentionCard(rail, "thread-a")).toBeNull();
   });
 });

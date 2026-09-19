@@ -170,10 +170,15 @@ describe("webview-js-sidebar.ts", () => {
     expect(script).toContain("window.__wvFormatRelativeTime");
   });
 
-  it("keeps the agent panel toggle in the sidebar and no longer shows a count", () => {
+  it("keeps the agent panel toggle in the sidebar and makes it own its badge", () => {
     const script = getSidebarScript(makeTr());
     expect(script).toContain("agent-panel-toggle");
     expect(script).not.toContain("__wvFormatThreadsCount");
+    // One owner: the label, the tooltip and the click target are all built from
+    // the thread list this module already holds, so a count can never point at
+    // a thread the click cannot find.
+    expect(script).toContain("refreshAgentAttentionBadge");
+    expect(script).toContain("agentStatusWaiting");
   });
 
   it("groups the thread rail by attention and run state", () => {
@@ -205,12 +210,19 @@ describe("webview-js-sidebar.ts", () => {
     const script = getSidebarScript(makeTr());
     // A thread outside the rendered rail (another workspace, or past the
     // summary limit) has no card to hang the inline panel on — switching to it
-    // is the only way left to reach its approvals.
-    expect(script).toContain("if (msg.threadId && msg.threadId !== activeThreadId)");
-    // Both row removals share one helper.
+    // is the only way left to reach its approvals. Only the request that asked
+    // for the card may do that; a repaint after a rebuild just leaves it be.
+    // The behaviour itself is driven in the runtime suite.
+    expect(script).toContain("function renderThreadAttention(allowFallback)");
+    expect(script).toContain("if (allowFallback && threadId)");
+    // Both row removals share one helper, and both keep the expanded payload in
+    // step with it — the row is gone either way, but the rail is rebuilt on the
+    // next thread list, and a payload still holding an answered request would
+    // put its buttons back on the card.
     expect(script).toContain("function removeThreadAttentionRow");
     expect(script).toContain("removeThreadAttentionRow('.thread-attention-approval");
     expect(script).toContain("removeThreadAttentionRow('.thread-attention-input");
+    expect(script).toContain("dropThreadAttentionEntry");
   });
 
   it("does not render file changes in work panel (TUI design: file changes are shown inline, not in Work sidebar)", () => {

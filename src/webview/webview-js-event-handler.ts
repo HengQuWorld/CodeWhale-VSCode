@@ -129,22 +129,6 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
   // ── Streaming state helpers ──
   var statusBarEl = document.getElementById('status');
 
-  // Toolbar Agent badge: base label cached on first paint so the count can be
-  // appended/removed without losing the localized "Agent" wording.
-  var agentBadgeEl = document.getElementById('agent-panel-toggle');
-  var agentBadgeBaseLabel = agentBadgeEl ? agentBadgeEl.textContent : '';
-
-  function updateAgentAttentionBadge(total) {
-    if (!agentBadgeEl) return;
-    if (total > 0) {
-      agentBadgeEl.textContent = agentBadgeBaseLabel + ' · ' + total;
-      agentBadgeEl.classList.add('has-attention');
-    } else {
-      agentBadgeEl.textContent = agentBadgeBaseLabel;
-      agentBadgeEl.classList.remove('has-attention');
-    }
-  }
-
   function setStreamingState(streaming, label) {
     if (statusBarEl) {
       if (streaming) {
@@ -502,10 +486,9 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
         window.__wvSidebar.setThreads(msg.threads || []);
         window.__wvSidebar.setShowAllWorkspaces(!!msg.showAllWorkspaces);
         window.__wvSidebar.renderThreads();
-        // Toolbar Agent badge: total pending attention on background threads
-        // (the active view shows its own cards inline, so it is excluded
-        // server-side). Clicking the badge still opens the panel.
-        updateAgentAttentionBadge(msg.attentionTotal || 0);
+        // The toolbar Agent chip (label, tooltip, click target) is refreshed by
+        // renderThreads: it reads this same list, so the count it shows and the
+        // request it offers to answer cannot disagree.
         break;
 
       case 'threadListLoading':
@@ -528,6 +511,13 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
       case 'sessionLoaded':
         window.__wvSidebar.setActiveSessionId(msg.sessionId || null);
         window.__wvSidebar.renderSessions();
+        // A saved session is viewed without a thread, so no thread is the one
+        // on screen any more. Both the rail's "needs you" grouping and the
+        // toolbar chip hide the thread they think the view holds — leave the
+        // last one named here and a session view silently hides its requests
+        // from both.
+        window.__wvSidebar.setActiveThreadId(null);
+        window.__wvSidebar.renderThreads();
         // A saved session is viewed without a thread, so the goal slot belongs
         // to no thread at all: drop the previous one's card, its background
         // list and any open editor before the extension pushes the session's

@@ -1600,6 +1600,12 @@ export function getWebviewCss(): string {
     #toolbar .agent-panel-toggle:hover { color: var(--fg); background: var(--card-bg); }
     /* Pending cross-thread approvals/inputs badge (needs-you total) */
     #toolbar .agent-panel-toggle.has-attention { color: var(--status-warn, #e2b93d); font-weight: 600; }
+    /* The chip answers Enter and Space, so it has to show that it has focus:
+       a keyboard affordance with no ring reads as a dead control. */
+    #toolbar .agent-panel-toggle:focus-visible {
+      outline: 1px solid var(--vscode-focusBorder, #007fd4);
+      outline-offset: 1px;
+    }
 
     /* ── Setting dropdowns (settings bar and toolbar share these) ── */
     #settings-bar .setting-item,

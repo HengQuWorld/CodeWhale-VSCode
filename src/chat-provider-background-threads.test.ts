@@ -373,8 +373,10 @@ describe("background thread watching", () => {
       expect(streamFor(streams, "thread-waiting")!.sinceSeq).toBe(UNWATCHED_SINCE_SEQ);
       const list = messagesOf(provider, "threadList");
       expect(list).toHaveLength(1);
-      // The viewed thread is excluded: its cards are already inline.
-      expect(list[0].attentionTotal).toBe(2);
+      // The rail is handed the summaries and nothing else: the toolbar chip
+      // derives the count from them, so what it offers to open cannot name a
+      // thread the list does not carry. (The viewed-thread exclusion the count
+      // depends on is asserted in the sidebar's own runtime test.)
     });
 
     it("prunes the watch and the cursor of a thread that went idle", async () => {

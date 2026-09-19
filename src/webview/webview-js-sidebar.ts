@@ -600,7 +600,100 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
     container.appendChild(el);
   }
 
+  // ── Toolbar Agent chip ──
+  // The chip is the only chrome that says "another thread is waiting on you".
+  // Its label, its tooltip and its click target are all derived from this one
+  // list, so what it promises and where it lands cannot disagree. The number
+  // is the pending-item total (approvals + user inputs), not a thread count:
+  // one thread can be waiting on two things.
+  var ATTENTION_TITLE_MAX = 24;
+
+  function threadAttentionCount(t) {
+    var n = Number(t && t.pending_attention_count);
+    return isFinite(n) && n > 0 ? n : 0;
+  }
+
+  // Threads waiting on the user, longest wait first. The active thread is
+  // excluded: its cards render inline, so it is not "elsewhere".
+  function agentAttentionThreads() {
+    var waiting = [];
+    for (var i = 0; i < threads.length; i++) {
+      var t = threads[i];
+      if (!t || !t.id || t.id === activeThreadId) continue;
+      if (threadAttentionCount(t) > 0) {
+        waiting.push({ t: t, index: i, at: Date.parse(t.updated_at || '') });
+      }
+    }
+    // Oldest first: updated_at is when the thread last moved, so the oldest
+    // one has been sitting unanswered the longest. A thread with no usable
+    // timestamp cannot be ordered; it queues behind the dated ones in list
+    // order rather than jumping the line.
+    waiting.sort(function(a, b) {
+      var aDated = !isNaN(a.at), bDated = !isNaN(b.at);
+      if (aDated && bDated && a.at !== b.at) return a.at - b.at;
+      if (aDated !== bDated) return aDated ? -1 : 1;
+      return a.index - b.index;
+    });
+    var out = [];
+    for (var w = 0; w < waiting.length; w++) out.push(waiting[w].t);
+    return out;
+  }
+
+  function attentionTitle(t) {
+    var title = String((t && t.title) || '').trim();
+    if (!title) title = String((t && t.id) || '').slice(0, 8);
+    if (title.length > ATTENTION_TITLE_MAX) title = title.slice(0, ATTENTION_TITLE_MAX - 1) + '\u2026';
+    return title;
+  }
+
+  function setAgentChipHint(text) {
+    if (!agentPanelToggleEl) return;
+    agentPanelToggleEl.setAttribute('data-tooltip', text);
+    agentPanelToggleEl.setAttribute('title', text);
+    agentPanelToggleEl.setAttribute('aria-label', text);
+  }
+
+  // The chip says what it counts and names where a click lands. "Agent · 1"
+  // read as an agent count; the number is a work queue on other threads, and
+  // an unexplained yellow is worse than no badge at all.
+  function refreshAgentAttentionBadge() {
+    if (!agentPanelToggleEl) return;
+    var waiting = agentAttentionThreads();
+    if (waiting.length === 0) {
+      agentPanelToggleEl.textContent = __i18n.agentStatus;
+      agentPanelToggleEl.classList.remove('has-attention');
+      setAgentChipHint(__i18n.agentStatusTitle);
+      return;
+    }
+    var items = 0;
+    for (var i = 0; i < waiting.length; i++) items += threadAttentionCount(waiting[i]);
+    var oldest = attentionTitle(waiting[0]);
+    var template = waiting.length === 1 ? __i18n.agentStatusWaitingOne : __i18n.agentStatusWaitingMany;
+    var hint = String(template).replace('{title}', oldest).replace('{count}', String(waiting.length));
+    agentPanelToggleEl.textContent = __i18n.agentStatus + ' \u00b7 ' +
+      String(__i18n.agentStatusWaiting).replace('{count}', String(items));
+    agentPanelToggleEl.classList.add('has-attention');
+    setAgentChipHint(hint);
+  }
+
+  // Clicking the chip shows the waiting thread's card where attention is
+  // answered — expanded in the panel, on the tab that holds it — instead of
+  // switching threads out from under a conversation the user is in the middle
+  // of. Going to the thread is still one click away, from the card itself.
+  function showAgentAttentionInPanel() {
+    var waiting = agentAttentionThreads();
+    if (waiting.length === 0) return false;
+    setThreadsPanelOpen(true);
+    switchSidebarTab('threads');
+    vscode.postMessage({ type: 'showThreadAttention', threadId: waiting[0].id });
+    return true;
+  }
+
   function renderThreads() {
+    // The chip counts the same list this function paints, so it is refreshed
+    // here: a thread that just became active stops being counted as
+    // "elsewhere", and its cards are the ones already on screen.
+    refreshAgentAttentionBadge();
     var container = document.getElementById('tab-threads-list');
     if (!container) return;
     var count = threads.length;
@@ -641,6 +734,9 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
         container.appendChild(renderThreadItem(groups[g].items[j]));
       }
     }
+    // Every one of those items is new, so an expanded attention card was
+    // thrown away with the row that held it — draw it again from its payload.
+    renderThreadAttention(false);
   }
 
   // ── Inline background-thread attention ──
@@ -649,26 +745,63 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
   // approvalDecision / userInputSelect / userInputCancel messages; approval
   // ids are global one-shot capabilities and user inputs name their thread,
   // so both are answerable cross-thread.
+
+  // The expanded card, kept as the payload rather than as whatever DOM happens
+  // to be on screen: the rail is rebuilt out of every thread list, and a rebuild
+  // replaces the row that holds the card. Re-rendering it from this puts it back
+  // where it was, instead of vanishing under the pointer of someone about to
+  // click Allow.
+  var expandedAttention = null;
+
+  function forgetThreadAttention() {
+    expandedAttention = null;
+  }
+
   function showThreadAttention(msg) {
+    expandedAttention = {
+      threadId: msg.threadId || '',
+      approvals: (msg.approvals || []).slice(),
+      inputs: (msg.inputs || []).slice(),
+    };
+    renderThreadAttention(true);
+  }
+
+  /** Put the expanded card back on its thread's row. The allow-fallback flag
+   *  belongs to the request that asked for it: a card the rail cannot hold
+   *  (another workspace, or past the summary limit) leaves opening the thread as
+   *  the only way left to reach its approvals. A repaint after a rebuild never
+   *  falls back — a row that is not there is not somewhere to send the user. */
+  function renderThreadAttention(allowFallback) {
+    if (!expandedAttention) return;
     var container = document.getElementById('tab-threads-list');
     if (!container) return;
-    var item = container.querySelector('.thread-item[data-thread-id="' + (msg.threadId || '') + '"]');
+    var threadId = expandedAttention.threadId;
+    if (threadId === activeThreadId) {
+      // The thread is on screen now, and its requests are answered in the
+      // conversation: one request, one place to answer it.
+      forgetThreadAttention();
+      return;
+    }
+    var item = container.querySelector('.thread-item[data-thread-id="' + threadId + '"]');
     if (!item) {
-      // The card is not in the rendered rail (another workspace, or past the
-      // summary limit). Switching to the thread is the only way left to reach
-      // its approvals, so fall back to opening it rather than doing nothing.
-      if (msg.threadId && msg.threadId !== activeThreadId) {
-        vscode.postMessage({ type: 'loadThread', threadId: msg.threadId });
+      if (allowFallback && threadId) {
+        vscode.postMessage({ type: 'loadThread', threadId: threadId });
       }
       return;
     }
 
-    var existingPanel = item.querySelector('.thread-attention');
-    if (existingPanel) existingPanel.remove();
+    // Exactly one card is expanded, and this payload is it: anything a
+    // previous payload left on another row is stale, and would be the one to
+    // vanish on the next rebuild rather than this one.
+    var openCards = container.querySelectorAll('.thread-attention');
+    for (var c = 0; c < openCards.length; c++) openCards[c].remove();
 
-    var approvals = msg.approvals || [];
-    var inputs = msg.inputs || [];
-    if (approvals.length === 0 && inputs.length === 0) return;
+    var approvals = expandedAttention.approvals;
+    var inputs = expandedAttention.inputs;
+    if (approvals.length === 0 && inputs.length === 0) {
+      forgetThreadAttention();
+      return;
+    }
 
     var panel = document.createElement('div');
     panel.className = 'thread-attention';
@@ -777,12 +910,28 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
 
   function removeThreadAttentionApproval(approvalId) {
     if (!approvalId) return;
+    dropThreadAttentionEntry('approvals', approvalId);
     removeThreadAttentionRow('.thread-attention-approval[data-approval-id="' + approvalId + '"]');
   }
 
   function removeThreadAttentionInput(inputId) {
     if (!inputId) return;
+    dropThreadAttentionEntry('inputs', inputId);
     removeThreadAttentionRow('.thread-attention-input[data-input-id="' + inputId + '"]');
+  }
+
+  /** Retire an answered row from the expanded payload too. Removing the row
+   *  empties the card either way, but the rail is rebuilt on the next thread
+   *  list, and a payload still holding a request that has been answered would
+   *  put its buttons back on the card. */
+  function dropThreadAttentionEntry(list, id) {
+    if (!expandedAttention) return;
+    expandedAttention[list] = expandedAttention[list].filter(function(entry) {
+      return String((entry && entry.id) || '') !== String(id);
+    });
+    if (expandedAttention.approvals.length === 0 && expandedAttention.inputs.length === 0) {
+      forgetThreadAttention();
+    }
   }
 
   // ── Switch Sidebar Tab ──
@@ -1594,14 +1743,20 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
   }
 
   // ── Sidebar toggle ──
-  function toggleThreadsPanel() {
+  function setThreadsPanelOpen(open) {
     var threadsPanel = document.getElementById('threads-panel');
-    var opening = !threadsPanel.classList.contains('open');
-    threadsPanel.classList.toggle('open');
+    if (!threadsPanel) return;
+    var opening = open && !threadsPanel.classList.contains('open');
+    threadsPanel.classList.toggle('open', open);
     if (opening) {
       void threadsPanel.offsetHeight;
       vscode.postMessage({ type: 'refreshSidebar' });
     }
+  }
+
+  function toggleThreadsPanel() {
+    var threadsPanel = document.getElementById('threads-panel');
+    setThreadsPanelOpen(!(threadsPanel && threadsPanel.classList.contains('open')));
   }
 
   // ── Sidebar section collapse toggle ──
@@ -1637,7 +1792,21 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
 
   // ── Threads panel toggle buttons ──
   document.getElementById('btn-threads').addEventListener('click', toggleThreadsPanel);
-  if (agentPanelToggleEl) agentPanelToggleEl.addEventListener('click', toggleThreadsPanel);
+  if (agentPanelToggleEl) {
+    agentPanelToggleEl.addEventListener('click', function() {
+      if (showAgentAttentionInPanel()) return;
+      toggleThreadsPanel();
+    });
+    // The chip carries role="button", so it has to answer Enter and Space the
+    // way the pointer does — a clickable span that ignores the keyboard is
+    // only half an affordance.
+    agentPanelToggleEl.addEventListener('keydown', function(e) {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      e.preventDefault();
+      if (showAgentAttentionInPanel()) return;
+      toggleThreadsPanel();
+    });
+  }
 
   // ── Escape closes the panel ──
   // Same effect as the ✕ button, without hunting for it. Inputs keep their own
@@ -1689,5 +1858,8 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
 
   closeTaskDetail();
   closeAgentDetail();
+  // Paint the chip from whatever is already known before the first thread
+  // list lands; the template's base label stays as the no-JS fallback.
+  refreshAgentAttentionBadge();
   })();`;
 }

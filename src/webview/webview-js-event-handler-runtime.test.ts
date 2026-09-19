@@ -175,6 +175,7 @@ function createRuntimeHarness() {
   const attachmentPreviewCalls: Array<{ id: string; previewUrl: string }> = [];
   const goalCalls: Array<{ method: string; args: unknown[] }> = [];
   const planApproveCalls: string[] = [];
+  const activeThreadCalls: Array<string | null> = [];
 
   const windowObj: Record<string, any> = {
     __wvI18n: makeTr(),
@@ -227,7 +228,9 @@ function createRuntimeHarness() {
       setChangesState: () => {},
       renderChanges: () => {},
       setActiveSessionId: () => {},
-      setActiveThreadId: () => {},
+      setActiveThreadId: (id: unknown) => {
+        activeThreadCalls.push((id ?? null) as string | null);
+      },
       showTaskDetail: (task: unknown) => {
         taskDetailCalls.push(task);
       },
@@ -321,6 +324,8 @@ function createRuntimeHarness() {
     attachmentPreviewCalls,
     goalCalls,
     planApproveCalls,
+    /** Every thread the sidebar was told is on screen, in order. */
+    activeThreadCalls,
   };
 }
 
@@ -660,6 +665,18 @@ describe("webview-js-event-handler runtime", () => {
 
     // A viewed session has no thread yet, so it has no goal of its own.
     expect(harness.goalCalls).toEqual([{ method: "reset", args: [] }]);
+  });
+
+  it("stops holding a thread as the one on screen when a saved session is opened", () => {
+    const harness = createRuntimeHarness();
+
+    harness.dispatchMessage({ type: "sessionLoaded", sessionId: "s1" });
+
+    // Both the rail's "needs you" grouping and the toolbar chip hide the thread
+    // they believe is on screen. A viewed session holds no thread, so keeping
+    // the last one named silently hides that thread's pending requests from
+    // both — the chip would count nothing while a thread waits.
+    expect(harness.activeThreadCalls).toEqual([null]);
   });
 
   it("keeps a running turn's streaming state when a goal error arrives", () => {

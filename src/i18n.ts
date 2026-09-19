@@ -12,6 +12,14 @@ interface Translations {
   activity: string;
   agentStatus: string;
   agentStatusTitle: string;
+  /** Chip suffix while other threads wait on the user: "{count} waiting". */
+  agentStatusWaiting: string;
+  /** Chip tooltip with one waiting thread; `{title}` names the thread the
+   *  click expands, and the answer is given where the click lands. */
+  agentStatusWaitingOne: string;
+  /** Chip tooltip with several waiting threads; `{count}` threads need you and
+   *  `{title}` names the longest-waiting one the click expands. */
+  agentStatusWaitingMany: string;
   closePanel: string;
   sessionsTabHint: string;
   threadsTabHint: string;
@@ -19,7 +27,9 @@ interface Translations {
   newThread: string;
   compact: string;
   interrupt: string;
-  toggleHistory: string;
+  /** Toolbar panel toggle (📋): what the panel holds, and the fact that a
+   *  thread waiting on the user is answered inside it. */
+  togglePanel: string;
   send: string;
   inputPlaceholder: string;
   initializing: string;
@@ -410,9 +420,10 @@ const en: Translations = {
   locale: "en",
   history: "History", threads: "Threads", sessions: "Sessions", tasks: "Tasks", work: "Work", activity: "Activity",
   agentStatus: "Agent", agentStatusTitle: "Open agent panel — sessions, threads, activity", closePanel: "Close panel",
+  agentStatusWaiting: "{count} waiting", agentStatusWaitingOne: "“{title}” is waiting for your approval or input — click to answer it here", agentStatusWaitingMany: "{count} threads need you — click to answer the longest-waiting “{title}”",
   sessionsTabHint: "Saved, archived conversations", threadsTabHint: "Active conversation threads", activityTabHint: "Live agent status: work, changes, tasks, agents",
   newThread: "+ New", compact: "⬒ Compact", interrupt: "■ Stop",
-  toggleHistory: "Click to toggle history", send: "Send",
+  togglePanel: "Open or close the panel — sessions, threads, and anything waiting on you", send: "Send",
   inputPlaceholder: "Ask CodeWhale...",
   initializing: "Initializing...", ready: "Ready",
   thinking: "Thinking...", streaming: "Streaming...", processing: "Processing...",
@@ -754,9 +765,10 @@ const zhCn: Translations = {
   locale: "zh-cn",
   history: "历史", threads: "线程", sessions: "会话", tasks: "任务", work: "工作", activity: "活动",
   agentStatus: "智能体", agentStatusTitle: "打开智能体面板 — 会话、线程、活动", closePanel: "关闭面板",
+  agentStatusWaiting: "{count} 项待处理", agentStatusWaitingOne: "「{title}」正在等待你的审批或输入 — 点击在此答复", agentStatusWaitingMany: "{count} 条线程等你处理 — 点击答复等待最久的「{title}」",
   sessionsTabHint: "已保存归档的会话", threadsTabHint: "进行中的对话线程", activityTabHint: "智能体实时状态：工作、变更、任务、子代理",
   newThread: "+ 新建", compact: "⬒ 压缩", interrupt: "■ 停止",
-  toggleHistory: "点击切换历史", send: "发送",
+  togglePanel: "打开或关闭面板 — 会话、线程，以及等待你的请求", send: "发送",
   inputPlaceholder: "向 CodeWhale 提问...",
   initializing: "初始化中...", ready: "就绪",
   thinking: "思考中...", streaming: "输出中...", processing: "处理中...",
@@ -1129,6 +1141,9 @@ export function webviewTranslations(tr: Translations) {
     activity: tr.activity,
     agentStatus: tr.agentStatus,
     agentStatusTitle: tr.agentStatusTitle,
+    agentStatusWaiting: tr.agentStatusWaiting,
+    agentStatusWaitingOne: tr.agentStatusWaitingOne,
+    agentStatusWaitingMany: tr.agentStatusWaitingMany,
     closePanel: tr.closePanel,
     sessionsTabHint: tr.sessionsTabHint,
     threadsTabHint: tr.threadsTabHint,
@@ -1136,7 +1151,7 @@ export function webviewTranslations(tr: Translations) {
     newThread: tr.newThread,
     compact: tr.compact,
     interrupt: tr.interrupt,
-    toggleHistory: tr.toggleHistory,
+    togglePanel: tr.togglePanel,
     send: tr.send,
     inputPlaceholder: tr.inputPlaceholder,
     initializing: tr.initializing,

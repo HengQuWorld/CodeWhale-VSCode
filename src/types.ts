@@ -174,6 +174,11 @@ export interface PendingApprovalRequest {
   tool_name: string;
   description: string;
   intent_summary?: string | null;
+  /** The provider tool-call id this approval gates, mirroring `tool_call_id`
+   *  on `approval.required` (runtime_threads.rs). A client resuming from a
+   *  snapshot matches it against the tool row the request belongs to; it is a
+   *  correlator, never a capability — a decision is delivered against `id`. */
+  tool_call_id?: string | null;
 }
 
 export interface UserInputOption {
