@@ -36,6 +36,19 @@ Because nothing about the agent is copied into the extension, the engine can shi
 ![File change diff](https://raw.githubusercontent.com/HengQuWorld/CodeWhale-VSCode/main/docs/media/02-diff.gif)
 
 
+## Highlights
+
+**One entry point for three workloads** — Goals, Tasks and Threads are created and switched in the same sidebar. Think something through, hand something off, or just talk it over: each has its place, and you never carry context between windows.
+
+**Work in parallel and put the whole engine to use** — Several tasks can move forward at once: every turn is owned by the Runtime, so a goal loop or a long task keeps running while you keep chatting in another thread. That is real concurrency, not a queue — you decide when to come back and collect results.
+
+**Status and progress, visible at any moment** — The three peer tabs — Sessions, Threads and Activity — lay out what is happening right now: running threads, the live work panel, the change list, Fleet and sub-agent state, task progress. Each active thread holds one lightweight SSE stream, so status and progress stay live without a polling timer.
+
+**The moment your decision is needed, it reaches you in one click** — When a background thread stops for an approval or a question, its own card carries a pending count (grouped under *Needs you*), the toolbar's Agent label shows the total, and a VS Code notification fires. Approve or answer right in the card, without switching threads first.
+
+**Roll back at the level you need — turn or file** — Not happy with the last turn? Undo and Retry act on that turn. Badly edited file? Per-file Revert restores just that one recorded change and names the restore point taken before it, leaving the file's other changes and every other file untouched. For a wider sweep, snapshots roll the workspace files back to a point in time.
+
+
 ## Requirements
 
 | Requirement | Notes |
