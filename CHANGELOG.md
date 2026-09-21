@@ -1,5 +1,15 @@
 # Change Log
 
+## Unreleased
+
+### Bug Fixes
+
+- **A threadless `/mode`, `/auto` or `/trust` re-marks the defaults it just moved** — Those commands write `brotherwhale.defaultMode` / `defaultPermissionPosture` when the view has no conversation yet, but only the toolbar chips were told: the dropdown's *New threads* group is marked against the defaults copy the webview was last sent, so it went on ticking the value that no longer held until the panel was reloaded. The three writers now push the same `scopedDefaults` message the dropdown's own group does. A thread-scoped change still pushes nothing, because nothing in the default scope moved. The group's mark now also resolves a legacy `defaultMode: "yolo"` the way the chips and thread creation do (Act + Full Access), so a stale posture setting can no longer make the mark name a posture the next session will not start under — the chips, the mark, and the thread a new session creates are one resolution (`startupPosture` in `utils/modes.ts`).
+
+- **A `brotherwhale.*` setting changed outside the panel reaches the toolbar** — Nothing subscribed to `workspace.onDidChangeConfiguration`, so a default changed in the VS Code settings editor, in another window, or in the config panel left the chips and the *New threads* marks describing the value from before it — and the next session would start under a mode and permission the toolbar never showed. The extension now re-announces both scopes when a `brotherwhale.*` setting changes: the active thread keeps its own mode and posture, and a view with no thread shows the defaults it will start with.
+
+- **A task runs on the same new-session defaults as a chat thread** — A task runs on a runtime thread of its own, but `POST /v1/tasks` carried `mode` and the legacy `auto_approve` bit and no permission posture, so a task created under Auto-Review or Full Access ran on whatever the runtime happens to default to. The engine's task request now carries `permission_posture` — stored on the task record, handed to the thread the task runs on, and compared on admission replay — and both task entry points send it from the startup-default scope. A legacy `defaultMode: "yolo"` is normalized to Act + Full Access on the way out instead of sending an alias the runtime rejects.
+
 ## 0.7.2
 
 ### New Features

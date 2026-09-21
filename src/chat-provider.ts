@@ -30,10 +30,10 @@ import {
   MODE_LABELS,
   POSTURE_LABELS,
   POSTURE_WIRE,
-  isYoloAlias,
   normalizeMode,
   normalizePosture,
   postureFromThread,
+  startupPosture,
   type PermissionPosture,
   type TuiMode,
 } from "./utils/modes";
@@ -725,13 +725,16 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
   /** The startup defaults new threads inherit. They are process-scoped, not
    *  thread state, so they travel on their own message instead of riding
    *  `settingsUpdated` — the webview marks each dropdown group against its own
-   *  source, and this is the source for the "new threads" group. */
-  private postScopedDefaults(): void {
-    const cfg = vscode.workspace.getConfiguration("brotherwhale");
+   *  source, and this is the source for the "new threads" group.
+   *
+   *  Both values come from the same resolution the chips and a new thread use,
+   *  so the group's mark cannot name a posture the next session will not start
+   *  under (a legacy `defaultMode: "yolo"`, for instance, is Full Access). */
+  public postScopedDefaults(): void {
     this.postMessage({
       type: "scopedDefaults",
-      mode: normalizeMode(cfg.get<string>("defaultMode", "agent")),
-      posture: normalizePosture(cfg.get<string>("defaultPermissionPosture", "ask")),
+      mode: this.getCurrentMode(),
+      posture: this.getCurrentPosture(),
     });
   }
 
@@ -753,6 +756,20 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       model: this.currentThread?.model || this.getCurrentModel(),
       reasoningEffort: this.getCurrentReasoningEffort(),
     });
+  }
+
+  /** A `brotherwhale.*` setting changed outside this panel: the VS Code
+   *  settings editor, another window, or the config panel.
+   *
+   *  Nothing in the webview reads the settings directly. The chips were last
+   *  told the active thread's values and the dropdown's "New threads" group the
+   *  startup defaults, so a change made anywhere else has to be re-announced —
+   *  otherwise the toolbar goes on describing what a new session would have
+   *  started with before the change, and the session that does start uses a
+   *  mode and permission the UI never showed. */
+  public handleConfigurationChanged(): void {
+    this.postCurrentSettings();
+    this.postScopedDefaults();
   }
 
   /** Change the startup mode for new threads only: the active thread keeps its
@@ -3247,12 +3264,17 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     try {
       await this.api.ensureReady();
       const taskCfg = vscode.workspace.getConfiguration("brotherwhale");
+      // A task runs on a thread of its own, so it starts from the same
+      // new-session defaults a chat thread does — including the permission,
+      // which used to fall to the runtime's own default here.
+      const posture = this.getCurrentPosture();
       const task = await this.api.createTask({
         prompt: trimmed,
         model: taskCfg.get<string>("defaultModel", "deepseek-v4-pro"),
-        mode: taskCfg.get<string>("defaultMode", "agent"),
+        mode: normalizeMode(taskCfg.get<string>("defaultMode", "agent")),
         workspace: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
-        auto_approve: taskCfg.get<boolean>("autoApprove", false),
+        permission_posture: POSTURE_WIRE[posture],
+        auto_approve: posture === "full_access" || taskCfg.get<boolean>("autoApprove", false),
       });
       await this.refreshTaskList();
       // Every task runs on a runtime thread of its own, and the watcher
@@ -5993,8 +6015,10 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
    *  one-way shorthand for Act + Full Access and still wins when set. */
   private getCurrentPosture(): PermissionPosture {
     const cfg = vscode.workspace.getConfiguration("brotherwhale");
-    if (isYoloAlias(cfg.get<string>("defaultMode", "agent"))) return "full_access";
-    return normalizePosture(cfg.get<string>("defaultPermissionPosture", "ask"));
+    return startupPosture(
+      cfg.get<string>("defaultMode", "agent"),
+      cfg.get<string>("defaultPermissionPosture", "ask"),
+    );
   }
 
   /** Effective posture for the active thread, falling back to the startup default. */

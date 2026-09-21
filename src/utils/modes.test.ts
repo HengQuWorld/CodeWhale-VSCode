@@ -13,6 +13,7 @@ import {
   postureFromThread,
   postureLabel,
   resolveModeArg,
+  startupPosture,
 } from "./modes";
 
 describe("TUI mode contract", () => {
@@ -122,5 +123,19 @@ describe("TUI permission-posture contract", () => {
     // The engine's `from_persisted` ignores `trust_mode`; the GUI must too.
     expect(postureFromThread({ trust_mode: true } as never)).toBe("ask");
     expect(postureFromThread({})).toBe("ask");
+  });
+
+  it("resolves the startup posture a new session starts under", () => {
+    // The configured posture is what a thread created from scratch starts on.
+    expect(startupPosture("agent", "auto_review")).toBe("auto_review");
+    expect(startupPosture("plan", "full_access")).toBe("full_access");
+    // Unset or unparseable falls back to Ask, like the runtime's own default.
+    expect(startupPosture("agent", undefined)).toBe("ask");
+    expect(startupPosture("agent", "nonsense")).toBe("ask");
+    // A legacy `defaultMode: "yolo"` is Act + Full Access and decides the
+    // posture itself, so a stale posture setting must not narrow it back.
+    expect(startupPosture("yolo", "ask")).toBe("full_access");
+    expect(startupPosture("yolo", undefined)).toBe("full_access");
+    expect(startupPosture("4", "ask")).toBe("full_access");
   });
 });

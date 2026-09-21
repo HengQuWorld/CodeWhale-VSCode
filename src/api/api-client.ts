@@ -518,6 +518,10 @@ export class CodeWhaleApiClient {
     mode?: string;
     workspace?: string;
     auto_approve?: boolean;
+    /** Permission posture the task's own thread starts on (`ask` /
+     *  `auto_review` / `full_access`). The engine derives `auto_approve` from
+     *  it, and only reads that bit when no posture is given. */
+    permission_posture?: string;
   }): Promise<TaskRecord> {
     return (await this.post("/v1/tasks", opts)) as TaskRecord;
   }

@@ -277,4 +277,116 @@ describe("ChatProvider permission posture", () => {
       expect(messagesOf(provider).some((msg) => msg.type === "approvalRequired")).toBe(false);
     }
   });
+
+  // ── settings changed outside the panel ──
+
+  it("re-announces both scopes when a setting changes outside the panel", () => {
+    const api = makeApi();
+    const provider = makeProvider(api);
+    // The active thread keeps its own mode and posture: a change made in the
+    // VS Code settings editor is a change to what the *next* session starts
+    // with, not to this conversation.
+    (provider as any).currentThread = thread("plan");
+
+    vscodeState.configValues.set("defaultMode", "operate");
+    vscodeState.configValues.set("defaultPermissionPosture", "full_access");
+    provider.handleConfigurationChanged();
+
+    expect(messagesOf(provider)).toContainEqual({
+      type: "scopedDefaults",
+      mode: "operate",
+      posture: "full_access",
+    });
+    expect(messagesOf(provider)).toContainEqual(
+      expect.objectContaining({ type: "settingsUpdated", mode: "plan", posture: "ask" })
+    );
+  });
+
+  it("shows the changed defaults in a view with no thread", () => {
+    const api = makeApi();
+    const provider = makeProvider(api);
+
+    vscodeState.configValues.set("defaultMode", "plan");
+    vscodeState.configValues.set("defaultPermissionPosture", "auto_review");
+    provider.handleConfigurationChanged();
+
+    // Nothing else would tell the chips: their next values come from the
+    // defaults until a thread exists, and no message was sent since the change.
+    expect(messagesOf(provider)).toContainEqual(
+      expect.objectContaining({ type: "settingsUpdated", mode: "plan", posture: "auto_review" })
+    );
+  });
+
+  it("marks the posture a legacy yolo default actually starts, and agrees with the chips", () => {
+    const api = makeApi();
+    const provider = makeProvider(api);
+    // `yolo` is Act + Full Access, and a stale posture setting that predates the
+    // alias must not narrow what the next session starts under.
+    vscodeState.configValues.set("defaultMode", "yolo");
+    vscodeState.configValues.set("defaultPermissionPosture", "ask");
+
+    provider.postScopedDefaults();
+    provider.handleConfigurationChanged();
+
+    // The dropdown's default group and the chips name the same value as
+    // `getCurrentPosture()` installs on a thread, because they are the same
+    // resolution.
+    expect(messagesOf(provider)).toContainEqual({
+      type: "scopedDefaults",
+      mode: "agent",
+      posture: "full_access",
+    });
+    expect(messagesOf(provider)).toContainEqual(
+      expect.objectContaining({ type: "settingsUpdated", mode: "agent", posture: "full_access" })
+    );
+  });
+
+  // ── tasks start on the same defaults as a chat thread ──
+
+  it("creates a task on the new-session defaults, permission included", async () => {
+    const createTask = vi.fn(async () => ({ id: "task-1", status: "queued" }));
+    const api = makeApi({
+      ensureReady: vi.fn(async () => undefined),
+      createTask,
+    });
+    const provider = makeProvider(api);
+    (provider as any).refreshTaskList = vi.fn(async () => undefined);
+    (provider as any).handleShowTaskDetail = vi.fn(async () => undefined);
+    (provider as any).scheduleThreadListRefresh = vi.fn();
+    vscodeState.configValues.set("defaultMode", "plan");
+    vscodeState.configValues.set("defaultPermissionPosture", "full_access");
+
+    await (provider as any).handleCreateTaskFromSidebar("  do the thing  ");
+
+    // A task runs on a thread of its own, so it starts where a new chat thread
+    // would — not on whatever the runtime happens to default to.
+    expect(createTask).toHaveBeenCalledWith({
+      prompt: "do the thing",
+      model: "deepseek-v4-pro",
+      mode: "plan",
+      workspace: undefined,
+      permission_posture: "full_access",
+      auto_approve: true,
+    });
+  });
+
+  it("normalizes a legacy yolo default for the task it starts", async () => {
+    const createTask = vi.fn(async () => ({ id: "task-1", status: "queued" }));
+    const api = makeApi({
+      ensureReady: vi.fn(async () => undefined),
+      createTask,
+    });
+    const provider = makeProvider(api);
+    (provider as any).refreshTaskList = vi.fn(async () => undefined);
+    (provider as any).handleShowTaskDetail = vi.fn(async () => undefined);
+    (provider as any).scheduleThreadListRefresh = vi.fn();
+    // `yolo` is Act + Full Access, not a mode the runtime accepts.
+    vscodeState.configValues.set("defaultMode", "yolo");
+
+    await (provider as any).handleCreateTaskFromSidebar("do the thing");
+
+    expect(createTask).toHaveBeenCalledWith(
+      expect.objectContaining({ mode: "agent", permission_posture: "full_access" })
+    );
+  });
 });

@@ -20,10 +20,10 @@ import {
   isYoloAlias,
   modeLabel,
   normalizeMode,
-  normalizePosture,
   postureFromThread,
   postureLabel,
   resolveModeArg,
+  startupPosture,
   type PermissionPosture,
   type TuiMode,
 } from "../utils/modes";
@@ -47,6 +47,15 @@ export interface SlashCommandContext {
   readonly totalOutputTokens: number;
 
   postMessage(msg: Record<string, unknown>): void;
+  /** Re-announce the startup defaults — the values the dropdown's "New
+   *  threads" group is marked against.
+   *
+   *  A threadless `/mode`, `/auto` or `/trust` writes
+   *  `brotherwhale.defaultMode` / `defaultPermissionPosture`, and the webview
+   *  only knows what it was last sent: without this the group goes on ticking
+   *  the values that no longer hold, and the marks disagree with the chips
+   *  until the webview reloads. */
+  postScopedDefaults(): void;
   getCurrentModel(): string;
   /** Returns the cached provider list from `GET /v1/providers`, or null if
    * not yet loaded. Slash handlers (`/provider`, `/models`) use this to
@@ -176,6 +185,8 @@ async function applyMode(
     if (posture) {
       await cfg().update("defaultPermissionPosture", POSTURE_WIRE[posture], vscode.ConfigurationTarget.Global);
     }
+    // The default just moved, so the group that shows it has to be re-marked.
+    ctx.postScopedDefaults();
     infoMessage = `No conversation yet — new threads will start in ${MODE_LABELS[mode]}`;
   } else {
     try {
@@ -217,6 +228,7 @@ async function applyPosture(ctx: SlashCommandContext, posture: PermissionPosture
     // Same threadless case as applyMode: the startup default is the only scope
     // available, and the toast names it.
     await cfg().update("defaultPermissionPosture", wire, vscode.ConfigurationTarget.Global);
+    ctx.postScopedDefaults();
     infoMessage = `No conversation yet — new threads will start with ${POSTURE_LABELS[posture]}`;
   } else {
     try {
@@ -238,10 +250,21 @@ async function applyPosture(ctx: SlashCommandContext, posture: PermissionPosture
   ctx.postMessage({ type: "info", message: infoMessage });
 }
 
+/** The posture a thread created from scratch starts with, resolved through the
+ *  same shared rule the chips and the dropdown's "New threads" group use —
+ *  otherwise a toast could name a posture the next session does not start
+ *  under. */
+function configuredStartupPosture(): PermissionPosture {
+  return startupPosture(
+    cfg().get<string>("defaultMode", "agent"),
+    cfg().get<string>("defaultPermissionPosture", "ask"),
+  );
+}
+
 /** The current thread's effective posture, falling back to the startup default. */
 function effectivePosture(ctx: SlashCommandContext): PermissionPosture {
   if (ctx.currentThread) return postureFromThread(ctx.currentThread);
-  return normalizePosture(cfg().get<string>("defaultPermissionPosture", "ask"));
+  return configuredStartupPosture();
 }
 
 async function handleModel(ctx: SlashCommandContext, args: string): Promise<void> {
@@ -644,12 +667,17 @@ async function handleTask(ctx: SlashCommandContext, args: string): Promise<void>
     await ctx.api.ensureReady();
     if (taskSub === "add" && taskRest) {
       const taskCfg = vscode.workspace.getConfiguration("brotherwhale");
+      // A task runs on a thread of its own, so its mode and permission come
+      // from the same startup-default scope — the permission used to fall to
+      // whatever the runtime defaults to instead.
+      const posture = configuredStartupPosture();
       const task = await ctx.api.createTask({
         prompt: taskRest,
         model: taskCfg.get<string>("defaultModel", "deepseek-v4-pro"),
-        mode: taskCfg.get<string>("defaultMode", "agent"),
+        mode: normalizeMode(taskCfg.get<string>("defaultMode", "agent")),
         workspace: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
-        auto_approve: taskCfg.get<boolean>("autoApprove", false),
+        permission_posture: POSTURE_WIRE[posture],
+        auto_approve: posture === "full_access" || taskCfg.get<boolean>("autoApprove", false),
       });
       ctx.postMessage({ type: "info", message: `Task created: ${task.id.slice(0, 8)} — "${taskRest.slice(0, 60)}" [${task.status}]` });
       await ctx.refreshTaskList();
@@ -699,6 +727,9 @@ async function handleTrust(ctx: SlashCommandContext, args: string): Promise<void
         });
       } catch { /* non-critical */ }
     }
+    // `/trust` writes the startup posture for every later session, thread or
+    // not, so the "New threads" group has to be re-marked either way.
+    ctx.postScopedDefaults();
     postCurrentSettings(ctx);
     ctx.postMessage({ type: "info", message: "Trust mode enabled (Full Access)" });
   } else if (sub === "off") {
@@ -720,6 +751,7 @@ async function handleTrust(ctx: SlashCommandContext, args: string): Promise<void
         mergeThreadUpdate(ctx, updated, { permission_posture: POSTURE_WIRE[posture] });
       } catch { /* non-critical */ }
     }
+    ctx.postScopedDefaults();
     postCurrentSettings(ctx);
     ctx.postMessage({ type: "info", message: "Trust mode disabled" });
   } else {

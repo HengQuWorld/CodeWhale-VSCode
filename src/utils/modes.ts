@@ -183,3 +183,21 @@ export function postureFromThread(thread: {
   if (isYoloAlias(thread.mode) || thread.auto_approve) return "full_access";
   return "ask";
 }
+
+/**
+ * The posture a thread created from scratch starts under, from the two settings
+ * that decide it (`brotherwhale.defaultMode` / `defaultPermissionPosture`).
+ *
+ * One resolution for every consumer, because three of them display or install
+ * it and a disagreement is invisible until a turn runs under the other value:
+ * the status-bar chips, the dropdown's "New threads" group, and thread/task
+ * creation. Legacy `defaultMode: "yolo"` is Act **plus Full Access** — an alias
+ * the runtime does not accept as a mode — so it decides the posture here rather
+ * than being sent on. */
+export function startupPosture(
+  defaultMode: string | undefined | null,
+  defaultPermissionPosture: string | undefined | null,
+): PermissionPosture {
+  if (isYoloAlias(defaultMode)) return "full_access";
+  return normalizePosture(defaultPermissionPosture);
+}

@@ -250,6 +250,7 @@ function createContext(overrides: Partial<SlashCommandContext> = {}): SlashComma
     totalInputTokens: 12000,
     totalOutputTokens: 4000,
     postMessage: vi.fn(),
+    postScopedDefaults: vi.fn(),
     getCurrentModel: vi.fn(() => "deepseek-v4-pro"),
     getProvidersCache: vi.fn(() => null),
     getCurrentProvider: vi.fn(() => null),
@@ -429,6 +430,10 @@ describe("SlashCommandHandler - Dispatcher Pattern", () => {
       await handler.handle("/mode", "plan");
 
       expect(vscodeState.updateMock).toHaveBeenCalledWith("defaultMode", "plan", "global");
+      // The value the "New threads" group is marked against just moved, so it
+      // has to be re-announced — the chips alone would leave the group ticking
+      // the old mode.
+      expect(ctx.postScopedDefaults).toHaveBeenCalled();
     });
 
     it("maps numeric shortcuts to Act / Plan / Operate", async () => {
@@ -472,6 +477,8 @@ describe("SlashCommandHandler - Dispatcher Pattern", () => {
         permission_posture: "full_access",
       });
       expect(currentThread.permission_posture).toBe("full_access");
+      // Nothing in the startup-default scope moved, so nothing re-marks it.
+      expect(ctx.postScopedDefaults).not.toHaveBeenCalled();
     });
 
     it("shows current mode when no valid arg given", async () => {
@@ -535,6 +542,28 @@ describe("SlashCommandHandler - Dispatcher Pattern", () => {
         model: "deepseek-v4-pro",
         reasoningEffort: "auto",
       });
+      expect(ctx.postScopedDefaults).not.toHaveBeenCalled();
+    });
+
+    it("moves the startup posture when there is no thread, and re-marks the group that shows it", async () => {
+      const postMessage = vi.fn();
+      const postScopedDefaults = vi.fn();
+      const ctx = createContext({ postMessage, postScopedDefaults });
+      const handler = new SlashCommandHandler(ctx);
+
+      await handler.handle("/auto", "");
+
+      // No thread to scope it to, so the written default is the whole effect —
+      // and the "New threads" group has to hear about it.
+      expect(vscodeState.updateMock).toHaveBeenCalledWith(
+        "defaultPermissionPosture",
+        "auto_review",
+        "global"
+      );
+      expect(postScopedDefaults).toHaveBeenCalled();
+      expect(postMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ type: "settingsUpdated", posture: "auto_review" })
+      );
     });
 
     it("rejects arguments with a usage hint", async () => {
@@ -1227,6 +1256,9 @@ describe("SlashCommandHandler - Dispatcher Pattern", () => {
       await handler.handle("/trust", "on");
 
       expect(vscodeState.updateMock).toHaveBeenCalledWith("autoApprove", true, "global");
+      // `/trust` writes the posture later sessions start on, so the group that
+      // shows it is re-marked whether or not there is a thread.
+      expect(ctx.postScopedDefaults).toHaveBeenCalled();
     });
 
     it("disables trust mode with 'off'", async () => {
@@ -1237,6 +1269,7 @@ describe("SlashCommandHandler - Dispatcher Pattern", () => {
       await handler.handle("/trust", "off");
 
       expect(vscodeState.updateMock).toHaveBeenCalledWith("autoApprove", false, "global");
+      expect(ctx.postScopedDefaults).toHaveBeenCalled();
     });
 
     it("shows usage when no arg", async () => {

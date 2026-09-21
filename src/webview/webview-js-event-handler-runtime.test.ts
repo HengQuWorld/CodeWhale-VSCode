@@ -329,6 +329,56 @@ function createRuntimeHarness() {
   };
 }
 
+/** A status-bar dropdown as `scopedDropdownItems()` builds it: the value chip
+ *  the status messages update, and the same roster listed twice — this thread's
+ *  group first, the "New threads" default second. */
+function buildScopedMenu(
+  harness: ReturnType<typeof createRuntimeHarness>,
+  setting: "mode" | "posture",
+  chipId: string,
+  values: string[],
+) {
+  const chip = harness.getElement(chipId);
+  // The stand-in matches selectors against `className` and click targets
+  // against `classList`, so the chip carries both (the real DOM keeps them in
+  // sync).
+  chip.className = "setting-value";
+  chip.classList.add("setting-value");
+  const wrapper = new FakeElement();
+  wrapper.setAttribute("data-setting", setting);
+  const menu = new FakeElement();
+  menu.className = "dropdown-menu";
+  const items: FakeElement[] = [];
+  for (const scope of ["thread", "default"] as const) {
+    for (const value of values) {
+      const item = new FakeElement();
+      item.className = "dropdown-item";
+      item.setAttribute("data-scope", scope);
+      item.setAttribute("data-value", value);
+      menu.appendChild(item);
+      items.push(item);
+    }
+  }
+  wrapper.appendChild(chip);
+  wrapper.appendChild(menu);
+  return {
+    /** Open the menu the way a click on the chip does, which is what marks it. */
+    open(): void {
+      harness.getElement("toolbar").dispatch("click", { target: chip, stopPropagation: () => {} });
+    },
+    /** Values marked selected in one scope. */
+    selected(scope: "thread" | "default"): string[] {
+      return items
+        .filter(
+          (item) =>
+            item.getAttribute("data-scope") === scope &&
+            item.classList.contains("selected"),
+        )
+        .map((item) => item.getAttribute("data-value") || "");
+    },
+  };
+}
+
 describe("webview-js-event-handler runtime", () => {
   it("updates the visible settings labels and ready status text for ready/settingsUpdated messages", () => {
     const harness = createRuntimeHarness();
@@ -364,6 +414,74 @@ describe("webview-js-event-handler runtime", () => {
     expect(harness.getElement("current-reasoning").textContent).toBe("high");
     expect(harness.getElement("status-text").textContent).toBe("Ready (deepseek-v4-pro)");
     expect(harness.postMessages).toEqual([{ type: "webviewReady" }]);
+  });
+
+  it("moves the mode and permission menus onto the defaults when 新建会话 clears the thread", () => {
+    // On screen: a conversation running Plan under Ask, with Operate + Full
+    // Access configured as the defaults for the next one.
+    const active = createRuntimeHarness();
+    active.dispatchMessage({
+      type: "ready",
+      mode: "plan",
+      posture: "ask",
+      model: "deepseek-v4-pro",
+      reasoningEffort: "auto",
+    });
+    active.dispatchMessage({ type: "scopedDefaults", mode: "operate", posture: "full_access" });
+    const activeMode = buildScopedMenu(active, "mode", "current-mode", ["agent", "plan", "operate"]);
+    const activePosture = buildScopedMenu(active, "posture", "current-posture", [
+      "ask",
+      "auto_review",
+      "full_access",
+    ]);
+
+    activeMode.open();
+    activePosture.open();
+    expect(activeMode.selected("thread")).toEqual(["plan"]);
+    expect(activePosture.selected("thread")).toEqual(["ask"]);
+    expect(activeMode.selected("default")).toEqual(["operate"]);
+    expect(activePosture.selected("default")).toEqual(["full_access"]);
+
+    // 新建会话 clears the view, then republishes what the next session starts
+    // with — the defaults, not what the thread that just ended was running.
+    const fresh = createRuntimeHarness();
+    fresh.dispatchMessage({
+      type: "ready",
+      mode: "plan",
+      posture: "ask",
+      model: "deepseek-v4-pro",
+      reasoningEffort: "auto",
+    });
+    fresh.dispatchMessage({ type: "scopedDefaults", mode: "operate", posture: "full_access" });
+    const freshMode = buildScopedMenu(fresh, "mode", "current-mode", ["agent", "plan", "operate"]);
+    const freshPosture = buildScopedMenu(fresh, "posture", "current-posture", [
+      "ask",
+      "auto_review",
+      "full_access",
+    ]);
+    fresh.dispatchMessage({ type: "clearChat" });
+    fresh.dispatchMessage({
+      type: "settingsUpdated",
+      mode: "operate",
+      posture: "full_access",
+      model: "deepseek-v4-pro",
+      reasoningEffort: "auto",
+    });
+
+    // The chips carry the values the new session will run with...
+    expect(fresh.getElement("current-mode").textContent).toBe("Operate");
+    expect(fresh.getElement("current-mode").getAttribute("data-value")).toBe("operate");
+    expect(fresh.getElement("current-posture").textContent).toBe("Full Access");
+    expect(fresh.getElement("current-posture").getAttribute("data-value")).toBe("full_access");
+
+    // ...and so do both groups of both menus: with no thread, the value the
+    // next session starts on *is* the default.
+    freshMode.open();
+    freshPosture.open();
+    expect(freshMode.selected("thread")).toEqual(["operate"]);
+    expect(freshMode.selected("default")).toEqual(["operate"]);
+    expect(freshPosture.selected("thread")).toEqual(["full_access"]);
+    expect(freshPosture.selected("default")).toEqual(["full_access"]);
   });
 
   it("returns focus to the input after attachments change", () => {

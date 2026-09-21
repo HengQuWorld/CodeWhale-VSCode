@@ -46,6 +46,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     })
   );
 
+  // The two startup defaults this panel's dropdowns write can also be changed
+  // from the VS Code settings editor, another window, or the config panel.
+  // Those changes arrive here and nowhere else, so the chips and the "New
+  // threads" group are re-announced from this one place.
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeConfiguration((event) => {
+      if (event.affectsConfiguration("brotherwhale")) {
+        chatProvider.handleConfigurationChanged();
+      }
+    })
+  );
+
   context.subscriptions.push(
     vscode.commands.registerCommand("brotherwhale.compactContext", () => {
       chatProvider.handleCompactCommand();
