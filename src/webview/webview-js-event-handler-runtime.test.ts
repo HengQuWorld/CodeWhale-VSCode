@@ -168,6 +168,18 @@ function createRuntimeHarness() {
 
   const postMessages: Array<Record<string, unknown>> = [];
   const sendStopCalls: boolean[] = [];
+  const composerTextCalls: string[] = [];
+  // The streaming flag is the webview's one record of "a turn is running":
+  // the input routing reads it and the send/stop button follows it. The
+  // stand-in keeps it the way the messages module does, so a test can tell a
+  // state that was armed from one that was merely announced.
+  let streaming = false;
+  const streamingCalls: boolean[] = [];
+  // The stall deadline is part of arming a turn (the view must not hold the
+  // composer forever for a turn that stopped reporting), so the stand-in
+  // records what was set and cleared.
+  let streamingTimer: unknown = null;
+  const streamingTimers: unknown[] = [];
   const windowListeners = new Map<string, (event: any) => void>();
   const documentListeners = new Map<string, (event: any) => void>();
   const taskDetailCalls: unknown[] = [];
@@ -241,10 +253,16 @@ function createRuntimeHarness() {
     },
     __wvMessages: {
       addMessage: () => {},
-      setStreaming: () => {},
-      getStreamingTimeout: () => null,
-      setStreamingTimeout: () => {},
-      isStreaming: () => false,
+      setStreaming: (value: boolean) => {
+        streaming = !!value;
+        streamingCalls.push(!!value);
+      },
+      getStreamingTimeout: () => streamingTimer,
+      setStreamingTimeout: (value: unknown) => {
+        streamingTimer = value;
+        streamingTimers.push(value);
+      },
+      isStreaming: () => streaming,
       setUserScrolledUp: () => {},
       smartScrollToBottom: () => {},
       renderWelcome: () => {},
@@ -257,6 +275,9 @@ function createRuntimeHarness() {
     __wvInput: {
       updateSendStopButton: (streaming: boolean) => {
         sendStopCalls.push(streaming);
+      },
+      setComposerText: (text: string) => {
+        composerTextCalls.push(text);
       },
       applyApiCapabilities: () => {},
       setCurrentAttachments: () => {},
@@ -289,10 +310,13 @@ function createRuntimeHarness() {
     createElement: () => new FakeElement(),
   };
 
+  let timerId = 0;
   const context = vm.createContext({
     window: windowObj,
     document: documentObj,
-    setTimeout: () => 0,
+    // Ids are truthy so `getStreamingTimeout()` can tell an armed deadline
+    // apart from the cleared one, the way the messages module does.
+    setTimeout: () => (timerId += 1),
     clearTimeout: () => {},
     console,
   });
@@ -318,6 +342,11 @@ function createRuntimeHarness() {
     getElement: getEl,
     postMessages,
     sendStopCalls,
+    composerTextCalls,
+    streamingCalls,
+    streamingTimers,
+    /** What the input router would read if the user pressed Enter now. */
+    isStreaming: () => streaming,
     documentListeners,
     taskDetailCalls,
     agentDetailCalls,
@@ -664,6 +693,96 @@ describe("webview-js-event-handler runtime", () => {
 
     expect(harness.sendStopCalls).toEqual([true, false]);
     expect(harness.getElement("status").classList.contains("is-streaming")).toBe(false);
+  });
+
+  it("re-arms the running turn a rebuilt conversation still holds", () => {
+    const harness = createRuntimeHarness();
+
+    // The order the host posts for a thread whose last turn is in_progress:
+    // the streaming placeholder and `turnStarted` first, then the rebuild.
+    // The rebuild resets the streaming state (it replaces the whole
+    // conversation), so the last word on whether a turn is running has to
+    // come from the transcript it just drew — the trailing streaming bubble.
+    harness.dispatchMessage({
+      type: "addMessage",
+      message: { id: "placeholder", role: "assistant", content: "", status: "streaming" },
+    });
+    harness.dispatchMessage({ type: "turnStarted", turnId: "turn-running" });
+    harness.dispatchMessage({
+      type: "loadHistory",
+      messages: [
+        { id: "u1", role: "user", content: "hi", status: "complete" },
+        { id: "placeholder", role: "assistant", content: "", status: "streaming" },
+      ],
+    });
+
+    // Armed: Enter steers the adopted turn rather than starting one the
+    // engine refuses for a busy thread, and the button offers Stop.
+    expect(harness.isStreaming()).toBe(true);
+    expect(harness.sendStopCalls[harness.sendStopCalls.length - 1]).toBe(true);
+    // The reset then the re-arm, in that order: the load really did clear the
+    // state the rebuild had to restore.
+    expect(harness.streamingCalls.slice(-2)).toEqual([false, true]);
+    // Armed with the deadline: an armed turn is never left without one.
+    expect(harness.streamingTimers[harness.streamingTimers.length - 1]).toBeTruthy();
+  });
+
+  it("gives an adopted turn the same deadline the live path sets", () => {
+    const harness = createRuntimeHarness();
+
+    // What `adoptActiveTurn` posts after the engine refuses a send because the
+    // thread is busy. Nothing else arms this turn — the placeholder it lands in
+    // already existed — so `turnStarted` has to arm it, deadline included, or
+    // the composer would offer Send for a turn the engine is running (or hold
+    // Stop forever for a turn whose engine went silent).
+    harness.dispatchMessage({ type: "turnStarted", turnId: "turn-running" });
+
+    expect(harness.isStreaming()).toBe(true);
+    expect(harness.sendStopCalls).toEqual([true]);
+    expect(harness.streamingTimers[harness.streamingTimers.length - 1]).toBeTruthy();
+  });
+
+  it("leaves a rebuilt conversation that finished not streaming", () => {
+    const harness = createRuntimeHarness();
+
+    harness.dispatchMessage({
+      type: "loadHistory",
+      messages: [
+        { id: "u1", role: "user", content: "hi", status: "complete" },
+        { id: "a1", role: "assistant", content: "done", status: "complete" },
+      ],
+    });
+
+    expect(harness.isStreaming()).toBe(false);
+    expect(harness.sendStopCalls).toEqual([false]);
+  });
+
+  it("keeps the Stop button on a running turn when a status message repaints", () => {
+    const harness = createRuntimeHarness();
+
+    harness.dispatchMessage({ type: "turnStarted", turnId: "turn-running" });
+    // `ready` and `settingsUpdated` arrive right after a load and only say
+    // what the status line reads; neither may hand the composer back to Send
+    // while the turn they describe is still running.
+    harness.dispatchMessage({ type: "ready", model: "deepseek-v4-pro" });
+    harness.dispatchMessage({ type: "settingsUpdated", model: "deepseek-v4-pro" });
+
+    expect(harness.isStreaming()).toBe(true);
+    // One call per repaint, each asking for the flag's value: Stop, three times.
+    expect(harness.sendStopCalls).toEqual([true, true, true]);
+  });
+
+  it("routes a restored composer prompt through the input module", () => {
+    const harness = createRuntimeHarness();
+
+    // `setInputText` is how a refused send (and a retried turn) hands the text
+    // back. The input module's writer is the only place that refreshes what
+    // depends on the box's text — the steer button reads it — and the text
+    // lands exactly when the turn is adopted, so it has to be sendable.
+    harness.dispatchMessage({ type: "setInputText", text: "carry on then" });
+
+    expect(harness.composerTextCalls).toEqual(["carry on then"]);
+    expect(harness.getElement("input").focusCount).toBe(1);
   });
 
   it("renders the plan-approve action only when messageComplete carries planApproval", () => {

@@ -509,3 +509,160 @@ describe("webview-js-input runtime: the send button is the Stop button mid-turn"
     expect(btn.classList.contains("streaming")).toBe(false);
   });
 });
+
+describe("webview-js-input runtime: Enter steers the turn that is running", () => {
+  // Steering is what makes Enter usable on a turn this client did not start —
+  // one adopted while loading a thread that had a turn in flight. The state
+  // it reads is the streaming flag, which the event handler arms; a fresh
+  // placeholder, a `turnStarted`, and a load that ends on a streaming bubble
+  // all leave it set.
+  it("posts steer for plain text while a turn is streaming", () => {
+    const h = createHarness();
+    h.windowObj.__wvApiCapabilities = { turnSteer: true };
+    h.windowObj.__wvMessages.isStreaming = () => true;
+    h.input.value = "focus on the tests";
+
+    h.input.dispatch("keydown", syntheticEvent({ key: "Enter", shiftKey: false }));
+
+    expect(h.postMessages).toEqual([{ type: "steer", text: "focus on the tests" }]);
+  });
+
+  it("blocks the prompt when the engine cannot steer", () => {
+    const h = createHarness();
+    h.windowObj.__wvApiCapabilities = { turnSteer: false };
+    h.windowObj.__wvMessages.isStreaming = () => true;
+    h.input.value = "a new prompt";
+
+    h.input.dispatch("keydown", syntheticEvent({ key: "Enter", shiftKey: false }));
+
+    // The pre-steer behaviour: an engine that cannot steer must not be sent a
+    // steer it would refuse, and must not be sent a new turn either — the
+    // thread is busy and `start_turn` refuses that too.
+    expect(h.postMessages).toEqual([]);
+  });
+
+  it("sends a new prompt when nothing is streaming", () => {
+    const h = createHarness();
+    h.windowObj.__wvApiCapabilities = { turnSteer: true };
+    h.input.value = "hello";
+
+    h.input.dispatch("keydown", syntheticEvent({ key: "Enter", shiftKey: false }));
+
+    expect(h.postMessages).toEqual([{ type: "sendMessage", text: "hello" }]);
+  });
+});
+
+describe("webview-js-input runtime: the steer button, and not the Stop button", () => {
+  // While a turn streams, plain text and Enter go INTO that turn. That is a
+  // second action in the composer, and it gets its own control: the merged
+  // send/stop button used to be the only thing to click while the placeholder
+  // said "steer the running turn", so the one click available was the one that
+  // ended the turn.
+  function streamingWithSteering(h: Harness): void {
+    h.windowObj.__wvApiCapabilities = { turnSteer: true };
+    h.windowObj.__wvMessages.isStreaming = () => true;
+    h.windowObj.__wvInput.updateSendStopButton(true);
+  }
+
+  it("sends the text as a steer when it is clicked", () => {
+    const h = createHarness();
+    streamingWithSteering(h);
+    h.input.value = "focus on the tests";
+    h.input.dispatch("input", syntheticEvent());
+
+    h.getElement("btn-steer").dispatch("click", syntheticEvent());
+
+    expect(h.postMessages).toEqual([{ type: "steer", text: "focus on the tests" }]);
+    // Nothing is left behind: the guidance left the box the way Enter takes it.
+    expect(h.input.value).toBe("");
+  });
+
+  it("stays out of the way until a turn can take guidance", () => {
+    const h = createHarness();
+    const btn = h.getElement("btn-steer");
+
+    // Idle: the composer's one action is send, and the Stop/steer pair is not
+    // in the toolbar at all.
+    expect(btn.classList.contains("is-active")).toBe(false);
+    expect(btn.getAttribute("aria-disabled")).toBe("true");
+
+    streamingWithSteering(h);
+    h.input.value = "guide this";
+    h.input.dispatch("input", syntheticEvent());
+
+    expect(btn.classList.contains("is-active")).toBe(true);
+    expect(btn.getAttribute("aria-disabled")).toBe("false");
+  });
+
+  it("is not offered on an engine that cannot steer", () => {
+    const h = createHarness();
+    h.windowObj.__wvApiCapabilities = { turnSteer: false };
+    h.windowObj.__wvMessages.isStreaming = () => true;
+    h.windowObj.__wvInput.updateSendStopButton(true);
+    h.input.value = "guide this";
+    h.input.dispatch("input", syntheticEvent());
+
+    // Without steering the composer is the Stop button alone, exactly as it
+    // was before steering existed.
+    const btn = h.getElement("btn-steer");
+    expect(btn.classList.contains("is-active")).toBe(false);
+    expect(btn.getAttribute("aria-disabled")).toBe("true");
+  });
+
+  it("does not arm over an empty box, and says why when hovered", () => {
+    const h = createHarness();
+    streamingWithSteering(h);
+
+    const btn = h.getElement("btn-steer");
+    expect(btn.getAttribute("aria-disabled")).toBe("true");
+    // The tooltip is the point of staying hoverable: a control that cannot be
+    // used has to be able to say what it is waiting for.
+    expect(btn.getAttribute("data-tooltip")).toBe(makeTr().steerNeedsText);
+
+    h.input.value = "now there is something to send";
+    h.input.dispatch("input", syntheticEvent());
+
+    expect(btn.getAttribute("aria-disabled")).toBe("false");
+    expect(btn.getAttribute("data-tooltip")).toBe(makeTr().steerAction);
+  });
+
+  it("does nothing when it is clicked while unarmed", () => {
+    const h = createHarness();
+    streamingWithSteering(h);
+    h.input.value = "   ";
+    h.input.dispatch("input", syntheticEvent());
+
+    // It stays hoverable so it can explain itself, which means the guard, not
+    // the disabled attribute, is what keeps an empty click out of the engine.
+    h.getElement("btn-steer").dispatch("click", syntheticEvent());
+
+    expect(h.postMessages).toEqual([]);
+  });
+
+  it("takes the text the host put back in the box (a refused send)", () => {
+    const h = createHarness();
+    streamingWithSteering(h);
+
+    // restoreComposerText -> setInputText -> the input module's writer, which
+    // is what refreshes the button the restored text is meant to be sent from.
+    h.windowObj.__wvInput.setComposerText("carry on then");
+
+    expect(h.getElement("btn-steer").getAttribute("aria-disabled")).toBe("false");
+  });
+
+  it("names the box honestly when the engine cannot take guidance", () => {
+    const h = createHarness();
+    h.windowObj.__wvApiCapabilities = { turnSteer: false };
+    h.windowObj.__wvMessages.isStreaming = () => true;
+    h.windowObj.__wvInput.updateSendStopButton(true);
+
+    // Typing goes nowhere in this state (sendMessage drops it), so the default
+    // "type a message" would be a promise the composer cannot keep.
+    expect(h.input.getAttribute("placeholder")).toBe(makeTr().steerUnavailablePlaceholder);
+
+    h.windowObj.__wvMessages.isStreaming = () => false;
+    h.windowObj.__wvInput.updateSendStopButton(false);
+
+    expect(h.input.getAttribute("placeholder")).toBe("");
+  });
+});

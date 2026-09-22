@@ -12,6 +12,7 @@ export function getInputScript(tr: WebviewTranslations): string {
   var vscode = window.__wvVscode;
   var inputEl = document.getElementById('input');
   var sendStopBtn = document.getElementById('btn-send-stop');
+  var steerBtn = document.getElementById('btn-steer');
   var attachBtn = document.getElementById('btn-attach');
   var attachmentsArea = document.getElementById('attachments-area');
   var slashMenuEl = document.getElementById('slash-menu');
@@ -187,7 +188,7 @@ export function getInputScript(tr: WebviewTranslations): string {
   function applySlashCommand(index) {
     if (index >= 0 && index < slashMenuCommands.length) {
       var cmd = slashMenuCommands[index];
-      inputEl.value = cmd.name + ' ';
+      setComposerText(cmd.name + ' ');
       inputEl.focus();
       slashMenuEl.classList.remove('open');
       slashMenuOpen = false;
@@ -217,7 +218,7 @@ export function getInputScript(tr: WebviewTranslations): string {
     var canSteer = isStreaming && steerCapable();
     if (isStreaming && isSlash && !slashAllowedWhileStreaming) return;
     if (isStreaming && !isSlash && !canSteer) return;
-    inputEl.value = '';
+    setComposerText('');
     window.__wvMessages.setUserScrolledUp(false);
     messageHistory.unshift(text);
     if (messageHistory.length > 200) messageHistory.length = 200;
@@ -253,19 +254,25 @@ export function getInputScript(tr: WebviewTranslations): string {
     setButtonCapabilityState(undoBtn, !!apiCapabilities.undoLastTurn, undoDefaultTitle, __i18n.undoUnsupportedTooltip);
     setButtonCapabilityState(retryBtn, !!apiCapabilities.retryLastTurn, retryDefaultTitle, __i18n.retryUnsupportedTooltip);
     updateInputPlaceholder();
+    updateSteerButtonState();
   }
 
-  // ── Input placeholder: steer hint while a turn is running ──
+  // ── Input placeholder ──
+  // While a turn runs, the box is a channel into that turn: it says so when
+  // the engine can take guidance. When the engine cannot, plain text has
+  // nowhere to go — sendMessage() drops it — so the default "type a
+  // message" must not stay up promising the opposite.
   var inputDefaultPlaceholder = inputEl.getAttribute('placeholder') || '';
 
   function updateInputPlaceholder() {
     var isStreaming = !!(window.__wvMessages && window.__wvMessages.isStreaming());
-    var steerHint = (__i18n && __i18n.steerPlaceholder) || inputDefaultPlaceholder;
+    var placeholder = inputDefaultPlaceholder;
     if (isStreaming && steerCapable()) {
-      inputEl.setAttribute('placeholder', steerHint);
-    } else {
-      inputEl.setAttribute('placeholder', inputDefaultPlaceholder);
+      placeholder = (__i18n && __i18n.steerPlaceholder) || inputDefaultPlaceholder;
+    } else if (isStreaming) {
+      placeholder = (__i18n && __i18n.steerUnavailablePlaceholder) || inputDefaultPlaceholder;
     }
+    inputEl.setAttribute('placeholder', placeholder);
   }
 
   // ── Send/Stop button toggle ──
@@ -275,16 +282,54 @@ export function getInputScript(tr: WebviewTranslations): string {
   var stopLabel = (__i18n && __i18n.interrupt) || 'Stop';
 
   function updateSendStopButton(isStreaming) {
-    if (!sendStopBtn) return;
-    if (isStreaming) {
-      sendStopBtn.classList.add('streaming');
-    } else {
-      sendStopBtn.classList.remove('streaming');
+    if (sendStopBtn) {
+      if (isStreaming) {
+        sendStopBtn.classList.add('streaming');
+      } else {
+        sendStopBtn.classList.remove('streaming');
+      }
+      var label = isStreaming ? stopLabel : sendLabel;
+      sendStopBtn.setAttribute('title', label);
+      sendStopBtn.setAttribute('aria-label', label);
     }
-    var label = isStreaming ? stopLabel : sendLabel;
-    sendStopBtn.setAttribute('title', label);
-    sendStopBtn.setAttribute('aria-label', label);
     updateInputPlaceholder();
+    updateSteerButtonState();
+  }
+
+  // ── Steer button: the running turn's own send ──
+  // Typing while a turn streams does not start a new turn — it guides the one
+  // that is running. That is a second action in the composer, so it gets its
+  // own control: Stop keeps stopping, this one guides, and each face says what
+  // its click does (the merged button told a user reading "Enter steers" that
+  // the only thing to click was Stop). It appears only while the engine can
+  // take guidance — without that, the Stop button is the whole composer, as
+  // before — and dims while the box is empty rather than offering to send
+  // nothing.
+  var steerActionLabel = (__i18n && __i18n.steerAction) || 'Guide this turn';
+  var steerNeedsTextLabel = (__i18n && __i18n.steerNeedsText) || steerActionLabel;
+
+  function updateSteerButtonState() {
+    if (!steerBtn) return;
+    var streaming = !!(window.__wvMessages && window.__wvMessages.isStreaming());
+    var shown = streaming && steerCapable();
+    var armed = shown && !!inputEl.value.trim();
+    steerBtn.classList.toggle('is-active', shown);
+    // Marked unavailable, never 'disabled': a disabled button swallows the
+    // hover, and the hover is where a dim control says what it is waiting for.
+    // The click guard below is what makes it inert — the same shape the
+    // toolbar's undo/retry buttons use (setButtonCapabilityState).
+    var label = armed ? steerActionLabel : (shown ? steerNeedsTextLabel : steerActionLabel);
+    setButtonCapabilityState(steerBtn, armed, label, label);
+    steerBtn.setAttribute('aria-label', label);
+  }
+
+  /** The box's text, with the controls that depend on it refreshed. Assigning
+   *  .value fires no 'input' event, so every programmatic write goes through
+   *  here — otherwise the steer button would stay dim over text it could
+   *  send, or stay armed over an empty box. */
+  function setComposerText(value) {
+    inputEl.value = value;
+    updateSteerButtonState();
   }
 
   // ── Event listeners ──
@@ -294,6 +339,12 @@ export function getInputScript(tr: WebviewTranslations): string {
     } else {
       sendMessage();
     }
+  });
+  // The same action Enter takes while a turn is running — sendMessage()
+  // routes it — so the button cannot drift from the key it stands for.
+  steerBtn.addEventListener('click', function() {
+    if (steerBtn.getAttribute('aria-disabled') === 'true') return;
+    sendMessage();
   });
   attachBtn.addEventListener('click', function() { vscode.postMessage({ type: 'attachFile' }); });
 
@@ -548,7 +599,7 @@ export function getInputScript(tr: WebviewTranslations): string {
           draftBeforeHistory = inputEl.value;
         }
         historyIndex = Math.min(historyIndex + 1, messageHistory.length - 1);
-        inputEl.value = messageHistory[historyIndex];
+        setComposerText(messageHistory[historyIndex]);
         inputEl.selectionStart = inputEl.selectionEnd = inputEl.value.length;
         return;
       }
@@ -559,9 +610,9 @@ export function getInputScript(tr: WebviewTranslations): string {
         e.preventDefault();
         historyIndex--;
         if (historyIndex === -1) {
-          inputEl.value = draftBeforeHistory;
+          setComposerText(draftBeforeHistory);
         } else {
-          inputEl.value = messageHistory[historyIndex];
+          setComposerText(messageHistory[historyIndex]);
         }
         inputEl.selectionStart = inputEl.selectionEnd = 0;
         return;
@@ -577,6 +628,8 @@ export function getInputScript(tr: WebviewTranslations): string {
   inputEl.addEventListener('input', function() {
     slashMenuSelected = 0;
     updateSlashMenu(inputEl.value);
+    // Typing is what arms the steer button: the text is the thing it sends.
+    updateSteerButtonState();
   });
 
   newThreadBtn.addEventListener('click', function() { vscode.postMessage({ type: 'newThread' }); });
@@ -598,6 +651,7 @@ export function getInputScript(tr: WebviewTranslations): string {
     setCurrentAttachments: function(v) { currentAttachments = v; },
     setAttachmentPreview: setAttachmentPreview,
     updateSendStopButton: updateSendStopButton,
+    setComposerText: setComposerText,
   };
 
   applyApiCapabilities();

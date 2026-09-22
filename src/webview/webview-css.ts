@@ -1508,6 +1508,7 @@ export function getWebviewCss(): string {
       flex: none;
     }
     #input-toolbar #btn-attach,
+    #input-toolbar #btn-steer,
     #input-toolbar #btn-send-stop {
       height: 26px;
       padding: 0 6px;
@@ -1531,11 +1532,21 @@ export function getWebviewCss(): string {
     #input-area button:hover { background: var(--brand-primary-light); }
     #input-area button:disabled { opacity: 0.5; cursor: not-allowed; }
 
+    /* ── The composer's own actions, together at the right edge ──
+       Send alone when the view is idle; guide + stop while a turn runs. One
+       auto margin on the group, not one per button: two auto margins in a
+       flex row split the free space between them, which would strand the
+       guide button in the middle of the toolbar instead of beside Stop. */
+    #input-toolbar .input-actions {
+      margin-left: auto;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
     /* ── Merged Send/Stop button (icon-only, far right of the toolbar) ── */
 
     #input-toolbar #btn-send-stop {
-      /* Pushes send to the far right; everything before it flows from the left. */
-      margin-left: auto;
       width: 26px;
       padding: 0;
     }
@@ -1549,6 +1560,32 @@ export function getWebviewCss(): string {
     #input-toolbar .btn-send-stop.streaming { background: #d32f2f; }
     #input-toolbar .btn-send-stop.streaming:hover { background: #e53935; }
     #input-toolbar .btn-send-stop.streaming:active { background: #b71c1c; }
+
+    /* ── Steer button: the running turn's own send ──
+       Plain text and Enter guide the turn that is streaming; this button is
+       the same action for the mouse, so Stop does not have to wear two faces.
+       Hidden until there is a turn that can take guidance — an idle composer
+       is the send button alone — and revealed by the class the input module
+       adds while that is true. */
+    #input-toolbar #btn-steer {
+      display: none;
+      width: 26px;
+      padding: 0;
+    }
+    #input-toolbar #btn-steer.is-active { display: flex; }
+    /* Shown but not armed (nothing typed yet). Deliberately not the disabled
+       attribute: the hover has to keep working, because the dim state is where
+       the button explains what it is waiting for. */
+    #input-toolbar #btn-steer[aria-disabled="true"] {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    /* The generic composer hover rule would lighten it, which reads as "this
+       responds"; an unavailable control keeps the colour it has. */
+    #input-toolbar #btn-steer[aria-disabled="true"]:hover {
+      background: var(--brand-primary);
+    }
+    #input-toolbar .btn-steer .btn-icon-steer { display: block; width: 14px; height: 14px; }
 
     #toolbar {
       padding: 4px 8px;

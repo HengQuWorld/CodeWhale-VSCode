@@ -2336,6 +2336,13 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     try {
       await this.api.steerTurn(thread.id, turnId, trimmed);
     } catch (err) {
+      // The engine refused the guidance — a turn that moved on, a turn that is
+      // stopping, a lost connection. The webview cleared the box the moment
+      // the text left it, so the words go back where they came from: TUI
+      // parity (`dispatch.rs` restores the failed steer plus anything
+      // unattempted, "so nothing is lost"), and the same recovery a refused
+      // send already gets. The steer button re-arms with the restored text.
+      this.restoreComposerText(trimmed);
       this.postMessage({
         type: "error",
         message: formatError(t().steerFailed, err),

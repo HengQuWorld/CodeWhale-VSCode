@@ -79,6 +79,9 @@ function makeTr(): WebviewTranslations {
     thinkingOpen: "▶ Thinking",
     thinkingClose: "▼ Thinking",
     steerPlaceholder: "Steer the running turn...",
+    steerAction: "Guide this turn (Enter)",
+    steerNeedsText: "Type a message to guide the running turn",
+    steerUnavailablePlaceholder: "A turn is running — this engine cannot take guidance",
     steerBadge: "steer",
     steerBadgeTitle: "Sent as mid-turn steering",
     modeLabel: "Mode",
@@ -448,6 +451,24 @@ describe("webview-html.ts assembler", () => {
     expect(html).toContain('id="btn-attach"');
     expect(html).toContain('id="slash-menu"');
     expect(html).toContain('id="attachments-area"');
+  });
+
+  it("ships a steer button the composer can offer beside Stop", () => {
+    const html = getWebviewHtml(makeMockWebview(), makeMockExtensionUri(), makeTr());
+    const toolbarStart = html.indexOf('id="input-toolbar"');
+    const toolbar = html.slice(toolbarStart, html.indexOf('id="status"'));
+
+    // Two actions, two controls: Stop ends the running turn, this one sends
+    // the text into it. Reading order is attach -> guide -> stop.
+    expect(toolbar).toContain('id="btn-steer"');
+    expect(toolbar).toContain('btn-icon-steer');
+    expect(toolbar.indexOf('id="btn-attach"')).toBeLessThan(toolbar.indexOf('id="btn-steer"'));
+    expect(toolbar.indexOf('id="btn-steer"')).toBeLessThan(
+      toolbar.indexOf('id="btn-send-stop"')
+    );
+    // It ships hidden: the input module reveals it only while a turn that can
+    // take guidance is running, so an idle composer is unchanged.
+    expect(toolbar).not.toContain('is-active');
   });
 
   it("stacks the composer's textarea above a bottom toolbar", () => {

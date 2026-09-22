@@ -189,6 +189,20 @@ describe("ChatProvider steer flow", () => {
     expect(types).toContain("error");
   });
 
+  it("a refused steer puts the text back in the box", async () => {
+    const { provider, api, postMessage } = createProvider();
+    api.steerTurn.mockRejectedValueOnce(new Error("Turn turn-1 is stopping and cannot be steered"));
+
+    await (provider as any).handleSteer("focus on tests");
+
+    // The webview cleared the box when the text left it, so the failure has to
+    // hand it back — the same recovery a refused send gets, and what the TUI
+    // does with a steer the engine never took ("so nothing is lost").
+    expect(postMessage).toHaveBeenCalledWith({ type: "setInputText", text: "focus on tests" });
+    const types = postMessage.mock.calls.map((c: any[]) => (c[0] as any).type);
+    expect(types).toContain("error");
+  });
+
   it("empty streaming placeholder is removed, not finalized (TUI flush_active_cell discards empty cells)", async () => {
     const { provider, postMessage } = createProvider();
     const oldAssistant = provider.messages[provider.messages.length - 1];

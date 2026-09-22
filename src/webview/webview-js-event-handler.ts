@@ -140,9 +140,17 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
     if (statusTextEl) {
       statusTextEl.textContent = label || (streaming ? __i18n.thinking : __i18n.ready);
     }
-    // Sync send/stop button state
+    // The button follows the turn, not the caller. This is also called by
+    // messages that only paint the status line — 'ready' and
+    // 'settingsUpdated' arrive right after a thread is loaded, when a turn may
+    // still be running and adopted — and a button that trusted the argument
+    // would offer Send for a live turn, or (with the flag armed) label itself
+    // Stop while the click, which reads the flag, sent a new prompt instead.
+    // The streaming flag is the same state Enter routes on, so the button and
+    // the composer always agree: Stop exactly while the key steers.
     if (window.__wvInput && window.__wvInput.updateSendStopButton) {
-      window.__wvInput.updateSendStopButton(streaming);
+      var live = !!(window.__wvMessages && window.__wvMessages.isStreaming());
+      window.__wvInput.updateSendStopButton(live);
     }
   }
 
@@ -154,6 +162,27 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
   // flickered between send and stop throughout a turn.
   function setStatusText(text) {
     if (statusTextEl) statusTextEl.textContent = text;
+  }
+
+  /** Bound how long the view waits for a turn it has armed to say something.
+   *
+   *  Every place that arms the streaming state calls this, so an armed state
+   *  always carries the same give-up deadline: a turn whose engine died, or
+   *  one the runtime still describes as running after the client lost its
+   *  stream, releases the composer instead of holding it as Stop/steer
+   *  forever. Re-arming restarts the deadline, which is what the streaming
+   *  placeholder is for — a turn nobody can be steered into is worse than one
+   *  the next prompt starts fresh.
+   */
+  function armStallTimeout() {
+    var st = window.__wvMessages.getStreamingTimeout();
+    if (st) clearTimeout(st);
+    window.__wvMessages.setStreamingTimeout(setTimeout(function() {
+      if (window.__wvMessages.isStreaming()) {
+        window.__wvMessages.setStreaming(false);
+        setStreamingState(false, __i18n.readyTimedOut);
+      }
+    }, 300000));
   }
 
   function showThinkingActivity(messageId, label) {
@@ -735,6 +764,26 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
         if (msg.planApprovalFor && window.__wvMessages.renderPlanApproveButton) {
           window.__wvMessages.renderPlanApproveButton(msg.planApprovalFor);
         }
+        // A transcript that ends on a streaming assistant bubble is a turn the
+        // engine is still running: adopting one while switching back, opening
+        // a thread that has a turn in flight, or resuming a session into an
+        // already-busy thread. The reset above cannot stay the last word on
+        // the streaming state — the host posts that turn's 'turnStarted' and
+        // its streaming placeholder *before* this draw, and a rebuild only
+        // arms the state through 'addMessage' for a streaming message, which
+        // the reset has already wiped. Left un-armed, the composer offers Send
+        // for a live turn: plain text starts a new turn (the engine refuses a
+        // busy thread), and once a delta arrives the Stop button is labelled
+        // from the status bar while the click still reads this flag, so it
+        // sends instead of stopping. The trailing bubble is the invariant —
+        // a finished turn finalizes it to complete/error first.
+        var lastLoaded = msg.messages[msg.messages.length - 1];
+        if (lastLoaded && lastLoaded.role === 'assistant' && lastLoaded.status === 'streaming') {
+          window.__wvMessages.setStreaming(true);
+          armStallTimeout();
+          showThinkingActivity(lastLoaded.id, __i18n.thinking);
+          setStreamingState(true, __i18n.thinking);
+        }
         // Nav dots are rebuilt by addMessage() via scheduleNavUpdate(); no
         // explicit call needed here.
         break;
@@ -743,14 +792,7 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
         window.__wvMessages.addMessage(msg.message);
         if (msg.message.status === 'streaming') {
           window.__wvMessages.setStreaming(true);
-          var st = window.__wvMessages.getStreamingTimeout();
-          if (st) clearTimeout(st);
-          window.__wvMessages.setStreamingTimeout(setTimeout(function() {
-            if (window.__wvMessages.isStreaming()) {
-              window.__wvMessages.setStreaming(false);
-              setStreamingState(false, __i18n.readyTimedOut);
-            }
-          }, 300000));
+          armStallTimeout();
           showThinkingActivity(msg.message.id, __i18n.thinking);
           setStreamingState(true, __i18n.thinking);
         }
@@ -1108,6 +1150,14 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
       }
 
       case 'turnStarted':
+        // A turn is running the moment the host says so — including one this
+        // client never started, which it adopted while loading a thread that
+        // had a turn in flight. Arming the flag here is what makes the
+        // composer steer (and Stop) that turn instead of offering to start a
+        // second one the engine refuses, and the deadline comes with the flag
+        // so an adopted turn cannot hold the composer past a silent engine.
+        window.__wvMessages.setStreaming(true);
+        armStallTimeout();
         setStreamingState(true, __i18n.processing);
         break;
 
@@ -1140,7 +1190,16 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
 
       case 'setInputText':
         if (msg.text && inputEl) {
-          inputEl.value = msg.text;
+          // Through the input module's own writer: it is the one place that
+          // refreshes what depends on the box's text (the steer button sends
+          // it), and the restore that matters most is a refused send — the
+          // turn is adopted right after, so the guidance the user typed has
+          // to be sendable the moment it lands back.
+          if (window.__wvInput && window.__wvInput.setComposerText) {
+            window.__wvInput.setComposerText(msg.text);
+          } else {
+            inputEl.value = msg.text;
+          }
           inputEl.focus();
           inputEl.setSelectionRange(inputEl.value.length, inputEl.value.length);
         }
@@ -1202,19 +1261,25 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
         // because the turn it did not come from may still be running: stopping
         // the streaming indicator (and clearing its stall timeout) would
         // report that turn as finished and stop watching it for a stall.
+        //
+        // The streaming flag is cleared before the status line is repainted,
+        // not after: the flag is what the send/stop button and the Enter
+        // routing read, so a repaint that ran ahead of it would leave the
+        // composer offering Stop for a turn this error just ended — and
+        // steering, which needs a turn, would be refused by the engine.
         var keepStreaming = msg.keepStreaming === true;
-        if (!keepStreaming) setStreamingState(false, __i18n.error);
+        if (!keepStreaming) {
+          window.__wvMessages.setStreaming(false);
+          var st = window.__wvMessages.getStreamingTimeout();
+          if (st) { clearTimeout(st); window.__wvMessages.setStreamingTimeout(null); }
+          setStreamingState(false, __i18n.error);
+        }
         var errEl = document.createElement('div');
         errEl.className = 'error-banner';
         errEl.innerHTML = '<span class="msg-label error">' + __wvEscapeHtml(__i18n.error) + '</span><span>' + __wvEscapeHtml(msg.message) + '</span>';
         messagesEl.appendChild(errEl);
         window.__wvMessages.setUserScrolledUp(false);
         messagesEl.scrollTop = messagesEl.scrollHeight;
-        if (!keepStreaming) {
-          window.__wvMessages.setStreaming(false);
-          var st = window.__wvMessages.getStreamingTimeout();
-          if (st) { clearTimeout(st); window.__wvMessages.setStreamingTimeout(null); }
-        }
         break;
       }
 

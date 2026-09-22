@@ -8,6 +8,32 @@ describe("webview-css.ts", () => {
     expect(css.length).toBeGreaterThan(100);
   });
 
+  it("keeps the steer button hidden until a turn can take guidance", () => {
+    const css = getWebviewCss();
+
+    // Revealed by the class the input module adds; the box ships it hidden, so
+    // an idle composer looks exactly as it did.
+    expect(css).toMatch(/#input-toolbar #btn-steer \{[\s\S]*?display: none;/);
+    expect(css).toContain("#input-toolbar #btn-steer.is-active { display: flex; }");
+    expect(css).toContain("#input-toolbar .btn-steer .btn-icon-steer");
+    // Dim, and staying dim under the cursor: the composer's generic hover rule
+    // would otherwise light it up and read as a working control.
+    expect(css).toMatch(/#input-toolbar #btn-steer\[aria-disabled="true"\]/);
+    expect(css).toContain('#input-toolbar #btn-steer[aria-disabled="true"]:hover');
+  });
+
+  it("holds the composer's buttons together at the right edge", () => {
+    const css = getWebviewCss();
+
+    // The auto margin belongs to the group, never to both buttons: two of them
+    // in a flex row split the free space and leave the guide button mid-row
+    // while Stop sits at the edge (measured in a browser against this sheet).
+    expect(css).toMatch(/#input-toolbar \.input-actions \{[\s\S]*?margin-left: auto;/);
+    expect(css).toMatch(/#input-toolbar #btn-send-stop \{[^}]*\}/);
+    expect(css).not.toMatch(/#input-toolbar #btn-send-stop \{[^}]*margin-left: auto;/);
+    expect(css).not.toMatch(/#input-toolbar #btn-steer \{[^}]*margin-left: auto;/);
+  });
+
   it("contains CSS variable definitions", () => {
     const css = getWebviewCss();
     expect(css).toContain("--bg:");

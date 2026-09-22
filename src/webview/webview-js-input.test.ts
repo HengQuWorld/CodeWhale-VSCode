@@ -102,6 +102,16 @@ describe("webview-js-input.ts", () => {
     expect(script).toContain("interrupt");
   });
 
+  it("wires the steer button to the same action Enter takes", () => {
+    const script = getInputScript(makeTr());
+
+    // The button is shown for a turn that can take guidance and its click is
+    // the Enter path (sendMessage routes it), so the two cannot drift apart.
+    expect(script).toContain("btn-steer");
+    expect(script).toContain("updateSteerButtonState");
+    expect(script).toContain("setComposerText");
+  });
+
   it("never resizes the textarea from its content", () => {
     const script = getInputScript(makeTr());
 

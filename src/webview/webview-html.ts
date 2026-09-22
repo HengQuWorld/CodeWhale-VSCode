@@ -116,6 +116,17 @@ export interface WebviewTranslations {
   thinkingOpen: string;
   thinkingClose: string;
   steerPlaceholder: string;
+  /** The composer's steering action, as the button that carries it names
+   *  itself: plain text and Enter guide the running turn, and this button is
+   *  the same action with a mouse. */
+  steerAction: string;
+  /** The same button while the box is empty: it names what it is waiting
+   *  for instead of looking like a control that would send nothing. */
+  steerNeedsText: string;
+  /** What the box says while a turn runs on an engine that cannot take
+   *  guidance: plain text has nowhere to go, so the default "type a message"
+   *  must not be promised. */
+  steerUnavailablePlaceholder: string;
   steerBadge: string;
   steerBadgeTitle: string;
   modeLabel: string;
@@ -550,10 +561,15 @@ ${css}
           <textarea id="input" placeholder="${tr.inputPlaceholder}" rows="1"></textarea>
           <div id="input-toolbar">
             <button id="btn-attach" title="${tr.attachFiles}">📎</button>
-            <button id="btn-send-stop" class="btn-send-stop" title="${tr.send}" aria-label="${tr.send}">
-              <svg class="btn-icon-send" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M3.4 20.4l17.45-7.48a1 1 0 0 0 0-1.84L3.4 3.6a.993.993 0 0 0-1.39.91L2 9.12c0 .5.37.93.87.99L17 12 2.87 13.88c-.5.07-.87.5-.87 1l.01 4.61c0 .71.73 1.2 1.39.91z"/></svg>
-              <svg class="btn-icon-stop" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="4.5" y="4.5" width="15" height="15" rx="2.5" fill="currentColor"/></svg>
-            </button>
+            <div class="input-actions">
+              <button id="btn-steer" class="btn-steer" data-tooltip="${tr.steerAction}" aria-label="${tr.steerAction}">
+                <svg class="btn-icon-steer" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M3.2 11h9.9l-3.2-3.2L11.3 6.4 16.9 12l-5.6 5.6-1.4-1.4 3.2-3.2H3.2z"/><rect x="18.4" y="5" width="2.1" height="14" rx="1.05" fill="currentColor"/></svg>
+              </button>
+              <button id="btn-send-stop" class="btn-send-stop" title="${tr.send}" aria-label="${tr.send}">
+                <svg class="btn-icon-send" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M3.4 20.4l17.45-7.48a1 1 0 0 0 0-1.84L3.4 3.6a.993.993 0 0 0-1.39.91L2 9.12c0 .5.37.93.87.99L17 12 2.87 13.88c-.5.07-.87.5-.87 1l.01 4.61c0 .71.73 1.2 1.39.91z"/></svg>
+                <svg class="btn-icon-stop" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="4.5" y="4.5" width="15" height="15" rx="2.5" fill="currentColor"/></svg>
+              </button>
+            </div>
           </div>
         </div>
       </div>

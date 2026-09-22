@@ -126,6 +126,13 @@ interface Translations {
   steerUnsupported: string;
   steerFailed: string;
   steerPlaceholder: string;
+  /** The composer's steering action, as the button that carries it names
+   *  itself (see webview-html.ts). */
+  steerAction: string;
+  /** The same button while the box is empty. */
+  steerNeedsText: string;
+  /** What the box says while a turn runs on an engine that cannot steer. */
+  steerUnavailablePlaceholder: string;
   steerBadge: string;
   steerBadgeTitle: string;
   engineRestarted: string;
@@ -484,6 +491,9 @@ const en: Translations = {
   steerUnsupported: "Steering is not supported by this engine version",
   steerFailed: "Failed to steer",
   steerPlaceholder: "Steer the running turn...",
+  steerAction: "Guide this turn (Enter)",
+  steerNeedsText: "Type a message to guide the running turn",
+  steerUnavailablePlaceholder: "A turn is running — this engine cannot take guidance",
   steerBadge: "steer",
   steerBadgeTitle: "Sent as mid-turn steering",
   engineRestarted: "CodeWhale engine restarted",
@@ -833,6 +843,9 @@ const zhCn: Translations = {
   steerUnsupported: "当前引擎版本不支持引导",
   steerFailed: "引导失败",
   steerPlaceholder: "引导当前回复...",
+  steerAction: "引导当前回合（Enter）",
+  steerNeedsText: "输入内容后可引导当前回合",
+  steerUnavailablePlaceholder: "本回合运行中 — 当前引擎不支持引导",
   steerBadge: "引导",
   steerBadgeTitle: "作为中途引导发送",
   engineRestarted: "CodeWhale 引擎已重启",
@@ -1219,6 +1232,9 @@ export function webviewTranslations(tr: Translations) {
     initFailed: tr.initFailed,
     eventStreamError: tr.eventStreamError,
     steerPlaceholder: tr.steerPlaceholder,
+    steerAction: tr.steerAction,
+    steerNeedsText: tr.steerNeedsText,
+    steerUnavailablePlaceholder: tr.steerUnavailablePlaceholder,
     steerBadge: tr.steerBadge,
     steerBadgeTitle: tr.steerBadgeTitle,
     engineRestarted: tr.engineRestarted,
