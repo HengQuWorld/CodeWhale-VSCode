@@ -54,8 +54,22 @@ describe("webview-css.ts", () => {
     expect(css).toContain("#toolbar .dropdown-menu { bottom: 100%; margin-bottom: 2px; }");
   });
 
-  it("hides the sidebar resize grip while the threads panel is collapsed", () => {
+  it("bounds every dropdown menu and lets it scroll", () => {
+    // The provider roster is longer than the panel (a user-defined route is
+    // appended after every built-in), and the menu is absolutely positioned
+    // inside a bar: with no bound and no scroll the rows at its far end were
+    // laid out past the viewport and could not be seen or reached at all.
     const css = getWebviewCss();
+    const ruleStart = css.indexOf("#settings-bar .dropdown-menu,\n    #toolbar .dropdown-menu {");
+    expect(ruleStart).toBeGreaterThan(-1);
+    const ruleEnd = css.indexOf("}", ruleStart);
+    const menuRule = css.slice(ruleStart, ruleEnd);
+
+    expect(menuRule).toMatch(/max-height:\s*min\(45vh,\s*420px\);/);
+    expect(menuRule).toContain("overflow-y: auto;");
+    expect(menuRule).not.toContain("overflow: hidden;");
+  });
+  it("hides the sidebar resize grip while the threads panel is collapsed", () => {    const css = getWebviewCss();
 
     // The grip must not exist for dragging when the threads panel is closed.
     const ruleStart = css.indexOf("#sidebar-resize-handle {");

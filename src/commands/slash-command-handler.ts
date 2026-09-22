@@ -63,6 +63,11 @@ export interface SlashCommandContext {
   getProvidersCache(): ProviderEntry[] | null;
   /** Returns the active provider id, or null if not yet loaded. */
   getCurrentProvider(): string | null;
+  /** Returns the exact configured id of the active route, when it has one.
+   *  A user-defined `[providers.<name>]` route is named by this rather than by
+   *  its generic `custom` kind, so `/provider` can mark the route that is
+   *  actually selected. */
+  getCurrentProviderId(): string | null;
   /** Returns the current session ID tracking auto-save continuity, or null if none. */
   getCurrentSessionId(): string | null;
   /** Sets the current session ID for auto-save continuity. Pass null to reset. */
@@ -306,14 +311,26 @@ async function handleModels(ctx: SlashCommandContext, _args: string): Promise<vo
   // list yet (e.g. older TUI runtime without GET /v1/providers).
   const providers = ctx.getProvidersCache();
   const currentProvider = ctx.getCurrentProvider();
+  const currentExact = ctx.getCurrentProviderId();
   if (providers && providers.length > 0) {
-    const target = providers.find(p => p.id === currentProvider) || providers[0];
-    const lines: string[] = [`Available models for provider ${target.id} (${target.display_name}):`];
+    const target =
+      providers.find(
+        p =>
+          p.id === currentProvider &&
+          (p.model_provider_id || "") === (currentExact || "")
+      ) ||
+      providers.find(p => p.id === currentProvider) ||
+      providers[0];
+    const targetName = target.model_provider_id || target.id;
+    const lines: string[] = [`Available models for provider ${targetName} (${target.display_name}):`];
     if (target.has_model_catalog) {
       // Fetch live catalog via the API for accuracy. This is async but
       // handleModels is already async, so we can await it.
       try {
-        const resp = await ctx.api.listProviderModels(target.id);
+        const resp = await ctx.api.listProviderModels(
+          target.id,
+          target.model_provider_id || undefined
+        );
         for (const m of resp.models) {
           lines.push(`- ${m.id}${m.id === ctx.getCurrentModel() ? " (current)" : ""}`);
         }
@@ -324,7 +341,7 @@ async function handleModels(ctx: SlashCommandContext, _args: string): Promise<vo
       lines.push("(this provider exposes no built-in model list; pass any model id to /model)");
     }
     lines.push("");
-    lines.push(`Tip: switch provider via /provider <id>. Available providers: ${providers.map(p => p.id).join(", ")}`);
+    lines.push(`Tip: switch provider via /provider <id>. Available providers: ${providers.map(p => p.model_provider_id || p.id).join(", ")}`);
     ctx.postMessage({ type: "info", message: lines.join("\n") });
     return;
   }
@@ -784,31 +801,50 @@ async function handleProvider(ctx: SlashCommandContext, args: string): Promise<v
   const trimmed = args.trim();
   const providers = ctx.getProvidersCache();
   const current = ctx.getCurrentProvider();
+  const currentExact = ctx.getCurrentProviderId();
+  // A named custom route is named by its exact id; every other route's exact id
+  // repeats the generic one, which already says it.
+  const currentName = current === "custom" && currentExact ? currentExact : current;
 
   // /provider <id> [model] — switch provider (and optionally model).
   if (trimmed) {
     const parts = trimmed.split(/\s+/);
-    const providerId = parts[0];
+    const requested = parts[0];
     const model = parts.slice(1).join(" ") || undefined;
-    const known = providers?.find(p => p.id === providerId);
+    // A user-defined `[providers.<name>]` route is addressed by its own name:
+    // the catalog lists it as the generic `custom` kind plus that exact id, and
+    // this is the name the user configured and the one they will type. Accept
+    // either spelling and translate to the pair the backend takes.
+    const known = providers?.find(
+      p => p.id === requested || p.model_provider_id === requested
+    );
+    const providerKind = known?.id ?? requested;
+    const providerExact = known?.id === requested ? undefined : known?.model_provider_id || undefined;
     if (providers && !known) {
       ctx.postMessage({
         type: "error",
-        message: `Unknown provider '${providerId}'. Available: ${providers.map(p => p.id).join(", ")}`,
+        message: `Unknown provider '${requested}'. Available: ${providers
+          .map(p => p.model_provider_id || p.id)
+          .join(", ")}`,
       });
       return;
     }
     // Delegate to the chat-provider's switchProvider flow (persist + reload +
     // refresh). Posting a switchProvider message lets the chat-provider own
     // the state machine instead of duplicating it here.
-    ctx.postMessage({ type: "switchProviderFromSlash", provider: providerId, model });
+    ctx.postMessage({
+      type: "switchProviderFromSlash",
+      provider: providerKind,
+      providerId: providerExact,
+      model,
+    });
     return;
   }
 
   // /provider — show current provider + available list.
   const lines: string[] = [];
-  if (current) {
-    lines.push(`Current provider: ${current}`);
+  if (currentName) {
+    lines.push(`Current provider: ${currentName}`);
   } else {
     lines.push("Current provider: (unknown — backend has not reported yet)");
   }
@@ -816,8 +852,11 @@ async function handleProvider(ctx: SlashCommandContext, args: string): Promise<v
     lines.push("");
     lines.push("Available providers (use /provider <id> [model] to switch):");
     for (const p of providers) {
-      const marker = p.id === current ? " *" : "";
-      lines.push(`- ${p.id}${marker}  (${p.display_name})`);
+      // Name the route the user selects by, and mark the one that is selected:
+      // two named custom routes share the generic id, so the exact id decides.
+      const name = p.model_provider_id || p.id;
+      const isActive = p.id === current && (p.model_provider_id || "") === (currentExact || "");
+      lines.push(`- ${name}${isActive ? " *" : ""}  (${p.display_name})`);
     }
   } else {
     lines.push("");

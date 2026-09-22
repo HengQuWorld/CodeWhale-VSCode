@@ -165,8 +165,7 @@ describe("ChatProvider provider switch", () => {
 
     // switchProvider must be called with `model: undefined` so the backend
     // treats it as "no override" and does not persist a `model` key.
-    expect(api.switchProvider).toHaveBeenCalledWith("volcengine", undefined);
-
+    expect(api.switchProvider).toHaveBeenCalledWith("volcengine", undefined, undefined);
     // The backend-resolved model (the user's `glm-2`) must be displayed,
     // NOT the catalog default `deepseek-v4-pro`.
     expect(provider.postMessage).toHaveBeenCalledWith(expect.objectContaining({
@@ -232,7 +231,7 @@ describe("ChatProvider provider switch", () => {
     provider.postMessage = vi.fn();
     await (provider as any).handleSwitchProvider("volcengine", "glm-2");
 
-    expect(api.switchProvider).toHaveBeenCalledWith("volcengine", "glm-2");
+    expect(api.switchProvider).toHaveBeenCalledWith("volcengine", "glm-2", undefined);
     expect(vscodeState.updateMock).toHaveBeenCalledWith(
       "defaultModel", "glm-2", "global"
     );
@@ -324,5 +323,111 @@ describe("ChatProvider provider switch", () => {
     const calls = (provider.postMessage as any).mock.calls.map((c: any[]) => c[0]?.type);
     expect(calls).not.toContain("settingsUpdated");
     expect(calls).not.toContain("providerModels");
+  });
+
+  it("carries the exact route id when the picker selects a user-defined [providers.<name>] route", async () => {
+    // Such a route reports the generic 'custom' kind plus its own name in
+    // model_provider_id. The pair is what names it: switching on the kind
+    // alone selects nothing the user configured, and asking for the model
+    // list without the exact id answers for the wrong route (or 400s).
+    const api = {
+      bindEngine: vi.fn(),
+      ensureReady: vi.fn(async () => undefined),
+      switchProvider: vi.fn(async () => ({
+        provider: "bigmodel-cn",
+        model: "glm-5.3",
+        message: "Provider switched to bigmodel-cn (model: glm-5.3, resolved from config).",
+        persisted: true,
+      })),
+      listProviders: vi.fn(async () => ({
+        current: "custom",
+        current_provider_id: "bigmodel-cn",
+        providers: [
+          {
+            id: "custom",
+            model_provider_id: "bigmodel-cn",
+            display_name: "bigmodel-cn (custom)",
+            default_model: "glm-5.3",
+            has_model_catalog: true,
+          },
+        ],
+      })),
+      listProviderModels: vi.fn(async () => ({
+        provider: "custom",
+        models: [{ id: "glm-5.3" }],
+      })),
+    };
+
+    const provider = new ChatProvider({} as any, {} as any, api as any);
+    provider.postMessage = vi.fn();
+    await (provider as any).handleSwitchProvider("custom", undefined, "bigmodel-cn");
+
+    expect(api.switchProvider).toHaveBeenCalledWith("custom", undefined, "bigmodel-cn");
+    expect(api.listProviderModels).toHaveBeenCalledWith("custom", "bigmodel-cn");
+
+    // The active exact id reaches the picker, so it marks the route that is
+    // actually selected rather than the first entry sharing the kind.
+    expect(provider.postMessage).toHaveBeenCalledWith(expect.objectContaining({
+      type: "providersUpdated",
+      current: "custom",
+      currentProviderId: "bigmodel-cn",
+    }));
+    expect(provider.postMessage).toHaveBeenCalledWith(expect.objectContaining({
+      type: "providerModels",
+      provider: "custom",
+      providerId: "bigmodel-cn",
+      currentModel: "glm-5.3",
+    }));
+    expect((provider as any).getCurrentProviderId()).toBe("bigmodel-cn");
+  });
+
+  it("names the route it answered for, including a built-in provider's exact id", async () => {
+    // The webview drops a model list whose route is not the one on screen, and
+    // the chip carries the exact id the catalog reported — which for a built-in
+    // provider is its own id. A switch that carried no explicit route (the
+    // `/provider volcengine` path) must still answer with that id, or every
+    // answer for a built-in provider looks stale and the model list never
+    // refreshes.
+    const api = {
+      bindEngine: vi.fn(),
+      ensureReady: vi.fn(async () => undefined),
+      switchProvider: vi.fn(async () => ({
+        provider: "volcengine",
+        model: "glm-2",
+        message: "Provider switched to volcengine (model: glm-2, resolved from config).",
+        persisted: true,
+      })),
+      listProviders: vi.fn(async () => ({
+        current: "volcengine",
+        current_provider_id: "volcengine",
+        providers: [
+          {
+            id: "volcengine",
+            model_provider_id: "volcengine",
+            display_name: "Volcengine Ark",
+            default_model: "glm-2",
+            has_model_catalog: true,
+          },
+        ],
+      })),
+      listProviderModels: vi.fn(async () => ({
+        provider: "volcengine",
+        models: [{ id: "glm-2" }],
+      })),
+    };
+
+    const provider = new ChatProvider({} as any, {} as any, api as any);
+    provider.postMessage = vi.fn();
+    // No exact route: this is `/provider volcengine`, not a picker click.
+    await (provider as any).handleSwitchProvider("volcengine");
+
+    expect(api.listProviderModels).toHaveBeenCalledWith("volcengine", undefined);
+    expect(provider.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "providerModels",
+        provider: "volcengine",
+        providerId: "volcengine",
+      })
+    );
   });
 });

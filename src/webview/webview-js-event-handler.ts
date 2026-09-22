@@ -221,30 +221,70 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
   // picker reflects the live provider registry instead of the hard-coded
   // deepseek-only list baked into the HTML.
 
-  function renderProviderDropdown(providers, currentId) {
+  // The provider list + active ids last pushed by the backend. The dropdown,
+  // the chip and the stale-response guard all read the same source, so a label
+  // can never describe a different route than the one that is selected.
+  var lastProviders = [];
+  var lastProvider = '';
+  var lastProviderId = '';
+
+  // Two user-defined routes report the same generic id ('custom') and differ
+  // only by 'model_provider_id', so an entry is the selected one only when
+  // both match. An engine that does not report 'current_provider_id' predates
+  // named routes entirely — fall back to the id so nothing regresses there.
+  function providerEntryIsActive(p, currentId, currentExactId, exactKnown) {
+    if (p.id !== currentId) return false;
+    if (!exactKnown) return true;
+    return (p.model_provider_id || '') === (currentExactId || '');
+  }
+
+  function activeProviderEntry() {
+    var exactKnown = !!lastProviderId;
+    for (var i = 0; i < lastProviders.length; i++) {
+      if (providerEntryIsActive(lastProviders[i], lastProvider, lastProviderId, exactKnown)) {
+        return lastProviders[i];
+      }
+    }
+    return null;
+  }
+
+  /** Paint the chip from the cached catalog — one place decides the label, so
+   *  the chip, the dropdown's mark and the model guard cannot disagree. */
+  function applyProviderLabel() {
+    if (!currentProviderEl) return;
+    var active = activeProviderEntry();
+    currentProviderEl.setAttribute('data-provider-id', lastProvider || '');
+    currentProviderEl.setAttribute('data-model-provider-id', lastProviderId || '');
+    currentProviderEl.textContent = active
+      ? (active.display_name || active.model_provider_id || active.id)
+      : (lastProviderId || lastProvider);
+  }
+
+  function renderProviderDropdown(providers, currentId, currentExactId) {
     if (!dropdownProviderEl) return;
+    lastProviders = providers;
+    lastProvider = currentId || '';
+    lastProviderId = currentExactId || '';
+    var exactKnown = !!lastProviderId;
     dropdownProviderEl.innerHTML = '';
     for (var i = 0; i < providers.length; i++) {
       var p = providers[i];
       var item = document.createElement('div');
       item.className = 'dropdown-item';
       item.setAttribute('data-value', p.id);
-      // Show display_name (e.g. "OpenAI") when available, falling back to id.
-      var label = p.display_name || p.id;
-      if (p.id === currentId) label = label + ' \\u2713';
+      // The exact configured id is what names one route when several share the
+      // generic kind; the switch request carries both.
+      item.setAttribute('data-model-provider-id', p.model_provider_id || '');
+      // Show display_name (e.g. "OpenAI", "bigmodel-cn (custom)") when
+      // available, falling back to the route name, then to the id.
+      var label = p.display_name || p.model_provider_id || p.id;
+      if (providerEntryIsActive(p, currentId, currentExactId, exactKnown)) {
+        label = label + ' \\u2713';
+      }
       item.textContent = label;
       dropdownProviderEl.appendChild(item);
     }
-    if (currentProviderEl) {
-      currentProviderEl.setAttribute('data-provider-id', currentId || '');
-      // Show the display_name of the active provider if we can find it;
-      // otherwise fall back to the raw id.
-      var active = null;
-      for (var j = 0; j < providers.length; j++) {
-        if (providers[j].id === currentId) { active = providers[j]; break; }
-      }
-      currentProviderEl.textContent = active ? (active.display_name || active.id) : currentId;
-    }
+    applyProviderLabel();
   }
 
   function renderModelDropdown(models, currentModel) {
@@ -321,6 +361,7 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
       // Select item from dropdown
       if (target.classList.contains('dropdown-item')) {
         var val = target.getAttribute('data-value');
+        var exactVal = target.getAttribute('data-model-provider-id') || '';
         var dd = target.parentElement;
         var setting = dd.parentElement.getAttribute('data-setting');
         closeAllDropdowns();
@@ -344,7 +385,13 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
           } else if (setting === 'provider') {
             // Switching provider triggers a runtime reload. The model list
             // will be re-rendered when the backend pushes providerModels.
-            vscode.postMessage({ type: 'switchProvider', provider: val });
+            // A named custom route is named by its exact configured id; the
+            // generic kind alone would be ambiguous between two of them.
+            vscode.postMessage({
+              type: 'switchProvider',
+              provider: val,
+              providerId: exactVal || undefined,
+            });
           }
         }
       }
@@ -396,7 +443,11 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
         if (msg.posture) applyPostureDisplay(msg.posture);
         if (msg.model) currentModelEl.textContent = msg.model;
         if (msg.reasoningEffort) currentReasoningEl.textContent = msg.reasoningEffort;
-        if (msg.provider && currentProviderEl) currentProviderEl.textContent = msg.provider;
+        if (msg.provider) {
+          lastProvider = msg.provider;
+          lastProviderId = msg.providerId || '';
+          applyProviderLabel();
+        }
         runtimeVersion = msg.runtimeVersion || runtimeVersion || '';
         renderStatusStats();
         break;
@@ -409,9 +460,10 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
         if (msg.posture) applyPostureDisplay(msg.posture);
         if (msg.model) currentModelEl.textContent = msg.model;
         if (msg.reasoningEffort) currentReasoningEl.textContent = msg.reasoningEffort;
-        if (msg.provider && currentProviderEl) {
-          currentProviderEl.textContent = msg.provider;
-          currentProviderEl.setAttribute('data-provider-id', msg.provider);
+        if (msg.provider) {
+          lastProvider = msg.provider;
+          lastProviderId = msg.providerId || '';
+          applyProviderLabel();
         }
         break;
 
@@ -424,16 +476,22 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
         break;
 
       case 'providersUpdated':
-        // Backend pushed the full provider list + active id. Re-render the
+        // Backend pushed the full provider list + active ids. Re-render the
         // provider dropdown and request the model catalog for the active
         // provider so the model dropdown stays in sync.
         if (Array.isArray(msg.providers) && dropdownProviderEl && currentProviderEl) {
-          renderProviderDropdown(msg.providers, msg.current || '');
+          renderProviderDropdown(msg.providers, msg.current || '', msg.currentProviderId || '');
           // After re-rendering, ask the backend for the active provider's
-          // model list so the model dropdown reflects the new provider.
+          // model list so the model dropdown reflects the new provider. The
+          // exact id travels with it: without it, a named custom route is not
+          // addressable and the request would answer for the generic kind.
           var activeId = msg.current || (msg.providers[0] && msg.providers[0].id);
           if (activeId) {
-            vscode.postMessage({ type: 'requestProviderModels', provider: activeId });
+            vscode.postMessage({
+              type: 'requestProviderModels',
+              provider: activeId,
+              providerId: msg.currentProviderId || undefined,
+            });
           }
         }
         break;
@@ -447,8 +505,17 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
           var activeProviderId = currentProviderEl
             ? (currentProviderEl.getAttribute('data-provider-id') || '').trim()
             : '';
+          var activeExactId = currentProviderEl
+            ? (currentProviderEl.getAttribute('data-model-provider-id') || '').trim()
+            : '';
           var responseProviderId = (msg.provider || '').trim();
-          if (activeProviderId && responseProviderId && activeProviderId !== responseProviderId) {
+          var responseExactId = (msg.providerId || '').trim();
+          // Both halves must match, or a slower answer for a sibling custom
+          // route would repaint the model list of the one just selected.
+          if (
+            (activeProviderId && responseProviderId && activeProviderId !== responseProviderId) ||
+            activeExactId !== responseExactId
+          ) {
             break;
           }
           var models = Array.isArray(msg.models) ? msg.models : [];

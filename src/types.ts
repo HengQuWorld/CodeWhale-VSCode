@@ -692,26 +692,49 @@ export interface ReloadConfigResponse {
 
 export interface ProviderEntry {
   /** Stable id matching `ApiProvider::as_str()`. Use as the canonical value
-   * when persisting `provider = "<id>"` or comparing. */
+   * when persisting `provider = "<id>"` or comparing. A user-defined
+   * `[providers.<name>]` route reports the generic `custom` kind here and its
+   * own name in `model_provider_id`, so two named routes are two entries that
+   * differ only by that field. */
   id: string;
-  /** Human-friendly name for picker UIs (e.g. "DeepSeek", "OpenAI"). */
+  /** Exact configured id of this route, when it has one — the model-provider
+   * identity every other endpoint takes: `?model_provider_id=` on the model
+   * catalog, `model_provider_id` in the switch body, and on a new thread.
+   * Null for the legacy root-level custom route. */
+  model_provider_id?: string | null;
+  /** Human-friendly name for picker UIs (e.g. "DeepSeek", "OpenAI", or
+   * "bigmodel-cn (custom)" for a named route). */
   display_name: string;
-  /** Default base URL. Informational; the live value may be overridden in
-   * config.toml. */
-  default_base_url: string;
   /** Default model id for this provider, or empty string for pass-through
    * providers (Ollama / Custom). */
   default_model: string;
   /** When false, the provider exposes no built-in model list — render a
    * free-text input instead of calling `/v1/providers/{id}/models`. */
   has_model_catalog: boolean;
-  /** API key environment variable candidates. */
-  env_vars: string[];
+  /** Legacy fixture-only fields. The Runtime's catalog has never sent these:
+   * it is a non-secret projection and publishes credential *state*, not an
+   * endpoint or an environment variable name. Kept optional so a stale
+   * fixture cannot make a reader believe it is part of the wire contract. */
+  default_base_url?: string;
+  env_vars?: string[];
+  /** Sanitized credential classification for this exact route. */
+  credentialState?: "configured" | "login_required" | "missing" | "no_auth" | "local" | "legacy";
+  /** Which class owns the credential — never a value, path, or env var name. */
+  credentialSource?: "secret_store" | "config" | "external_auth" | "none";
+  /** Whether `PUT`/`DELETE /v1/providers/{id}/key` would act on this route. */
+  credentialWritable?: boolean;
+  /** Why a write is refused. Present only when `credentialWritable` is false. */
+  credentialWritableReason?: string;
 }
 
 export interface ProvidersResponse {
   /** Currently active provider id (matches `GuiConfigResponse.provider`). */
   current: string;
+  /** Exact configured id of the active route, when it has one. A named custom
+   * route reports `current = "custom"` plus this field, so the picker marks the
+   * route that is actually selected instead of the first entry sharing the
+   * generic kind. */
+  current_provider_id?: string | null;
   providers: ProviderEntry[];
 }
 
@@ -731,9 +754,13 @@ export interface ProviderModelsResponse {
 /** Request body for `POST /v1/providers/{id}/switch`.
  *  `model` is optional: when omitted, the TUI resolves the active model from
  *  `[providers.<id>].model` (or its built-in default) and does NOT persist a
- *  `model` key — mirroring the TUI's `/provider <id>` command (model: None). */
+ *  `model` key — mirroring the TUI's `/provider <id>` command (model: None).
+ *  `model_provider_id` names one exact configured route when the path holds the
+ *  generic kind (`custom`), which is how a user-defined `[providers.<name>]`
+ *  route is addressed. */
 export interface SwitchProviderRequest {
   model?: string;
+  model_provider_id?: string;
 }
 
 /** Response for `POST /v1/providers/{id}/switch`. The GUI must display

@@ -961,9 +961,20 @@ export class CodeWhaleApiClient {
    * Backed by `GET /v1/providers/{id}/models`. Returns an empty list for
    * pass-through providers (Ollama, Custom) — callers should fall back to a
    * free-text input when `ProviderEntry.has_model_catalog` is false.
+   *
+   * `modelProviderId` selects one exact configured route and must be the
+   * `model_provider_id` the provider catalog published for it — without it, a
+   * named `[providers.<name>]` route is not addressable at all.
    */
-  async listProviderModels(providerId: string): Promise<ProviderModelsResponse> {
-    return (await this.get(`/v1/providers/${encodeURIComponent(providerId)}/models`)) as ProviderModelsResponse;
+  async listProviderModels(
+    providerId: string,
+    modelProviderId?: string
+  ): Promise<ProviderModelsResponse> {
+    const exact = modelProviderId?.trim();
+    const query = exact ? `?model_provider_id=${encodeURIComponent(exact)}` : "";
+    return (await this.get(
+      `/v1/providers/${encodeURIComponent(providerId)}/models${query}`
+    )) as ProviderModelsResponse;
   }
 
   /**
@@ -976,14 +987,24 @@ export class CodeWhaleApiClient {
    * the response and must be used for display (NOT the cached
    * `ProviderEntry.default_model`).
    *
+   * `modelProviderId` selects one exact configured route (a user-defined
+   * `[providers.<name>]` entry, addressed as `providerId = "custom"` plus the
+   * route name) and must be the `model_provider_id` the catalog published.
+   *
    * Callers SHOULD NOT chain `setConfig({key:"provider"})` + `reloadConfig()`
    * around this — that flow historically clobbered the user's per-provider
    * `model` config with the catalog default.
    */
-  async switchProvider(providerId: string, model?: string): Promise<SwitchProviderResponse> {
+  async switchProvider(
+    providerId: string,
+    model?: string,
+    modelProviderId?: string
+  ): Promise<SwitchProviderResponse> {
     const body: Record<string, unknown> = {};
     const trimmedModel = model?.trim();
     if (trimmedModel) body.model = trimmedModel;
+    const exact = modelProviderId?.trim();
+    if (exact) body.model_provider_id = exact;
     return (await this.post(
       `/v1/providers/${encodeURIComponent(providerId)}/switch`,
       body

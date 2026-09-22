@@ -32,6 +32,12 @@ export class ConfigPanel {
   private readonly extensionUri: vscode.Uri;
   private disposables: vscode.Disposable[] = [];
   private providersCache: ProviderEntry[] | null = null;
+  /** A provider whose model catalog was asked for before the provider catalog
+   *  arrived, with the model to preview. A named `[providers.<name>]` route is
+   *  not addressable without the exact id that catalog publishes, so the ask is
+   *  remembered and resolved when it lands instead of firing a request that
+   *  must fail. */
+  private pendingProviderModels: { name: string; currentModel?: string } | null = null;
 
   private constructor(
     panel: vscode.WebviewPanel,
@@ -96,8 +102,7 @@ export class ConfigPanel {
       // the hard-coded deepseek-only list.
       if (config.provider) {
         this.loadProviderModels(config.provider, config.model);
-      }
-    } catch (err) {
+      }    } catch (err) {
       this.panel.webview.postMessage({
         type: "error",
         message: `Failed to load config: ${getErrorMessage(err)}`,
@@ -118,7 +123,13 @@ export class ConfigPanel {
         type: "providersData",
         providers: resp.providers,
         current: resp.current,
+        currentProviderId: resp.current_provider_id || "",
       });
+      const pending = this.pendingProviderModels;
+      this.pendingProviderModels = null;
+      if (pending) {
+        await this.loadProviderModels(pending.name, pending.currentModel);
+      }
     } catch (err) {
       // Non-fatal: the static deepseek-only <option> stays in place.
       this.panel.webview.postMessage({
@@ -130,28 +141,40 @@ export class ConfigPanel {
 
   /**
    * Fetch the model catalog for a provider and push it to the webview so
-   * the model <select> can be re-rendered when the provider changes.
+   * the model <select> can be re-rendered.
+   *
+   * The caller passes the provider *name* — the value the `provider` config key
+   * holds, which for a named custom route is the route's own name. The kind and
+   * exact id are read from the catalog: those are what the model endpoint
+   * takes, and the exact id is the only thing telling two named routes apart.
    */
   private async loadProviderModels(
-    providerId: string,
+    providerName: string,
     currentModel?: string,
-    previewBaseUrl?: string,
   ): Promise<void> {
+    const entry = this.providersCache?.find(
+      p => (p.model_provider_id || p.id) === providerName
+    );
+    if (!entry && !this.providersCache) {
+      this.pendingProviderModels = { name: providerName, currentModel };
+      return;
+    }
+    const providerId = entry?.id ?? providerName;
+    const modelProviderId = entry?.model_provider_id || undefined;
     try {
-      const resp = await this.api.listProviderModels(providerId);
-      const info = this.providersCache?.find(p => p.id === providerId);
+      const resp = await this.api.listProviderModels(providerId, modelProviderId);
       this.panel.webview.postMessage({
         type: "providerModels",
         provider: providerId,
+        providerId: modelProviderId || "",
         models: resp.models.map(m => m.id),
         currentModel: currentModel || "",
-        previewBaseUrl,
-        hasCatalog: info ? info.has_model_catalog : (resp.models.length > 0),
+        hasCatalog: entry ? entry.has_model_catalog : (resp.models.length > 0),
       });
     } catch (err) {
       this.panel.webview.postMessage({
         type: "error",
-        message: `Failed to load models for ${providerId}: ${getErrorMessage(err)}`,
+        message: `Failed to load models for ${providerName}: ${getErrorMessage(err)}`,
       });
     }
   }
@@ -234,16 +257,40 @@ export class ConfigPanel {
           });
         }
         break;
-      case "providerChanged": {
-        // User changed the provider <select> in the form. Fetch the new
-        // provider's model catalog so the model <select> updates. This does
-        // NOT persist the change — that happens when the user clicks "Apply
-        // to Backend". It only re-renders the model options for preview.
-        const providerId = msg.provider as string;
-        if (providerId) {
-          const providerInfo = this.providersCache?.find(p => p.id === providerId);
-          const previewModel = providerInfo?.default_model;
-          await this.loadProviderModels(providerId, previewModel, providerInfo?.default_base_url);
+      case "switchProviderNow": {
+        // The Provider select is a switch, not a form field. The endpoint and
+        // the model list belong to the route the engine has actually selected —
+        // nothing here can describe a route that is only pending, and the
+        // `base_url` this form edits is that route's own endpoint. So the
+        // selection is applied the way the toolbar picker applies one, and the
+        // form is then re-read from the engine instead of being patched from
+        // whatever the previous route's values happened to be.
+        const providerName = (msg.provider ?? msg.value) as string;
+        if (providerName) {
+          const entry = this.providersCache?.find(
+            p => (p.model_provider_id || p.id) === providerName
+          );
+          try {
+            await this.api.switchProvider(
+              entry?.id ?? providerName,
+              undefined,
+              entry?.model_provider_id || undefined
+            );
+            this.panel.webview.postMessage({
+              type: "info",
+              message: `Switched to ${providerName}. The form now describes that route.`,
+            });
+          } catch (err) {
+            this.panel.webview.postMessage({
+              type: "error",
+              message: `Failed to switch provider: ${getErrorMessage(err)}`,
+            });
+          }
+          // Re-read the engine either way: after a switch the form must show
+          // the route that is now active, and after a refusal it must not keep
+          // showing a provider that was never applied.
+          await this.loadProviders();
+          await this.loadConfig();
         }
         break;
       }
@@ -729,13 +776,15 @@ export class ConfigPanel {
       vscode.postMessage({ type: 'setConfigBatch', changes: changes });
     });
 
-    // When the user changes the provider dropdown, ask the backend for the
-    // new provider's model catalog so the model <select> updates as a
-    // preview (the change is NOT persisted until "Apply to Backend").
+    // Changing the Provider select switches the engine's active route — it is
+    // not a pending form edit. The endpoint and the model list of the selected
+    // route can only be read from the route the engine actually runs, so this
+    // applies the switch (the same call the toolbar picker makes) and the
+    // backend then re-pushes both the config and the catalog.
     $('cfg-provider').addEventListener('change', function() {
-      var providerId = this.value;
-      if (providerId) {
-        vscode.postMessage({ type: 'providerChanged', provider: providerId });
+      var providerName = this.value;
+      if (providerName) {
+        vscode.postMessage({ type: 'switchProviderNow', provider: providerName });
       }
     });
 
@@ -750,15 +799,45 @@ export class ConfigPanel {
         // Backend pushed the provider catalog — rebuild the provider <select>.
         var sel = $('cfg-provider');
         if (sel && Array.isArray(msg.providers)) {
+          var activeExact = msg.currentProviderId || '';
+          var exactKnown = !!activeExact;
           sel.innerHTML = '';
+          var seen = {};
           for (var i = 0; i < msg.providers.length; i++) {
             var p = msg.providers[i];
+            // A named [providers.<name>] route is stored in the "provider"
+            // key under its own name; a built-in stores its id. Two named
+            // routes share the generic id, so the exact id is the value.
+            var value = p.model_provider_id || p.id;
+            // The endpoint reports one entry per route, but never let a
+            // duplicate value reach the form: a <select> cannot express it
+            // and the user could not tell the two apart.
+            if (seen[value]) continue;
+            seen[value] = true;
             var opt = document.createElement('option');
-            opt.value = p.id;
-            opt.textContent = p.display_name || p.id;
-            if (p.id === msg.current) opt.selected = true;
+            opt.value = value;
+            opt.textContent = p.display_name || value;
+            if (p.id === msg.current && (!exactKnown || (p.model_provider_id || '') === activeExact)) {
+              opt.selected = true;
+            }
             sel.appendChild(opt);
           }
+        }
+        // The Base URL this form edits is the active route's own endpoint, and
+        // the engine writes it where that route reads it — except for a
+        // user-defined [providers.<name>] route, whose endpoint lives in the
+        // table it is named by and is not reachable through this key. Offer no
+        // edit that cannot land: name the table it belongs to instead.
+        var baseUrlEl = $('cfg-base_url');
+        if (baseUrlEl) {
+          var namedRoute = msg.current === 'custom' ? (msg.currentProviderId || '') : '';
+          baseUrlEl.disabled = !!namedRoute;
+          baseUrlEl.placeholder = namedRoute
+            ? '[providers.' + namedRoute + '].base_url'
+            : 'https://api.deepseek.com';
+          baseUrlEl.title = namedRoute
+            ? 'This route keeps its endpoint in [providers.' + namedRoute + '].base_url in config.toml'
+            : '';
         }
       } else if (msg.type === 'providerModels') {
         // Backend pushed the model catalog for a provider — rebuild the
@@ -797,11 +876,7 @@ export class ConfigPanel {
             modelSel.appendChild(customOpt);
           }
         }
-        if (typeof msg.previewBaseUrl === 'string') {
-          setFieldValue('cfg-base_url', msg.previewBaseUrl);
-        }
-      } else if (msg.type === 'setConfigResult') {
-        if (msg.success) {
+      } else if (msg.type === 'setConfigResult') {        if (msg.success) {
           showStatus(msg.key + ' = ' + msg.value + ' applied', 'success');
         } else {
           showStatus('Failed to apply ' + msg.key + ': ' + msg.error, 'error');
@@ -812,6 +887,8 @@ export class ConfigPanel {
         } else {
           showStatus('Batch apply: ' + msg.saved + '/' + msg.total + ' applied. Error: ' + msg.error, 'error');
         }
+      } else if (msg.type === 'info') {
+        showStatus(msg.message, 'info');
       } else if (msg.type === 'reloadResult') {
         if (msg.success) {
           showStatus('Config fetched from backend', 'success');

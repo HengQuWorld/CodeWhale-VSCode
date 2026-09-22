@@ -1666,7 +1666,13 @@ export function getWebviewCss(): string {
       min-width: 100%;
       z-index: 1000;
       box-shadow: 0 4px 12px rgba(0,0,0,0.25);
-      overflow: hidden;
+      /* A provider roster is longer than the panel, and every item in it is
+         reachable: without a bound the menu grew past the viewport and the
+         rows at its far end could not be seen or scrolled to — which is
+         exactly where a user-defined route is appended. */
+      max-height: min(45vh, 420px);
+      overflow-x: hidden;
+      overflow-y: auto;
     }
     /* The bar decides which way its menus open: the settings bar sits at the
        top of the chat area, the toolbar below the messages, so each opens

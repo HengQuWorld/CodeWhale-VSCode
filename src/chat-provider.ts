@@ -265,6 +265,12 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
   /** Active provider id (mirrors `GuiConfigResponse.provider`). Used to
    * render the picker's selected value without waiting for a config refresh. */
   private currentProvider: string | null = null;
+  /** Exact configured id of the active route, when the catalog reports one —
+   * the `model_provider_id` that distinguishes two user-defined
+   * `[providers.<name>]` routes from each other, both of which report the
+   * generic `custom` id. Null when the route has no exact id (the legacy
+   * root-level custom route) or the runtime predates the field. */
+  private currentProviderId: string | null = null;
   private apiCapabilities: RuntimeApiCapabilities = {
     saveSession: false,
     threadUndo: false,
@@ -469,15 +475,27 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         await this.handleApprovePlan(msg.text as string | undefined);
         break;
       case "switchProvider":
-        await this.handleSwitchProvider(msg.provider as string, msg.model as string | undefined);
+        await this.handleSwitchProvider(
+          msg.provider as string,
+          msg.model as string | undefined,
+          msg.providerId as string | undefined
+        );
         break;
       case "switchProviderFromSlash":
         // Forwarded from the /provider slash command handler — convert to the
         // standard switchProvider flow so all state updates go through one path.
-        await this.handleSwitchProvider(msg.provider as string, msg.model as string | undefined);
+        await this.handleSwitchProvider(
+          msg.provider as string,
+          msg.model as string | undefined,
+          msg.providerId as string | undefined
+        );
         break;
       case "requestProviderModels":
-        await this.handleRequestProviderModels(msg.provider as string);
+        await this.handleRequestProviderModels(
+          msg.provider as string,
+          undefined,
+          msg.providerId as string | undefined
+        );
         break;
       case "newThread":
         await this.handleNewThread();
@@ -717,6 +735,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         posture: this.getEffectivePosture(),
         reasoningEffort: this.getCurrentReasoningEffort(),
         provider: this.currentProvider || undefined,
+        providerId: this.currentProviderId || undefined,
         runtimeVersion: this.runtimeVersion,
       });
     this.postScopedDefaults();
@@ -859,6 +878,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         posture: this.getEffectivePosture(),
         reasoningEffort: this.getCurrentReasoningEffort(),
         provider: this.currentProvider || undefined,
+        providerId: this.currentProviderId || undefined,
         runtimeVersion: this.runtimeVersion,
       });
     } catch (err) {
@@ -874,6 +894,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         posture: this.getEffectivePosture(),
         reasoningEffort: this.getCurrentReasoningEffort(),
         provider: this.currentProvider || undefined,
+        providerId: this.currentProviderId || undefined,
         runtimeVersion: this.runtimeVersion,
       });
     }
@@ -3657,6 +3678,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       const resp = await this.api.listProviders();
       this.providersCache = resp.providers;
       this.currentProvider = resp.current;
+      this.currentProviderId = resp.current_provider_id || null;
       this.postProviders();
     } catch (err) {
       this.debugLog(`refreshProviders failed: ${getErrorMessage(err)}`);
@@ -3670,6 +3692,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       type: "providersUpdated",
       providers: this.providersCache,
       current: this.currentProvider || "",
+      currentProviderId: this.currentProviderId || "",
     });
   }
 
@@ -3690,18 +3713,27 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
    * use for new turns — display THAT, not the cached
    * `ProviderEntry.default_model`, so the UI matches reality when the user
    * has `[providers.<id>].model` configured.
+   *
+   * `modelProviderId` carries the exact configured route when the picker
+   * selected a user-defined `[providers.<name>]` entry: those share the
+   * generic `custom` id, so the pair is what names one route.
    */
-  private async handleSwitchProvider(providerId: string, model?: string): Promise<void> {
+  private async handleSwitchProvider(
+    providerId: string,
+    model?: string,
+    modelProviderId?: string
+  ): Promise<void> {
     const trimmed = providerId.trim();
     if (!trimmed) {
       this.postMessage({ type: "error", message: "Empty provider id" });
       return;
     }
+    const exactRoute = modelProviderId?.trim() || undefined;
     try {
       // Single backend call: persists provider (+ model only when given),
       // reloads config, syncs to engines, and returns the resolved model.
       const effectiveModel = model?.trim() || undefined;
-      const resp = await this.api.switchProvider(trimmed, effectiveModel);
+      const resp = await this.api.switchProvider(trimmed, effectiveModel, exactRoute);
       const resolvedModel = resp.model;
 
       // Keep the VSCode-side `defaultModel` config in sync with the
@@ -3717,7 +3749,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       }
 
       await this.refreshProviders();
-      await this.handleRequestProviderModels(trimmed, resolvedModel);
+      await this.handleRequestProviderModels(trimmed, resolvedModel, exactRoute);
       this.postMessage({
         type: "settingsUpdated",
         model: resolvedModel,
@@ -3725,6 +3757,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         posture: this.getEffectivePosture(),
         reasoningEffort: this.getCurrentReasoningEffort(),
         provider: resp.provider || trimmed,
+        providerId: this.currentProviderId || undefined,
       });
       this.postMessage({
         type: "info",
@@ -3744,20 +3777,34 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
    * for a provider and push it to the webview so the model dropdown can be
    * re-rendered. Used when the user picks a different provider.
    */
-  private async handleRequestProviderModels(providerId: string, currentModel?: string): Promise<void> {
+  private async handleRequestProviderModels(
+    providerId: string,
+    currentModel?: string,
+    modelProviderId?: string
+  ): Promise<void> {
     const trimmed = providerId.trim();
     if (!trimmed) return;
+    const exactRoute = modelProviderId?.trim() || undefined;
     try {
-      const resp = await this.api.listProviderModels(trimmed);
+      const resp = await this.api.listProviderModels(trimmed, exactRoute);
       // Determine whether this provider has a built-in catalog so the
-      // webview can show a free-text hint when models is empty.
-      const info = this.providersCache?.find(p => p.id === trimmed);
+      // webview can show a free-text hint when models is empty. The exact
+      // route decides which entry owns the answer: two named routes share the
+      // generic id.
+      const info = this.findProviderEntry(trimmed, exactRoute);
+      // The answer names the route it describes, and the webview drops an
+      // answer whose route is not the one on screen. That id comes from the
+      // catalog rather than from the caller: the provider catalog reports an
+      // exact id for built-in providers too, so echoing only what the caller
+      // passed would make every answer for a built-in provider look stale.
+      const answeredRoute = info?.model_provider_id ?? exactRoute ?? "";
       const effectiveCurrentModel = currentModel?.trim()
         || info?.default_model
         || undefined;
       this.postMessage({
         type: "providerModels",
         provider: trimmed,
+        providerId: answeredRoute,
         models: resp.models.map(m => m.id),
         currentModel: effectiveCurrentModel,
         hasCatalog: info ? info.has_model_catalog : (resp.models.length > 0),
@@ -3778,6 +3825,29 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
   /** Public accessor for the active provider id. */
   public getCurrentProvider(): string | null {
     return this.currentProvider;
+  }
+
+  /** Public accessor for the active route's exact configured id, when it has
+   *  one. A user-defined `[providers.<name>]` route is named by this, not by
+   *  its generic `custom` kind. */
+  public getCurrentProviderId(): string | null {
+    return this.currentProviderId;
+  }
+
+  /** The catalog entry for one route. The exact id is the tiebreaker: two
+   *  named custom routes share the generic id, so matching on the id alone
+   *  would answer with whichever one happens to be listed first. */
+  private findProviderEntry(
+    providerId: string,
+    modelProviderId?: string
+  ): ProviderEntry | undefined {
+    const exact = modelProviderId?.trim();
+    const candidates = this.providersCache?.filter(p => p.id === providerId) ?? [];
+    if (exact) {
+      const match = candidates.find(p => (p.model_provider_id || "") === exact);
+      if (match) return match;
+    }
+    return candidates.find(p => !p.model_provider_id) || candidates[0];
   }
 
   private startPeriodicTaskRefresh(): void {

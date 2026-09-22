@@ -510,6 +510,52 @@ describe("webview-js-event-handler runtime", () => {
     ]);
   });
 
+  it("keeps a sibling custom route's model list out of the selected one", () => {
+    // Both routes report the generic 'custom' id, so the generic id alone
+    // cannot tell whose answer this is: a slower answer for the route the user
+    // just left must not repaint the model list of the one they selected.
+    const harness = createRuntimeHarness();
+
+    harness.dispatchMessage({
+      type: "providersUpdated",
+      current: "custom",
+      currentProviderId: "lm-studio",
+      providers: [
+        {
+          id: "custom",
+          model_provider_id: "bigmodel-cn",
+          display_name: "bigmodel-cn (custom)",
+        },
+        {
+          id: "custom",
+          model_provider_id: "lm-studio",
+          display_name: "lm-studio (custom)",
+        },
+      ],
+    });
+    harness.getElement("current-model").textContent = "local-model";
+
+    harness.dispatchMessage({
+      type: "providerModels",
+      provider: "custom",
+      providerId: "bigmodel-cn",
+      models: ["glm-5.3"],
+      currentModel: "glm-5.3",
+      hasCatalog: true,
+    });
+    expect(harness.getElement("current-model").textContent).toBe("local-model");
+
+    harness.dispatchMessage({
+      type: "providerModels",
+      provider: "custom",
+      providerId: "lm-studio",
+      models: ["local-model-v2"],
+      currentModel: "local-model-v2",
+      hasCatalog: true,
+    });
+    expect(harness.getElement("current-model").textContent).toBe("local-model-v2");
+  });
+
   it("updates the visible model label and ready status text from providerModels currentModel", () => {
     const harness = createRuntimeHarness();
 
@@ -911,6 +957,112 @@ describe("webview-js-event-handler runtime", () => {
       type: "slashCommand",
       command: "/mode",
       args: "operate",
+    });
+  });
+
+  it("lists a named custom route and marks only the one that is selected", () => {
+    // A user-defined [providers.<name>] route reports the generic 'custom' id
+    // with its own name in model_provider_id, so the dropdown shows two
+    // entries that differ only by that field. Marking by the id alone would
+    // tick both of them, and asking for the model list without the exact id
+    // would answer for the wrong route.
+    const harness = createRuntimeHarness();
+
+    harness.dispatchMessage({
+      type: "providersUpdated",
+      current: "custom",
+      currentProviderId: "bigmodel-cn",
+      providers: [
+        {
+          id: "deepseek",
+          model_provider_id: "deepseek",
+          display_name: "DeepSeek",
+          default_model: "deepseek-v4-pro",
+          has_model_catalog: true,
+        },
+        {
+          id: "custom",
+          model_provider_id: "bigmodel-cn",
+          display_name: "bigmodel-cn (custom)",
+          default_model: "glm-5.3",
+          has_model_catalog: true,
+        },
+        {
+          id: "custom",
+          model_provider_id: "lm-studio",
+          display_name: "lm-studio (custom)",
+          default_model: "local-model",
+          has_model_catalog: false,
+        },
+      ],
+    });
+
+    const items = harness.getElement("dropdown-provider").children;
+    expect(items.map((item) => item.getAttribute("data-value"))).toEqual([
+      "deepseek",
+      "custom",
+      "custom",
+    ]);
+    expect(items.map((item) => item.getAttribute("data-model-provider-id"))).toEqual([
+      "deepseek",
+      "bigmodel-cn",
+      "lm-studio",
+    ]);
+    expect(items.map((item) => item.textContent)).toEqual([
+      "DeepSeek",
+      "bigmodel-cn (custom) \u2713",
+      "lm-studio (custom)",
+    ]);
+
+    const chip = harness.getElement("current-provider");
+    expect(chip.textContent).toBe("bigmodel-cn (custom)");
+    expect(chip.getAttribute("data-provider-id")).toBe("custom");
+    expect(chip.getAttribute("data-model-provider-id")).toBe("bigmodel-cn");
+
+    // The catalog request carries the pair the runtime addresses the route by.
+    expect(harness.postMessages).toContainEqual({
+      type: "requestProviderModels",
+      provider: "custom",
+      providerId: "bigmodel-cn",
+    });
+  });
+
+  it("switches to a named custom route with the exact id the backend addresses it by", () => {
+    const harness = createRuntimeHarness();
+
+    harness.dispatchMessage({
+      type: "providersUpdated",
+      current: "deepseek",
+      currentProviderId: "deepseek",
+      providers: [
+        {
+          id: "custom",
+          model_provider_id: "bigmodel-cn",
+          display_name: "bigmodel-cn (custom)",
+          default_model: "glm-5.3",
+          has_model_catalog: true,
+        },
+      ],
+    });
+
+    const item = harness.getElement("dropdown-provider").children[0];
+    // The stand-in matches click targets against `classList`, the way it does
+    // for the setting chips.
+    item.classList.add("dropdown-item");
+    const wrapper = new FakeElement();
+    wrapper.setAttribute("data-setting", "provider");
+    const menu = harness.getElement("dropdown-provider");
+    wrapper.appendChild(menu);
+
+    harness.getElement("settings-bar").dispatch("click", {
+      target: item,
+      stopPropagation: () => {},
+    });
+
+    expect(harness.postMessages).toContainEqual({
+      type: "switchProvider",
+      provider: "custom",
+      providerId: "bigmodel-cn",
     });
   });
 });

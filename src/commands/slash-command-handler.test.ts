@@ -254,6 +254,7 @@ function createContext(overrides: Partial<SlashCommandContext> = {}): SlashComma
     getCurrentModel: vi.fn(() => "deepseek-v4-pro"),
     getProvidersCache: vi.fn(() => null),
     getCurrentProvider: vi.fn(() => null),
+    getCurrentProviderId: vi.fn(() => null),
     getCurrentSessionId: vi.fn(() => null),
     setCurrentSessionId: vi.fn(),
     saveCurrentSession: vi.fn(async () => ({ session_id: "session-test" })),

@@ -42,7 +42,12 @@ describe("ConfigPanel provider preview", () => {
     ConfigPanel.currentPanel = undefined;
   });
 
-  it("switches the previewed model to the provider default when provider changes", async () => {
+  it("switching the Provider select applies that provider and re-reads the form", async () => {
+    // The endpoint and the model list belong to the route the engine actually
+    // runs, so the select switches to it (the same call the toolbar picker
+    // makes) and the form is then re-read from the engine. The old path only
+    // previewed a base URL the catalog never publishes and left the previous
+    // route's endpoint on screen under the new route's name.
     const api = {
       getConfig: vi.fn(async () => ({
         model: "deepseek-v4-pro",
@@ -50,28 +55,33 @@ describe("ConfigPanel provider preview", () => {
       })),
       listProviders: vi.fn(async () => ({
         current: "deepseek",
+        current_provider_id: "deepseek",
         providers: [
           {
             id: "deepseek",
+            model_provider_id: "deepseek",
             display_name: "DeepSeek",
-            default_base_url: "https://api.deepseek.com",
             default_model: "deepseek-v4-pro",
             has_model_catalog: true,
-            env_vars: ["DEEPSEEK_API_KEY"],
           },
           {
-            id: "openai",
-            display_name: "OpenAI",
-            default_base_url: "https://api.openai.com/v1",
-            default_model: "gpt-4.1",
+            id: "custom",
+            model_provider_id: "bigmodel-cn",
+            display_name: "bigmodel-cn (custom)",
+            default_model: "glm-5.3",
             has_model_catalog: true,
-            env_vars: ["OPENAI_API_KEY"],
           },
         ],
       })),
       listProviderModels: vi.fn(async (providerId: string) => ({
         provider: providerId,
-        models: providerId === "openai" ? [{ id: "gpt-4.1" }, { id: "gpt-4.1-mini" }] : [{ id: "deepseek-v4-pro" }],
+        models: providerId === "custom" ? [{ id: "glm-5.3" }] : [{ id: "deepseek-v4-pro" }],
+      })),
+      switchProvider: vi.fn(async () => ({
+        provider: "bigmodel-cn",
+        model: "glm-5.3",
+        message: "Provider switched to bigmodel-cn (model: glm-5.3, resolved from config).",
+        persisted: true,
       })),
       setConfig: vi.fn(),
       reloadConfig: vi.fn(),
@@ -84,15 +94,16 @@ describe("ConfigPanel provider preview", () => {
     const handler = vscodeState.getMessageHandler();
     expect(handler).toBeTruthy();
 
-    await handler?.({ type: "providerChanged", provider: "openai" });
+    await handler?.({ type: "switchProviderNow", provider: "bigmodel-cn" });
 
-    expect(vscodeState.postMessage).toHaveBeenCalledWith(expect.objectContaining({
-      type: "providerModels",
-      provider: "openai",
-      currentModel: "gpt-4.1",
-      previewBaseUrl: "https://api.openai.com/v1",
-      models: ["gpt-4.1", "gpt-4.1-mini"],
-    }));
+    // A named route is switched through the pair the catalog published.
+    expect(api.switchProvider).toHaveBeenCalledWith("custom", undefined, "bigmodel-cn");
+    // And the form is re-read afterwards, so its endpoint describes the route
+    // that is now active instead of the one that used to be.
+    expect(api.getConfig.mock.calls.length).toBeGreaterThan(1);
+    expect(vscodeState.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "configData" })
+    );
   });
 
   it("renders the canonical mode and permission-posture options", () => {
@@ -119,7 +130,7 @@ describe("ConfigPanel provider preview", () => {
     expect(html).not.toContain('value="never"');
   });
 
-  it("renders inline script that updates preview base URL and avoids preserving stale models when currentModel is explicit", () => {
+  it("renders inline script that switches the provider and avoids preserving stale models when currentModel is explicit", () => {
     const api = {
       getConfig: vi.fn(async () => ({
         model: "deepseek-v4-pro",
@@ -133,6 +144,7 @@ describe("ConfigPanel provider preview", () => {
         provider: "deepseek",
         models: [{ id: "deepseek-v4-pro" }],
       })),
+      switchProvider: vi.fn(),
       setConfig: vi.fn(),
       reloadConfig: vi.fn(),
     };
@@ -140,7 +152,16 @@ describe("ConfigPanel provider preview", () => {
     ConfigPanel.createOrShow({} as any, api as any);
 
     const html = vscodeState.panel.webview.html;
-    expect(html).toContain("setFieldValue('cfg-base_url', msg.previewBaseUrl);");
+    expect(html).toContain("vscode.postMessage({ type: 'switchProviderNow', provider: providerName });");
+    // The catalog never publishes endpoints, so a preview fetched from it could
+    // only ever be undefined — the field it wrote was never updated.
+    expect(html).not.toContain("previewBaseUrl");
+    // A named route is offered by the name the `provider` key holds.
+    expect(html).toContain("var value = p.model_provider_id || p.id;");
+    // ...and its endpoint is not editable through this key, so the form names
+    // the table that owns it instead of offering an edit that cannot land.
+    expect(html).toContain("baseUrlEl.disabled = !!namedRoute;");
+    expect(html).toContain("p.model_provider_id || p.id;");
     expect(html).toContain("if (!hasExplicitCurrentModel && prev && !msg.models.includes(prev))");
   });
 });
