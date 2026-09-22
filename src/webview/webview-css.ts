@@ -1115,6 +1115,12 @@ export function getWebviewCss(): string {
       color: var(--muted);
       border-color: var(--muted);
     }
+    /* The same scroll-and-flash the message rail uses, worn by a card: the
+       sidebar's Locate action brings a change's tool call back into view and
+       this is what says which card arrived. */
+    .file-change-card.jump-flash {
+      animation: msgJumpFlash 0.8s ease-out;
+    }
 
     @keyframes spin {
       from { transform: rotate(0deg); }
@@ -2449,6 +2455,12 @@ export function getWebviewCss(): string {
       border-bottom: 1px solid rgba(128,128,128,0.05);
       border-radius: 4px;
       transition: background 0.15s;
+      /* The panel is resizable down to 120px, and a row can carry three action
+         buttons. Wrapping puts them on a second line there instead of letting
+         the row overflow and clip the last one. In the common case nothing
+         moves: .change-path is flex: 1 with a 0 basis, so it claims only the
+         space the actions leave. */
+      flex-wrap: wrap;
     }
     .change-item:last-child { border-bottom: none; }
     .change-item:hover {
@@ -2492,6 +2504,9 @@ export function getWebviewCss(): string {
       flex-shrink: 0;
       display: flex;
       gap: 3px;
+      /* Keeps the actions right-aligned on the line they wrap to. A no-op in
+         the common case, where the path has already taken the slack. */
+      margin-left: auto;
     }
     .change-btn {
       padding: 1px 6px;

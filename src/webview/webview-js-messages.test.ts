@@ -100,6 +100,21 @@ describe("webview-js-messages.ts", () => {
     expect(script).toContain("callId: callId");
   });
 
+  it("names the change on the card, so the sidebar can find it again", () => {
+    const script = getMessagesScript(makeTr());
+    // The Changes panel's Locate action resolves a row back to the card the
+    // change came from, through the same identity the row carries.
+    expect(script).toContain("data-fc-path=");
+    expect(script).toContain("data-fc-index=");
+    expect(script).toContain("data-fc-call-id=");
+  });
+
+  it("exposes revealFileChangeCard to the sidebar", () => {
+    const script = getMessagesScript(makeTr());
+    expect(script).toContain("function revealFileChangeCard");
+    expect(script).toContain("revealFileChangeCard: revealFileChangeCard");
+  });
+
   it("generates a script the webview can parse", () => {
     // The webview scripts are string-built, so nothing else type-checks them.
     expect(() => new Function(getMessagesScript(makeTr()))).not.toThrow();

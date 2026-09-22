@@ -1279,6 +1279,32 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
   }
 
   // ── Render Changes ──
+  /** One path, one spelling: mirror the extension's own path normalisation, so
+   *  the file count cannot double-count a path written with backslashes. */
+  function normalizeChangePath(filePath) {
+    return String(filePath === undefined || filePath === null ? '' : filePath).replace(/\\\\/g, '/').replace(/\\/+$/, '');
+  }
+
+  /** How many distinct files the change list touches.
+   *
+   *  The panel lists one row per recorded change, so a file edited three times
+   *  is three rows; the header also reports the file count, which is the number
+   *  a reader asking "what did this turn touch" actually wants. */
+  function countChangedFiles(changes) {
+    // A prototype-less map, not a plain object: a file can be called
+    // "constructor" or "toString", and those read as already-seen on a bare
+    // object literal. (This block is a template literal: no backticks here.)
+    var seen = Object.create(null);
+    var count = 0;
+    for (var i = 0; i < changes.length; i++) {
+      var path = normalizeChangePath(changes[i].filePath);
+      if (!path || seen[path]) continue;
+      seen[path] = true;
+      count++;
+    }
+    return count;
+  }
+
   function renderChanges() {
     var container = document.getElementById('tab-changes');
     if (!container) return;
@@ -1308,6 +1334,7 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
       totalAdded += changesState[si].addedLines || 0;
       totalRemoved += changesState[si].removedLines || 0;
     }
+    var fileCount = countChangedFiles(changesState);
     var summaryParts = [];
     if (createdCount > 0) summaryParts.push('<span class="change-summary-item change-summary-created">' + createdCount + ' ' + __wvEscapeHtml(__i18n.fileCreated) + '</span>');
     if (modifiedCount > 0) summaryParts.push('<span class="change-summary-item change-summary-modified">' + modifiedCount + ' ' + __wvEscapeHtml(__i18n.fileModified) + '</span>');
@@ -1315,7 +1342,11 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
     if (totalAdded > 0 || totalRemoved > 0) {
       summaryParts.push('<span class="change-summary-item change-summary-lines"><span class="change-added">+' + totalAdded + '</span> <span class="change-removed">-' + totalRemoved + '</span></span>');
     }
-    header.innerHTML = '<div class="work-section-title"><span class="work-section-title-icon">\\uD83D\\uDCC1</span>' + __wvEscapeHtml(__i18n.fileChanges) + ' <span class="work-section-subtitle">(' + changesState.length + ')</span></div><div class="change-summary-row">' + summaryParts.join(' ') + '</div>';
+    // The two readings side by side: how many change records are listed, and
+    // how many distinct files those records touch.
+    var countLabel = __i18n.changesCount.replace('{n}', String(changesState.length)) +
+      ' \\u00B7 ' + __i18n.filesCount.replace('{n}', String(fileCount));
+    header.innerHTML = '<div class="work-section-title"><span class="work-section-title-icon">\\uD83D\\uDCC1</span>' + __wvEscapeHtml(__i18n.fileChanges) + ' <span class="work-section-subtitle">(' + __wvEscapeHtml(countLabel) + ')</span></div><div class="change-summary-row">' + summaryParts.join(' ') + '</div>';
     container.appendChild(header);
 
     // Change list
@@ -1346,13 +1377,19 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
       if (fc.changeType !== 'deleted') {
         html += '<button class="change-btn change-open-file" data-file-path="' + __wvEscapeHtml(fc.filePath) + '" title="' + __wvEscapeHtml(__i18n.openFileTooltip) + '">Open</button>';
       }
+      // Locate, not open: this change also has a card in the stream, inside the
+      // tool call that made it, and that card is the context this row only
+      // summarizes. The row carries the same identity the card does (see
+      // revealFileChangeCard), so one file changing several times cannot send
+      // the reader to the wrong change.
+      html += '<button class="change-btn change-goto-card" data-file-path="' + __wvEscapeHtml(fc.filePath) + '" data-change-index="' + (fc.changeIndex !== undefined && fc.changeIndex !== null ? fc.changeIndex : '') + '" data-call-id="' + __wvEscapeHtml(fc.callId || '') + '" title="' + __wvEscapeHtml(__i18n.locateChangeTooltip) + '">' + __wvEscapeHtml(__i18n.locateChange) + '</button>';
       html += '</span>';
       html += '</div>';
     }
     list.innerHTML = html;
     container.appendChild(list);
 
-    // Click delegation for diff/open buttons
+    // Click delegation for the diff / open / locate actions
     list.addEventListener('click', function(e) {
       var target = e.target;
       if (target.classList.contains('change-view-diff')) {
@@ -1363,6 +1400,18 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
       } else if (target.classList.contains('change-open-file')) {
         var filePath = target.getAttribute('data-file-path');
         vscode.postMessage({ type: 'openFile', filePath: filePath });
+      } else if (target.classList.contains('change-goto-card')) {
+        // The card lives in this same document, so this is a scroll rather than
+        // a round trip through the extension. The messages module owns the
+        // lookup and loads after this one, hence the guard.
+        var gotoIndex = target.getAttribute('data-change-index');
+        if (window.__wvMessages && window.__wvMessages.revealFileChangeCard) {
+          window.__wvMessages.revealFileChangeCard({
+            filePath: target.getAttribute('data-file-path'),
+            callId: target.getAttribute('data-call-id') || undefined,
+            changeIndex: gotoIndex !== null && gotoIndex !== '' ? parseInt(gotoIndex, 10) : undefined
+          });
+        }
       }
     });
   }

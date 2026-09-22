@@ -223,6 +223,10 @@ interface Translations {
   changes: string;
   noFileChanges: string;
   fileChanges: string;
+  changesCount: string;
+  filesCount: string;
+  locateChange: string;
+  locateChangeTooltip: string;
   viewDiff: string;
   viewDiffTooltip: string;
   openFile: string;
@@ -568,6 +572,10 @@ const en: Translations = {
   changes: "Changes",
   noFileChanges: "No file changes in this session",
   fileChanges: "Changes",
+  changesCount: "{n} change(s)",
+  filesCount: "{n} file(s)",
+  locateChange: "Locate",
+  locateChangeTooltip: "Jump to the tool call card that made this change",
   viewDiff: "View Diff",
   viewDiffTooltip: "Open diff view for this file",
   openFile: "Open File",
@@ -913,6 +921,10 @@ const zhCn: Translations = {
   changes: "变更",
   noFileChanges: "本次会话无文件变更",
   fileChanges: "文件变更",
+  changesCount: "{n} 处变更",
+  filesCount: "{n} 个文件",
+  locateChange: "定位",
+  locateChangeTooltip: "跳转到产生此变更的工具调用卡片",
   viewDiff: "查看差异",
   viewDiffTooltip: "在差异视图中对比文件变更",
   openFile: "打开文件",
@@ -1315,6 +1327,10 @@ export function webviewTranslations(tr: Translations) {
     changes: tr.changes,
     noFileChanges: tr.noFileChanges,
     fileChanges: tr.fileChanges,
+    changesCount: tr.changesCount,
+    filesCount: tr.filesCount,
+    locateChange: tr.locateChange,
+    locateChangeTooltip: tr.locateChangeTooltip,
     viewDiff: tr.viewDiff,
     viewDiffTooltip: tr.viewDiffTooltip,
     openFile: tr.openFile,

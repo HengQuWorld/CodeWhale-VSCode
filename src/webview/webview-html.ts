@@ -237,6 +237,13 @@ export interface WebviewTranslations {
   revertFile: string;
   revertFileTooltip: string;
   fileChanges: string;
+  /** "{n} change(s)" — how many change records the sidebar's Changes panel
+   *  lists, as opposed to the number of distinct files they touch. */
+  changesCount: string;
+  /** "{n} file(s)" — the distinct-file reading of the same list. */
+  filesCount: string;
+  locateChange: string;
+  locateChangeTooltip: string;
   userInputAwaiting: string;
   // Session search & delete
   searchSessions: string;

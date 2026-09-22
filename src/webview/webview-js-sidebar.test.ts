@@ -272,6 +272,32 @@ describe("webview-js-sidebar.ts", () => {
     expect(script).not.toContain("useCumulative: true");
   });
 
+  it("reports the change count and the file count side by side", () => {
+    const script = getSidebarScript(makeTr());
+    // Rows are changes, not files: a file edited three times is three rows.
+    // The header names both readings so the second cannot be mistaken for the
+    // first.
+    expect(script).toContain("function countChangedFiles");
+    expect(script).toContain("__i18n.changesCount.replace('{n}'");
+    expect(script).toContain("__i18n.filesCount.replace('{n}'");
+  });
+
+  it("counts distinct files after normalising the path separators", () => {
+    const script = getSidebarScript(makeTr());
+    // Same normalisation the extension applies, so a path the runtime wrote
+    // with backslashes is not counted twice.
+    expect(script).toContain("function normalizeChangePath");
+  });
+
+  it("offers a Locate action on every change row", () => {
+    const script = getSidebarScript(makeTr());
+    // Each row names the change it came from, so Locate lands on that change's
+    // card in the stream rather than on the file's first card.
+    expect(script).toContain("change-goto-card");
+    expect(script).toContain("data-call-id=");
+    expect(script).toContain("revealFileChangeCard");
+  });
+
   it("generates a script the webview can parse", () => {
     // The webview scripts are string-built, so nothing else type-checks them.
     expect(() => new Function(getSidebarScript(makeTr()))).not.toThrow();

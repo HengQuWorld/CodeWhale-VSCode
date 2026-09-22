@@ -401,7 +401,13 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
     var displayPath = fc.filePath.replace(/\\\\\\\\/g, '/').split('/').length > 3 ? '\\u2026/' + shortP : fc.filePath;
     var diffKey = fc.filePath + '@' + (++_diffIdCounter.value);
     if (fc.diff) _diffStore.set(diffKey, fc.diff);
-    var html = '<div class="file-change-card">';
+    // The card names the change it was built from, so the sidebar's Changes
+    // panel can find it again (see revealFileChangeCard). The call id is the
+    // engine's own identity for the tool call; the change index is the change's
+    // position within its file's history. Neither is guaranteed: recordings
+    // that predate the call id carry only the path.
+    var fcIndex = fc.changeIndex !== undefined && fc.changeIndex !== null ? String(fc.changeIndex) : '';
+    var html = '<div class="file-change-card" data-fc-path="' + __wvEscapeHtml(fc.filePath) + '" data-fc-index="' + fcIndex + '" data-fc-call-id="' + __wvEscapeHtml(fc.callId || '') + '">';
     html += '<div class="fc-header">';
     html += '<span class="fc-path" title="' + __wvEscapeHtml(fc.filePath) + '">\\uD83D\\uDCDD ' + __wvEscapeHtml(displayPath) + '</span>';
     html += '<span class="fc-badge ' + fc.changeType + '">' + __wvEscapeHtml(changeTypeLabel) + '</span>';
@@ -432,6 +438,44 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
     html += '</div>';
     html += '</div>';
     return html;
+  }
+
+  // ── Reveal File Change Card ──
+  /** Scroll the card a recorded change came from into view and flash it.
+   *
+   *  The sidebar's Changes panel lists one row per change and offers a Locate
+   *  action on each; this is what that action calls. The row and the card
+   *  describe the *same* change object, so they are matched on what that object
+   *  already carries: the call id when the runtime published one, else the file
+   *  path plus the change's index within that file's history. Matching on the
+   *  path alone is the last resort for a recording that carries neither, and
+   *  landing on the right file beats landing on nothing.
+   *
+   *  A miss is not an error: the panel can list a change whose tool call the
+   *  view no longer holds. Returns whether a card was found. */
+  function revealFileChangeCard(ref) {
+    if (!ref || !ref.filePath) return false;
+    var wantedIndex = ref.changeIndex === undefined || ref.changeIndex === null ? '' : String(ref.changeIndex);
+    var cards = messagesEl.querySelectorAll('.file-change-card');
+    var exactCall = null, exactIndex = null, samePath = null;
+    for (var i = 0; i < cards.length; i++) {
+      var card = cards[i];
+      if (card.getAttribute('data-fc-path') !== ref.filePath) continue;
+      // Every tier takes the last match rather than the first. The panel lists
+      // the current turn's changes and the stream is in chronological order, so
+      // the newest card is the current turn's. A recording old enough to carry
+      // no call id can leave the same path and index on two turns' cards, and
+      // the older card is then the wrong answer.
+      samePath = card;
+      if (card.getAttribute('data-fc-index') === wantedIndex) exactIndex = card;
+      if (ref.callId && card.getAttribute('data-fc-call-id') === ref.callId) exactCall = card;
+    }
+    var target = exactCall || exactIndex || samePath;
+    if (!target) return false;
+    // Same scroll-and-flash the message rail uses; the card wears jump-flash
+    // through its own rule in webview-css.
+    scrollToMessage(target);
+    return true;
   }
 
   // ── Add Message ──
@@ -923,6 +967,7 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
     renderToolCall: renderToolCall,
     renderToolInput: renderToolInput,
     renderFileChangeCard: renderFileChangeCard,
+    revealFileChangeCard: revealFileChangeCard,
     smartScrollToBottom: smartScrollToBottom,
     isStreaming: function() { return isStreaming; },
     setStreaming: function(v) { isStreaming = v; },

@@ -221,6 +221,15 @@ describe("webview-css.ts", () => {
     expect(css).toContain('[aria-disabled="true"]');
   });
 
+  it("lets a change row wrap its three actions instead of clipping the last one", () => {
+    const css = getWebviewCss();
+    // The sidebar resizes down to 120px and a row now carries Diff, Open and
+    // Locate; without a wrap the row overflows and the last button is lost.
+    const item = css.slice(css.indexOf(".change-item {"));
+    const block = item.slice(0, item.indexOf("}"));
+    expect(block).toContain("flex-wrap: wrap");
+  });
+
   it("does not contain template literal syntax", () => {
     const css = getWebviewCss();
     expect(css).not.toContain("${");

@@ -153,11 +153,24 @@ function createHarness() {
   };
 
   const postMessages: Array<Record<string, unknown>> = [];
+  // The Changes panel's Locate action scrolls the stream itself rather than
+  // calling back into the extension, so it reaches the messages module here.
+  const revealCalls: Array<Record<string, unknown>> = [];
   const windowObj: Record<string, any> = {
     __wvI18n: makeTr(),
     __wvEscapeHtml: (value: unknown) => String(value ?? ""),
     __wvFormatRelativeTime: () => "now",
     __wvVscode: { postMessage: (msg: Record<string, unknown>) => postMessages.push(msg) },
+    // The diff store the change rows key their Diff action by, shared with the
+    // message cards in the real webview.
+    __wvDiffStore: new Map<string, string>(),
+    __wvDiffIdCounter: { value: 0 },
+    __wvMessages: {
+      revealFileChangeCard: (ref: Record<string, unknown>) => {
+        revealCalls.push(ref);
+        return true;
+      },
+    },
     addEventListener: () => {},
   };
   const documentObj = {
@@ -191,7 +204,9 @@ function createHarness() {
     panel: getEl("threads-panel"),
     sidebarSection: getEl("sidebar-threads"),
     agentsPanel: getEl("tab-agents"),
+    changesPanel: getEl("tab-changes"),
     postMessages,
+    revealCalls,
     sidebar: windowObj.__wvSidebar as Record<string, any>,
   };
 }
@@ -670,5 +685,138 @@ describe("inline thread attention", () => {
     sidebar.setActiveThreadId("thread-a");
     sidebar.renderThreads();
     expect(attentionCard(rail, "thread-a")).toBeNull();
+  });
+});
+
+// ── Changes panel ──
+
+/** One recorded change, shaped as `refreshChangesPanel` publishes it. */
+function recordedChange(overrides: Record<string, unknown> = {}) {
+  return {
+    filePath: "src/a.ts",
+    changeType: "modified",
+    addedLines: 3,
+    removedLines: 1,
+    diff: "--- a\n+++ b\n",
+    changeIndex: 0,
+    callId: "call-1",
+    ...overrides,
+  };
+}
+
+/** The panel's list element — the header section is its first child. */
+function changeList(panel: FakeElement): FakeElement {
+  return panel.children[1];
+}
+
+/** The Locate buttons as `renderChanges` actually wrote them.
+ *
+ *  Reading them back out of the rendered markup, instead of hand-writing the
+ *  attributes, is what lets this test fail: a renderer that stops emitting an
+ *  attribute hands the click handler an element without it, and the assertions
+ *  below see the same miss the user would. Hand-building the button would test
+ *  the handler against a row the panel never produces — and would stay green
+ *  while Locate became a silent no-op. */
+function locateButtons(renderedListHtml: string): FakeElement[] {
+  const tags = renderedListHtml.match(/<button[^>]*change-goto-card[^>]*>/g) ?? [];
+  return tags.map((tag) => {
+    const button = new FakeElement();
+    button.classList.add("change-goto-card");
+    for (const [, name, value] of tag.matchAll(/([\w-]+)="([^"]*)"/g)) {
+      button.setAttribute(name, value);
+    }
+    return button;
+  });
+}
+
+describe("Changes panel", () => {
+  it("reports the change count and the distinct file count", () => {
+    const { changesPanel, sidebar } = createHarness();
+    // Three rows over two files: the header must not present the rows as files.
+    sidebar.setChangesState([
+      recordedChange({ filePath: "src/a.ts", changeIndex: 0 }),
+      recordedChange({ filePath: "src/a.ts", changeIndex: 1, callId: "call-2" }),
+      recordedChange({ filePath: "src/b.ts", changeType: "created", callId: "call-3" }),
+    ]);
+    sidebar.renderChanges();
+
+    const header = changesPanel.children[0].innerHTML;
+    expect(header).toContain("3 change(s)");
+    expect(header).toContain("2 file(s)");
+  });
+
+  it("counts one file once, however the runtime spelled its path", () => {
+    const { changesPanel, sidebar } = createHarness();
+    sidebar.setChangesState([
+      recordedChange({ filePath: "src/a.ts", changeIndex: 0 }),
+      recordedChange({ filePath: "src\\a.ts", changeIndex: 1, callId: "call-2" }),
+    ]);
+    sidebar.renderChanges();
+
+    const header = changesPanel.children[0].innerHTML;
+    expect(header).toContain("2 change(s)");
+    expect(header).toContain("1 file(s)");
+  });
+
+  it("gives every row a Locate button carrying that row's own change", () => {
+    const { changesPanel, sidebar } = createHarness();
+    sidebar.setChangesState([
+      recordedChange({ filePath: "src/a.ts", changeIndex: 0, callId: "call-1" }),
+      recordedChange({ filePath: "src/a.ts", changeIndex: 1, callId: "call-2" }),
+    ]);
+    sidebar.renderChanges();
+
+    const buttons = locateButtons(changeList(changesPanel).innerHTML);
+    expect(buttons).toHaveLength(2);
+    // The second row must not carry the first row's identity: one file changing
+    // twice is the case the whole lookup exists for.
+    expect(buttons[0].getAttribute("data-file-path")).toBe("src/a.ts");
+    expect(buttons[0].getAttribute("data-change-index")).toBe("0");
+    expect(buttons[0].getAttribute("data-call-id")).toBe("call-1");
+    expect(buttons[1].getAttribute("data-change-index")).toBe("1");
+    expect(buttons[1].getAttribute("data-call-id")).toBe("call-2");
+  });
+
+  it("scrolls the stream to that change's card when Locate is clicked", () => {
+    const { changesPanel, revealCalls, sidebar } = createHarness();
+    sidebar.setChangesState([
+      recordedChange({ filePath: "src/a.ts", changeIndex: 0, callId: "call-1" }),
+      recordedChange({ filePath: "src/a.ts", changeIndex: 1, callId: "call-2" }),
+    ]);
+    sidebar.renderChanges();
+
+    const list = changeList(changesPanel);
+    list.dispatch("click", { target: locateButtons(list.innerHTML)[1] });
+
+    // The second change, not the file's first card: the row names the change it
+    // came from and so must the scroll.
+    expect(revealCalls).toEqual([{ filePath: "src/a.ts", callId: "call-2", changeIndex: 1 }]);
+  });
+
+  it("sends a row without a call id by path and index instead", () => {
+    const { changesPanel, revealCalls, sidebar } = createHarness();
+    sidebar.setChangesState([recordedChange({ callId: undefined, changeIndex: undefined })]);
+    sidebar.renderChanges();
+
+    const list = changeList(changesPanel);
+    list.dispatch("click", { target: locateButtons(list.innerHTML)[0] });
+
+    expect(revealCalls).toEqual([{ filePath: "src/a.ts", callId: undefined, changeIndex: undefined }]);
+  });
+
+  it("counts a file whose name collides with an object member", () => {
+    const { changesPanel, sidebar } = createHarness();
+    // `constructor` and `toString` read as already-seen on a `{}`, which would
+    // under-report the count rather than crash.
+    sidebar.setChangesState([
+      recordedChange({ filePath: "constructor", changeIndex: 0 }),
+      recordedChange({ filePath: "toString", changeIndex: 0, callId: "call-2" }),
+      recordedChange({ filePath: "__proto__", changeIndex: 0, callId: "call-3" }),
+    ]);
+    sidebar.renderChanges();
+
+    const header = changesPanel.children[0].innerHTML;
+    expect(header).toContain("3 change(s)");
+    expect(header).toContain("3 file(s)");
   });
 });
