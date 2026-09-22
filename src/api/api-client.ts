@@ -566,11 +566,20 @@ export class CodeWhaleApiClient {
   // (see runtime_api/sessions.rs); a `permission_posture` sent here would be
   // silently dropped, so the resumed thread derives its posture from the
   // persisted session instead.
-  async resumeSessionThread(sessionId: string, opts?: { model?: string; mode?: string }): Promise<ResumeSessionResponse> {
+  async resumeSessionThread(sessionId: string, opts?: { model?: string; mode?: string }): Promise<ResumeSessionResponse & { created: boolean }> {
     const body: Record<string, unknown> = {};
     if (opts?.model) body.model = opts.model;
     if (opts?.mode) body.mode = opts.mode;
-    return (await this.post(`/v1/sessions/${sessionId}/resume-thread`, body)) as ResumeSessionResponse;
+    const { statusCode, body: payload } = await this.requestWithStatus(
+      "POST",
+      `/v1/sessions/${sessionId}/resume-thread`,
+      body
+    );
+    // `201` — the runtime created a thread for this session. `200` — the
+    // session was already open, and this is the thread that holds it. The
+    // caller has to tell them apart: renaming a reopened thread overwrites
+    // whatever title it already carries.
+    return { ...(payload as ResumeSessionResponse), created: statusCode === 201 };
   }
 
   async saveThreadAsSession(threadId: string, sessionId?: string): Promise<SaveThreadAsSessionResponse> {
@@ -1124,15 +1133,32 @@ export class CodeWhaleApiClient {
     body: unknown,
     timeoutMs?: number
   ): Promise<unknown> {
+    return this.requestWithStatus(method, path, body, timeoutMs).then((response) => response.body);
+  }
+
+  /** `request` with the status line kept.
+   *
+   *  A route whose contract distinguishes "created it" (`201`) from an
+   *  idempotent "handed the same thing back" (`200`) cannot be read from the
+   *  body: the body is identical either way, and the status is the only
+   *  structural signal there is. */
+  private requestWithStatus(
+    method: string,
+    path: string,
+    body: unknown,
+    timeoutMs?: number
+  ): Promise<{ statusCode: number; body: unknown }> {
     return this.requestRaw(method, path, body, timeoutMs).then(({ statusCode, data }) => {
       if (statusCode >= 400) {
         throw new Error(`API error ${statusCode}: ${extractApiErrorMessage(data)}`);
       }
+      let parsed: unknown;
       try {
-        return JSON.parse(data);
+        parsed = JSON.parse(data);
       } catch {
-        return data;
+        parsed = data;
       }
+      return { statusCode, body: parsed };
     });
   }
 

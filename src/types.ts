@@ -23,6 +23,11 @@ export interface ThreadRecord {
   system_prompt?: string | null;
   task_id?: string | null;
   title?: string | null;
+  /** The saved session this thread reads and writes. The runtime owns this
+   *  binding, and `PUT /v1/sessions` updates that document in place — a client
+   *  that drops the id has its next auto-save mint a second document for the
+   *  same conversation and orphan the first. */
+  session_id?: string | null;
 }
 
 export interface ThreadSummary {

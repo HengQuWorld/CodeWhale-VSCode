@@ -852,10 +852,15 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       
       if (threadWithContent) {
         this.currentThread = threadWithContent;
+        // The conversation this window was last in keeps the session it writes
+        // to. Dropping it here is how a reload turned the next auto-save into a
+        // second document for the same history.
+        this.currentSessionId = threadWithContent.session_id ?? null;
         await this.loadHistory();
         this.subscribeToEvents();
       } else if (threads.length > 0) {
         this.currentThread = threads[0];
+        this.currentSessionId = threads[0].session_id ?? null;
         this.postMessage({ type: "clearChat" });
         this.postMessage({ 
           type: "status", 
@@ -1725,6 +1730,21 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     }
   }
 
+  /** Forget the session binding this client is holding, because the thread it
+   *  belongs to must not be saved under it.
+   *
+   *  `PUT /v1/sessions` makes the stored document match the saving thread's
+   *  engine — it rewrites the transcript — so two threads must never write one
+   *  document. Two of them otherwise would: a thread the runtime just created is
+   *  empty and owns no session yet (the id still held belongs to the thread it
+   *  replaced), and a fork's history is a prefix of the thread it came from, so
+   *  *that* thread's document is the one thing it must not overwrite. Adopting a
+   *  binding is `loadThread`'s job — never an inference from whatever id happened
+   *  to be around. */
+  private forgetSessionBinding(): void {
+    this.currentSessionId = null;
+  }
+
   private async loadThread(threadId: string): Promise<void> {
     // Switching parks the outgoing thread instead of interrupting it: the
     // runtime keeps the turn running server-side and the background watcher
@@ -1765,6 +1785,14 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
           });
         }
       }
+
+      // The runtime owns the thread → session binding and this record is the
+      // only place a client can read it. Adopting it keeps auto-save an update
+      // of the conversation's own document: without it the next completed turn
+      // saves with no session id, the runtime mints a second document for the
+      // same history, and the one this thread was bound to is left behind.
+      // Every path that establishes `currentThread` has to read it from here.
+      this.currentSessionId = this.currentThread.session_id ?? null;
 
       await this.loadHistory(threadId);
       this.subscribeToEvents();
@@ -2164,6 +2192,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
           auto_approve: autoApprove,
           trust_mode: posture === "full_access",
         });
+        this.forgetSessionBinding();
         this.subscribeToEvents();
         this.refreshSessionList();
         this.postCurrentSettings();
@@ -2223,6 +2252,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
           auto_approve: posture === "full_access",
           trust_mode: posture === "full_access",
         });
+        this.forgetSessionBinding();
         this.subscribeToEvents();
         this.refreshSessionList();
         this.postCurrentSettings();
@@ -2945,11 +2975,17 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     // busting the prefix cache because the system prompt and tool catalog
     // change with the model/mode.
     const result = await this.api.resumeSessionThread(sessionId);
-    try {
-      await this.api.updateThread(result.thread_id, {
-        title: `Resumed: ${result.summary.slice(0, 50)}`,
-      });
-    } catch { /* non-critical */ }
+    // Only a thread this call *created* needs the placeholder title. A `200`
+    // hands back the thread that already held the session, whose title is the
+    // user's (or the one a previous resume gave it) — renaming it here would
+    // overwrite that.
+    if (result.created) {
+      try {
+        await this.api.updateThread(result.thread_id, {
+          title: `Resumed: ${result.summary.slice(0, 50)}`,
+        });
+      } catch { /* non-critical */ }
+    }
 
     this.viewingSessionId = null;
     await this.loadThread(result.thread_id);
@@ -3109,6 +3145,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       auto_approve: posture === "full_access",
       trust_mode: posture === "full_access",
     });
+    this.forgetSessionBinding();
     this.subscribeToEvents();
     await this.refreshSessionList();
     // This thread did not exist a moment ago and the webview has never been
@@ -4273,6 +4310,11 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     if (thread && (this.currentTurnId || this.pendingApprovals.size > 0 || this.pendingUserInputs.size > 0 || goalActive)) {
       const st = this.ensureBackgroundState(thread.id);
       st.lastEventSeq = this.lastEventSeq;
+      // The parked thread keeps writing to the session it is bound to. Seeded
+      // from what this client is holding for it — not from the record — because
+      // a binding it deliberately dropped (`forgetSessionBinding`) must not come
+      // back through the background path.
+      st.sessionId ??= this.currentSessionId;
       if (this.currentTurnId) {
         st.currentTurnId = this.currentTurnId;
         st.running = true;
@@ -4524,6 +4566,11 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         this.postMessage({ type: "info", message: result.patch_result.summary });
       }
 
+      // Which document the thread being forked writes to. A runtime that gives
+      // a fork a document of its own answers with a different id below; one that
+      // predates that hands the fork the source's id.
+      const forkedFromSession = this.currentSessionId;
+
       // Switch to the new forked thread.
       this.currentThread = result.thread;
       this.messages = [];
@@ -4536,6 +4583,14 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
 
       // Load the forked thread's history.
       await this.loadThread(result.thread.id);
+      // A fork's history is a prefix of the thread it came from, so that
+      // thread's document is the one it must not rewrite: `PUT /v1/sessions`
+      // replaces the stored transcript, and the source thread would be left
+      // describing bytes that are gone. Nothing to do when the runtime gave the
+      // fork a document of its own.
+      if (this.currentSessionId && this.currentSessionId === forkedFromSession) {
+        this.forgetSessionBinding();
+      }
 
       // Put the user's message back in the input box so they can edit & re-send.
       if (result.original_user_text) {
@@ -4630,6 +4685,10 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
 
       const result = await this.api.retryThreadTurn(this.currentThread.id);
 
+      // Which document the thread being retried writes to — see the same
+      // capture in `handleUndoLastTurn`.
+      const forkedFromSession = this.currentSessionId;
+
       // Switch to the new forked thread and subscribe to its events.
       this.currentThread = result.thread;
       this.messages = [];
@@ -4642,6 +4701,11 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
 
       // Load the forked thread's history.
       await this.loadThread(result.thread.id);
+      // Same reason as `handleUndoLastTurn`: the retried thread's document is
+      // the one this fork must not rewrite.
+      if (this.currentSessionId && this.currentSessionId === forkedFromSession) {
+        this.forgetSessionBinding();
+      }
 
       this.postMessage({
         type: "info",
