@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Discussions
+    url: https://github.com/HengQuWorld/CodeWhale-VSCode/discussions
+    about: Questions, ideas, and anything that is not a bug or a feature request — English or 中文 both welcome.
+  - name: Engine (codewhale) issues
+    url: https://github.com/Hmbown/CodeWhale/issues
+    about: Bugs and features of the agent engine itself — prompts, models, providers, tools, sandboxing.
+  - name: README (install, features, troubleshooting)
+    url: https://github.com/HengQuWorld/CodeWhale-VSCode#readme
+    about: English README; 简体中文版见 README_zh.md.

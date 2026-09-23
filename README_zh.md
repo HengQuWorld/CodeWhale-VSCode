@@ -2,8 +2,11 @@
 
 [![Version](https://img.shields.io/badge/version-0.7.4-blue)](https://github.com/HengQuWorld/CodeWhale-VSCode)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![CI](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/ci.yml/badge.svg)](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/ci.yml)
+[![Release](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/release.yml/badge.svg)](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/release.yml)
 [![VS Code](https://img.shields.io/badge/VS%20Code-1.85+-informational)](https://code.visualstudio.com/)
-[![VSIX](https://img.shields.io/badge/VSIX-~300%20KB-brightgreen)](https://github.com/HengQuWorld/CodeWhale-VSCode)
+[![VSIX](https://img.shields.io/badge/VSIX-~300%20KB-brightgreen)](https://github.com/HengQuWorld/CodeWhale-VSCode/releases)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
 CodeWhale for VS Code 是 [CodeWhale](https://github.com/Hmbown/CodeWhale) 的**图形化前端**。CodeWhale 是一个开源且持续活跃开发的编程代理，本扩展把它装进 VS Code 原生侧边栏：读取工作区、修改文件、执行命令、搜索网络、派发子代理，全程不必离开编辑器。
 
@@ -293,6 +296,16 @@ npx @vscode/vsce package --no-dependencies   # 打包 VSIX
 ```
 
 项目结构：`src/extension.ts`（入口）→ `src/chat-provider.ts`（业务编排）→ `src/api/`（引擎进程 + runtime API 客户端）→ `src/commands/`（斜杠命令）→ `src/webview/`（按域拆分的 HTML/CSS/JS）→ `src/utils/`（diff、成本、会话状态）。更深的架构说明、以及让这个前端保持轻薄的「复用引擎、绝不重造」原则，见 `AGENTS.md`。
+
+Pull Request 请按 [CONTRIBUTING.md](CONTRIBUTING.md)（中英双语）中的清单提交。
+
+## 反馈与贡献
+
+**欢迎通过 issue、discussion 和 pull request 参与反馈和贡献，中英文均可。**本扩展最好用的几个功能最初都来自社区 PR（[#9](https://github.com/HengQuWorld/CodeWhale-VSCode/pull/9)–[#12](https://github.com/HengQuWorld/CodeWhale-VSCode/pull/12)），还有很多值得做的事。
+
+- **缺陷与功能建议** —— [提交 issue](https://github.com/HengQuWorld/CodeWhale-VSCode/issues/new/choose)，缺陷与功能建议各有模板。代理引擎本身的问题（`codewhale` CLI：提示词、模型、供应商、工具）请提[上游](https://github.com/Hmbown/CodeWhale/issues)，本仓库只维护前端。
+- **提问与想法** —— [Discussions](https://github.com/HengQuWorld/CodeWhale-VSCode/discussions)，适合一切不是缺陷的内容。
+- **代码** —— [CONTRIBUTING.md](CONTRIBUTING.md) 有开发环境、基本约定（代理行为归引擎，GUI 只做薄适配层）和 PR 检查清单。欢迎首次贡献者 —— 在 issue 下留言，维护者会帮你找到切入点。
 
 ## 相关项目
 

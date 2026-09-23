@@ -17,6 +17,16 @@ AGENTS.md
 design-language.md
 debug-ide-plugin-freeze.md
 troubleshooting-ide-plugin-freeze.md
+# README_zh.md is GitHub-only (the marketplace reads README.md)
+README_zh.md
+
+# Repo infrastructure (not needed at runtime)
+.github/**
+.editorconfig
+eslint.config.mjs
+CONTRIBUTING.md
+SECURITY.md
+CODE_OF_CONDUCT.md
 
 # Docs and demo media (guides + recordings — never shipped; keeps the VSIX ~200 KB)
 docs/**

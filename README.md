@@ -2,8 +2,11 @@
 
 [![Version](https://img.shields.io/badge/version-0.7.4-blue)](https://github.com/HengQuWorld/CodeWhale-VSCode)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![CI](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/ci.yml/badge.svg)](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/ci.yml)
+[![Release](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/release.yml/badge.svg)](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/release.yml)
 [![VS Code](https://img.shields.io/badge/VS%20Code-1.85+-informational)](https://code.visualstudio.com/)
-[![VSIX](https://img.shields.io/badge/VSIX-~300%20KB-brightgreen)](https://github.com/HengQuWorld/CodeWhale-VSCode)
+[![VSIX](https://img.shields.io/badge/VSIX-~300%20KB-brightgreen)](https://github.com/HengQuWorld/CodeWhale-VSCode/releases)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
 CodeWhale for VS Code is the **graphical frontend** for [CodeWhale](https://github.com/Hmbown/CodeWhale) — an open-source, actively developed coding agent. It brings the agent into a native VS Code sidebar, so you get the full engine (reading your workspace, editing files, running commands, searching the web, delegating to sub-agents) without leaving the editor.
 
@@ -291,6 +294,16 @@ npx @vscode/vsce package --no-dependencies   # build the VSIX
 ```
 
 Project layout: `src/extension.ts` (entry) → `src/chat-provider.ts` (orchestration) → `src/api/` (engine process + runtime API client) → `src/commands/` (slash commands) → `src/webview/` (HTML/CSS/JS split by domain) → `src/utils/` (diff, cost, session state). See `AGENTS.md` for the deeper architecture and the "reuse the engine, never reimplement it" rule that keeps this frontend thin.
+
+Pull requests follow the checklist in [CONTRIBUTING.md](CONTRIBUTING.md) (bilingual, English / 中文).
+
+## Feedback & contributing
+
+**Issues, discussions and pull requests are welcome — in English or Chinese.** Several of the best parts of this extension came from community pull requests ([#9](https://github.com/HengQuWorld/CodeWhale-VSCode/pull/9)–[#12](https://github.com/HengQuWorld/CodeWhale-VSCode/pull/12)), and there is plenty left to build.
+
+- **Bugs and feature ideas** — [open an issue](https://github.com/HengQuWorld/CodeWhale-VSCode/issues/new/choose); bug reports and feature requests each have a template. Problems in the agent engine itself (`codewhale` CLI: prompts, models, providers, tools) belong [upstream](https://github.com/Hmbown/CodeWhale/issues), not here.
+- **Questions and ideas** — [Discussions](https://github.com/HengQuWorld/CodeWhale-VSCode/discussions), for anything that is not a bug.
+- **Code** — [CONTRIBUTING.md](CONTRIBUTING.md) has the dev setup, the ground rules (the engine owns agent behavior; the GUI stays a thin adapter), and the PR checklist. First-time contributors are welcome — comment on an issue and a maintainer will help you find a starting point.
 
 ## Related projects
 

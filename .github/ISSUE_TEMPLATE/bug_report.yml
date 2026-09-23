@@ -1,0 +1,84 @@
+name: Bug report
+description: Something in the extension does not work as expected.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. Please search
+        [existing issues](https://github.com/HengQuWorld/CodeWhale-VSCode/issues?q=is%3Aissue) first.
+
+        Note: problems in the **agent engine** (`codewhale` CLI — prompts, model
+        quality, providers, tools, sandboxing) belong
+        [upstream](https://github.com/Hmbown/CodeWhale/issues), not in this repo.
+        This repo is only the VS Code frontend.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear description of the bug. A screenshot or short recording helps a lot.
+      placeholder: The diff view opened with wrong line numbers after…
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open a workspace with …
+        2. Send …
+        3. Click …
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect to happen?
+    validations:
+      required: true
+  - type: input
+    id: vscode-version
+    attributes:
+      label: VS Code (or IDE) version
+      placeholder: "1.93"
+    validations:
+      required: true
+  - type: input
+    id: extension-version
+    attributes:
+      label: Extension version
+      description: Shown in the Extensions panel, or in the VSIX filename.
+      placeholder: "0.7.4"
+    validations:
+      required: true
+  - type: input
+    id: engine-version
+    attributes:
+      label: Engine version (`codewhale --version`)
+      placeholder: "0.10.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: OS
+      options:
+        - macOS (Apple Silicon)
+        - macOS (Intel)
+        - Windows
+        - Linux
+    validations:
+      required: true
+  - type: input
+    id: provider
+    attributes:
+      label: Provider / model (if relevant)
+      placeholder: deepseek / deepseek-v4-pro
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: >-
+        The CodeWhale output channel (View → Output → CodeWhale), or engine.log
+        from the extension's global storage. Redact secrets before pasting.
+      render: shell

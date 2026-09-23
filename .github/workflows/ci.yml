@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    name: Node ${{ matrix.node }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [20, 22]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm test
+
+      - name: Build (production)
+        run: npm run package
+
+      - name: Package VSIX
+        run: npx @vscode/vsce package --no-dependencies
+
+      # A buildable VSIX from the latest main, for anyone who wants to live on
+      # the edge before a release is tagged.
+      - name: Upload VSIX artifact
+        if: matrix.node == 20 && github.event_name == 'push'
+        uses: actions/upload-artifact@v4
+        with:
+          name: brotherwhale-vscode-main
+          path: brotherwhale-vscode-*.vsix
+          retention-days: 14
+          if-no-files-found: error

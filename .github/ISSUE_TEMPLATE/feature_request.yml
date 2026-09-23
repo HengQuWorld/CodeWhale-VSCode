@@ -1,0 +1,27 @@
+name: Feature request
+description: An idea for the VS Code frontend.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Ideas for the **GUI** belong here. Ideas about the agent engine
+        (`codewhale` CLI — prompts, models, providers, tools) belong
+        [upstream](https://github.com/Hmbown/CodeWhale/issues).
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      description: What are you trying to do that the extension makes hard today?
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: What should it do?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered
