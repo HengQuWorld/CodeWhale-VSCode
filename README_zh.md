@@ -1,9 +1,9 @@
 # CodeWhale for VS Code —— CodeWhale 代理的轻量图形前端
 
-[![Version](https://img.shields.io/badge/version-0.7.3-blue)](https://github.com/HengQuWorld/CodeWhale-VSCode)
+[![Version](https://img.shields.io/badge/version-0.7.4-blue)](https://github.com/HengQuWorld/CodeWhale-VSCode)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![VS Code](https://img.shields.io/badge/VS%20Code-1.85+-informational)](https://code.visualstudio.com/)
-[![VSIX](https://img.shields.io/badge/VSIX-~290%20KB-brightgreen)](https://github.com/HengQuWorld/CodeWhale-VSCode)
+[![VSIX](https://img.shields.io/badge/VSIX-~300%20KB-brightgreen)](https://github.com/HengQuWorld/CodeWhale-VSCode)
 
 CodeWhale for VS Code 是 [CodeWhale](https://github.com/Hmbown/CodeWhale) 的**图形化前端**。CodeWhale 是一个开源且持续活跃开发的编程代理，本扩展把它装进 VS Code 原生侧边栏：读取工作区、修改文件、执行命令、搜索网络、派发子代理，全程不必离开编辑器。
 
@@ -15,7 +15,7 @@ CodeWhale for VS Code 是 [CodeWhale](https://github.com/Hmbown/CodeWhale) 的**
 
 | | |
 |---|---|
-| VSIX 体积（0.7.3） | 约 290 KB |
+| VSIX 体积（0.7.4） | 约 300 KB |
 | 运行时 npm 依赖 | **零** —— 扩展自身的 TypeScript（以及用于渲染的 `marked`）都被 webpack 内联 |
 | 打包的引擎或模型 | **无** —— `codewhale` 是独立的原生二进制 |
 | 重复实现的代理逻辑 | **无** —— GUI 只是引擎本地 runtime API 之上的适配层 |
@@ -25,9 +25,9 @@ CodeWhale for VS Code 是 [CodeWhale](https://github.com/Hmbown/CodeWhale) 的**
 
 正因为代理的任何一部分都没有被复制进扩展，引擎可以独立发布新能力和修复，而不需要前端跟着发版。
 
-### 0.7.3 的引擎兼容性
+### 0.7.4 的引擎兼容性
 
-0.7.3 针对引擎 **v0.10.0** 验证。有两项行为需要比 v0.10.0 更新的引擎修复，且目前没有任何已发布引擎包含它们 —— 客户端这一半在本版交付，引擎那一半还没有：
+0.7.4 针对引擎 **v0.10.0** 验证。有两项行为需要比 v0.10.0 更新的引擎修复，且目前没有任何已发布引擎包含它们 —— 客户端这一半在本版交付，引擎那一半还没有：
 
 - **选择器中的用户自定义 provider** —— 需要 [Codewhale#6404](https://github.com/Hmbown/Codewhale/pull/6404)，已于 2026-09-23 合并、尚未发布。在 v0.10.0 上，你在 TUI 中配置的 `[providers.<name>]` 路由依然不会出现在 provider 列表里。
 - **fork 保留自己的会话文档** —— 需要 [Codewhale#6406](https://github.com/Hmbown/Codewhale/pull/6406)，目前仍为 open。在 v0.10.0 上，fork 首次保存时仍会新建一份自己的会话文档，而不是沿用原本绑定的那一份。
@@ -105,12 +105,12 @@ npx @vscode/vsce package --no-dependencies
 然后安装生成的 `.vsix`（`Extensions: Install from VSIX...`），或在终端执行：
 
 ```bash
-code --install-extension ./brotherwhale-vscode-0.7.3.vsix --force
+code --install-extension ./brotherwhale-vscode-0.7.4.vsix --force
 ```
 
 > **Trae CN 用户：** 如果 `code` 不在 `PATH` 中，使用自带的 CLI：
 > ```bash
-> "/Applications/Trae CN.app/Contents/Resources/app/bin/code" --install-extension ./brotherwhale-vscode-0.7.3.vsix --force
+> "/Applications/Trae CN.app/Contents/Resources/app/bin/code" --install-extension ./brotherwhale-vscode-0.7.4.vsix --force
 > ```
 
 ### 3. 打开它
@@ -273,7 +273,7 @@ codewhale serve（引擎 —— 单独安装与升级）
 
 **安装 VSIX**
 ```bash
-code --install-extension /path/to/brotherwhale-vscode-0.7.3.vsix --force
+code --install-extension /path/to/brotherwhale-vscode-0.7.4.vsix --force
 ```
 
 ## 隐私与数据

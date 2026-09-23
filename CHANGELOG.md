@@ -1,6 +1,6 @@
 # Change Log
 
-## Unreleased
+## 0.7.4
 
 Client-side only; verified against engine **v0.10.0**.
 
