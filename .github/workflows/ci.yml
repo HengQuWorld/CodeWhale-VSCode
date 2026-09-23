@@ -47,7 +47,7 @@ jobs:
       # the edge before a release is tagged.
       - name: Upload VSIX artifact
         if: matrix.node == 20 && github.event_name == 'push'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: brotherwhale-vscode-main
           path: brotherwhale-vscode-*.vsix
