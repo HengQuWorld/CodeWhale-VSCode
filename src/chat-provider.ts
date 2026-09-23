@@ -22,6 +22,7 @@ import type {
   ThreadGoal,
 } from "./types";
 import { formatError, getErrorMessage } from "./utils/error-handler";
+import { providerEntryRouteKey, providerRouteKey } from "./utils/provider-route";
 import { getWebviewHtml } from "./webview/webview-html";
 import { renderMarkdown } from "./utils/markdown";
 import { finalizeAssistantMessage } from "./utils/event-helpers";
@@ -330,9 +331,27 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
   public get currentThread(): ThreadRecord | null { return this.sessionState.data.currentThread; }
   public set currentThread(v: ThreadRecord | null) { this.sessionState.data.currentThread = v; }
   private get viewingSessionId(): string | null { return this.sessionState.data.viewingSessionId; }
-  private set viewingSessionId(v: string | null) { this.sessionState.data.viewingSessionId = v; }
+  private set viewingSessionId(v: string | null) {
+    this.sessionState.data.viewingSessionId = v;
+    // The viewed route describes exactly the session being viewed: with no
+    // session there is nothing on screen for it to describe, and a leftover
+    // value would name a route the next message will not use. Cleared here so
+    // every path that leaves a session (resume, delete, 新建会话) is covered by
+    // one rule rather than five.
+    if (v === null) {
+      this.sessionState.data.viewingSessionProvider = null;
+      this.sessionState.data.viewingSessionProviderId = null;
+      this.sessionState.data.viewingSessionModel = null;
+    }
+  }
   private get viewingSessionWorkspace(): string | null { return this.sessionState.data.viewingSessionWorkspace; }
   private set viewingSessionWorkspace(v: string | null) { this.sessionState.data.viewingSessionWorkspace = v; }
+  private get viewingSessionProvider(): string | null { return this.sessionState.data.viewingSessionProvider; }
+  private set viewingSessionProvider(v: string | null) { this.sessionState.data.viewingSessionProvider = v; }
+  private get viewingSessionProviderId(): string | null { return this.sessionState.data.viewingSessionProviderId; }
+  private set viewingSessionProviderId(v: string | null) { this.sessionState.data.viewingSessionProviderId = v; }
+  private get viewingSessionModel(): string | null { return this.sessionState.data.viewingSessionModel; }
+  private set viewingSessionModel(v: string | null) { this.sessionState.data.viewingSessionModel = v; }
   private get currentSessionId(): string | null { return this.sessionState.data.currentSessionId; }
   private set currentSessionId(v: string | null) { this.sessionState.data.currentSessionId = v; }
   private get pendingSessionCost(): SessionCostSnapshot | null { return this.sessionState.data.pendingSessionCost; }
@@ -775,6 +794,11 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       model: this.currentThread?.model || this.getCurrentModel(),
       reasoningEffort: this.getCurrentReasoningEffort(),
     });
+    // The picker describes the route the view is bound to, and the view's
+    // binding changes with the conversation — so every thread change re-states
+    // it. Sent from the same place as the model chip, because the two are the
+    // same answer and must not be able to disagree.
+    this.postProviders();
   }
 
   /** A `brotherwhale.*` setting changed outside this panel: the VS Code
@@ -1381,6 +1405,15 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       this.sessionState.reset();
       this.viewingSessionId = sessionId;
       this.viewingSessionWorkspace = session.metadata.workspace || null;
+      // The session's own provider route, not the picker's: this session was
+      // saved on it and `POST /v1/sessions/{id}/resume-thread` builds its
+      // thread from exactly these two fields. Without them the toolbar
+      // described the picker's route while the conversation on screen would
+      // run on its own as soon as a message resumed it — the model chip
+      // followed the session and the provider chip did not.
+      this.viewingSessionProvider = session.metadata.model_provider?.trim() || null;
+      this.viewingSessionProviderId = session.metadata.model_provider_id?.trim() || null;
+      this.viewingSessionModel = session.metadata.model?.trim() || null;
 
       // Tell the webview which model/mode this session uses so the status
       // bar reflects the loaded session (not the user's global default).
@@ -1392,7 +1425,9 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       const sessionModel = session.metadata.model;
       const sessionMode = normalizeMode(session.metadata.mode || "agent");
       const cfg = vscode.workspace.getConfiguration("brotherwhale");
-      const currentModel = cfg.get<string>("defaultModel", "deepseek-v4-pro");
+      // A session with no model recorded falls back to the model its own route
+      // would run, not to one global value shared by every provider.
+      const currentModel = this.getCurrentModel();
       this.postMessage({
         type: "settingsUpdated",
         model: sessionModel || currentModel,
@@ -1400,6 +1435,10 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         posture: this.getCurrentPosture(),
         reasoningEffort: cfg.get<string>("reasoningEffort", "auto"),
       });
+      // The provider chip and the model menu describe the route on screen, and
+      // for a viewed session that route is this session's — so it is published
+      // now, not only after a message resumes it into a thread.
+      this.postProviders();
 
       // Stash the session's persisted cost so it can be restored after
       // resumeSessionThread + loadThread (which zero stats because seeded
@@ -2179,13 +2218,20 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
 
       if (!this.currentThread) {
         const cfg = vscode.workspace.getConfiguration("brotherwhale");
-        const model = cfg.get<string>("defaultModel", "deepseek-v4-pro");
+        // The route, not just the model: a new thread is created for the
+        // provider the picker is on, and the model remembered for that
+        // provider. Sending the model alone let the runtime pair it with
+        // whichever provider was active — `deepseek-flash` under the Zhipu
+        // route answered `400 模型不存在`.
+        const route = this.newThreadRoute();
         const mode = normalizeMode(cfg.get<string>("defaultMode", "agent"));
         const posture = this.getCurrentPosture();
         const workspace = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
         const autoApprove = posture === "full_access" || cfg.get<boolean>("autoApprove", false);
         this.currentThread = await this.api.createThread({
-          model,
+          model: route.model,
+          model_provider: route.model_provider,
+          model_provider_id: route.model_provider_id,
           mode,
           workspace,
           permission_posture: POSTURE_WIRE[posture],
@@ -2239,8 +2285,14 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         const replaced = this.currentThread;
         const mode = normalizeMode(replaced.mode);
         const posture = postureFromThread(replaced);
+        // The recovery keeps the conversation's own route, not the picker's:
+        // a thread that was running on `bigmodel-cn` must come back on
+        // `bigmodel-cn` even if the picker has since moved on.
+        const route = this.threadRoute(replaced);
         this.currentThread = await this.api.createThread({
-          model: replaced.model || this.getCurrentModel(),
+          model: route.model,
+          model_provider: route.model_provider,
+          model_provider_id: route.model_provider_id,
           mode,
           workspace: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
           permission_posture: POSTURE_WIRE[posture],
@@ -3071,8 +3123,16 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         // session opened from the Sessions tab); the configured defaults stand
         // in, because a background goal must not need a thread already running.
         const posture = this.getEffectivePosture();
+        // The goal's thread runs on the conversation's own route when there is
+        // one, and on the picker's active route when there is not — the same
+        // pair the first message would create.
+        const route = this.currentThread
+          ? this.threadRoute(this.currentThread)
+          : this.newThreadRoute();
         const thread = await this.api.createThread({
-          model: this.currentThread?.model || this.getCurrentModel(),
+          model: route.model,
+          model_provider: route.model_provider,
+          model_provider_id: route.model_provider_id,
           mode: this.currentThread?.mode || this.getCurrentMode(),
           workspace: this.currentThread?.workspace ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
           title: trimmed.slice(0, 80),
@@ -3137,8 +3197,11 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     const cfg = vscode.workspace.getConfiguration("brotherwhale");
     const mode = normalizeMode(cfg.get<string>("defaultMode", "agent"));
     const posture = this.getEffectivePosture();
+    const route = this.newThreadRoute();
     this.currentThread = await this.api.createThread({
-      model: this.getCurrentModel(),
+      model: route.model,
+      model_provider: route.model_provider,
+      model_provider_id: route.model_provider_id,
       mode,
       workspace: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
       permission_posture: POSTURE_WIRE[posture],
@@ -3331,11 +3394,16 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       const taskCfg = vscode.workspace.getConfiguration("brotherwhale");
       // A task runs on a thread of its own, so it starts from the same
       // new-session defaults a chat thread does — including the permission,
-      // which used to fall to the runtime's own default here.
+      // which used to fall to the runtime's own default here, and the route,
+      // which used to be the global `defaultModel` under whichever provider
+      // happened to be active.
       const posture = this.getCurrentPosture();
+      const route = this.newThreadRoute();
       const task = await this.api.createTask({
         prompt: trimmed,
-        model: taskCfg.get<string>("defaultModel", "deepseek-v4-pro"),
+        model: route.model,
+        model_provider: route.model_provider,
+        model_provider_id: route.model_provider_id,
         mode: normalizeMode(taskCfg.get<string>("defaultMode", "agent")),
         workspace: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
         permission_posture: POSTURE_WIRE[posture],
@@ -3723,20 +3791,46 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       this.providersCache = resp.providers;
       this.currentProvider = resp.current;
       this.currentProviderId = resp.current_provider_id || null;
-      this.postProviders();
+      this.postProviders(true);
     } catch (err) {
       this.debugLog(`refreshProviders failed: ${getErrorMessage(err)}`);
     }
   }
 
+  /** The last route answer published. `postCurrentSettings()` runs on every
+   *  chip-affecting action (an approval, a mode change, a thread switch), and
+   *  every publish makes the webview re-request the route's model list, so a
+   *  republish that says nothing new is skipped. `force` is for the one caller
+   *  whose payload really changed: the catalog refresh itself. */
+  private publishedRouteKey: string | null = null;
+
   /** Push the cached provider list + active provider to the webview. */
-  private postProviders(): void {
+  private postProviders(force = false): void {
     if (!this.providersCache) return;
+    const view = this.viewRoute();
+    const routeKey = [
+      this.currentProvider || "",
+      this.currentProviderId || "",
+      view?.provider || "",
+      view?.providerId || "",
+    ].join("|");
+    if (!force && routeKey === this.publishedRouteKey) return;
+    this.publishedRouteKey = routeKey;
     this.postMessage({
       type: "providersUpdated",
       providers: this.providersCache,
       current: this.currentProvider || "",
       currentProviderId: this.currentProviderId || "",
+      // The route whatever is on screen will actually run on, which is not the
+      // runtime's active route once the picker has moved: a conversation keeps
+      // the provider it was created on (runtime_threads.rs::
+      // provider_identity_for_thread), no endpoint re-routes one, and a saved
+      // session that is only being viewed already knows the route its resume
+      // will use. The webview reads its chip and its model list from this, so
+      // neither can describe a route the next message will not use.
+      viewProvider: view?.provider || "",
+      viewProviderId: view?.providerId || "",
+      viewModel: this.getCurrentModel(),
     });
   }
 
@@ -3780,19 +3874,18 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       const resp = await this.api.switchProvider(trimmed, effectiveModel, exactRoute);
       const resolvedModel = resp.model;
 
-      // Keep the VSCode-side `defaultModel` config in sync with the
-      // backend-resolved model so other UI surfaces (status bar, slash
-      // commands) read the same value. Only write when the user explicitly
-      // chose a model — when they didn't, the backend's resolved model may
-      // already reflect their per-provider config and we don't want to
-      // surface it as a global default.
-      if (effectiveModel) {
-        await vscode.workspace.getConfiguration("brotherwhale").update(
-          "defaultModel", resolvedModel, vscode.ConfigurationTarget.Global
-        );
-      }
-
+      // Remember the model the backend resolved for the route that is now
+      // active, so the next thread created under it starts from the model the
+      // user is looking at. This write lands in `modelByProvider` under this
+      // route's key, never in the single global `defaultModel`: one global
+      // value is what paired `deepseek-flash` with the Zhipu route when the
+      // picker was switched here without naming a model.
       await this.refreshProviders();
+      // Keyed by the route that was *asked for*: `refreshProviders` swallows a
+      // failed catalog read, and a memory written under a stale active route
+      // would pin this route's model onto another one.
+      await this.rememberModelForRoute(resolvedModel, resp.provider || trimmed, exactRoute);
+
       await this.handleRequestProviderModels(trimmed, resolvedModel, exactRoute);
       this.postMessage({
         type: "settingsUpdated",
@@ -3808,6 +3901,24 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         message: resp.message ||
           `Provider switched to ${resp.provider || trimmed} (model: ${resolvedModel}).`,
       });
+
+      // A conversation keeps the provider it was created on — a deliberate
+      // engine decision, for prefix-cache economics — and no endpoint can move
+      // one: `PATCH /v1/threads` and `POST .../turns` carry no provider. So a
+      // message sent here still goes to the old provider. The picker keeps
+      // describing the conversation, and the one action that does move it is
+      // offered rather than left to be discovered.
+      const conversation = this.threadRouteOf(this.currentThread);
+      const conversationKey = providerRouteKey(conversation?.provider, conversation?.providerId);
+      const activeKey = providerRouteKey(this.currentProvider, this.currentProviderId);
+      if (conversationKey && activeKey && conversationKey !== activeKey) {
+        const action = "New conversation";
+        const choice = await vscode.window.showWarningMessage(
+          `Switched to ${activeKey} (model: ${resolvedModel}). This conversation keeps running on ${conversationKey}, so its next message still goes there — the switch applies to new conversations.`,
+          action
+        );
+        if (choice === action) await this.handleNewThread();
+      }
     } catch (err) {
       this.postMessage({
         type: "error",
@@ -3828,26 +3939,41 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
   ): Promise<void> {
     const trimmed = providerId.trim();
     if (!trimmed) return;
-    const exactRoute = modelProviderId?.trim() || undefined;
+    // The list belongs to the route the *view* is bound to, not to the route
+    // the caller named: once the picker has moved on, a conversation keeps
+    // running on the provider it was created with, and offering the picker's
+    // models is how `deepseek-flash` was chosen for a thread pinned to the
+    // Zhipu route. The answer is labelled with the route it describes, so the
+    // webview's own guard — chip route vs answer route — still matches.
+    const bound = this.viewRoute();
+    const targetProvider = bound?.provider || trimmed;
+    const targetExact = bound ? bound.providerId : modelProviderId?.trim() || undefined;
     try {
-      const resp = await this.api.listProviderModels(trimmed, exactRoute);
+      const resp = await this.api.listProviderModels(targetProvider, targetExact);
       // Determine whether this provider has a built-in catalog so the
       // webview can show a free-text hint when models is empty. The exact
       // route decides which entry owns the answer: two named routes share the
       // generic id.
-      const info = this.findProviderEntry(trimmed, exactRoute);
+      const info = this.findProviderEntry(targetProvider, targetExact);
       // The answer names the route it describes, and the webview drops an
       // answer whose route is not the one on screen. That id comes from the
       // catalog rather than from the caller: the provider catalog reports an
       // exact id for built-in providers too, so echoing only what the caller
       // passed would make every answer for a built-in provider look stale.
-      const answeredRoute = info?.model_provider_id ?? exactRoute ?? "";
-      const effectiveCurrentModel = currentModel?.trim()
+      const answeredRoute = info?.model_provider_id ?? targetExact ?? "";
+      // The model of whatever is on screen wins over the caller's suggestion:
+      // the chip and the list have to describe the same conversation the route
+      // does. A viewed session has no thread to read, so its saved model is
+      // the answer — falling through to the route's default here would repaint
+      // the chip with a model the session never used.
+      const effectiveCurrentModel = this.currentThread?.model?.trim()
+        || (this.viewingSessionId ? this.viewingSessionModel?.trim() : undefined)
+        || currentModel?.trim()
         || info?.default_model
         || undefined;
       this.postMessage({
         type: "providerModels",
-        provider: trimmed,
+        provider: targetProvider,
         providerId: answeredRoute,
         models: resp.models.map(m => m.id),
         currentModel: effectiveCurrentModel,
@@ -3856,7 +3982,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     } catch (err) {
       this.postMessage({
         type: "error",
-        message: `Failed to list models for provider ${trimmed}: ${getErrorMessage(err)}`,
+        message: `Failed to list models for provider ${targetProvider}: ${getErrorMessage(err)}`,
       });
     }
   }
@@ -3892,6 +4018,217 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       if (match) return match;
     }
     return candidates.find(p => !p.model_provider_id) || candidates[0];
+  }
+
+  /** The catalog entry for the route the picker is on, when the runtime has
+   *  published one. */
+  private activeProviderEntry(): ProviderEntry | undefined {
+    if (!this.currentProvider) return undefined;
+    return this.findProviderEntry(this.currentProvider, this.currentProviderId ?? undefined);
+  }
+
+  /** Every route's remembered model, keyed by `model_provider_id || id`.
+   *
+   *  One global `defaultModel` cannot serve two providers: it holds whatever
+   *  route was touched last, so a thread created under a different route was
+   *  pinned to that route's provider with another route's model id —
+   *  `deepseek-flash` under the Zhipu route is `400 模型不存在`, and the same
+   *  pairing failed the DeepSeek Anthropic route's credential check. Each
+   *  route remembers its own; `defaultModel` stays as the last-resort
+   *  fallback. */
+  private providerModelMemory(): Record<string, string> {
+    const raw = vscode.workspace
+      .getConfiguration("brotherwhale")
+      .get<Record<string, unknown>>("modelByProvider", {});
+    const memory: Record<string, string> = {};
+    if (raw && typeof raw === "object") {
+      for (const [key, value] of Object.entries(raw)) {
+        if (typeof value === "string" && value.trim()) memory[key] = value.trim();
+      }
+    }
+    return memory;
+  }
+
+  /** The model a new thread of this route starts from.
+   *
+   *  Precedence: what this route last remembered, then the model the runtime's
+   *  own catalog publishes for it (the user's `[providers.<id>].model`, which
+   *  is provider-correct by construction), then the global `defaultModel` for a
+   *  route the catalog cannot describe. A pass-through route publishes no
+   *  catalog, so it keeps the fallback rather than a placeholder model id. */
+  public getModelForRoute(provider?: string | null, providerId?: string | null): string {
+    const key = providerRouteKey(provider, providerId);
+    const remembered = key ? this.providerModelMemory()[key] : undefined;
+    if (remembered) return remembered;
+    const entry = provider ? this.findProviderEntry(provider, providerId ?? undefined) : undefined;
+    const catalogModel = entry?.default_model?.trim();
+    if (entry?.has_model_catalog && catalogModel) return catalogModel;
+    return vscode.workspace
+      .getConfiguration("brotherwhale")
+      .get<string>("defaultModel", "deepseek-v4-pro");
+  }
+
+  /** Remember `model` for a route — the model its new threads start from.
+   *
+   *  Public because `/model` writes through the same path the provider picker
+   *  does (`SlashCommandContext`), so the memory has exactly one author. */
+  public async rememberModelForRoute(
+    model: string,
+    provider?: string | null,
+    providerId?: string | null
+  ): Promise<void> {
+    const trimmed = model?.trim();
+    if (!trimmed) return;
+    // An explicit route wins outright; with none, the route *on screen* is the
+    // one remembered for — the picker's only when nothing is open. Falling back
+    // per-field instead would mix the two (`/provider volcengine` names no
+    // exact id, and inheriting the previous provider's would write the model
+    // onto the route the user just left).
+    const explicit = provider !== undefined || providerId !== undefined;
+    const route = explicit
+      ? { provider: provider ?? undefined, providerId: providerId ?? undefined }
+      : this.viewRoute();
+    const key = providerRouteKey(route?.provider, route?.providerId);
+    if (!key) return;
+    const memory = this.providerModelMemory();
+    if (memory[key] === trimmed) return;
+    memory[key] = trimmed;
+    await vscode.workspace
+      .getConfiguration("brotherwhale")
+      .update("modelByProvider", memory, vscode.ConfigurationTarget.Global);
+  }
+
+  /** The provider pair a thread created now must carry.
+   *
+   *  Only returned when the runtime published an exact id for the active
+   *  route: the pair is what names one route, and `model_provider: "custom"`
+   *  without it would mean the legacy root-level route instead of the named one
+   *  the picker is showing. A runtime that publishes no exact id therefore
+   *  keeps the pre-existing behaviour — provider omitted, the runtime's own
+   *  active route used — rather than being pointed at the wrong one. */
+  private activeRoutePair(): { model_provider?: string; model_provider_id?: string } {
+    const active = this.activeProviderEntry();
+    const provider = active?.id || this.currentProvider || undefined;
+    const providerId = active?.model_provider_id || this.currentProviderId || undefined;
+    if (!provider || !providerId) return {};
+    return { model_provider: provider, model_provider_id: providerId };
+  }
+
+  /** Public accessor for `SlashCommandContext`: a command that creates a
+   *  conversation sends the same three fields a chat thread's creation does. */
+  public routeForNewConversation(): {
+    model: string;
+    model_provider?: string;
+    model_provider_id?: string;
+  } {
+    return this.newThreadRoute();
+  }
+
+  /** The route a brand-new thread is created on: the picker's active provider
+   *  plus the model remembered for it. */
+  private newThreadRoute(): {
+    model: string;
+    model_provider?: string;
+    model_provider_id?: string;
+  } {
+    const pair = this.activeRoutePair();
+    return {
+      ...pair,
+      model: this.getModelForRoute(pair.model_provider, pair.model_provider_id),
+    };
+  }
+
+  /** The route a thread record already carries, for a thread this client is
+   *  rebuilding: its own provider pair and model, never the picker's. */
+  private threadRoute(thread: ThreadRecord): {
+    model: string;
+    model_provider?: string;
+    model_provider_id?: string;
+  } {
+    const provider = thread.model_provider?.trim() || undefined;
+    const providerId = thread.model_provider_id?.trim() || undefined;
+    const model = thread.model?.trim() || this.getModelForRoute(provider, providerId);
+    if (!provider) return { model };
+    // A built-in kind stands on its own: the runtime resolves it back to that
+    // route and fills the exact id (verified against an engine — `POST
+    // /v1/threads` with the kind alone answers 201 and stores both). The
+    // literal `custom` kind does not: without an exact id it names the legacy
+    // root-level route, which the runtime refuses outright once the live config
+    // selects a named one ("legacy session records only the generic `custom`
+    // provider kind, but the live config selects 'bigmodel-cn' … will not guess
+    // or fall back"). That record keeps the pre-route behaviour — the runtime's
+    // own active route — rather than turning a rebuild into a 400.
+    if (!providerId && provider.toLowerCase() === "custom") return { model };
+    return providerId
+      ? { model, model_provider: provider, model_provider_id: providerId }
+      : { model, model_provider: provider };
+  }
+
+  /** The provider pair a thread record carries, when it has one. */
+  private threadRouteOf(
+    thread: ThreadRecord | null | undefined
+  ): { provider: string; providerId?: string } | null {
+    const provider = thread?.model_provider?.trim();
+    if (!provider) return null;
+    return { provider, providerId: thread?.model_provider_id?.trim() || undefined };
+  }
+
+  /** The route this view is bound to: the open conversation's own route when it
+   *  has one, then the route of a saved session being *viewed* (its next
+   *  message resumes it into a thread on that route), then the picker's active
+   *  route.
+   *
+   *  A conversation keeps the provider it was created on (`runtime_threads.rs::
+   *  provider_identity_for_thread` resolves the thread's persisted route, and
+   *  neither `PATCH /v1/threads` nor `POST .../turns` carries a provider), so
+   *  once the picker has moved on, these are two different answers. Everything
+   *  that describes "what will happen when I send" — the provider chip, the
+   *  model chip, the model list — has to read this one. */
+  private viewRoute(): { provider: string; providerId?: string } | null {
+    const thread = this.threadRouteOf(this.currentThread);
+    if (thread) return thread;
+    if (this.viewingSessionId && this.viewingSessionProvider) {
+      return {
+        provider: this.viewingSessionProvider,
+        providerId: this.viewingSessionProviderId ?? undefined,
+      };
+    }
+    if (!this.currentProvider) return null;
+    return { provider: this.currentProvider, providerId: this.currentProviderId ?? undefined };
+  }
+
+  /** Whether `model` belongs to a provider route other than the one this view
+   *  is bound to.
+   *
+   *  `/model <id>` can name any id at all, and an id that belongs to another
+   *  provider is exactly the pair a provider answers `400 模型不存在` for (the
+   *  Zhipu route received `deepseek-flash` this way). The rule is deliberately
+   *  narrow — the id must be one another route is *known* to use, as that
+   *  route's own catalog default or as the model remembered for it — because
+   *  the engine itself accepts a name-shaped id for a route whose catalog does
+   *  not list it (`normalize_runtime_config_model` validates the shape, not
+   *  membership). Refusing everything outside the route's catalog would make
+   *  the GUI stricter than the engine and reject models that work, which is a
+   *  worse failure than passing one through to a provider that says no. */
+  public modelFitsViewRoute(model: string): {
+    ok: boolean;
+    route: string;
+    /** The other route this id is known to belong to, when it is one. */
+    foreign?: string;
+  } {
+    const trimmed = model?.trim() ?? "";
+    const route = this.viewRoute();
+    const routeKey = providerRouteKey(route?.provider, route?.providerId);
+    if (!trimmed || !route) return { ok: true, route: routeKey };
+    const memory = this.providerModelMemory();
+    for (const entry of this.providersCache ?? []) {
+      const entryKey = providerEntryRouteKey(entry);
+      if (!entryKey || entryKey === routeKey) continue;
+      if (entry.default_model?.trim() === trimmed || memory[entryKey] === trimmed) {
+        return { ok: false, route: routeKey, foreign: entryKey };
+      }
+    }
+    return { ok: true, route: routeKey };
   }
 
   private startPeriodicTaskRefresh(): void {
@@ -6130,9 +6467,15 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     });
   }
 
+  /** The model of whatever this view is on: the open conversation's, else the
+   *  viewed session's, else the one the picker's route would start a new
+   *  conversation with. One answer, so the chip, `/model` with no argument and
+   *  the model menu cannot name three different models. */
   public getCurrentModel(): string {
-    const cfg = vscode.workspace.getConfiguration("brotherwhale");
-    return cfg.get<string>("defaultModel", "deepseek-v4-pro");
+    const threadModel = this.currentThread?.model?.trim();
+    if (threadModel) return threadModel;
+    if (this.viewingSessionId && this.viewingSessionModel) return this.viewingSessionModel;
+    return this.getModelForRoute(this.currentProvider, this.currentProviderId);
   }
 
   public getCurrentSessionId(): string | null {

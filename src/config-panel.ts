@@ -7,6 +7,7 @@
 import * as vscode from "vscode";
 import type { CodeWhaleApiClient, ProviderEntry } from "./types";
 import { getErrorMessage } from "./utils/error-handler";
+import { PROVIDER_PICKER_JS } from "./utils/provider-route";
 import {
   MODE_LABELS,
   MODE_VALUES,
@@ -687,6 +688,14 @@ export class ConfigPanel {
     let currentConfig = null;
     let pendingChanges = {};
 
+    // Provider rows are named and filtered by the same rules the toolbar picker
+    // uses (utils/provider-route.ts): two rows can share a display name — both
+    // DeepSeek routes are called "DeepSeek" — and a row with no key configured
+    // is not a selectable route. This panel's copy is English, so the two
+    // suffixes are too.
+    const __cwProviderText = { needsLogin: 'needs login', noKey: 'no key configured' };
+${PROVIDER_PICKER_JS}
+
     // ── Helpers ──
 
     function $(id) { return document.getElementById(id); }
@@ -814,10 +823,15 @@ export class ConfigPanel {
             // and the user could not tell the two apart.
             if (seen[value]) continue;
             seen[value] = true;
+            var isActive = p.id === msg.current && (!exactKnown || (p.model_provider_id || '') === activeExact);
+            // Same rule as the toolbar picker: a route with no credential is
+            // not offered, except the active one, which the form must be able
+            // to describe.
+            if (!__cwProviderVisible(p, isActive)) continue;
             var opt = document.createElement('option');
             opt.value = value;
-            opt.textContent = p.display_name || value;
-            if (p.id === msg.current && (!exactKnown || (p.model_provider_id || '') === activeExact)) {
+            opt.textContent = __cwProviderLabel(p, msg.providers, __cwProviderText);
+            if (isActive) {
               opt.selected = true;
             }
             sel.appendChild(opt);

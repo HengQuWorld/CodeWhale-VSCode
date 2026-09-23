@@ -4,11 +4,17 @@
  */
 import type { WebviewTranslations } from "./webview-html";
 import { MODE_LABELS, POSTURE_LABELS } from "../utils/modes";
+import { PROVIDER_PICKER_JS } from "../utils/provider-route";
 
 export function getEventHandlerScript(tr: WebviewTranslations): string {
   return `(function(){
   'use strict';
   var __i18n = window.__wvI18n;
+  var __cwProviderText = {
+    needsLogin: ${JSON.stringify(tr.providerNeedsLogin)},
+    noKey: ${JSON.stringify(tr.providerNoKey)}
+  };
+${PROVIDER_PICKER_JS}
   var __wvEscapeHtml = window.__wvEscapeHtml;
   var __wvFormatLoadedThread = window.__wvFormatLoadedThread;
   var vscode = window.__wvVscode;
@@ -256,6 +262,10 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
   var lastProviders = [];
   var lastProvider = '';
   var lastProviderId = '';
+  // The route whatever is on screen runs on — the open conversation's, or a
+  // viewed session's — pushed alongside the picker's.
+  var lastViewProvider = '';
+  var lastViewProviderId = '';
 
   // Two user-defined routes report the same generic id ('custom') and differ
   // only by 'model_provider_id', so an entry is the selected one only when
@@ -267,47 +277,86 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
     return (p.model_provider_id || '') === (currentExactId || '');
   }
 
-  function activeProviderEntry() {
-    var exactKnown = !!lastProviderId;
-    for (var i = 0; i < lastProviders.length; i++) {
-      if (providerEntryIsActive(lastProviders[i], lastProvider, lastProviderId, exactKnown)) {
-        return lastProviders[i];
-      }
+  /** Whether what is on screen runs on a different route than the picker's.
+   *
+   *  A conversation keeps the provider it was created on and a viewed session
+   *  carries its own, so once the picker has moved on, "where will my next
+   *  message go" and "what did I just switch to" are different routes. The
+   *  chip and the model list answer the first question; the dropdown still
+   *  marks the second. */
+  function threadRouteDiffers() {
+    if (!lastViewProvider) return false;
+    if (lastViewProvider !== (lastProvider || '')) return true;
+    return (lastViewProviderId || '') !== (lastProviderId || '');
+  }
+
+  /** The provider pair the model list must be requested for: the one on screen
+   *  when there is something, otherwise the picker's. */
+  function modelListRoute() {
+    if (lastViewProvider) {
+      return { provider: lastViewProvider, providerId: lastViewProviderId || '' };
     }
-    return null;
+    return { provider: lastProvider || '', providerId: lastProviderId || '' };
   }
 
   /** Paint the chip from the cached catalog — one place decides the label, so
    *  the chip, the dropdown's mark and the model guard cannot disagree. */
   function applyProviderLabel() {
     if (!currentProviderEl) return;
-    var active = activeProviderEntry();
-    currentProviderEl.setAttribute('data-provider-id', lastProvider || '');
-    currentProviderEl.setAttribute('data-model-provider-id', lastProviderId || '');
-    currentProviderEl.textContent = active
-      ? (active.display_name || active.model_provider_id || active.id)
-      : (lastProviderId || lastProvider);
+    var route = modelListRoute();
+    // The chip carries the route the model list is fetched for, so the answer's
+    // own guard (chip route vs answer route) compares like with like.
+    currentProviderEl.setAttribute('data-provider-id', route.provider || '');
+    currentProviderEl.setAttribute('data-model-provider-id', route.providerId || '');
+    var entry = providerEntryFor(route.provider, route.providerId);
+    var label = entry
+      ? __cwProviderLabel(entry, lastProviders, __cwProviderText)
+      : (route.providerId || route.provider || '');
+    if (threadRouteDiffers()) label = label + ' · ' + __i18n.threadRouteMarker;
+    currentProviderEl.textContent = label;
   }
 
-  function renderProviderDropdown(providers, currentId, currentExactId) {
+  /** The catalog entry for a route, by the same pair the picker matches on. */
+  function providerEntryFor(providerId, exactId) {
+    if (!providerId) return null;
+    var exactKnown = !!exactId;
+    for (var i = 0; i < lastProviders.length; i++) {
+      if (providerEntryIsActive(lastProviders[i], providerId, exactId, exactKnown)) {
+        return lastProviders[i];
+      }
+    }
+    return null;
+  }
+
+  function renderProviderDropdown(providers, currentId, currentExactId, viewProvider, viewProviderId) {
     if (!dropdownProviderEl) return;
     lastProviders = providers;
     lastProvider = currentId || '';
     lastProviderId = currentExactId || '';
+    lastViewProvider = viewProvider || '';
+    lastViewProviderId = viewProviderId || '';
     var exactKnown = !!lastProviderId;
     dropdownProviderEl.innerHTML = '';
     for (var i = 0; i < providers.length; i++) {
       var p = providers[i];
+      var isActive = providerEntryIsActive(p, currentId, currentExactId, exactKnown);
+      // A route with no key configured is not a choice — it only spends the
+      // user's first message to explain itself, and the two DeepSeek routes
+      // proved how expensive that is. The route that is already active stays
+      // listed whatever its state, or the chip would name a row the picker
+      // cannot show.
+      if (!__cwProviderVisible(p, isActive)) continue;
       var item = document.createElement('div');
       item.className = 'dropdown-item';
       item.setAttribute('data-value', p.id);
       // The exact configured id is what names one route when several share the
       // generic kind; the switch request carries both.
       item.setAttribute('data-model-provider-id', p.model_provider_id || '');
-      // Show display_name (e.g. "OpenAI", "bigmodel-cn (custom)") when
-      // available, falling back to the route name, then to the id.
-      var label = p.display_name || p.model_provider_id || p.id;
-      if (providerEntryIsActive(p, currentId, currentExactId, exactKnown)) {
+      // Route id appended whenever two rows share a display name (both DeepSeek
+      // routes are called "DeepSeek"), plus the credential state when the route
+      // is not ready.
+      var label = __cwProviderLabel(p, providers, __cwProviderText);
+      if (isActive) {
         label = label + ' \\u2713';
       }
       item.textContent = label;
@@ -505,21 +554,29 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
         break;
 
       case 'providersUpdated':
-        // Backend pushed the full provider list + active ids. Re-render the
-        // provider dropdown and request the model catalog for the active
-        // provider so the model dropdown stays in sync.
+        // Backend pushed the full provider list, the picker's active route, and
+        // the route the open conversation runs on. Re-render the provider
+        // dropdown, then ask for the *conversation's* model list: that is the
+        // list whose models the next message can actually use, and offering
+        // another route's models here is how deepseek-flash was picked for a
+        // thread pinned to the Zhipu route.
         if (Array.isArray(msg.providers) && dropdownProviderEl && currentProviderEl) {
-          renderProviderDropdown(msg.providers, msg.current || '', msg.currentProviderId || '');
-          // After re-rendering, ask the backend for the active provider's
-          // model list so the model dropdown reflects the new provider. The
-          // exact id travels with it: without it, a named custom route is not
-          // addressable and the request would answer for the generic kind.
-          var activeId = msg.current || (msg.providers[0] && msg.providers[0].id);
-          if (activeId) {
+          renderProviderDropdown(
+            msg.providers,
+            msg.current || '',
+            msg.currentProviderId || '',
+            msg.viewProvider || '',
+            msg.viewProviderId || ''
+          );
+          var route = modelListRoute();
+          if (!route.provider) {
+            route = { provider: msg.providers[0] && msg.providers[0].id, providerId: '' };
+          }
+          if (route.provider) {
             vscode.postMessage({
               type: 'requestProviderModels',
-              provider: activeId,
-              providerId: msg.currentProviderId || undefined,
+              provider: route.provider,
+              providerId: route.providerId || undefined,
             });
           }
         }

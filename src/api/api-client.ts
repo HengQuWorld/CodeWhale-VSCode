@@ -226,6 +226,15 @@ export class CodeWhaleApiClient {
 
   async createThread(opts?: {
     model?: string;
+    /** Provider kind for the new thread's route. Sent together with
+     *  `model_provider_id` and `model`: a thread's route is one choice, and
+     *  sending only the model let the runtime pair it with whichever provider
+     *  happened to be active — a DeepSeek model id under the Zhipu route is
+     *  `400 模型不存在`. */
+    model_provider?: string;
+    /** Exact configured route (`model_provider_id`), for a named
+     *  `[providers.<name>]` route or a legacy dialect kind. */
+    model_provider_id?: string;
     mode?: string;
     workspace?: string;
     allow_shell?: boolean;
@@ -237,6 +246,8 @@ export class CodeWhaleApiClient {
   }): Promise<ThreadRecord> {
     const body: Record<string, unknown> = {};
     if (opts?.model) body.model = opts.model;
+    if (opts?.model_provider) body.model_provider = opts.model_provider;
+    if (opts?.model_provider_id) body.model_provider_id = opts.model_provider_id;
     if (opts?.mode) body.mode = opts.mode;
     if (opts?.workspace) body.workspace = opts.workspace;
     if (opts?.allow_shell !== undefined) body.allow_shell = opts.allow_shell;
@@ -515,6 +526,10 @@ export class CodeWhaleApiClient {
   async createTask(opts: {
     prompt: string;
     model?: string;
+    /** Provider kind for the task thread's route; see `createThread`. */
+    model_provider?: string;
+    /** Exact configured route for the task thread; see `createThread`. */
+    model_provider_id?: string;
     mode?: string;
     workspace?: string;
     auto_approve?: boolean;

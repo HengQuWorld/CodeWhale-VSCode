@@ -57,6 +57,32 @@ export interface SlashCommandContext {
    *  until the webview reloads. */
   postScopedDefaults(): void;
   getCurrentModel(): string;
+  /** Remember `model` as the model the route on screen's new threads start
+   *  from. A model is remembered per route, so `/model` on one provider cannot
+   *  change what another provider's new threads use. */
+  rememberModelForRoute(
+    model: string,
+    provider?: string | null,
+    providerId?: string | null
+  ): Promise<void>;
+  /** Whether `model` belongs to some other provider route than the one this
+   *  view is bound to (the open conversation's or viewed session's route, else
+   *  the picker's). `foreign` names that route when it does. */
+  modelFitsViewRoute(model: string): {
+    ok: boolean;
+    route: string;
+    foreign?: string;
+  };
+  /** The route a conversation created now would run on: the picker's active
+   *  provider plus the model remembered for it. A command that creates a
+   *  conversation (`/task add`) sends all three together — sending the model
+   *  with another route's provider is the pair a provider answers
+   *  `400 模型不存在` for. */
+  routeForNewConversation(): {
+    model: string;
+    model_provider?: string;
+    model_provider_id?: string;
+  };
   /** Returns the cached provider list from `GET /v1/providers`, or null if
    * not yet loaded. Slash handlers (`/provider`, `/models`) use this to
    * render dynamic output instead of the hard-coded deepseek-only list. */
@@ -172,7 +198,7 @@ async function applyMode(
   mode: TuiMode,
   opts?: { posture?: PermissionPosture }
 ): Promise<void> {
-  const model = ctx.currentThread?.model || cfg().get<string>("defaultModel", "deepseek-v4-pro");
+  const model = ctx.currentThread?.model || ctx.getCurrentModel();
   const reasoningEffort = cfg().get<string>("reasoningEffort", "auto");
   const posture = opts?.posture;
 
@@ -222,7 +248,7 @@ async function applyMode(
  * Thread-scoped for the same reason as `applyMode`: the startup default for new
  * threads is its own setting and its own dropdown group (`setDefaultPosture`). */
 async function applyPosture(ctx: SlashCommandContext, posture: PermissionPosture): Promise<void> {
-  const model = ctx.currentThread?.model || cfg().get<string>("defaultModel", "deepseek-v4-pro");
+  const model = ctx.currentThread?.model || ctx.getCurrentModel();
   const reasoningEffort = cfg().get<string>("reasoningEffort", "auto");
   const mode = normalizeMode(ctx.currentThread?.mode || cfg().get<string>("defaultMode", "agent"));
   const wire = POSTURE_WIRE[posture];
@@ -275,7 +301,23 @@ function effectivePosture(ctx: SlashCommandContext): PermissionPosture {
 async function handleModel(ctx: SlashCommandContext, args: string): Promise<void> {
   const model = args.trim();
   if (model) {
-    await cfg().update("defaultModel", model, vscode.ConfigurationTarget.Global);
+    // A model id belonging to another provider is the pair a provider answers
+    // `400 模型不存在` for. Refuse that one while the reason can be named; an id
+    // this route merely does not list is left to the provider, which is what
+    // the engine does with it too.
+    const fit = ctx.modelFitsViewRoute(model);
+    if (!fit.ok) {
+      ctx.postMessage({
+        type: "error",
+        message: `Cannot use ${model}: it belongs to ${fit.foreign}, not to this conversation's route (${fit.route}).`,
+      });
+      return;
+    }
+    // Remembered for the route on screen, not in the single global
+    // `defaultModel`: one global value is shared by every provider, which is
+    // how a model chosen for DeepSeek ended up pinned to a thread created
+    // under the Zhipu route (`400 模型不存在`).
+    await ctx.rememberModelForRoute(model);
     const defaultMode = normalizeMode(cfg().get<string>("defaultMode", "agent"));
     const reasoningEffort = cfg().get<string>("reasoningEffort", "auto");
     const posture = effectivePosture(ctx);
@@ -291,17 +333,17 @@ async function handleModel(ctx: SlashCommandContext, args: string): Promise<void
       } catch (err) {
         ctx.postMessage({
           type: "error",
-          message: `Model changed in settings but failed to update current thread: ${getErrorMessage(err)}`,
+          message: `Model remembered for this provider but failed to update current thread: ${getErrorMessage(err)}`,
         });
         modeForUi = normalizeMode(ctx.currentThread.mode);
         modelForUi = ctx.currentThread.model;
-        infoMessage = `Default model changed to ${model}; current thread remains ${ctx.currentThread.model}`;
+        infoMessage = `Model remembered for this provider as ${model}; current thread remains ${ctx.currentThread.model}`;
       }
     }
     ctx.postMessage({ type: "settingsUpdated", mode: modeForUi, posture, model: modelForUi, reasoningEffort });
     ctx.postMessage({ type: "info", message: infoMessage });
   } else {
-    ctx.postMessage({ type: "info", message: `Current model: ${cfg().get<string>("defaultModel", "deepseek-v4-pro")}` });
+    ctx.postMessage({ type: "info", message: `Current model: ${ctx.getCurrentModel()}` });
   }
 }
 
@@ -352,7 +394,7 @@ async function handleReasoning(ctx: SlashCommandContext, args: string): Promise<
   const effort = args.trim().toLowerCase();
   if (["auto", "off", "low", "medium", "high", "max"].includes(effort)) {
     await cfg().update("reasoningEffort", effort, vscode.ConfigurationTarget.Global);
-    ctx.postMessage({ type: "settingsUpdated", mode: normalizeMode(ctx.currentThread?.mode || cfg().get<string>("defaultMode", "agent")), posture: effectivePosture(ctx), model: cfg().get<string>("defaultModel", "deepseek-v4-pro"), reasoningEffort: effort });
+    ctx.postMessage({ type: "settingsUpdated", mode: normalizeMode(ctx.currentThread?.mode || cfg().get<string>("defaultMode", "agent")), posture: effectivePosture(ctx), model: ctx.getCurrentModel(), reasoningEffort: effort });
     ctx.postMessage({ type: "info", message: `Reasoning effort changed to ${effort}` });
   } else {
     ctx.postMessage({ type: "info", message: `Current reasoning effort: ${cfg().get<string>("reasoningEffort", "auto")}\nUsage: /reasoning [auto|off|low|medium|high|max]` });
@@ -401,7 +443,7 @@ async function handleConfig(ctx: SlashCommandContext, args: string): Promise<voi
 }
 
 async function handleSettings(ctx: SlashCommandContext, _args: string): Promise<void> {
-  ctx.postMessage({ type: "info", message: `Current settings:\n- Mode: ${modeLabel(ctx.currentThread?.mode || cfg().get<string>("defaultMode", "agent"))}\n- Permission: ${POSTURE_LABELS[effectivePosture(ctx)]}\n- Model: ${cfg().get<string>("defaultModel", "deepseek-v4-pro")}\n- Reasoning Effort: ${cfg().get<string>("reasoningEffort", "auto")}\n- Engine Path: ${cfg().get<string>("enginePath", "codewhale")}` });
+  ctx.postMessage({ type: "info", message: `Current settings:\n- Mode: ${modeLabel(ctx.currentThread?.mode || cfg().get<string>("defaultMode", "agent"))}\n- Permission: ${POSTURE_LABELS[effectivePosture(ctx)]}\n- Model: ${ctx.getCurrentModel()}\n- Reasoning Effort: ${cfg().get<string>("reasoningEffort", "auto")}\n- Engine Path: ${cfg().get<string>("enginePath", "codewhale")}` });
 }
 
 async function handleInterrupt(ctx: SlashCommandContext, _args: string): Promise<void> {
@@ -473,7 +515,7 @@ async function handleExport(ctx: SlashCommandContext, _args: string): Promise<vo
 
 async function handleContext(ctx: SlashCommandContext, _args: string): Promise<void> {
   if (ctx.currentThread) {
-    ctx.postMessage({ type: "info", message: `Thread: ${ctx.currentThread.id.slice(0, 12)}...\nMessages: ${ctx.messages.length}\nMode: ${cfg().get<string>("defaultMode", "agent")}\nModel: ${cfg().get<string>("defaultModel", "deepseek-v4-pro")}` });
+    ctx.postMessage({ type: "info", message: `Thread: ${ctx.currentThread.id.slice(0, 12)}...\nMessages: ${ctx.messages.length}\nMode: ${cfg().get<string>("defaultMode", "agent")}\nModel: ${ctx.getCurrentModel()}` });
   } else {
     ctx.postMessage({ type: "info", message: "No active thread" });
   }
@@ -642,19 +684,19 @@ async function handleStatus(ctx: SlashCommandContext, _args: string): Promise<vo
   Thread: ${ctx.currentThread ? ctx.currentThread.id.slice(0, 12) + "..." : "None"}
   Mode: ${modeLabel(ctx.currentThread?.mode || cfg().get<string>("defaultMode", "agent"))}
   Permission: ${POSTURE_LABELS[effectivePosture(ctx)]}
-  Model: ${cfg().get<string>("defaultModel", "deepseek-v4-pro")}`
+  Model: ${ctx.getCurrentModel()}`
     });
   } catch (err) {
     const running = ctx.engine.isRunning;
     ctx.postMessage({
       type: "info",
-      message: `Engine: ${running ? "Running" : "Stopped"}\nPort: ${ctx.engine.port}\nThread: ${ctx.currentThread ? ctx.currentThread.id.slice(0, 12) + "..." : "None"}\nMode: ${modeLabel(ctx.currentThread?.mode || cfg().get<string>("defaultMode", "agent"))}\nPermission: ${POSTURE_LABELS[effectivePosture(ctx)]}\nModel: ${cfg().get<string>("defaultModel", "deepseek-v4-pro")}\n(${formatError("Runtime info unavailable", err)})`
+      message: `Engine: ${running ? "Running" : "Stopped"}\nPort: ${ctx.engine.port}\nThread: ${ctx.currentThread ? ctx.currentThread.id.slice(0, 12) + "..." : "None"}\nMode: ${modeLabel(ctx.currentThread?.mode || cfg().get<string>("defaultMode", "agent"))}\nPermission: ${POSTURE_LABELS[effectivePosture(ctx)]}\nModel: ${ctx.getCurrentModel()}\n(${formatError("Runtime info unavailable", err)})`
     });
   }
 }
 
 async function handleHome(ctx: SlashCommandContext, _args: string): Promise<void> {
-  ctx.postMessage({ type: "info", message: `Dashboard:\n- Threads: see sidebar\n- Mode: ${modeLabel(ctx.currentThread?.mode || cfg().get<string>("defaultMode", "agent"))}\n- Permission: ${POSTURE_LABELS[effectivePosture(ctx)]}\n- Model: ${cfg().get<string>("defaultModel", "deepseek-v4-pro")}\n- Reasoning: ${cfg().get<string>("reasoningEffort", "auto")}` });
+  ctx.postMessage({ type: "info", message: `Dashboard:\n- Threads: see sidebar\n- Mode: ${modeLabel(ctx.currentThread?.mode || cfg().get<string>("defaultMode", "agent"))}\n- Permission: ${POSTURE_LABELS[effectivePosture(ctx)]}\n- Model: ${ctx.getCurrentModel()}\n- Reasoning: ${cfg().get<string>("reasoningEffort", "auto")}` });
 }
 
 async function handleWorkspace(ctx: SlashCommandContext, _args: string): Promise<void> {
@@ -688,9 +730,16 @@ async function handleTask(ctx: SlashCommandContext, args: string): Promise<void>
       // from the same startup-default scope — the permission used to fall to
       // whatever the runtime defaults to instead.
       const posture = configuredStartupPosture();
+      // One route, from one place: a task is a new conversation, so its
+      // provider and model come from the same resolution a chat thread's does.
+      // Taking the model from the view and the provider from the picker (as
+      // this did) can send one route's model under another's provider.
+      const route = ctx.routeForNewConversation();
       const task = await ctx.api.createTask({
         prompt: taskRest,
-        model: taskCfg.get<string>("defaultModel", "deepseek-v4-pro"),
+        model: route.model,
+        model_provider: route.model_provider,
+        model_provider_id: route.model_provider_id,
         mode: normalizeMode(taskCfg.get<string>("defaultMode", "agent")),
         workspace: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
         permission_posture: POSTURE_WIRE[posture],
@@ -782,7 +831,7 @@ function postCurrentSettings(ctx: SlashCommandContext): void {
     type: "settingsUpdated",
     mode: normalizeMode(ctx.currentThread?.mode || cfg().get<string>("defaultMode", "agent")),
     posture: effectivePosture(ctx),
-    model: ctx.currentThread?.model || cfg().get<string>("defaultModel", "deepseek-v4-pro"),
+    model: ctx.currentThread?.model || ctx.getCurrentModel(),
     reasoningEffort: cfg().get<string>("reasoningEffort", "auto"),
   });
 }

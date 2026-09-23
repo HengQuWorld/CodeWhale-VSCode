@@ -8,6 +8,13 @@ export interface ThreadRecord {
   created_at: string;
   updated_at: string;
   model: string;
+  /** The provider kind this thread runs on, with the exact configured route in
+   *  `model_provider_id` when it has one — the pair `POST /v1/threads` pins at
+   *  creation. Both are optional: a runtime older than the fields omits them,
+   *  and absent means "the runtime's active route", which is how this client
+   *  behaved before it sent an explicit pair. */
+  model_provider?: string | null;
+  model_provider_id?: string | null;
   workspace: string;
   mode: string;
   /** Named default permission posture for new turns: `ask` | `auto_review` |
@@ -375,6 +382,12 @@ export interface SessionMetadata {
   message_count: number;
   total_tokens: number;
   model: string;
+  /** Provider route this session was saved on. The runtime stores both and
+   *  reads them back when the session is resumed into a thread, so they are
+   *  also what a merely-*viewed* session will run on the moment its next
+   *  message creates — or reopens — that thread. */
+  model_provider?: string | null;
+  model_provider_id?: string | null;
   workspace: string;
   mode?: string | null;
   cost?: {

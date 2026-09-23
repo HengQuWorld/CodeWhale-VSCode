@@ -219,7 +219,8 @@ code --install-extension ./brotherwhale-vscode-0.7.3.vsix --force
 | 设置项 | 默认值 | 说明 |
 |---|---|---|
 | `brotherwhale.enginePath` | `"codewhale"` | 引擎二进制路径。保持默认即使用内置的自动查找 |
-| `brotherwhale.defaultModel` | `"deepseek-v4-pro"` | 新线程的默认模型 |
+| `brotherwhale.defaultModel` | `"deepseek-v4-pro"` | 新会话的回退模型：仅当该路线在 `brotherwhale.modelByProvider` 中无记录、且其运行时目录也没有模型时使用 |
+| `brotherwhale.modelByProvider` | `{}` | 每条 provider 路线的新会话使用的模型，按路线 id（有精确 id 时为 `model_provider_id`）记录。由 `/model` 与 provider 选择器写入 |
 | `brotherwhale.defaultMode` | `"agent"` | `agent`（Act）、`plan` 或 `operate`。旧的 `yolo` 值会解析为 Act + Full Access |
 | `brotherwhale.defaultPermissionPosture` | `"ask"` | `ask`、`auto_review` 或 `full_access` |
 | `brotherwhale.reasoningEffort` | `"auto"` | `auto`、`off`、`low`、`medium`、`high`、`max` |

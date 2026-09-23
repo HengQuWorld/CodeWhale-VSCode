@@ -9,11 +9,12 @@
   "commands.restartEngine.title": "CodeWhale: Restart Engine",
   "commands.openConfig.title": "CodeWhale: Open Config Panel",
   "config.enginePath.description": "Path to the codewhale binary",
-  "config.defaultModel.description": "Default model for new threads",
+  "config.defaultModel.description": "Fallback model for new threads: used only for a provider route that has no entry in `brotherwhale.modelByProvider` and no model in its own runtime catalog.",
   "config.defaultMode.description": "Default mode for new threads: agent (Act), plan, or operate",
   "config.defaultPermissionPosture.description": "Default permission posture for new threads: ask, auto_review, or full_access (the TUI's Ask / Auto-Review / Full Access)",
   "config.reasoningEffort.description": "Reasoning effort level (auto, off, low, medium, high, max)",
   "config.autoApprove.description": "Legacy fallback: auto-approve tool calls. Prefer the Full Access permission posture, which already implies auto-approval.",
   "config.costCurrency.description": "Currency for cost display: auto follows the interface language (Chinese → CNY, otherwise USD), or force USD/CNY. Amounts come from the TUI runtime's provider-published pricing; when no native CNY price exists the display falls back to USD (same as the TUI).",
-  "config.backgroundThreadNotifications.description": "Show a VS Code notification when a background thread needs your approval or input (each fires once per attention episode; the Threads rail badge always stays live)."
+  "config.backgroundThreadNotifications.description": "Show a VS Code notification when a background thread needs your approval or input (each fires once per attention episode; the Threads rail badge always stays live).",
+  "config.modelByProvider.description": "The model each provider route's new threads start from, keyed by the route's id (`model_provider_id` when it has one). `/model` and the provider picker write here, so choosing a model on one route no longer changes what another route's new threads use. `brotherwhale.defaultModel` remains the fallback for a route with no entry here."
 }

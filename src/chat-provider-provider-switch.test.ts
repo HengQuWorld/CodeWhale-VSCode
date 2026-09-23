@@ -13,6 +13,7 @@ const vscodeState = vi.hoisted(() => {
     updateMock: vi.fn(async (key: string, value: unknown) => {
       vscodeState.configValues.set(key, value);
     }),
+    showWarningMessage: vi.fn(),
   };
 });
 
@@ -27,7 +28,7 @@ vi.mock("vscode", () => ({
     })),
   },
   window: {
-    showWarningMessage: vi.fn(),
+    showWarningMessage: vscodeState.showWarningMessage,
     showErrorMessage: vi.fn(),
     setStatusBarMessage: vi.fn(),
   },
@@ -187,10 +188,15 @@ describe("ChatProvider provider switch", () => {
     );
   });
 
-  it("passes the explicit model to switchProvider and persists it to VSCode config when the user chose one", async () => {
+  it("passes the explicit model to switchProvider and remembers it for that route when the user chose one", async () => {
     // Mirrors the TUI's `/provider volcengine glm-2` flow: the model arg is
     // forwarded to the backend, which persists `[providers.volcengine].model`
     // and returns the same model in the response.
+    //
+    // The client half is remembered per route (`modelByProvider`) and NOT in
+    // the single global `defaultModel`: one global value is shared by every
+    // provider, which is how a model chosen here ended up pinned to a thread
+    // created under a different route.
     const api = {
       bindEngine: vi.fn(),
       ensureReady: vi.fn(async () => undefined),
@@ -232,14 +238,68 @@ describe("ChatProvider provider switch", () => {
     await (provider as any).handleSwitchProvider("volcengine", "glm-2");
 
     expect(api.switchProvider).toHaveBeenCalledWith("volcengine", "glm-2", undefined);
-    expect(vscodeState.updateMock).toHaveBeenCalledWith(
-      "defaultModel", "glm-2", "global"
+    expect(vscodeState.configValues.get("modelByProvider")).toEqual({ volcengine: "glm-2" });
+    expect(vscodeState.updateMock).not.toHaveBeenCalledWith(
+      "defaultModel", expect.anything(), expect.anything()
     );
     expect(provider.postMessage).toHaveBeenCalledWith(expect.objectContaining({
       type: "settingsUpdated",
       model: "glm-2",
       provider: "volcengine",
     }));
+  });
+
+  it("remembers the resolved model under the route that was asked for, even if the catalog refresh fails", async () => {
+    // `refreshProviders` swallows a failed catalog read. Keying the memory off
+    // the post-refresh active route would then write this route's model onto
+    // whatever route was active before — poisoning a route the user did not
+    // touch.
+    const api = {
+      bindEngine: vi.fn(),
+      ensureReady: vi.fn(async () => undefined),
+      switchProvider: vi.fn(async () => ({
+        provider: "volcengine",
+        model: "glm-2",
+        message: "Provider switched to volcengine.",
+        persisted: true,
+      })),
+      listProviders: vi.fn(async () => {
+        throw new Error("engine restarting");
+      }),
+      listProviderModels: vi.fn(async () => ({ provider: "volcengine", models: [] })),
+    };
+
+    const provider = new ChatProvider({} as any, {} as any, api as any);
+    provider.postMessage = vi.fn();
+    // Stale state from before the switch: a refresh that fails leaves these
+    // pointing at the previous route.
+    (provider as any).currentProvider = "deepseek";
+    (provider as any).currentProviderId = "deepseek";
+
+    await (provider as any).handleSwitchProvider("volcengine");
+
+    expect(vscodeState.configValues.get("modelByProvider")).toEqual({ volcengine: "glm-2" });
+  });
+
+  it("remembers a model for the route on screen, not the picker's", async () => {
+    // `/model` with no explicit route reaches this same method. A model chosen
+    // for a conversation belongs to that conversation's route — the picker may
+    // have moved on, and writing under its key would apply the choice somewhere
+    // the user never made it.
+    const api = { bindEngine: vi.fn(), ensureReady: vi.fn(async () => undefined) };
+    const provider = new ChatProvider({} as any, {} as any, api as any);
+    (provider as any).currentProvider = "deepseek";
+    (provider as any).currentProviderId = "deepseek";
+    (provider as any).currentThread = {
+      id: "thread-1",
+      model: "glm-5.3",
+      model_provider: "custom",
+      model_provider_id: "bigmodel-cn",
+    };
+
+    await provider.rememberModelForRoute("glm-5.4");
+
+    expect(vscodeState.configValues.get("modelByProvider")).toEqual({ "bigmodel-cn": "glm-5.4" });
   });
 
   it("calls switchProvider before refreshing providers so stale provider state does not overwrite the UI", async () => {
@@ -421,7 +481,11 @@ describe("ChatProvider provider switch", () => {
     // No exact route: this is `/provider volcengine`, not a picker click.
     await (provider as any).handleSwitchProvider("volcengine");
 
-    expect(api.listProviderModels).toHaveBeenCalledWith("volcengine", undefined);
+    // The model list is requested for the route the view is bound to, which
+    // after the switch is the route the catalog just reported — exact id
+    // included, the way every other request names a route. The answer then
+    // carries that same pair, so the chip's guard accepts it as current.
+    expect(api.listProviderModels).toHaveBeenCalledWith("volcengine", "volcengine");
     expect(provider.postMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         type: "providerModels",
@@ -429,5 +493,205 @@ describe("ChatProvider provider switch", () => {
         providerId: "volcengine",
       })
     );
+  });
+
+  it("answers the model list for the open conversation's route, not the picker's", async () => {
+    // Once the picker moves on, a conversation keeps the provider it was
+    // created on (no endpoint re-routes a thread). Offering the picker's models
+    // is how `deepseek-flash` was chosen for a thread pinned to the Zhipu
+    // route, and the provider answered `400 模型不存在` for it.
+    const api = {
+      bindEngine: vi.fn(),
+      ensureReady: vi.fn(async () => undefined),
+      listProviderModels: vi.fn(async (id: string) => ({
+        provider: id,
+        models: id === "custom" ? [{ id: "glm-5.3" }] : [{ id: "deepseek-flash" }],
+      })),
+    };
+
+    const provider = new ChatProvider({} as any, {} as any, api as any);
+    provider.postMessage = vi.fn();
+    (provider as any).providersCache = [
+      { id: "custom", model_provider_id: "bigmodel-cn", display_name: "bigmodel-cn (custom)", default_model: "glm-5.3", has_model_catalog: true },
+      { id: "deepseek", model_provider_id: "deepseek", display_name: "DeepSeek", default_model: "deepseek-flash", has_model_catalog: true },
+    ];
+    // The picker has moved to DeepSeek; the conversation is still on Zhipu.
+    (provider as any).currentProvider = "deepseek";
+    (provider as any).currentProviderId = "deepseek";
+    (provider as any).currentThread = {
+      id: "thread-1",
+      model: "glm-5.3",
+      model_provider: "custom",
+      model_provider_id: "bigmodel-cn",
+    };
+
+    await (provider as any).handleRequestProviderModels("deepseek", undefined, "deepseek");
+
+    expect(api.listProviderModels).toHaveBeenCalledWith("custom", "bigmodel-cn");
+    expect(provider.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "providerModels",
+        provider: "custom",
+        providerId: "bigmodel-cn",
+        models: ["glm-5.3"],
+        currentModel: "glm-5.3",
+      })
+    );
+  });
+
+  it("tells the user a switch does not move the open conversation, and offers a new one", async () => {
+    // A conversation keeps the provider it was created on — a deliberate
+    // engine decision (prefix-cache economics): neither `PATCH /v1/threads`
+    // nor `POST .../turns` carries a provider, and `resume-thread` says so in
+    // as many words. The client must therefore not pretend the switch reached
+    // this conversation, and must not try to re-route it: it says where the
+    // next message goes and offers the one action that changes that.
+    const api = {
+      bindEngine: vi.fn(),
+      ensureReady: vi.fn(async () => undefined),
+      switchProvider: vi.fn(async () => ({
+        provider: "deepseek",
+        model: "deepseek-flash",
+        message: "Provider switched to deepseek (model: deepseek-flash, resolved from config).",
+        persisted: true,
+      })),
+      listProviders: vi.fn(async () => ({
+        current: "deepseek",
+        current_provider_id: "deepseek",
+        providers: [
+          {
+            id: "deepseek",
+            model_provider_id: "deepseek",
+            display_name: "DeepSeek",
+            default_model: "deepseek-flash",
+            has_model_catalog: true,
+            credentialState: "configured",
+          },
+        ],
+      })),
+      listProviderModels: vi.fn(async () => ({
+        provider: "deepseek",
+        models: [{ id: "deepseek-flash" }],
+      })),
+      updateThread: vi.fn(),
+    };
+
+    const provider = new ChatProvider({} as any, {} as any, api as any);
+    provider.postMessage = vi.fn();
+    provider.currentThread = {
+      id: "thread-1",
+      model: "glm-5.3",
+      mode: "agent",
+      workspace: "",
+      auto_approve: false,
+      trust_mode: false,
+      allow_shell: true,
+      model_provider: "custom",
+      model_provider_id: "bigmodel-cn",
+    } as any;
+    const newThread = vi.fn(async () => undefined);
+    (provider as any).handleNewThread = newThread;
+
+    vscodeState.showWarningMessage.mockResolvedValueOnce("New conversation");
+    await (provider as any).handleSwitchProvider("deepseek", undefined, "deepseek");
+
+    expect(vscodeState.showWarningMessage).toHaveBeenCalledWith(
+      expect.stringContaining("keeps running on bigmodel-cn"),
+      "New conversation"
+    );
+    expect(newThread).toHaveBeenCalled();
+    // The conversation is not touched: its route is the engine's to keep.
+    expect(api.updateThread).not.toHaveBeenCalled();
+    expect(provider.currentThread?.model_provider_id).toBe("bigmodel-cn");
+    expect(provider.currentThread?.model).toBe("glm-5.3");
+  });
+
+  it("refuses a model that belongs to another route, and passes one the route simply does not list", async () => {
+    // Two different answers for two different situations. An id another route
+    // is known to use is the pair a provider answers `400 模型不存在` for, so it
+    // is refused. An id this route merely does not list is left alone: the
+    // engine accepts name-shaped ids for a route whose catalog is not
+    // exhaustive, and a client stricter than its engine rejects models that
+    // work.
+    const api = {
+      bindEngine: vi.fn(),
+      ensureReady: vi.fn(async () => undefined),
+      listProviderModels: vi.fn(),
+    };
+
+    const provider = new ChatProvider({} as any, {} as any, api as any);
+    (provider as any).providersCache = [
+      {
+        id: "custom",
+        model_provider_id: "bigmodel-cn",
+        display_name: "bigmodel-cn (custom)",
+        default_model: "glm-5.3",
+        has_model_catalog: true,
+      },
+      {
+        id: "deepseek",
+        model_provider_id: "deepseek",
+        display_name: "DeepSeek",
+        default_model: "deepseek-flash",
+        has_model_catalog: true,
+      },
+    ];
+    (provider as any).currentProvider = "deepseek";
+    (provider as any).currentProviderId = "deepseek";
+    (provider as any).currentThread = {
+      id: "thread-1",
+      model: "glm-5.3",
+      model_provider: "custom",
+      model_provider_id: "bigmodel-cn",
+    };
+
+    // The conversation's own model, and one nothing else claims.
+    expect(provider.modelFitsViewRoute("glm-5.3")).toMatchObject({
+      ok: true,
+      route: "bigmodel-cn",
+    });
+    expect(provider.modelFitsViewRoute("glm-5.4")).toMatchObject({
+      ok: true,
+      route: "bigmodel-cn",
+    });
+    // The picker's route's own default: refused, and it names where it belongs.
+    expect(provider.modelFitsViewRoute("deepseek-flash")).toMatchObject({
+      ok: false,
+      route: "bigmodel-cn",
+      foreign: "deepseek",
+    });
+    // The route's catalog is not consulted over the wire: this answer has to be
+    // available before `/model` writes anything.
+    expect(api.listProviderModels).not.toHaveBeenCalled();
+  });
+
+  it("counts a model remembered for another route as belonging to it", async () => {
+    const api = { bindEngine: vi.fn(), ensureReady: vi.fn(async () => undefined) };
+    const provider = new ChatProvider({} as any, {} as any, api as any);
+    (provider as any).providersCache = [
+      {
+        id: "custom",
+        model_provider_id: "bigmodel-cn",
+        display_name: "bigmodel-cn (custom)",
+        default_model: "glm-5.3",
+        has_model_catalog: true,
+      },
+      {
+        id: "volcengine",
+        model_provider_id: null,
+        display_name: "Volcengine Ark",
+        default_model: "deepseek-v4-flash",
+        has_model_catalog: true,
+      },
+    ];
+    vscodeState.configValues.set("modelByProvider", { volcengine: "glm-2" });
+    (provider as any).currentProvider = "custom";
+    (provider as any).currentProviderId = "bigmodel-cn";
+
+    expect(provider.modelFitsViewRoute("glm-2")).toMatchObject({
+      ok: false,
+      route: "bigmodel-cn",
+      foreign: "volcengine",
+    });
   });
 });

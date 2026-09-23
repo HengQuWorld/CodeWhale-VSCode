@@ -90,6 +90,9 @@ function makeTr(): WebviewTranslations {
     scopeDefaultLabel: "New threads",
     scopeDefaultTitle: "New conversations start here; this one keeps its own setting.",
     reasoningEffortLabel: "Reasoning",
+    providerNeedsLogin: "needs login",
+    providerNoKey: "no key configured",
+    threadRouteMarker: "this conversation",
     planApproveButton: "Switch to Act & execute",
     planApproveButtonHint:
       "Switch to Act & execute. Anything you type in the box below first goes with this approval and takes precedence over the plan.",

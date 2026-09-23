@@ -163,5 +163,11 @@ describe("ConfigPanel provider preview", () => {
     expect(html).toContain("baseUrlEl.disabled = !!namedRoute;");
     expect(html).toContain("p.model_provider_id || p.id;");
     expect(html).toContain("if (!hasExplicitCurrentModel && prev && !msg.models.includes(prev))");
+    // The provider <select> applies the same two rules as the toolbar picker:
+    // the route id disambiguates two rows that share a display name, and a
+    // route with no key configured is not offered (except the active one).
+    expect(html).toContain("function __cwProviderVisible(p, isActive)");
+    expect(html).toContain("opt.textContent = __cwProviderLabel(p, msg.providers, __cwProviderText);");
+    expect(html).toContain("if (!__cwProviderVisible(p, isActive)) continue;");
   });
 });

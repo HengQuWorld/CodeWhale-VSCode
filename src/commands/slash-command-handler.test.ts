@@ -252,6 +252,9 @@ function createContext(overrides: Partial<SlashCommandContext> = {}): SlashComma
     postMessage: vi.fn(),
     postScopedDefaults: vi.fn(),
     getCurrentModel: vi.fn(() => "deepseek-v4-pro"),
+    rememberModelForRoute: vi.fn(async () => undefined),
+    modelFitsViewRoute: vi.fn(() => ({ ok: true, route: "deepseek" })),
+    routeForNewConversation: vi.fn(() => ({ model: "deepseek-v4-pro" })),
     getProvidersCache: vi.fn(() => null),
     getCurrentProvider: vi.fn(() => null),
     getCurrentProviderId: vi.fn(() => null),
@@ -581,6 +584,36 @@ describe("SlashCommandHandler - Dispatcher Pattern", () => {
 
   // ── /model ──
 
+  describe("/task", () => {
+    it("creates the task on the route a new conversation would use, pair included", async () => {
+      // The task's own thread is a new conversation. Taking its model from the
+      // view and its provider from the picker (which this did) can send one
+      // route's model under another route's provider — the pair a provider
+      // answers `400 模型不存在` for.
+      const createTask = vi.fn(async () => ({ id: "task-1", status: "pending" }));
+      const postMessage = vi.fn();
+      const ctx = createContext({
+        api: { ...createContext().api, createTask, ensureReady: vi.fn(async () => undefined) } as any,
+        postMessage,
+        routeForNewConversation: vi.fn(() => ({
+          model: "glm-5.3",
+          model_provider: "custom",
+          model_provider_id: "bigmodel-cn",
+        })),
+      });
+      const handler = new SlashCommandHandler(ctx);
+
+      await handler.handle("/task", "add check the build");
+
+      expect(createTask).toHaveBeenCalledWith(expect.objectContaining({
+        prompt: "check the build",
+        model: "glm-5.3",
+        model_provider: "custom",
+        model_provider_id: "bigmodel-cn",
+      }));
+    });
+  });
+
   describe("/model", () => {
     it("switches model, updates the active thread, and posts settings update", async () => {
       const currentThread = {
@@ -602,7 +635,12 @@ describe("SlashCommandHandler - Dispatcher Pattern", () => {
 
       await handler.handle("/model", "deepseek-v4-flash");
 
-      expect(vscodeState.updateMock).toHaveBeenCalledWith("defaultModel", "deepseek-v4-flash", "global");
+      // Remembered for the active route, not written to the shared global
+      // `defaultModel` that every provider reads from.
+      expect(ctx.rememberModelForRoute).toHaveBeenCalledWith("deepseek-v4-flash");
+      expect(vscodeState.updateMock).not.toHaveBeenCalledWith(
+        "defaultModel", expect.anything(), expect.anything()
+      );
       expect(updateThread).toHaveBeenCalledWith("thread-1", { model: "deepseek-v4-flash" });
       expect(postMessage).toHaveBeenCalledWith({
         type: "settingsUpdated",
@@ -612,6 +650,35 @@ describe("SlashCommandHandler - Dispatcher Pattern", () => {
         reasoningEffort: "auto",
       });
       expect(currentThread.model).toBe("deepseek-v4-flash");
+    });
+
+    it("refuses a model that belongs to another route, without touching the thread or the memory", async () => {
+      const currentThread = { id: "thread-1", mode: "agent", model: "glm-5.3" } as any;
+      const updateThread = vi.fn(async () => currentThread);
+      const postMessage = vi.fn();
+      const rememberModelForRoute = vi.fn(async () => undefined);
+      const ctx = createContext({
+        api: { ...createContext().api, updateThread } as any,
+        currentThread,
+        postMessage,
+        rememberModelForRoute,
+        modelFitsViewRoute: vi.fn(() => ({
+          ok: false,
+          route: "bigmodel-cn",
+          foreign: "deepseek",
+        })),
+      });
+      const handler = new SlashCommandHandler(ctx);
+
+      await handler.handle("/model", "deepseek-flash");
+
+      expect(postMessage).toHaveBeenCalledWith({
+        type: "error",
+        message: expect.stringContaining("belongs to deepseek"),
+      });
+      expect(updateThread).not.toHaveBeenCalled();
+      expect(rememberModelForRoute).not.toHaveBeenCalled();
+      expect(currentThread.model).toBe("glm-5.3");
     });
 
     it("shows current model when no arg given", async () => {

@@ -135,6 +135,13 @@ export interface WebviewTranslations {
   scopeDefaultLabel: string;
   scopeDefaultTitle: string;
   reasoningEffortLabel: string;
+  /** Provider picker suffix for a route whose credential slot needs a login. */
+  providerNeedsLogin: string;
+  /** Provider picker suffix for a route with no key configured. */
+  providerNoKey: string;
+  /** Chip suffix while an open conversation runs on another route than the
+   *  picker's active one; the picker's choice applies to new conversations. */
+  threadRouteMarker: string;
   planApproveButton: string;
   planApproveButtonHint: string;
   welcomeTitle: string;

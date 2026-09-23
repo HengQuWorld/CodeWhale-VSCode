@@ -101,6 +101,14 @@
           "default": "deepseek-v4-pro",
           "description": "%config.defaultModel.description%"
         },
+        "brotherwhale.modelByProvider": {
+          "type": "object",
+          "default": {},
+          "additionalProperties": {
+            "type": "string"
+          },
+          "markdownDescription": "%config.modelByProvider.description%"
+        },
         "brotherwhale.defaultMode": {
           "type": "string",
           "enum": [

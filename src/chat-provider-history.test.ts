@@ -37,6 +37,12 @@ function createProvider(detail: Record<string, unknown>) {
     bindEngine: vi.fn(),
     getThreadDetail: vi.fn(async () => detail),
     getSession: vi.fn(async () => detail),
+    // The model menu asks the runtime for the route's catalog; a test that
+    // exercises the chip's model needs the answer to come from a route.
+    listProviderModels: vi.fn(async () => ({
+      provider: "custom",
+      models: [{ id: "glm-5.3" }, { id: "glm-5.4" }],
+    })),
     decideApproval: vi.fn(async () => undefined),
     ensureReady: vi.fn(async () => undefined),
     interruptTurn: vi.fn(async () => undefined),
@@ -52,6 +58,114 @@ function createProvider(detail: Record<string, unknown>) {
 describe("ChatProvider thread history rendering", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it("names a viewed session's own provider route, not the picker's", async () => {
+    // Viewing a saved session shows a conversation with no thread yet: its
+    // next message resumes it into a thread built from the session's own
+    // `model_provider` / `model_provider_id`. The model chip followed the
+    // session from the start and the provider chip did not — it kept naming
+    // the picker's route while the conversation on screen would run on its
+    // own, which is the same "the toolbar describes a route the next message
+    // will not use" failure, one step earlier.
+    const { provider, postMessage } = createProvider({
+      metadata: {
+        id: "sess-1",
+        title: "Bigmodel work",
+        model: "glm-5.3",
+        model_provider: "custom",
+        model_provider_id: "bigmodel-cn",
+        workspace: "/workspace",
+        message_count: 0,
+      },
+      messages: [],
+    });
+    (provider as any).providersCache = [
+      {
+        id: "deepseek",
+        model_provider_id: "deepseek",
+        display_name: "DeepSeek",
+        default_model: "deepseek-flash",
+        has_model_catalog: true,
+        credentialState: "configured",
+      },
+      {
+        id: "custom",
+        model_provider_id: "bigmodel-cn",
+        display_name: "bigmodel-cn (custom)",
+        default_model: "glm-5.3",
+        has_model_catalog: true,
+        credentialState: "configured",
+      },
+    ];
+    // The picker is on another route entirely.
+    (provider as any).currentProvider = "deepseek";
+    (provider as any).currentProviderId = "deepseek";
+
+    await provider.loadSessionMessages("sess-1");
+
+    expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({
+      type: "providersUpdated",
+      // The picker's route is still reported as the picker's...
+      current: "deepseek",
+      currentProviderId: "deepseek",
+      // ...and what is on screen carries the session's.
+      viewProvider: "custom",
+      viewProviderId: "bigmodel-cn",
+    }));
+
+    // The route the view is bound to is the session's, so the model menu is
+    // fetched for it.
+    expect((provider as any).viewRoute()).toEqual({
+      provider: "custom",
+      providerId: "bigmodel-cn",
+    });
+  });
+
+  it("keeps the viewed session's own model on the chip, not the route's default", async () => {
+    // The model menu answers with a model, and for a viewed session the answer
+    // must be the model that session was saved with. With no thread to read,
+    // falling through to the route's catalog default repainted the chip with a
+    // model the session never used.
+    const { provider, postMessage } = createProvider({
+      metadata: {
+        id: "sess-1",
+        title: "Bigmodel work",
+        model: "glm-5.4",
+        model_provider: "custom",
+        model_provider_id: "bigmodel-cn",
+        workspace: "/workspace",
+        message_count: 0,
+      },
+      messages: [],
+    });
+    (provider as any).providersCache = [
+      {
+        id: "custom",
+        model_provider_id: "bigmodel-cn",
+        display_name: "bigmodel-cn (custom)",
+        default_model: "glm-5.3",
+        has_model_catalog: true,
+      },
+    ];
+    (provider as any).currentProvider = "custom";
+    (provider as any).currentProviderId = "bigmodel-cn";
+
+    await provider.loadSessionMessages("sess-1");
+    await (provider as any).handleRequestProviderModels("custom", undefined, "bigmodel-cn");
+
+    expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({
+      type: "providerModels",
+      provider: "custom",
+      providerId: "bigmodel-cn",
+      currentModel: "glm-5.4",
+    }));
+    expect(provider.getCurrentModel()).toBe("glm-5.4");
+
+    // And once the view leaves the session, the route's own model is the
+    // answer again — the session's model does not outlive it.
+    await (provider as any).handleNewThread();
+    expect(provider.getCurrentModel()).toBe("glm-5.3");
   });
 
   it("skips blank user bubbles for tool_result-only turns", async () => {

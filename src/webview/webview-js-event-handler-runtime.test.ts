@@ -1184,4 +1184,223 @@ describe("webview-js-event-handler runtime", () => {
       providerId: "bigmodel-cn",
     });
   });
+
+  it("tells the two DeepSeek routes apart and drops the one with no key", () => {
+    // The Runtime publishes both the DeepSeek route and the legacy Anthropic
+    // dialect route, both named "DeepSeek", with separate credential slots —
+    // and only one of them holds the user's key. Rendering the display name
+    // alone made them indistinguishable, so picking "DeepSeek" could land on
+    // the route whose credential slot is empty and fail the first message.
+    const harness = createRuntimeHarness();
+
+    harness.dispatchMessage({
+      type: "providersUpdated",
+      current: "custom",
+      currentProviderId: "bigmodel-cn",
+      providers: [
+        {
+          id: "deepseek",
+          model_provider_id: null,
+          display_name: "DeepSeek",
+          default_model: "deepseek-flash",
+          has_model_catalog: true,
+          credentialState: "configured",
+        },
+        {
+          id: "deepseek-anthropic",
+          model_provider_id: "deepseek-anthropic",
+          display_name: "DeepSeek",
+          default_model: "deepseek-flash",
+          has_model_catalog: true,
+          credentialState: "missing",
+        },
+        {
+          id: "openrouter",
+          model_provider_id: null,
+          display_name: "OpenRouter",
+          default_model: "deepseek/deepseek-v4-pro",
+          has_model_catalog: true,
+          credentialState: "missing",
+        },
+        {
+          id: "custom",
+          model_provider_id: "bigmodel-cn",
+          display_name: "bigmodel-cn (custom)",
+          default_model: "glm-5.3",
+          has_model_catalog: true,
+          credentialState: "configured",
+        },
+      ],
+    });
+
+    const items = harness.getElement("dropdown-provider").children;
+    expect(items.map((item) => item.getAttribute("data-value"))).toEqual(["deepseek", "custom"]);
+    // The route id is spelled out even though this row is not the active one:
+    // the name it shares with a hidden row is what makes it ambiguous.
+    expect(items.map((item) => item.textContent)).toEqual([
+      "DeepSeek (deepseek)",
+      "bigmodel-cn (custom) \u2713",
+    ]);
+  });
+
+  it("keeps the active route listed when it has no key, labelled with its state", () => {
+    // Hiding the route the chip names would leave the picker unable to say
+    // where the user is — and the label is the one place that says why its
+    // next message will fail.
+    const harness = createRuntimeHarness();
+
+    harness.dispatchMessage({
+      type: "providersUpdated",
+      current: "deepseek-anthropic",
+      currentProviderId: "deepseek-anthropic",
+      providers: [
+        {
+          id: "deepseek",
+          model_provider_id: null,
+          display_name: "DeepSeek",
+          default_model: "deepseek-flash",
+          has_model_catalog: true,
+          credentialState: "configured",
+        },
+        {
+          id: "deepseek-anthropic",
+          model_provider_id: "deepseek-anthropic",
+          display_name: "DeepSeek",
+          default_model: "deepseek-flash",
+          has_model_catalog: true,
+          credentialState: "missing",
+        },
+      ],
+    });
+
+    const items = harness.getElement("dropdown-provider").children;
+    expect(items.map((item) => item.textContent)).toEqual([
+      "DeepSeek (deepseek)",
+      "DeepSeek (deepseek-anthropic) · no key configured \u2713",
+    ]);
+
+    const chip = harness.getElement("current-provider");
+    expect(chip.textContent).toBe("DeepSeek (deepseek-anthropic) · no key configured");
+  });
+
+  it("offers a route that only needs a login, since the picker is where it is reached", () => {
+    const harness = createRuntimeHarness();
+
+    harness.dispatchMessage({
+      type: "providersUpdated",
+      current: "deepseek",
+      currentProviderId: "deepseek",
+      providers: [
+        {
+          id: "deepseek",
+          model_provider_id: "deepseek",
+          display_name: "DeepSeek",
+          default_model: "deepseek-flash",
+          has_model_catalog: true,
+          credentialState: "configured",
+        },
+        {
+          id: "openai-codex",
+          model_provider_id: null,
+          display_name: "OpenAI Codex",
+          default_model: "gpt-5-codex",
+          has_model_catalog: true,
+          credentialState: "login_required",
+        },
+      ],
+    });
+
+    const labels = harness
+      .getElement("dropdown-provider")
+      .children.map((item) => item.textContent);
+    expect(labels).toContain("OpenAI Codex · needs login");
+  });
+
+  it("describes the open conversation's route and lists that route's models", () => {
+    // A conversation keeps the provider it was created on, so once the picker
+    // has moved on, the chip and the model list must describe where the next
+    // message actually goes — otherwise the picker's provider's models are the
+    // ones offered, and choosing one produces the pair the provider rejects.
+    const harness = createRuntimeHarness();
+
+    harness.dispatchMessage({
+      type: "providersUpdated",
+      current: "deepseek",
+      currentProviderId: "deepseek",
+      viewProvider: "custom",
+      viewProviderId: "bigmodel-cn",
+      providers: [
+        {
+          id: "deepseek",
+          model_provider_id: "deepseek",
+          display_name: "DeepSeek",
+          default_model: "deepseek-flash",
+          has_model_catalog: true,
+          credentialState: "configured",
+        },
+        {
+          id: "custom",
+          model_provider_id: "bigmodel-cn",
+          display_name: "bigmodel-cn (custom)",
+          default_model: "glm-5.3",
+          has_model_catalog: true,
+          credentialState: "configured",
+        },
+      ],
+    });
+
+    // The list is requested for the conversation's route...
+    expect(harness.postMessages).toContainEqual({
+      type: "requestProviderModels",
+      provider: "custom",
+      providerId: "bigmodel-cn",
+    });
+
+    // ...the chip names that route and says why it is not the one just picked...
+    const chip = harness.getElement("current-provider");
+    expect(chip.textContent).toBe("bigmodel-cn (custom) \u00b7 this conversation");
+    expect(chip.getAttribute("data-provider-id")).toBe("custom");
+    expect(chip.getAttribute("data-model-provider-id")).toBe("bigmodel-cn");
+
+    // ...and the dropdown still marks where new conversations will start.
+    const items = harness.getElement("dropdown-provider").children;
+    expect(items.map((item) => item.textContent)).toEqual([
+      "DeepSeek \u2713",
+      "bigmodel-cn (custom)",
+    ]);
+  });
+
+  it("keeps the marker off while the conversation and the picker are on one route", () => {
+    const harness = createRuntimeHarness();
+    const providers = [
+      {
+        id: "custom",
+        model_provider_id: "bigmodel-cn",
+        display_name: "bigmodel-cn (custom)",
+        default_model: "glm-5.3",
+        has_model_catalog: true,
+        credentialState: "configured",
+      },
+    ];
+
+    // Same route on both sides: there is nothing to explain...
+    harness.dispatchMessage({
+      type: "providersUpdated",
+      current: "custom",
+      currentProviderId: "bigmodel-cn",
+      viewProvider: "custom",
+      viewProviderId: "bigmodel-cn",
+      providers,
+    });
+    expect(harness.getElement("current-provider").textContent).toBe("bigmodel-cn (custom)");
+
+    // ...and it stays off once 新建会话 leaves the view with no conversation.
+    harness.dispatchMessage({
+      type: "providersUpdated",
+      current: "custom",
+      currentProviderId: "bigmodel-cn",
+      providers,
+    });
+    expect(harness.getElement("current-provider").textContent).toBe("bigmodel-cn (custom)");
+  });
 });

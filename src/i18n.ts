@@ -86,6 +86,14 @@ interface Translations {
   scopeDefaultLabel: string;
   scopeDefaultTitle: string;
   reasoningEffortLabel: string;
+  /** Provider picker suffix: this route's credential slot needs a login. */
+  providerNeedsLogin: string;
+  /** Provider picker suffix: this route has no key configured. Shown on the
+   *  active route, which stays listed even when unconfigured. */
+  providerNoKey: string;
+  /** Chip suffix while the open conversation runs on a route other than the
+   *  one the picker selected (that choice applies to new conversations). */
+  threadRouteMarker: string;
   planApproveButton: string;
   planApproveButtonHint: string;
   planApproveProceed: string;
@@ -456,6 +464,8 @@ const en: Translations = {
   modeLabel: "Mode", permissionLabel: "Permission", reasoningEffortLabel: "Reasoning Effort",
   scopeThreadLabel: "This thread", scopeDefaultLabel: "New threads",
   scopeDefaultTitle: "New conversations start here; this one keeps its own setting.",
+  providerNeedsLogin: "needs login", providerNoKey: "no key configured",
+  threadRouteMarker: "this conversation",
   planApproveButton: "Switch to Act & execute", planApproveProceed: "Plan approved. Mode is now Act — proceed with the plan above.",
   planApproveButtonHint: "Switch to Act & execute. Anything you type in the box below first goes with this approval and takes precedence over the plan.",
   planApproveWithPrompt: "Plan approved. Mode is now Act. The instruction below takes precedence over the plan above:",
@@ -808,6 +818,8 @@ const zhCn: Translations = {
   modeLabel: "模式", permissionLabel: "权限", reasoningEffortLabel: "思考深度",
   scopeThreadLabel: "当前会话", scopeDefaultLabel: "新会话默认",
   scopeDefaultTitle: "新会话以此启动；当前会话保持自己的设置。",
+  providerNeedsLogin: "需登录", providerNoKey: "未配置密钥",
+  threadRouteMarker: "当前会话",
   planApproveButton: "切换到 Act 并执行", planApproveProceed: "计划已确认，模式已切换为 Act。请按上面的计划开始执行。",
   planApproveButtonHint: "切换到 Act 并执行。先在下面输入框写下的内容会随本次批准一起发送，并优先于上面的计划。",
   planApproveWithPrompt: "计划已确认，模式已切换为 Act。以下指示优先于上面的计划：",
@@ -1246,6 +1258,9 @@ export function webviewTranslations(tr: Translations) {
     scopeDefaultLabel: tr.scopeDefaultLabel,
     scopeDefaultTitle: tr.scopeDefaultTitle,
     reasoningEffortLabel: tr.reasoningEffortLabel,
+    providerNeedsLogin: tr.providerNeedsLogin,
+    providerNoKey: tr.providerNoKey,
+    threadRouteMarker: tr.threadRouteMarker,
     planApproveButton: tr.planApproveButton,
     planApproveButtonHint: tr.planApproveButtonHint,
     welcomeTitle: tr.welcomeTitle,

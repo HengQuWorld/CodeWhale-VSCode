@@ -146,6 +146,17 @@ export interface SessionStateData {
    *  workspace-relative paths against *that* root, which is not necessarily
    *  the workspace currently open in VSCode. */
   viewingSessionWorkspace: string | null;
+  /** Provider route a viewed session was saved on. A session that is only
+   *  being *viewed* has no thread yet, so without this the toolbar described
+   *  the picker's route while the conversation on screen would run on its own
+   *  the moment a message resumed it. */
+  viewingSessionProvider: string | null;
+  viewingSessionProviderId: string | null;
+  /** Model a viewed session was saved with. The toolbar's model chip and the
+   *  route's model list both describe what is on screen, and for a viewed
+   *  session that is this model — not the route's current default, which is
+   *  what a lookup with no thread to read would fall back to. */
+  viewingSessionModel: string | null;
   /** Session ID for auto-save — same thread always saves to the same session */
   currentSessionId: string | null;
   messages: ChatMessage[];
@@ -186,6 +197,9 @@ function createEmptyState(): SessionStateData {
     currentThread: null,
     viewingSessionId: null,
     viewingSessionWorkspace: null,
+    viewingSessionProvider: null,
+    viewingSessionProviderId: null,
+    viewingSessionModel: null,
     currentSessionId: null,
     messages: [],
     lastEventSeq: 0,

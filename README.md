@@ -219,7 +219,8 @@ Search for `brotherwhale` in VS Code settings (`Cmd/Ctrl+,`).
 | Setting | Default | Description |
 |---|---|---|
 | `brotherwhale.enginePath` | `"codewhale"` | Path to the engine binary. Leave at the default to use built-in discovery |
-| `brotherwhale.defaultModel` | `"deepseek-v4-pro"` | Model for new threads |
+| `brotherwhale.defaultModel` | `"deepseek-v4-pro"` | Fallback model for new threads: used only when the route has no entry in `brotherwhale.modelByProvider` and its runtime catalog publishes no model |
+| `brotherwhale.modelByProvider` | `{}` | The model each provider route's new threads start from, keyed by the route id (`model_provider_id` when it has one). Written by `/model` and the provider picker |
 | `brotherwhale.defaultMode` | `"agent"` | `agent` (Act), `plan`, or `operate`. A legacy `yolo` value resolves to Act + Full Access |
 | `brotherwhale.defaultPermissionPosture` | `"ask"` | `ask`, `auto_review`, or `full_access` |
 | `brotherwhale.reasoningEffort` | `"auto"` | `auto`, `off`, `low`, `medium`, `high`, `max` |
