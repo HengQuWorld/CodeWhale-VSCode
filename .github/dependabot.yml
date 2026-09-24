@@ -1,11 +1,41 @@
 version: 2
 updates:
+  # Dev toolchain policy: patches and minors flow automatically; major
+  # bumps are deliberate, coordinated upgrades tracked on the toolchain
+  # roadmap (they need CI-matrix or workflow changes together). None of
+  # these packages ship to users — the VSIX has zero runtime dependencies
+  # and engines.vscode stays at ^1.85.
   - package-ecosystem: npm
     directory: "/"
     schedule:
       interval: weekly
     commit-message:
       prefix: "chore(deps)"
+    ignore:
+      - dependency-name: typescript
+        update-types: ["version-update:semver-major"]
+      - dependency-name: eslint
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@eslint/js"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: typescript-eslint
+        update-types: ["version-update:semver-major"]
+      - dependency-name: vitest
+        update-types: ["version-update:semver-major"]
+      - dependency-name: webpack
+        update-types: ["version-update:semver-major"]
+      - dependency-name: webpack-cli
+        update-types: ["version-update:semver-major"]
+      - dependency-name: ts-loader
+        update-types: ["version-update:semver-major"]
+      - dependency-name: marked
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@vscode/vsce"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@types/vscode"
+        update-types: ["version-update:semver-major"]
     groups:
       dev-dependencies:
         patterns: ["*"]
