@@ -34,8 +34,10 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: "@types/node"
         update-types: ["version-update:semver-major"]
+      # @types/vscode: any manifest range above engines.vscode (^1.85) is
+      # rejected by vsce at packaging time. The lockfile still resolves a
+      # recent 1.x on its own; re-enabling requires raising engines first.
       - dependency-name: "@types/vscode"
-        update-types: ["version-update:semver-major"]
     groups:
       dev-dependencies:
         patterns: ["*"]
