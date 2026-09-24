@@ -207,6 +207,13 @@ describe("i18n UI string translations", () => {
     { key: "justNow", en: "just now", zhCn: "刚刚" },
     { key: "contextCompacted", en: "Context compacted", zhCn: "上下文已压缩" },
     { key: "compactFailed", en: "Compact failed", zhCn: "压缩失败" },
+    { key: "contextCompactionStarted", en: "Context compaction started", zhCn: "已开始压缩上下文" },
+    {
+      key: "compactRefusedActiveTurn",
+      en: "This thread is already running a turn, so it can't be compacted yet. Press Stop, then try again.",
+      zhCn: "会话正在运行，暂时无法压缩。请先停止当前回合再试。",
+    },
+    { key: "compactNoThread", en: "Open or start a conversation before compacting.", zhCn: "请先打开或新建一个会话，再进行压缩。" },
     { key: "sendFailed", en: "Failed to send message", zhCn: "发送消息失败" },
     { key: "initFailed", en: "Failed to initialize", zhCn: "初始化失败" },
     { key: "eventStreamError", en: "Event stream error", zhCn: "事件流错误" },

@@ -353,10 +353,17 @@ export class CodeWhaleApiClient {
     )) as TurnRecord;
   }
 
-  async compactThread(threadId: string, reason?: string): Promise<void> {
+  /** Request a manual context compaction. The engine accepts it (202) and does
+   *  the work asynchronously on its own turn, reporting progress and outcome
+   *  through the thread's event stream — so the returned turn id is the handle
+   *  the caller uses to tell that turn apart from a normal one. */
+  async compactThread(threadId: string, reason?: string): Promise<StartTurnResponse> {
     const body: Record<string, unknown> = {};
     if (reason) body.reason = reason;
-    await this.post(`/v1/threads/${threadId}/compact`, body);
+    return (await this.post(
+      `/v1/threads/${threadId}/compact`,
+      body
+    )) as StartTurnResponse;
   }
 
   // ── Undo / Retry ──

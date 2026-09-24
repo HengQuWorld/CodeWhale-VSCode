@@ -107,6 +107,10 @@ export interface ChatMessage {
     input_tokens: number;
     output_tokens: number;
   } | null;
+  /** The compaction handoff summary a note carries, when the engine has one for
+   *  the thread. Rendered collapsed: it is the model's own record of the
+   *  conversation before it, and it can run to thousands of words. */
+  compactionSummary?: string;
 }
 
 export interface ChecklistItem {

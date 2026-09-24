@@ -346,3 +346,62 @@ describe("revealFileChangeCard", () => {
     expect(messagesEl.scrollCalls).toHaveLength(0);
   });
 });
+
+describe("addMessage system notes", () => {
+  it("draws a system message as a note, not a chat turn", () => {
+    const { messages, messagesEl } = createHarness();
+
+    messages.addMessage({
+      id: "note-turn_compact",
+      role: "system",
+      content: "Compaction complete: 12 → 5 messages",
+      status: "complete",
+      timestamp: 1,
+    });
+
+    // The same markup the live 'info' message produces, so a reloaded
+    // transcript shows the line the user already saw.
+    const note = messagesEl.children[messagesEl.children.length - 1];
+    expect(note.className).toBe("system-message");
+    expect(note.innerHTML).toContain('class="msg-label note"');
+    expect(note.innerHTML).toContain("Compaction complete: 12 → 5 messages");
+    // A chat turn is tagged `message <role>`; a note must not be, or the
+    // transcript would show a "system" speaker bubble instead of a note.
+    expect(note.className.startsWith("message ")).toBe(false);
+  });
+
+  it("hangs a compaction summary off its note, collapsed", () => {
+    const { messages, messagesEl } = createHarness();
+
+    messages.addMessage({
+      id: "note-turn_c",
+      role: "system",
+      content: "Compaction complete: 96 → 9 messages",
+      status: "complete",
+      timestamp: 1,
+      compactionSummary: "The user asked for X.",
+    });
+
+    // A details element, so the expand costs no script and no state to keep in
+    // sync; the body is the model's own handoff record and can be very long.
+    const note = messagesEl.children[messagesEl.children.length - 1];
+    expect(note.innerHTML).toContain('<details class="compaction-summary">');
+    expect(note.innerHTML).toContain("Compaction summary");
+    expect(note.innerHTML).toContain("The user asked for X.");
+  });
+
+  it("renders no summary block when the note carries none", () => {
+    const { messages, messagesEl } = createHarness();
+
+    messages.addMessage({
+      id: "note-plain",
+      role: "system",
+      content: "Compaction complete: 96 → 9 messages",
+      status: "complete",
+      timestamp: 1,
+    });
+
+    const note = messagesEl.children[messagesEl.children.length - 1];
+    expect(note.innerHTML).not.toContain("details");
+  });
+});

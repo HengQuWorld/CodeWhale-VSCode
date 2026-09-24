@@ -50,6 +50,7 @@ import {
   type RecordedEdit,
 } from "./utils/diff-utils";
 import { resolveRecordedFilePath } from "./utils/file-paths";
+import { extractCompactionSummary } from "./utils/compaction-summary";
 import { MAX_EAGER_HASH_BYTES, sha256OfFile } from "./utils/file-hash";
 import { t, webviewTranslations, currentLocale } from "./i18n";
 import { ConfigPanel } from "./config-panel";
@@ -327,6 +328,13 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
   /** The mode the turn in `currentTurnId` was started with, used only when the
    *  runtime does not report a mode on the turn record itself (see `turnMode`). */
   private activeTurnMode: { turnId: string; mode: TuiMode } | null = null;
+  /** Turn ids belonging to a manual context compaction. A compaction runs as an
+   *  ordinary runtime turn, but it is not a conversation turn: its
+   *  `turn.completed` must not re-finalize the last answer (which would stamp
+   *  the compaction's usage — and, in Plan mode, its plan-approval action — onto
+   *  a message the user already has). Populated from the accepted compact call
+   *  and drained when that turn ends. */
+  private compactionTurns = new Set<string>();
 
   // Convenience accessors for session state
   public get currentThread(): ThreadRecord | null { return this.sessionState.data.currentThread; }
@@ -944,6 +952,19 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       this.lastEventSeq = detail.latest_seq ?? 0;
       const itemById = new Map(detail.items.map((item) => [item.id, item]));
 
+      // The handoff summary the engine holds for this thread. The carrier keeps
+      // one section — a later pass replaces it — so only the most recent
+      // compaction turn may claim it; attaching it to an older one would show
+      // the current summary against a superseded compaction.
+      const compactionSummary = extractCompactionSummary(detail.thread?.system_prompt);
+      const lastCompactionTurnId = [...detail.turns]
+        .reverse()
+        .find((turn) =>
+          (turn.item_ids || []).some(
+            (itemId) => itemById.get(itemId)?.kind === "context_compaction"
+          )
+        )?.id;
+
       for (const turn of detail.turns) {
         // One group per turn, so the panel's sections follow the conversation's
         // turn order after a reload. Opened before the turn's items are read:
@@ -966,6 +987,10 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         let currentThinkingBlock: ContentBlock | undefined;
         let segmentIdx = 0;
         let emittedUserBubble = false;
+        // A compaction is not a conversation turn: it contributes one note and
+        // no question/answer pair (see the two fallbacks below).
+        let isCompactionTurn = false;
+        let compactionText: string | null = null;
         const turnStartIdx = this.messages.length;
 
         // Turn-level: a tool in flight when the steer landed has its result
@@ -1039,6 +1064,16 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
 
         for (const item of turnItems) {
           switch (item.kind) {
+            case "context_compaction": {
+              // Nothing was asked and no model answer was produced. Replaying
+              // this turn through the input_summary fallbacks below would print
+              // the engine's own label for the request ("Manual context
+              // compaction") as a user question and an assistant answer. The
+              // engine's result text is the record worth keeping.
+              isCompactionTurn = true;
+              compactionText = ChatProvider.compactionNoteText(item, "");
+              break;
+            }
             case "user_message": {
               const text = stripTurnMeta(item.detail || item.summary || "").trim();
               if (!text) break;
@@ -1196,8 +1231,10 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         }
 
         // Turns without a persisted user_message item (e.g. runtime-initiated
-        // turns) still show the input summary as the turn's user bubble.
-        if (!emittedUserBubble && turn.input_summary.trim()) {
+        // turns) still show the input summary as the turn's user bubble. A
+        // compaction turn is excluded: that summary is the engine's label for
+        // the request, and printing it would show a question nobody asked.
+        if (!isCompactionTurn && !emittedUserBubble && turn.input_summary.trim()) {
           this.messages.splice(turnStartIdx, 0, {
             id: `user-${turn.id}`,
             role: "user",
@@ -1223,10 +1260,29 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
           }
         }
 
-        // Preserve the legacy behavior for turns with no assistant output
-        // at all: emit the fallback bubble (input summary preview) rather
-        // than rendering nothing for the turn.
-        if (!this.messages.slice(turnStartIdx).some((m) => m.role === "assistant")) {
+        if (isCompactionTurn) {
+          // One note per compaction, carrying the same engine text the live view
+          // reported. The engine keeps a single item per pass and rewrites it
+          // with the outcome, so there is no separate "started" record to
+          // replay — the reloaded transcript is the result, not the process.
+          if (compactionText) {
+            this.messages.push({
+              id: `note-${turn.id}`,
+              role: "system",
+              content: compactionText,
+              status: "complete",
+              timestamp: new Date(turn.ended_at || turn.created_at).getTime(),
+              // The body the live view showed, from the same record — so a
+              // reload does not silently drop what the user could already read.
+              ...(compactionSummary && turn.id === lastCompactionTurnId
+                ? { compactionSummary }
+                : {}),
+            });
+          }
+        } else if (!this.messages.slice(turnStartIdx).some((m) => m.role === "assistant")) {
+          // Preserve the legacy behavior for turns with no assistant output
+          // at all: emit the fallback bubble (input summary preview) rather
+          // than rendering nothing for the turn.
           this.messages.push({
             id: `assistant-${turn.id}`,
             role: "assistant",
@@ -5411,16 +5467,34 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
   }
 
   public async handleCompact(): Promise<void> {
-    if (this.currentThread) {
-      try {
-        await this.api.compactThread(this.currentThread.id);
-        this.postMessage({ type: "info", message: "Context compacted" });
-      } catch (err) {
-        this.postMessage({
-          type: "error",
-          message: formatError("Compact failed", err),
-        });
+    // No conversation on screen: the click has nothing to compact. Reported
+    // rather than dropped, because a silent no-op reads as a broken button.
+    if (!this.currentThread) {
+      this.postMessage({ type: "info", message: t().compactNoThread });
+      return;
+    }
+    // A compaction is itself a turn and the runtime refuses a second one on a
+    // busy thread. Refusing here turns an inevitable engine error into the
+    // guidance the user needs (Stop first), and saves a doomed round trip.
+    if (this.currentTurnId) {
+      this.postMessage({ type: "info", message: t().compactRefusedActiveTurn });
+      return;
+    }
+    try {
+      const result = await this.api.compactThread(this.currentThread.id);
+      // The runtime accepts the request and compacts asynchronously; the turn id
+      // is what lets the event stream's completion report be told apart from a
+      // conversation turn's. Never claim completion here — that arrives later.
+      if (result?.turn?.id) {
+        this.compactionTurns.add(result.turn.id);
       }
+      this.postMessage({ type: "busy", active: true });
+      this.postMessage({ type: "status", text: t().contextCompactionStarted });
+    } catch (err) {
+      this.postMessage({
+        type: "error",
+        message: formatError(t().compactFailed, err),
+      });
     }
   }
 
@@ -5879,6 +5953,12 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
 
       case "turn.completed": {
         const pl = event.payload as { turn?: TurnRecord };
+        // A compaction turn is not a conversation turn: it must not finalize
+        // the last answer standing in the transcript, nor stamp the
+        // compaction's usage (and, in Plan mode, a plan-approval action) onto
+        // it. Drained here so the set cannot grow without bound.
+        const isCompactionTurn =
+          !!pl.turn?.id && this.compactionTurns.delete(pl.turn.id);
         this.currentTurnId = null;
         if (pl.turn?.usage) {
           const u = pl.turn.usage;
@@ -5941,7 +6021,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         this.pendingApprovals.clear();
         this.activeItems.clear();
 
-        if (lastMsg?.role === "assistant") {
+        if (!isCompactionTurn && lastMsg?.role === "assistant") {
           // TUI parity (flush_active_cell): a streaming placeholder that
           // never received output (steer raced the turn end, or the model
           // returned nothing) is discarded, not finalized as an empty
@@ -6228,8 +6308,135 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     this.postMessage({ type: "addMessage", message: assistantMsg });
   }
 
+  /** The one line a compaction contributes to the transcript.
+   *
+   *  The engine's own text is the source of truth in both directions: the live
+   *  `item.completed` payload and the persisted turn item carry the same string,
+   *  so the reloaded transcript shows exactly what the live view reported. It
+   *  also names what the pass actually did (messages and tokens before/after,
+   *  coverage) — detail a client-side template could not reconstruct.
+   */
+  private static compactionNoteText(
+    item: { summary?: string | null; detail?: string | null } | undefined,
+    fallback: string
+  ): string {
+    return (item?.detail || item?.summary || "").trim() || fallback;
+  }
+
+  /** Report a manual context compaction in the conversation window.
+   *
+   *  Both ends are worth showing: the process (the click was accepted and the
+   *  pass is running) and the result. There is no stream to show — the engine's
+   *  summarizer is one non-streaming call (a partial summary is deliberately
+   *  never accepted), so it publishes started and then the outcome, nothing in
+   *  between. The activity is therefore carried by the status bar's indicator,
+   *  and the outcome line by the engine's own text.
+   */
+  private reportManualCompaction(
+    event: RuntimeEvent,
+    envelope: {
+      item?: { summary?: string; detail?: string };
+    }
+  ): void {
+    if (event.event === "item.started") {
+      this.postMessage({ type: "busy", active: true });
+      this.postMessage({ type: "info", message: t().contextCompactionStarted });
+      return;
+    }
+    if (event.event === "item.completed") {
+      // The summary body needs one more read (the engine keeps it on the thread
+      // record, not in this event), so the result line is posted from there.
+      void this.reportCompactionCompleted(envelope);
+      return;
+    }
+    if (event.event === "item.failed") {
+      this.postMessage({
+        type: "error",
+        message: formatError(
+          t().compactFailed,
+          envelope.item?.detail || envelope.item?.summary || ""
+        ),
+      });
+      // The bar keeps the engine's own failure line, which it publishes for
+      // this path — no text reset here, or the diagnosis would be wiped.
+      this.postMessage({ type: "busy", active: false });
+      return;
+    }
+    // item.canceled / item.interrupted: the conversation was never changed and
+    // the engine publishes no status for it, so the bar is the one thing left
+    // claiming the pass is still running.
+    this.postMessage({ type: "busy", active: false });
+    this.postMessage({ type: "status", text: t().ready });
+  }
+
+  /** Post the result line, carrying the handoff summary the engine committed.
+   *
+   *  The summary is a second read — the engine stores it on the thread record
+   *  (`merge_summary_into_prompt`), not in the completion event — so a failure
+   *  there must not cost the user the outcome: the result line is the report,
+   *  the body is what makes it auditable.
+   */
+  private async reportCompactionCompleted(envelope: {
+    item?: { summary?: string; detail?: string };
+  }): Promise<void> {
+    // Resolved before the first await, deliberately: the event belongs to the
+    // thread that was on screen when it arrived, and the view may have moved on
+    // by the time the read comes back. Reading it later would report another
+    // conversation's handoff against this one.
+    const threadId = this.currentThread?.id ?? null;
+    let summary: string | null = null;
+    try {
+      summary = await this.readCompactionSummary(threadId);
+    } catch (err) {
+      this.debugLog(`compaction summary unavailable: ${getErrorMessage(err)}`);
+    }
+    this.postMessage({
+      type: "info",
+      message: ChatProvider.compactionNoteText(envelope.item, t().contextCompacted),
+      ...(summary ? { compactionSummary: summary } : {}),
+    });
+    this.endCompactionActivity();
+  }
+
+  /** The handoff summary the engine holds for `threadId`, if any. */
+  private async readCompactionSummary(threadId: string | null): Promise<string | null> {
+    if (!threadId) return null;
+    const thread = await this.api.getThread(threadId);
+    return extractCompactionSummary(thread?.system_prompt);
+  }
+
+  /** Stop the status bar's activity indicator and settle its text.
+   *
+   *  The engine emits no status on a successful compaction, so without this the
+   *  bar would keep claiming work that is over.
+   */
+  private endCompactionActivity(): void {
+    this.postMessage({ type: "busy", active: false });
+    this.postMessage({ type: "status", text: t().ready });
+  }
+
   private handleItemEvent(event: RuntimeEvent): void {
     const itemId = event.item_id!;
+    // A manual compaction publishes itself as a `context_compaction` item. Its
+    // outcome is the only thing that tells the user the click did something, so
+    // it is handled before the assistant-routing guard below: a compaction can
+    // land on a thread whose transcript is empty or ends on a user message, and
+    // the report must not be dropped for that. Auto compactions are the
+    // engine's own housekeeping and keep the generic status-only treatment.
+    const envelope = event.payload as {
+      item?: { kind?: string; summary?: string; detail?: string };
+      auto?: boolean;
+    };
+    if (envelope.item?.kind === "context_compaction" && !envelope.auto) {
+      // Remember the turn here as well as at the accepted call: a compaction
+      // another client started (the TUI against the same runtime, or one whose
+      // 202 this view never saw) still has to be kept out of the conversation
+      // turn's completion handling below.
+      if (event.turn_id) this.compactionTurns.add(event.turn_id);
+      this.reportManualCompaction(event, envelope);
+      return;
+    }
+
     const lastMsg = this.messages[this.messages.length - 1];
     if (!lastMsg || lastMsg.role !== "assistant") return;
 

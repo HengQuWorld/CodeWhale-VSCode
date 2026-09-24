@@ -116,6 +116,9 @@ interface Translations {
   completionPct: string;
   readyTimedOut: string;
   note: string;
+  /** Toggle label on the collapsed body of a compaction result (see
+   *  `WebviewTranslations`). */
+  compactionSummaryLabel: string;
   noPreviousMessage: string;
   justNow: string;
   minutesAgoPattern: string;
@@ -124,6 +127,16 @@ interface Translations {
   loadedThread: (title: string) => string;
   contextCompacted: string;
   compactFailed: string;
+  /** Posted when a manual compaction is accepted, in the conversation window
+   *  and on the status bar. Phrased as a completed act ("started") rather than
+   *  an ongoing one: the line stays in the transcript after the pass ends, and
+   *  "compacting now" would read as a lie next to its own result. */
+  contextCompactionStarted: string;
+  /** Guidance for a compact click the engine would refuse because the thread
+   *  already has a turn running: it names the way out (Stop). */
+  compactRefusedActiveTurn: string;
+  /** Posted when Compact is clicked with no conversation open. */
+  compactNoThread: string;
   sendFailed: string;
   /** Guidance for a send the engine refused because the thread already has a
    *  turn running: it names the way out (Stop) rather than the refusal. */
@@ -490,6 +503,7 @@ const en: Translations = {
   completionPct: "{n}% complete",
   readyTimedOut: "Ready (stream timed out)",
   note: "Note",
+  compactionSummaryLabel: "Compaction summary",
   noPreviousMessage: "No previous message to edit",
   justNow: "just now",
   minutesAgoPattern: "{n}m ago",
@@ -497,6 +511,9 @@ const en: Translations = {
   daysAgoPattern: "{n}d ago",
   loadedThread: (title) => `Loaded: ${title}`,
   contextCompacted: "Context compacted", compactFailed: "Compact failed",
+  contextCompactionStarted: "Context compaction started",
+  compactRefusedActiveTurn: "This thread is already running a turn, so it can't be compacted yet. Press Stop, then try again.",
+  compactNoThread: "Open or start a conversation before compacting.",
   sendFailed: "Failed to send message", initFailed: "Failed to initialize",
   sendRefusedActiveTurn: "This thread is already running a turn, so this message was not sent. It is back in the input box — press Stop to interrupt the running turn, then send it again.",
   eventStreamError: "Event stream error",
@@ -845,6 +862,7 @@ const zhCn: Translations = {
   completionPct: "已完成 {n}%",
   readyTimedOut: "就绪（流超时）",
   note: "提示",
+  compactionSummaryLabel: "压缩摘要",
   noPreviousMessage: "没有可编辑的上一条消息",
   justNow: "刚刚",
   minutesAgoPattern: "{n}分钟前",
@@ -852,6 +870,9 @@ const zhCn: Translations = {
   daysAgoPattern: "{n}天前",
   loadedThread: (title) => `已加载: ${title}`,
   contextCompacted: "上下文已压缩", compactFailed: "压缩失败",
+  contextCompactionStarted: "已开始压缩上下文",
+  compactRefusedActiveTurn: "会话正在运行，暂时无法压缩。请先停止当前回合再试。",
+  compactNoThread: "请先打开或新建一个会话，再进行压缩。",
   sendFailed: "发送消息失败", initFailed: "初始化失败",
   sendRefusedActiveTurn: "该会话已有正在运行的回合，这条消息未发送。已放回输入框——点击停止按钮中断正在运行的回合后，再重新发送。",
   eventStreamError: "事件流错误",
@@ -1244,6 +1265,7 @@ export function webviewTranslations(tr: Translations) {
     thinkingOpen: tr.thinkingOpen,
     thinkingClose: tr.thinkingClose,
     contextCompacted: tr.contextCompacted,
+    compactionSummaryLabel: tr.compactionSummaryLabel,
     compactFailed: tr.compactFailed,
     sendFailed: tr.sendFailed,
     initFailed: tr.initFailed,

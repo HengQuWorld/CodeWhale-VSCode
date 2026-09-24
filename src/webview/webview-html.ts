@@ -161,6 +161,9 @@ export interface WebviewTranslations {
   completionPct: string;
   readyTimedOut: string;
   note: string;
+  /** Toggle label on the collapsed body of a compaction result: the handoff
+   *  summary the engine now holds in place of the older conversation. */
+  compactionSummaryLabel: string;
   noPreviousMessage: string;
   justNow: string;
   minutesAgoPattern: string;

@@ -1245,6 +1245,18 @@ ${PROVIDER_PICKER_JS}
         setStatusText(msg.text);
         break;
 
+      case 'busy': {
+        // A pass that produces no tokens still has to look alive. Context
+        // compaction is exactly that — one non-streaming summary call, so no
+        // deltas ever arrive and the wait is otherwise silent. This paints the
+        // status bar's activity dot and nothing else: not the
+        // messages-streaming flag (which would arm the stall deadline and
+        // offer a Stop button with nothing to stop) and not the status text
+        // (the 'status' message owns that).
+        if (statusBarEl) statusBarEl.classList.toggle('is-streaming', !!msg.active);
+        break;
+      }
+
       case 'setInputText':
         if (msg.text && inputEl) {
           // Through the input module's own writer: it is the one place that
@@ -1343,7 +1355,12 @@ ${PROVIDER_PICKER_JS}
       case 'info': {
         var infoEl = document.createElement('div');
         infoEl.className = 'system-message';
-        infoEl.innerHTML = '<span class="msg-label note">' + __wvEscapeHtml(__i18n.note) + '</span><span class="msg-body">' + __wvEscapeHtml(msg.message) + '</span>';
+        // A compaction result carries the handoff summary the engine committed;
+        // it hangs off the same line, collapsed.
+        infoEl.innerHTML = '<span class="msg-label note">' + __wvEscapeHtml(__i18n.note) + '</span><span class="msg-body">' + __wvEscapeHtml(msg.message) + '</span>' +
+          (msg.compactionSummary && window.__wvMessages && window.__wvMessages.renderCompactionSummary
+            ? window.__wvMessages.renderCompactionSummary(msg.compactionSummary)
+            : '');
         messagesEl.appendChild(infoEl);
         window.__wvMessages.smartScrollToBottom();
         break;

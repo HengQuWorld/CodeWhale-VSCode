@@ -117,6 +117,7 @@ export function makeTr(overrides?: Partial<WebviewTranslations>): WebviewTransla
     completionPct: "0%",
     readyTimedOut: "Ready timed out",
     note: "Note",
+    compactionSummaryLabel: "Compaction summary",
     noPreviousMessage: "No previous message",
     justNow: "just now",
     minutesAgoPattern: "{n} min ago",

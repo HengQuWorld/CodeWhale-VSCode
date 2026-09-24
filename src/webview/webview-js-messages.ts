@@ -484,9 +484,38 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
     if (el) el.remove();
   }
 
+  /** A collapsed body for a compaction note.
+   *
+   *  A details/summary element provides the expand without any script or state
+   *  to keep in sync, which matters because this text is the model's own
+   *  handoff record and can run to thousands of words — laid out open it would
+   *  bury the conversation it describes.
+   */
+  function renderCompactionSummary(summaryText) {
+    if (!summaryText) return '';
+    return '<details class="compaction-summary">' +
+      '<summary>' + __wvEscapeHtml(__i18n.compactionSummaryLabel) + '</summary>' +
+      '<pre class="compaction-summary-body">' + __wvEscapeHtml(summaryText) + '</pre>' +
+      '</details>';
+  }
+
   function addMessage(msg, showRole) {
     var welcomeEl = messagesEl.querySelector('.welcome-screen');
     if (welcomeEl) welcomeEl.remove();
+
+    // A system message is a note, not a chat turn: nothing was asked and no
+    // model answer was produced. It is drawn with the same markup the live
+    // 'info' message uses, so a reloaded transcript shows the same line the
+    // user saw live (a compaction result, for instance).
+    if (msg.role === 'system') {
+      var noteEl = document.createElement('div');
+      noteEl.className = 'system-message';
+      noteEl.id = 'msg-' + msg.id;
+      noteEl.innerHTML = '<span class="msg-label note">' + __wvEscapeHtml(__i18n.note) + '</span><span class="msg-body">' + __wvEscapeHtml(msg.content) + '</span>' + renderCompactionSummary(msg.compactionSummary);
+      messagesEl.appendChild(noteEl);
+      smartScrollToBottom();
+      return;
+    }
 
     var el = document.createElement('div');
     el.className = 'message ' + msg.role + (msg.steered ? ' steered' : '');
@@ -982,6 +1011,7 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
     updateThinkingBlock: updateThinkingBlock,
     markClippedBlocks: markClippedBlocks,
     renderPlanApproveButton: renderPlanApproveButton,
+    renderCompactionSummary: renderCompactionSummary,
   };
 
   renderWelcome();

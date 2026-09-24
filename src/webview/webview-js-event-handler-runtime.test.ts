@@ -187,6 +187,8 @@ function createRuntimeHarness() {
   const attachmentPreviewCalls: Array<{ id: string; previewUrl: string }> = [];
   const goalCalls: Array<{ method: string; args: unknown[] }> = [];
   const planApproveCalls: string[] = [];
+  /** Summary bodies the event handler handed to the messages module. */
+  const compactionSummaryCalls: string[] = [];
   const activeThreadCalls: Array<string | null> = [];
   // What the Changes panel was handed: the change list, and the turns it is
   // grouped by. Both are needed — the panel is session-wide.
@@ -276,6 +278,10 @@ function createRuntimeHarness() {
       renderPlanApproveButton: (messageId: string) => {
         planApproveCalls.push(messageId);
       },
+      renderCompactionSummary: (summary: string) => {
+        compactionSummaryCalls.push(summary);
+        return '<details>' + summary + '</details>';
+      },
     },
     __wvInput: {
       updateSendStopButton: (streaming: boolean) => {
@@ -358,6 +364,7 @@ function createRuntimeHarness() {
     attachmentPreviewCalls,
     goalCalls,
     planApproveCalls,
+    compactionSummaryCalls,
     /** Every thread the sidebar was told is on screen, in order. */
     activeThreadCalls,
     changesStateCalls,
@@ -1448,5 +1455,49 @@ describe("Changes panel state routing", () => {
       changes: [{ filePath: "src/a.ts", changeType: "modified" }],
       turns: [],
     });
+  });
+});
+
+describe("webview-js-event-handler runtime: compaction activity", () => {
+  it("lights the status bar's activity dot for a pass that produces no output", () => {
+    const harness = createRuntimeHarness();
+    const status = harness.getElement("status");
+
+    harness.dispatchMessage({ type: "busy", active: true });
+
+    expect(status.classList.contains("is-streaming")).toBe(true);
+    // Deliberately not the messages-streaming flag: that would arm the stall
+    // deadline, and the composer would offer a Stop button for a pass it
+    // cannot stop.
+    expect(harness.isStreaming()).toBe(false);
+    expect(harness.streamingCalls).toEqual([]);
+    expect(harness.streamingTimers).toEqual([]);
+    expect(harness.sendStopCalls.every((value) => value === false)).toBe(true);
+
+    harness.dispatchMessage({ type: "busy", active: false });
+
+    expect(status.classList.contains("is-streaming")).toBe(false);
+  });
+
+  it("hangs an info message's compaction summary off the same line", () => {
+    const harness = createRuntimeHarness();
+
+    harness.dispatchMessage({
+      type: "info",
+      message: "Compaction complete: 96 → 9 messages",
+      compactionSummary: "The user asked for X.",
+    });
+
+    // The result line says what the pass did; the body says what the
+    // conversation became. Both land on one note.
+    expect(harness.compactionSummaryCalls).toEqual(["The user asked for X."]);
+  });
+
+  it("asks for no summary block on an info message that carries none", () => {
+    const harness = createRuntimeHarness();
+
+    harness.dispatchMessage({ type: "info", message: "Saved." });
+
+    expect(harness.compactionSummaryCalls).toEqual([]);
   });
 });

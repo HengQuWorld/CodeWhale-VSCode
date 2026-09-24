@@ -1849,6 +1849,35 @@ export function getWebviewCss(): string {
     .system-message .msg-body {
       font-style: italic;
     }
+    /* The collapsed body of a compaction result. It is the model's own handoff
+       record, so it is shown verbatim (no italic body styling, monospace-ish
+       wrapping) but capped: the point is that it can be read, not that it
+       takes over the scrollback. */
+    .compaction-summary {
+      margin-top: 6px;
+    }
+    .compaction-summary > summary {
+      cursor: pointer;
+      font-weight: 600;
+      color: var(--brand-primary);
+    }
+    .compaction-summary > summary:hover {
+      text-decoration: underline;
+    }
+    .compaction-summary-body {
+      margin: 6px 0 0 0;
+      padding: 8px;
+      max-height: 320px;
+      overflow: auto;
+      background: var(--input-bg);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      font-family: inherit;
+      font-size: 0.95em;
+      font-style: normal;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
     .error-banner {
       padding: 8px 12px;
       background: rgba(217,83,79,0.15);

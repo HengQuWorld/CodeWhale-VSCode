@@ -200,6 +200,14 @@ describe("webview-js-input runtime: emitted script", () => {
       expect(h.documentListeners.has(name)).toBe(true);
     }
   });
+
+  it("asks the host to compact when the toolbar's Compact button is clicked", () => {
+    const h = createHarness();
+    // The generated source merely naming `btn-compact` cannot tell a wired
+    // button from one whose listener body is empty; this clicks it.
+    h.getElement("btn-compact").dispatch("click", syntheticEvent());
+    expect(h.postMessages).toEqual([{ type: "compact" }]);
+  });
 });
 
 describe("webview-js-input runtime: drop routing", () => {

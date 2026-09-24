@@ -945,3 +945,60 @@ describe("CodeWhaleApiClient - per-file revert", () => {
   });
 });
 
+
+describe("CodeWhaleApiClient - manual compaction", () => {
+  type RawResponse = { statusCode: number; data: string };
+
+  /** Stub the raw HTTP layer so the test asserts the wire contract the engine
+   *  sees — method, path and body — instead of the transport. */
+  function clientStubbingRaw(
+    respond: (method: string, path: string, body: unknown) => RawResponse
+  ) {
+    const client = new CodeWhaleApiClient("http://localhost:54321");
+    const calls: { method: string; path: string; body: unknown }[] = [];
+    (client as any).requestRaw = vi.fn(
+      async (method: string, path: string, body: unknown) => {
+        calls.push({ method, path, body });
+        return respond(method, path, body);
+      }
+    );
+    return { client, calls };
+  }
+
+  it("posts a manual compaction and returns the turn it was accepted as", async () => {
+    const { client, calls } = clientStubbingRaw(() => ({
+      statusCode: 202,
+      data: JSON.stringify({
+        thread: { id: "thread-1" },
+        turn: { id: "turn_compact", status: "in_progress" },
+        idempotent_replay: false,
+      }),
+    }));
+
+    const result = await client.compactThread("thread-1");
+
+    expect(calls).toEqual([
+      { method: "POST", path: "/v1/threads/thread-1/compact", body: {} },
+    ]);
+    // A 202 is an acceptance, not a completion: the returned turn id is the
+    // handle the caller watches the engine's compaction by.
+    expect(result.turn.id).toBe("turn_compact");
+  });
+
+  it("carries the reason when one is supplied", async () => {
+    const { client, calls } = clientStubbingRaw(() => ({
+      statusCode: 202,
+      data: JSON.stringify({ thread: { id: "thread-1" }, turn: { id: "turn_compact" } }),
+    }));
+
+    await client.compactThread("thread-1", "user asked");
+
+    expect(calls).toEqual([
+      {
+        method: "POST",
+        path: "/v1/threads/thread-1/compact",
+        body: { reason: "user asked" },
+      },
+    ]);
+  });
+});
