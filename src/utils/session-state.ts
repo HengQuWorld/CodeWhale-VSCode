@@ -60,6 +60,32 @@ export interface FileChangeInfo {
    *  earlier session fall back to the current bytes at click time. */
   expectedHash?: string;
   toolName?: string;
+  /** The change group (turn) this record belongs to, as a 1-based ordinal
+   *  within the session's change list. The panel shows every turn's changes
+   *  grouped by this number, so a record must know which turn produced it —
+   *  the flat list is chronological but no longer turn-scoped. Assigned when
+   *  the record is appended (`beginChangeTurn`). */
+  turnIndex?: number;
+}
+
+/**
+ * One turn that produced file changes, as the Changes panel groups them.
+ *
+ * `index` is the turn's ordinal within the session (1-based, matching the
+ * conversation's turn order, not a renumbering of only the turns that changed
+ * something): a reader looking at "Turn 4" can find the 4th turn. `label`
+ * identifies the turn without reading the transcript — the user's own words,
+ * clipped, empty for a turn the runtime started on its own.
+ */
+export interface ChangeTurnInfo {
+  index: number;
+  label: string;
+  /** Engine id of the turn this group is, when the client knows it. Two views
+   *  of one turn (a history rebuild, then the live stream that resumes it) name
+   *  the same turn, so the second cannot open a duplicate section for it. */
+  turnId?: string;
+  /** Turn start, in ms. Absent for a live turn the client could not timestamp. */
+  timestamp?: number;
 }
 
 export interface ChatMessage {
@@ -170,6 +196,13 @@ export interface SessionStateData {
   /** Strategy steps from update_plan tool calls */
   strategySteps: StrategyStep[];
   turnFileChanges: FileChangeInfo[];
+  /** Groups for `turnFileChanges`, in the order the turns began. A turn with no
+   *  changes keeps its entry (later ordinals stay aligned with the
+   *  conversation); the panel drops the empty ones at render time. */
+  changeTurns: ChangeTurnInfo[];
+  /** Ordinal of the change group currently being filled. 0 = none open; the
+   *  next `beginChangeTurn` mints 1. */
+  currentChangeTurn: number;
   stats: SessionStats;
   pendingApprovals: Map<string, ToolCallInfo>;
   pendingUserInputs: Map<string, UserInputState>;
@@ -211,6 +244,8 @@ function createEmptyState(): SessionStateData {
     checklistCompletionPct: 0,
     strategySteps: [],
     turnFileChanges: [],
+    changeTurns: [],
+    currentChangeTurn: 0,
     stats: {
       sessionCostUsd: 0,
       sessionCostCny: 0,

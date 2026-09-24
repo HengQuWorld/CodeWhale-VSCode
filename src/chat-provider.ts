@@ -59,6 +59,7 @@ import {
   type ContentBlock,
   type ToolCallInfo,
   type FileChangeInfo,
+  type ChangeTurnInfo,
   type StrategyStep,
   type SessionCostSnapshot,
   type UserInputState,
@@ -377,6 +378,10 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
   private set strategySteps(v: StrategyStep[]) { this.sessionState.data.strategySteps = v; }
   private get turnFileChanges(): FileChangeInfo[] { return this.sessionState.data.turnFileChanges; }
   private set turnFileChanges(v: FileChangeInfo[]) { this.sessionState.data.turnFileChanges = v; }
+  private get changeTurns(): ChangeTurnInfo[] { return this.sessionState.data.changeTurns; }
+  private set changeTurns(v: ChangeTurnInfo[]) { this.sessionState.data.changeTurns = v; }
+  private get currentChangeTurn(): number { return this.sessionState.data.currentChangeTurn; }
+  private set currentChangeTurn(v: number) { this.sessionState.data.currentChangeTurn = v; }
   public get sessionCostUsd(): number { return this.sessionState.data.stats.sessionCostUsd; }
   public set sessionCostUsd(v: number) { this.sessionState.data.stats.sessionCostUsd = v; }
   public get sessionCostCny(): number { return this.sessionState.data.stats.sessionCostCny; }
@@ -935,11 +940,20 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     try {
       const detail = await this.api.getThreadDetail(id);
       this.messages = [];
-      this.turnFileChanges = [];
+      this.resetChangeGroups();
       this.lastEventSeq = detail.latest_seq ?? 0;
       const itemById = new Map(detail.items.map((item) => [item.id, item]));
 
       for (const turn of detail.turns) {
+        // One group per turn, so the panel's sections follow the conversation's
+        // turn order after a reload. Opened before the turn's items are read:
+        // its changes are appended from `flushAssistantSegment`, which runs
+        // inside this loop.
+        this.beginChangeTurn(
+          turn.input_summary,
+          new Date(turn.created_at).getTime() || undefined,
+          turn.id,
+        );
         // A mid-turn steer splits the turn into multiple assistant segments.
         // Segment state below resets at each steer boundary so history
         // renders like the live view: assistant → steer bubble → assistant
@@ -1223,9 +1237,11 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         }
       }
 
-      if (this.turnFileChanges.length > 0) {
-        this.refreshWorkPanel();
-      }
+      // Unconditional: the panel describes the thread that is now on screen.
+      // Publishing only when something changed left the previous thread's
+      // changes (and checklist) on screen after switching to a thread that
+      // has none — the one case where "nothing to say" must still be said.
+      this.refreshWorkPanel();
 
       // "Last turn" cache stats come from the most recent persisted usage
       // record; token/cost TOTALS are fetched from the TUI runtime below,
@@ -1249,7 +1265,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       const lastTurn = detail.turns[detail.turns.length - 1];
       if (lastTurn && (lastTurn.status === "in_progress" || lastTurn.status === "queued")) {
         this.currentTurnId = lastTurn.id;
-        this.ensureAssistantPlaceholderForExternalTurn();
+        this.ensureAssistantPlaceholderForExternalTurn(lastTurn.id);
         this.startPeriodicTaskRefresh();
         this.postMessage({ type: "turnStarted", turnId: lastTurn.id });
       }
@@ -1511,6 +1527,13 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     };
 
     let i = 0;
+    // One change group per user turn, so a *viewed* session's Changes panel is
+    // grouped by turn exactly like a live thread's. The appends themselves
+    // happen after this pass (a card's fileChange is only final once its
+    // tool_result has been read), so each tool call records the group it was
+    // created in and the batch below replays that.
+    this.resetChangeGroups();
+    const changeTurnByCallIdx: number[] = [];
     while (i < rawMessages.length) {
       const msg = rawMessages[i];
 
@@ -1558,6 +1581,9 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
             steered: !isFirstUserText || undefined,
             _realContent: true,
           } as ChatMessage & { _realContent: boolean });
+          // The turn's first user text opens its group; a steer is a second
+          // user message *inside* the same turn, so it must not open one.
+          if (isFirstUserText) this.beginChangeTurn(combined, Date.now());
           isFirstUserText = false;
         }
       } else {
@@ -1582,6 +1608,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
               };
               updateFileChangeCard(toolCall, false);
               globalToolCalls.push(toolCall);
+              changeTurnByCallIdx.push(this.currentChangeTurn);
               blocks.push({ type: "tool_call", toolCallIdx: idx });
               turnToolCallIndices.push(idx);
             } else if (block.type === "tool_result" && block.tool_use_id) {
@@ -1651,8 +1678,9 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
 
     // Collect file changes from reconstructed tool calls so the sidebar
     // Changes panel reflects the loaded session (mirrors loadHistory).
-    for (const tc of globalToolCalls) {
-      if (tc.fileChange) this.appendFileChange(tc.fileChange);
+    for (let ci = 0; ci < globalToolCalls.length; ci++) {
+      const tc = globalToolCalls[ci];
+      if (tc.fileChange) this.appendFileChange(tc.fileChange, changeTurnByCallIdx[ci]);
     }
     this.backfillSessionFileDiffs(globalToolCalls);
     this.refreshChangesPanel();
@@ -2247,7 +2275,9 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       this.activeItems.clear();
       this.currentTextBlockIdx = -1;
       this.currentThinkingBlockIdx = -1;
-      this.turnFileChanges = [];
+      // A new turn, not a new panel: everything the session changed so far stays
+      // listed under its own turn, and this turn's changes open a group below.
+      this.beginChangeTurn(text, Date.now());
 
       const userMsg: ChatMessage = {
         id: userMsgId,
@@ -2347,6 +2377,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         trust_mode: this.currentThread.trust_mode,
       });
       this.currentTurnId = result.turn.id;
+      this.setCurrentChangeTurnId(result.turn.id);
       this.activeTurnMode = { turnId: result.turn.id, mode };
       this.postMessage({ type: "turnStarted", turnId: result.turn.id });
     } catch (err) {
@@ -3654,12 +3685,111 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
   }
 
   /**
-   * Append one change record. Records share their object with the tool call
-   * card that produced them, so the panel and the card always agree on the
-   * change's identity, index and reviewed digest.
+   * Open a new change group for the turn that is starting.
+   *
+   * The Changes panel shows every turn of the session, grouped by turn, so the
+   * list is *not* cleared when a turn ends — a turn boundary only starts a new
+   * group. The ordinal is the turn's position in the session (1-based), which
+   * is what lets a group header be matched to the conversation instead of
+   * renumbering only the turns that happened to touch a file.
+   *
+   * `label` is the user's own words for the turn, clipped: it is what makes a
+   * group identifiable without reading the transcript. A turn the runtime
+   * started on its own has none.
+   *
+   * `turnId`, when the caller knows it, makes this idempotent: a thread reopened
+   * with a turn still in flight rebuilds that turn's group from history, then
+   * resumes the live turn, and the second call must land on the group that is
+   * already there rather than open a second section for one turn.
    */
-  private appendFileChange(change: FileChangeInfo): void {
+  private beginChangeTurn(label?: string, timestamp?: number, turnId?: string): void {
+    if (turnId) {
+      const existing = this.changeTurns.find((turn) => turn.turnId === turnId);
+      if (existing) {
+        this.currentChangeTurn = existing.index;
+        return;
+      }
+    }
+    // One past the highest group, not one past the current one: adopting an
+    // older turn's group (above) must not let the next turn reuse an index.
+    const index = this.changeTurns.reduce((max, turn) => Math.max(max, turn.index), 0) + 1;
+    this.currentChangeTurn = index;
+    this.changeTurns.push({
+      index,
+      label: (label ?? "").replace(/\s+/g, " ").trim().slice(0, 120),
+      turnId,
+      timestamp,
+    });
+  }
+
+  /** Name the engine turn the group now being filled belongs to. Called once
+   *  the runtime answers a send with that turn's id — the group itself opens
+   *  before the send, because the user's own words are the label and a turn the
+   *  runtime refuses must not leave a section behind. */
+  private setCurrentChangeTurnId(turnId: string): void {
+    const current = this.changeTurns.find((turn) => turn.index === this.currentChangeTurn);
+    if (current) current.turnId = turnId;
+  }
+
+  /** Drop every recorded change and every group. For a rebuild of the whole
+   *  panel (a thread load, a fork) — never for a turn boundary, which keeps the
+   *  session's earlier turns and opens a group instead (`beginChangeTurn`). */
+  private resetChangeGroups(): void {
+    this.turnFileChanges = [];
+    this.changeTurns = [];
+    this.currentChangeTurn = 0;
+  }
+
+  /**
+   * Take back the change group a refused send opened.
+   *
+   * `sendMessage` opens the group before it asks the runtime for a turn, so a
+   * send the runtime refuses (a turn is already running) would otherwise leave
+   * a group labelled with text the user retracted, sitting above the running
+   * turn's changes. An untouched group is dropped outright; one the running
+   * turn has already put changes into keeps its place in the turn order and
+   * only loses the label, because a wrong label misattributes the changes and
+   * a missing one merely says less.
+   */
+  private retractRefusedChangeTurn(): void {
+    const last = this.changeTurns[this.changeTurns.length - 1];
+    if (!last || last.index !== this.currentChangeTurn) return;
+    if (this.turnFileChanges.some((fc) => fc.turnIndex === last.index)) {
+      last.label = "";
+      return;
+    }
+    this.changeTurns.pop();
+    this.currentChangeTurn = last.index - 1;
+  }
+
+  /**
+   * Append one change record to a turn's group. Records share their object with
+   * the tool call card that produced them, so the panel and the card always
+   * agree on the change's identity, index and reviewed digest.
+   *
+   * `turnIndex` names the group for callers that rebuild a session's history in
+   * one pass (the tool call recorded which turn it belonged to); omit it for a
+   * change arriving live, which belongs to the turn currently open.
+   */
+  private appendFileChange(change: FileChangeInfo, turnIndex?: number): void {
     if (this.turnFileChanges.includes(change)) return;
+    const requested = turnIndex !== undefined && turnIndex > 0 ? turnIndex : this.currentChangeTurn;
+    if (requested === 0) {
+      // No turn open would mean no group to render under. Open one rather than
+      // drop the record: an unlabelled group is still a better answer than a
+      // change the panel cannot show.
+      this.beginChangeTurn();
+      change.turnIndex = this.currentChangeTurn;
+    } else {
+      // A group the caller named but never opened (a replay whose user message
+      // was filtered out) is created here so its changes have somewhere to go.
+      if (!this.changeTurns.some((turn) => turn.index === requested)) {
+        this.changeTurns.push({ index: requested, label: "" });
+        this.changeTurns.sort((a, b) => a.index - b.index);
+      }
+      change.turnIndex = requested;
+      if (requested > this.currentChangeTurn) this.currentChangeTurn = requested;
+    }
     this.turnFileChanges.push(change);
     this.reindexFileChanges();
   }
@@ -3697,10 +3827,18 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
    *
    *  One entry per change, not per file: the panel's Diff action reconstructs
    *  the change at `changeIndex` within its file's history, and its Revert
-   *  action names the exact tool call (`callId`) whose restore point it wants. */
+   *  action names the exact tool call (`callId`) whose restore point it wants.
+   *
+   *  The list spans the whole session, so it is published with the group each
+   *  change belongs to (`turns`), and the panel draws one section per turn.
+   *  Groups left with no changes — a turn that touched nothing, or one whose
+   *  only change was just reverted — are dropped here, where the record list is
+   *  authoritative, rather than in the renderer. */
   private refreshChangesPanel(): void {
+    const populated = new Set(this.turnFileChanges.map((fc) => fc.turnIndex));
     this.postMessage({
       type: "changesState",
+      turns: this.changeTurns.filter((turn) => populated.has(turn.index)),
       changes: this.turnFileChanges.map(fc => ({
         filePath: fc.filePath,
         changeType: fc.changeType,
@@ -3710,6 +3848,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         changeIndex: fc.changeIndex,
         callId: fc.callId,
         toolName: fc.toolName,
+        turnIndex: fc.turnIndex,
       })),
     });
   }
@@ -4767,7 +4906,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
   private adoptActiveTurn(turn: TurnRecord): void {
     this.currentTurnId = turn.id;
     this.activeTurnMode = { turnId: turn.id, mode: this.turnMode(turn) };
-    this.ensureAssistantPlaceholderForExternalTurn();
+    this.ensureAssistantPlaceholderForExternalTurn(turn.id);
     this.startPeriodicTaskRefresh();
     // An open stream for this thread is already delivering this turn's events;
     // re-subscribing would only re-read what it is about to deliver. With no
@@ -4806,6 +4945,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       this.messages.splice(idx, 1);
       this.postMessage({ type: "removeMessage", messageId: userMsgId });
     }
+    this.retractRefusedChangeTurn();
     this.restoreComposerText(text);
     if (attachments.length > 0) {
       this.currentAttachments = [...attachments];
@@ -4911,7 +5051,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       // Switch to the new forked thread.
       this.currentThread = result.thread;
       this.messages = [];
-      this.turnFileChanges = [];
+      this.resetChangeGroups();
       this.currentTurnId = null;
       this.activeItems.clear();
       this.currentTextBlockIdx = -1;
@@ -5029,7 +5169,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       // Switch to the new forked thread and subscribe to its events.
       this.currentThread = result.thread;
       this.messages = [];
-      this.turnFileChanges = [];
+      this.resetChangeGroups();
       this.currentTurnId = result.turn.id;
       this.activeItems.clear();
       this.currentTextBlockIdx = -1;
@@ -5725,8 +5865,12 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
           // have no preceding user message in this.messages, so the item
           // router would drop their assistant output. Ensure a streaming
           // placeholder exists so the work is visible instead of the goal
-          // appearing to stay "active" without running.
-          this.ensureAssistantPlaceholderForExternalTurn();
+          // appearing to stay "active" without running. The envelope names the
+          // turn, so this cannot open a second change group for a turn whose
+          // group a history rebuild already made.
+          this.ensureAssistantPlaceholderForExternalTurn(
+            event.turn_id ?? this.currentTurnId ?? undefined,
+          );
           this.scheduleThreadListRefresh();
         }
         this.postMessage({ type: "status", text: `Turn: ${pl.status || "unknown"}` });
@@ -6056,7 +6200,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
    *  turn (goal kickoff/continuation, agent mail). Without it, `handleItemEvent`
    *  drops the turn's assistant output because there is no preceding user
    *  message in `this.messages`. */
-  private ensureAssistantPlaceholderForExternalTurn(): void {
+  private ensureAssistantPlaceholderForExternalTurn(turnId?: string): void {
     const lastMsg = this.messages[this.messages.length - 1];
     if (lastMsg && lastMsg.role === "assistant" && lastMsg.status === "streaming") {
       return;
@@ -6064,7 +6208,13 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     this.activeItems.clear();
     this.currentTextBlockIdx = -1;
     this.currentThinkingBlockIdx = -1;
-    this.turnFileChanges = [];
+    // A turn the runtime started (a goal kickoff, an agent mail): it is a turn
+    // of this session like any other and gets its own change group. Its label
+    // stays empty — the client never saw the prompt that started it, and
+    // guessing one would misattribute the changes below it. Named by its turn
+    // id when we have one, so reopening this thread mid-turn (which rebuilds
+    // the group from history) does not get a second section for the same turn.
+    this.beginChangeTurn(undefined, undefined, turnId);
     const assistantMsg: ChatMessage = {
       id: `assistant-${Date.now()}`,
       role: "assistant",

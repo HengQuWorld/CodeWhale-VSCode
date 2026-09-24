@@ -188,6 +188,9 @@ function createRuntimeHarness() {
   const goalCalls: Array<{ method: string; args: unknown[] }> = [];
   const planApproveCalls: string[] = [];
   const activeThreadCalls: Array<string | null> = [];
+  // What the Changes panel was handed: the change list, and the turns it is
+  // grouped by. Both are needed — the panel is session-wide.
+  const changesStateCalls: Array<{ changes: unknown[]; turns: unknown[] }> = [];
 
   const windowObj: Record<string, any> = {
     __wvI18n: makeTr(),
@@ -237,7 +240,9 @@ function createRuntimeHarness() {
       renderAgents: () => {},
       setWorkState: () => {},
       renderWork: () => {},
-      setChangesState: () => {},
+      setChangesState: (changes: unknown[], turns: unknown[]) => {
+        changesStateCalls.push({ changes, turns });
+      },
       renderChanges: () => {},
       setActiveSessionId: () => {},
       setActiveThreadId: (id: unknown) => {
@@ -355,6 +360,7 @@ function createRuntimeHarness() {
     planApproveCalls,
     /** Every thread the sidebar was told is on screen, in order. */
     activeThreadCalls,
+    changesStateCalls,
   };
 }
 
@@ -1402,5 +1408,45 @@ describe("webview-js-event-handler runtime", () => {
       providers,
     });
     expect(harness.getElement("current-provider").textContent).toBe("bigmodel-cn (custom)");
+  });
+});
+
+describe("Changes panel state routing", () => {
+  it("hands the panel the turns as well as the changes", () => {
+    const harness = createRuntimeHarness();
+
+    harness.dispatchMessage({
+      type: "changesState",
+      changes: [{ filePath: "src/a.ts", changeType: "modified", turnIndex: 2 }],
+      turns: [{ index: 2, label: "second prompt" }],
+    });
+
+    expect(harness.changesStateCalls).toEqual([
+      {
+        changes: [{ filePath: "src/a.ts", changeType: "modified", turnIndex: 2 }],
+        turns: [{ index: 2, label: "second prompt" }],
+      },
+    ]);
+  });
+
+  it("clears the grouping when a host publishes changes without turns", () => {
+    const harness = createRuntimeHarness();
+    harness.dispatchMessage({
+      type: "changesState",
+      changes: [{ filePath: "src/a.ts", changeType: "modified", turnIndex: 1 }],
+      turns: [{ index: 1, label: "first prompt" }],
+    });
+
+    // An older host, or a reset: no turns named. The previous session's
+    // grouping must not stand over a list that no longer has groups.
+    harness.dispatchMessage({
+      type: "changesState",
+      changes: [{ filePath: "src/a.ts", changeType: "modified" }],
+    });
+
+    expect(harness.changesStateCalls[1]).toEqual({
+      changes: [{ filePath: "src/a.ts", changeType: "modified" }],
+      turns: [],
+    });
   });
 });

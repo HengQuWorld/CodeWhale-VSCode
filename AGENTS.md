@@ -119,6 +119,7 @@ DeepSeek-GUI/
 - Threads 面板与对话并排（`#threads-panel` 是 `#layout` 里的普通 flex 子项，靠 `.open` 显示），从对话区让出宽度而不是盖住它；不要改回绝对定位的覆盖写法
 - 打开后保持打开状态，除非用户明确关闭（✕ 按钮或 `Esc`）
 - 点击线程项不会自动关闭侧边栏
+- Changes 区块列出**整个会话**的文件变更，按轮次分组（每条变更带 `turnIndex`，`changesState` 消息同时带 `turns` 分组元数据）。轮次边界只**新开一个分组**，不清空列表：`sendMessage` / 外部回合开始时调 `beginChangeTurn`，只有重建整个面板的路径（`loadHistory`、fork/retry、切会话）才调 `resetChangeGroups`。`changeIndex` 与 diff 重建都是按文件、跨整个会话编号的，改回「只留本轮」会让 Diff/回滚/Revert 的目标错位。
 
 ## 常见问题修复
 

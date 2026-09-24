@@ -240,6 +240,9 @@ interface Translations {
   fileChanges: string;
   changesCount: string;
   filesCount: string;
+  /** Group header for one turn's changes in the Changes panel: "Turn 3". The
+   *  number is the turn's ordinal in the session, matching the conversation. */
+  changeTurnLabel: string;
   locateChange: string;
   locateChangeTooltip: string;
   viewDiff: string;
@@ -594,6 +597,7 @@ const en: Translations = {
   fileChanges: "Changes",
   changesCount: "{n} change(s)",
   filesCount: "{n} file(s)",
+  changeTurnLabel: "Turn {n}",
   locateChange: "Locate",
   locateChangeTooltip: "Jump to the tool call card that made this change",
   viewDiff: "View Diff",
@@ -948,6 +952,7 @@ const zhCn: Translations = {
   fileChanges: "文件变更",
   changesCount: "{n} 处变更",
   filesCount: "{n} 个文件",
+  changeTurnLabel: "第 {n} 轮",
   locateChange: "定位",
   locateChangeTooltip: "跳转到产生此变更的工具调用卡片",
   viewDiff: "查看差异",
@@ -1360,6 +1365,7 @@ export function webviewTranslations(tr: Translations) {
     fileChanges: tr.fileChanges,
     changesCount: tr.changesCount,
     filesCount: tr.filesCount,
+    changeTurnLabel: tr.changeTurnLabel,
     locateChange: tr.locateChange,
     locateChangeTooltip: tr.locateChangeTooltip,
     viewDiff: tr.viewDiff,

@@ -199,6 +199,7 @@ describe("i18n UI string translations", () => {
     { key: "readyTimedOut", en: "Ready (stream timed out)", zhCn: "就绪（流超时）" },
     { key: "changesCount", en: "{n} change(s)", zhCn: "{n} 处变更" },
     { key: "filesCount", en: "{n} file(s)", zhCn: "{n} 个文件" },
+    { key: "changeTurnLabel", en: "Turn {n}", zhCn: "第 {n} 轮" },
     { key: "locateChange", en: "Locate", zhCn: "定位" },
     { key: "locateChangeTooltip", en: "Jump to the tool call card that made this change", zhCn: "跳转到产生此变更的工具调用卡片" },
     { key: "note", en: "Note", zhCn: "提示" },

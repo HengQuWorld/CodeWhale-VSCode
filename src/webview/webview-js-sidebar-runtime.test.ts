@@ -11,8 +11,29 @@
  * webview script block stops the entire block (see AGENTS.md), so a passing run
  * here is also the guard that this module still initialises at all.
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import vm from "node:vm";
+
+// The extension half of this seam is imported below, and it reaches for
+// `vscode` on the way in.
+vi.mock("vscode", () => ({
+  workspace: {
+    getConfiguration: vi.fn(() => ({
+      get: (_key: string, fallback?: unknown) => fallback,
+      update: vi.fn(async () => undefined),
+    })),
+    workspaceFolders: undefined,
+  },
+  commands: { executeCommand: vi.fn() },
+  window: {},
+  env: { language: "en" },
+  Uri: {
+    file: (fsPath: string) => ({ fsPath }),
+    parse: (value: string) => ({ toString: () => value }),
+  },
+  ConfigurationTarget: { Global: "global" },
+}));
+
 import { getSidebarScript } from "./webview-js-sidebar";
 import { makeTr } from "./webview-test-helpers";
 
@@ -108,6 +129,13 @@ class FakeElement {
     this.detach(child);
     child.parentElement = this;
     this.children.push(child);
+  }
+
+  /** Nearest ancestor matching the selector, self included — the Changes panel
+   *  folds a turn by finding the group header a click landed inside. */
+  closest(selector: string): FakeElement | null {
+    if (matchesSelector(this, selector)) return this;
+    return this.parentElement ? this.parentElement.closest(selector) : null;
   }
 
   remove(): void {
@@ -207,6 +235,7 @@ function createHarness() {
     changesPanel: getEl("tab-changes"),
     postMessages,
     revealCalls,
+    diffStore: windowObj.__wvDiffStore as Map<string, string>,
     sidebar: windowObj.__wvSidebar as Record<string, any>,
   };
 }
@@ -729,6 +758,21 @@ function locateButtons(renderedListHtml: string): FakeElement[] {
   });
 }
 
+/** The Diff buttons as `renderChanges` actually wrote them, for the same
+ *  reason `locateButtons` reads them back: hand-building one would test the
+ *  handler against a row the panel never draws. */
+function diffButtons(renderedListHtml: string): FakeElement[] {
+  const tags = renderedListHtml.match(/<button[^>]*change-view-diff[^>]*>/g) ?? [];
+  return tags.map((tag) => {
+    const button = new FakeElement();
+    button.classList.add("change-view-diff");
+    for (const [, name, value] of tag.matchAll(/([\w-]+)="([^"]*)"/g)) {
+      button.setAttribute(name, value);
+    }
+    return button;
+  });
+}
+
 describe("Changes panel", () => {
   it("reports the change count and the distinct file count", () => {
     const { changesPanel, sidebar } = createHarness();
@@ -818,5 +862,379 @@ describe("Changes panel", () => {
     const header = changesPanel.children[0].innerHTML;
     expect(header).toContain("3 change(s)");
     expect(header).toContain("3 file(s)");
+  });
+});
+
+// ── Changes panel grouped by turn ──
+
+/** One turn's group as `renderChanges` drew it: header first, rows second. */
+interface DrawnGroup {
+  group: FakeElement;
+  header: FakeElement;
+  items: FakeElement;
+}
+
+/** The groups the panel currently holds, in order. */
+function drawnGroups(panel: FakeElement): DrawnGroup[] {
+  const list = panel.children[1];
+  return list.children
+    .filter((child) => child.className.includes("change-turn-group"))
+    .map((group) => ({
+      group,
+      header: group.children[0],
+      items: group.children[1],
+    }));
+}
+
+describe("Changes panel grouped by turn", () => {
+  it("draws one section per turn, in the order the turns ran", () => {
+    const { changesPanel, sidebar } = createHarness();
+    sidebar.setChangesState(
+      [
+        recordedChange({ filePath: "src/a.ts", turnIndex: 1, changeIndex: 0 }),
+        recordedChange({ filePath: "src/b.ts", turnIndex: 2, changeIndex: 0, callId: "call-2" }),
+        recordedChange({ filePath: "src/c.ts", turnIndex: 2, changeIndex: 0, callId: "call-3" }),
+      ],
+      [
+        { index: 1, label: "first prompt" },
+        { index: 2, label: "second prompt" },
+      ],
+    );
+    sidebar.renderChanges();
+
+    const groups = drawnGroups(changesPanel);
+    expect(groups).toHaveLength(2);
+    expect(groups[0].header.innerHTML).toContain("Turn 1");
+    expect(groups[0].header.innerHTML).toContain("first prompt");
+    expect(groups[1].header.innerHTML).toContain("Turn 2");
+    expect(groups[1].header.innerHTML).toContain("second prompt");
+    // Each turn owns its own rows, and the header counts only those.
+    expect(groups[0].items.innerHTML).toContain("src/a.ts");
+    expect(groups[0].items.innerHTML).not.toContain("src/b.ts");
+    expect(groups[1].items.innerHTML).toContain("src/b.ts");
+    expect(groups[1].items.innerHTML).toContain("src/c.ts");
+    expect(groups[1].header.innerHTML).toContain("2 change(s)");
+    // The header still reads the whole session.
+    expect(changesPanel.children[0].innerHTML).toContain("3 change(s)");
+  });
+
+  it("skips a turn that recorded no changes, keeping the others' numbering", () => {
+    const { changesPanel, sidebar } = createHarness();
+    sidebar.setChangesState(
+      [recordedChange({ filePath: "src/a.ts", turnIndex: 3, changeIndex: 0 })],
+      [
+        { index: 1, label: "no files touched" },
+        { index: 2, label: "neither did this one" },
+        { index: 3, label: "this one did" },
+      ],
+    );
+    sidebar.renderChanges();
+
+    const groups = drawnGroups(changesPanel);
+    expect(groups).toHaveLength(1);
+    // "Turn 3" still means the third turn of the conversation.
+    expect(groups[0].header.innerHTML).toContain("Turn 3");
+  });
+
+  it("tells an unlabelled turn apart without inventing words for it", () => {
+    const { changesPanel, sidebar } = createHarness();
+    // A turn the runtime started on its own: the client never saw the prompt.
+    sidebar.setChangesState(
+      [recordedChange({ turnIndex: 1, changeIndex: 0 })],
+      [{ index: 1, label: "" }],
+    );
+    sidebar.renderChanges();
+
+    const header = drawnGroups(changesPanel)[0].header;
+    expect(header.innerHTML).toContain("Turn 1");
+    expect(header.innerHTML).not.toContain('class="change-turn-preview"');
+  });
+
+  it("keeps every row's own identity inside its group", () => {
+    const { changesPanel, sidebar } = createHarness();
+    sidebar.setChangesState(
+      [
+        recordedChange({ filePath: "src/a.ts", turnIndex: 1, changeIndex: 0, callId: "call-1" }),
+        recordedChange({ filePath: "src/a.ts", turnIndex: 2, changeIndex: 1, callId: "call-2" }),
+      ],
+      [
+        { index: 1, label: "first" },
+        { index: 2, label: "second" },
+      ],
+    );
+    sidebar.renderChanges();
+
+    const groups = drawnGroups(changesPanel);
+    const first = locateButtons(groups[0].items.innerHTML);
+    const second = locateButtons(groups[1].items.innerHTML);
+    expect(first[0].getAttribute("data-call-id")).toBe("call-1");
+    expect(first[0].getAttribute("data-change-index")).toBe("0");
+    // The earlier turn's row must not adopt the later turn's diff: the whole
+    // reason a change carries its own index.
+    expect(second[0].getAttribute("data-call-id")).toBe("call-2");
+    expect(second[0].getAttribute("data-change-index")).toBe("1");
+  });
+
+  it("folds a turn shut, and leaves it shut across a re-render", () => {
+    const { changesPanel, sidebar } = createHarness();
+    const turns = [
+      { index: 1, label: "first" },
+      { index: 2, label: "second" },
+    ];
+    const changes = [
+      recordedChange({ filePath: "src/a.ts", turnIndex: 1, changeIndex: 0 }),
+      recordedChange({ filePath: "src/b.ts", turnIndex: 2, changeIndex: 0, callId: "call-2" }),
+    ];
+    sidebar.setChangesState(changes, turns);
+    sidebar.renderChanges();
+
+    const first = drawnGroups(changesPanel)[0];
+    // Through the list, like a real click: the handler is delegated there.
+    changeList(changesPanel).dispatch("click", { target: first.header });
+    expect(first.group.classList.contains("collapsed")).toBe(true);
+
+    // The panel re-renders on every detected change; a folded section that
+    // sprang back open each time would be unusable while a turn runs.
+    sidebar.renderChanges();
+    const redrawn = drawnGroups(changesPanel);
+    expect(redrawn[0].group.classList.contains("collapsed")).toBe(true);
+    expect(redrawn[1].group.classList.contains("collapsed")).toBe(false);
+
+    // And clicking again unfolds it.
+    changeList(changesPanel).dispatch("click", { target: redrawn[0].header });
+    expect(redrawn[0].group.classList.contains("collapsed")).toBe(false);
+  });
+
+  it("forgets a fold whose turn is no longer listed", () => {
+    const { changesPanel, sidebar } = createHarness();
+    const turns = [
+      { index: 1, label: "first" },
+      { index: 2, label: "second" },
+    ];
+    const changes = [
+      recordedChange({ filePath: "src/a.ts", turnIndex: 1, changeIndex: 0 }),
+      recordedChange({ filePath: "src/b.ts", turnIndex: 2, changeIndex: 0, callId: "call-2" }),
+    ];
+    sidebar.setChangesState(changes, turns);
+    sidebar.renderChanges();
+    const second = drawnGroups(changesPanel)[1];
+    changeList(changesPanel).dispatch("click", { target: second.header });
+    expect(second.group.classList.contains("collapsed")).toBe(true);
+
+    // The turn's only change is reverted, so its section goes away...
+    sidebar.setChangesState([changes[0]], [turns[0]]);
+    sidebar.renderChanges();
+    expect(drawnGroups(changesPanel)).toHaveLength(1);
+
+    // ...and when the turn comes back, it comes back open. A fold belongs to a
+    // section on screen, and this one was off screen in between.
+    sidebar.setChangesState(changes, turns);
+    sidebar.renderChanges();
+    expect(drawnGroups(changesPanel)[1].group.classList.contains("collapsed")).toBe(false);
+  });
+
+  it("stores one diff per change, however often the panel re-renders", () => {
+    const { changesPanel, diffStore, sidebar } = createHarness();
+    sidebar.setChangesState(
+      [
+        recordedChange({ filePath: "src/a.ts", turnIndex: 1, changeIndex: 0, callId: "call-1" }),
+        recordedChange({ filePath: "src/b.ts", turnIndex: 1, changeIndex: 0, callId: "call-2" }),
+      ],
+      [{ index: 1, label: "first" }],
+    );
+
+    sidebar.renderChanges();
+    sidebar.renderChanges();
+    sidebar.renderChanges();
+
+    // The panel now holds every turn of a session, so a key minted per render
+    // would leave a full copy of the session's diffs behind on each one.
+    expect(diffStore.size).toBe(2);
+    expect(changesPanel.children.length).toBe(2);
+  });
+
+  it("opens each row's own diff, even when two rows share a call id", () => {
+    const { changesPanel, postMessages, sidebar } = createHarness();
+    // One call reporting changes to two files, both at index 0 — the payload
+    // shape a key built from the call id alone would collapse, handing the
+    // first row the second row's patch.
+    sidebar.setChangesState(
+      [
+        recordedChange({
+          filePath: "src/a.ts",
+          turnIndex: 1,
+          changeIndex: 0,
+          callId: "call-1",
+          diff: "diff --git a/src/a.ts",
+        }),
+        recordedChange({
+          filePath: "src/z.ts",
+          turnIndex: 1,
+          changeIndex: 0,
+          callId: "call-1",
+          diff: "diff --git a/src/z.ts",
+        }),
+      ],
+      [{ index: 1, label: "first" }],
+    );
+    sidebar.renderChanges();
+
+    // Both rows are in the first turn's group; the Diff action is delegated
+    // from the list, so the click is dispatched there like a real one.
+    const buttons = diffButtons(drawnGroups(changesPanel)[0].items.innerHTML);
+    expect(buttons).toHaveLength(2);
+    for (const button of buttons) {
+      changeList(changesPanel).dispatch("click", { target: button });
+    }
+
+    const opened = postMessages.filter((m) => m.type === "openDiff");
+    expect(opened.map((m) => m.diff)).toEqual([
+      "diff --git a/src/a.ts",
+      "diff --git a/src/z.ts",
+    ]);
+  });
+
+  it("still draws one flat list when no turn grouping is published", () => {
+    const { changesPanel, sidebar } = createHarness();
+    // An older host, or a caller that only publishes the change list: the
+    // rows must still be there, ungrouped.
+    sidebar.setChangesState([recordedChange({ filePath: "src/a.ts", changeIndex: 0 })]);
+    sidebar.renderChanges();
+
+    const list = changesPanel.children[1];
+    expect(list.innerHTML).toContain("src/a.ts");
+    expect(drawnGroups(changesPanel)).toHaveLength(0);
+  });
+});
+
+// ── The seam: the extension's payload, drawn by the panel ──
+
+/** Two turns, each creating one file through the shape current TUI write tools
+ *  persist (`metadata.mutation`). */
+function twoTurnThreadDetail() {
+  const mutation = (itemId: string, toolUseId: string, path: string) => ({
+    id: itemId,
+    kind: "tool_call",
+    summary: `write: Successfully wrote 1 byte to ${path}`,
+    detail: `Successfully wrote 1 byte to ${path}`,
+    status: "completed",
+    metadata: {
+      tool_use_id: toolUseId,
+      tool_name: "write",
+      event: "file.mutation",
+      mutation: {
+        diff: [
+          `diff --git a/${path} b/${path}`,
+          "--- /dev/null",
+          `+++ b/${path}`,
+          "@@ -0,0 +1 @@",
+          "+hello",
+        ].join("\n"),
+        files: [{ path, outcome: "created" }],
+        renames: [],
+      },
+    },
+  });
+  return {
+    latest_seq: 9,
+    thread: { id: "thread-1", model: "deepseek-v4-pro" },
+    turns: [
+      {
+        id: "turn-1",
+        input_summary: "create the first file",
+        created_at: "2026-09-18T10:00:00Z",
+        ended_at: "2026-09-18T10:00:02Z",
+        status: "completed",
+        item_ids: ["u1", "t1", "a1"],
+      },
+      {
+        id: "turn-2",
+        input_summary: "now the second one",
+        created_at: "2026-09-18T10:05:00Z",
+        ended_at: "2026-09-18T10:05:02Z",
+        status: "completed",
+        item_ids: ["u2", "t2", "a2"],
+      },
+    ],
+    items: [
+      { id: "u1", kind: "user_message", summary: "create the first file", detail: "create the first file", status: "completed" },
+      mutation("t1", "tool-1", "src/first.ts"),
+      { id: "a1", kind: "agent_message", summary: "Done", detail: "Done", status: "completed", metadata: null },
+      { id: "u2", kind: "user_message", summary: "now the second one", detail: "now the second one", status: "completed" },
+      mutation("t2", "tool-2", "src/second.ts"),
+      { id: "a2", kind: "agent_message", summary: "Done again", detail: "Done again", status: "completed", metadata: null },
+    ],
+  };
+}
+
+describe("Changes panel drawn from the extension's own payload", () => {
+  it("shows a two-turn session as two groups, with each turn's changes under it", async () => {
+    // The point of this test is the seam: the field names the provider
+    // publishes and the ones the panel reads are separately spelled out, and
+    // both halves are string-built code that no type checks across. Only a real
+    // payload rendered by the real panel can catch a drift between them.
+    const { ChatProvider } = await import("../../src/chat-provider");
+    const api = {
+      bindEngine: vi.fn(),
+      getThreadDetail: vi.fn(async () => twoTurnThreadDetail()),
+      listSnapshots: vi.fn(async () => []),
+    };
+    const provider = new ChatProvider({} as never, {} as never, api as never);
+    const posted: Record<string, any>[] = [];
+    provider.postMessage = (message: unknown) => {
+      posted.push(message as Record<string, any>);
+    };
+
+    await (provider as unknown as { loadHistory(id?: string): Promise<number> }).loadHistory("thread-1");
+
+    const payload = posted.filter((m) => m.type === "changesState").pop();
+    expect(payload).toBeDefined();
+    expect(payload?.changes).toHaveLength(2);
+
+    const { changesPanel, sidebar } = createHarness();
+    sidebar.setChangesState(payload?.changes, payload?.turns);
+    sidebar.renderChanges();
+
+    const groups = drawnGroups(changesPanel);
+    expect(groups).toHaveLength(2);
+    expect(groups[0].header.innerHTML).toContain("create the first file");
+    expect(groups[0].items.innerHTML).toContain("src/first.ts");
+    expect(groups[1].header.innerHTML).toContain("now the second one");
+    expect(groups[1].items.innerHTML).toContain("src/second.ts");
+    // Neither turn is hiding behind the other: this is the report that started
+    // the change — the panel showed only the most recent turn.
+    expect(changesPanel.children[0].innerHTML).toContain("2 change(s)");
+    expect(changesPanel.children[0].innerHTML).toContain("2 file(s)");
+  });
+});
+
+describe("Changes panel keeps every row visible", () => {
+  it("falls back to the flat list when a change belongs to no published group", () => {
+    const { changesPanel, sidebar } = createHarness();
+    // A host that names turns but leaves one change unmarked. Grouping it
+    // anyway would drop that row from the panel without saying so.
+    sidebar.setChangesState(
+      [
+        recordedChange({ filePath: "src/a.ts", turnIndex: 1, changeIndex: 0 }),
+        recordedChange({ filePath: "src/orphan.ts", changeIndex: 0, callId: "call-2" }),
+      ],
+      [{ index: 1, label: "first" }],
+    );
+    sidebar.renderChanges();
+
+    const list = changesPanel.children[1];
+    expect(list.innerHTML).toContain("src/a.ts");
+    expect(list.innerHTML).toContain("src/orphan.ts");
+  });
+
+  it("falls back to the flat list when a change outlives its group", () => {
+    const { changesPanel, sidebar } = createHarness();
+    sidebar.setChangesState(
+      [recordedChange({ filePath: "src/a.ts", turnIndex: 4, changeIndex: 0 })],
+      [{ index: 1, label: "first" }],
+    );
+    sidebar.renderChanges();
+
+    expect(changesPanel.children[1].innerHTML).toContain("src/a.ts");
   });
 });

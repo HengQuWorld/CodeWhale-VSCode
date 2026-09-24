@@ -2490,6 +2490,67 @@ export function getWebviewCss(): string {
     .change-list {
       padding: 0 10px 2px;
     }
+    /* One turn's changes. The header is the fold control; the rows below it are
+       the same rows the ungrouped list draws. */
+    .change-turn-group {
+      border-top: 1px solid rgba(128,128,128,0.08);
+      padding-bottom: 2px;
+    }
+    .change-turn-group:first-child {
+      border-top: none;
+    }
+    .change-turn-header {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 2px;
+      cursor: pointer;
+      user-select: none;
+      border-radius: 4px;
+      font-size: 0.75em;
+      transition: background 0.15s;
+    }
+    .change-turn-header:hover {
+      background: rgba(128,128,128,0.06);
+    }
+    .change-turn-arrow {
+      flex-shrink: 0;
+      font-size: 0.85em;
+      color: var(--muted);
+      transition: transform 0.15s;
+    }
+    .change-turn-group.collapsed .change-turn-arrow {
+      transform: rotate(-90deg);
+    }
+    .change-turn-title {
+      flex-shrink: 0;
+      font-weight: 600;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    /* The turn's own words, so a group is identifiable without reading the
+       transcript. Truncated rather than wrapped: the header stays one line and
+       the full text is in its tooltip. */
+    .change-turn-preview {
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      color: var(--muted);
+      opacity: 0.75;
+    }
+    .change-turn-meta {
+      flex-shrink: 0;
+      margin-left: auto;
+      color: var(--muted);
+      opacity: 0.7;
+      font-family: var(--vscode-editor-font-family, monospace);
+    }
+    .change-turn-group.collapsed .change-turn-items {
+      display: none;
+    }
     .change-item {
       display: flex;
       align-items: center;

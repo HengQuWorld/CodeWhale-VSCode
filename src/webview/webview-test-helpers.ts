@@ -213,6 +213,7 @@ export function makeTr(overrides?: Partial<WebviewTranslations>): WebviewTransla
     fileChanges: "File Changes",
     changesCount: "{n} change(s)",
     filesCount: "{n} file(s)",
+    changeTurnLabel: "Turn {n}",
     locateChange: "Locate",
     locateChangeTooltip: "Jump to the tool call card that made this change",
     userInputAwaiting: "Input required",

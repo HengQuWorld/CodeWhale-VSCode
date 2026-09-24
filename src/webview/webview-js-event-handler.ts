@@ -769,7 +769,7 @@ ${PROVIDER_PICKER_JS}
         break;
 
       case 'changesState':
-        window.__wvSidebar.setChangesState(msg.changes || []);
+        window.__wvSidebar.setChangesState(msg.changes || [], msg.turns || []);
         window.__wvSidebar.renderChanges();
         break;
 

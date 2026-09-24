@@ -209,6 +209,7 @@ function makeTr(): WebviewTranslations {
     fileChanges: "File Changes",
     changesCount: "{n} change(s)",
     filesCount: "{n} file(s)",
+    changeTurnLabel: "Turn {n}",
     locateChange: "Locate",
     locateChangeTooltip: "Jump to the tool call card that made this change",
     userInputAwaiting: "Input required",

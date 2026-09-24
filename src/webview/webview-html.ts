@@ -260,6 +260,8 @@ export interface WebviewTranslations {
   changesCount: string;
   /** "{n} file(s)" — the distinct-file reading of the same list. */
   filesCount: string;
+  /** "Turn {n}" — the header of one turn's section in the Changes panel. */
+  changeTurnLabel: string;
   locateChange: string;
   locateChangeTooltip: string;
   userInputAwaiting: string;
@@ -621,6 +623,8 @@ ${css}
         showAllWorkspaces: false,
         sidebarTab: 'sessions',
         workState: { checklist: [], checklistCompletionPct: 0, strategy: [] },
+        changesState: [],
+        changeTurns: [],
         renderSessions: function() {},
         renderThreads: function() {},
         renderTasks: function() {},
@@ -637,7 +641,7 @@ ${css}
         setActiveThreadId: function(id) { this.activeThreadId = id; },
         setShowAllWorkspaces: function(v) { this.showAllWorkspaces = v; },
         setWorkState: function(ws) { this.workState = ws; },
-        setChangesState: function(cs) { this.changesState = cs; },
+        setChangesState: function(cs, turns) { this.changesState = cs; this.changeTurns = turns || []; },
       };
     })();
   </script>

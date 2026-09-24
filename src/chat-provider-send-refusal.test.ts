@@ -258,3 +258,66 @@ describe("ChatProvider Stop without a known turn id", () => {
     expect(api.interruptTurn).toHaveBeenCalledWith("thread-1", "turn-mine");
   });
 });
+
+describe("ChatProvider Changes panel across a send", () => {
+  /** The last Changes payload the provider published. */
+  function lastChanges(postMessage: ReturnType<typeof vi.fn>): any {
+    const payloads = messagesOfType(postMessage, "changesState");
+    expect(payloads.length).toBeGreaterThan(0);
+    return payloads[payloads.length - 1];
+  }
+
+  /** A session whose first turn already recorded a change to src/first.ts. */
+  function withAnEarlierTurn(provider: any): void {
+    provider.beginChangeTurn("earlier prompt", 1);
+    provider.appendFileChange({
+      filePath: "src/first.ts",
+      changeType: "modified",
+      addedLines: 2,
+      removedLines: 1,
+      diff: "diff --git a/src/first.ts b/src/first.ts",
+    });
+  }
+
+  it("keeps the earlier turn's changes when the next turn starts", async () => {
+    const { provider, api, postMessage } = createProvider();
+    withAnEarlierTurn(provider);
+    api.startTurn.mockResolvedValue({ turn: { id: "turn-2" }, thread: { id: "thread-1" } });
+
+    await (provider as any).handleSendMessage("carry on");
+
+    // The new turn's own change, recorded the way a detected one arrives.
+    (provider as any).appendFileChange({
+      filePath: "src/second.ts",
+      changeType: "created",
+      addedLines: 3,
+      removedLines: 0,
+      diff: "diff --git a/src/second.ts b/src/second.ts",
+    });
+    (provider as any).refreshChangesPanel();
+
+    const payload = lastChanges(postMessage);
+    // Both turns, not just the newest: this is the report the panel was fixed
+    // for — sending a message used to wipe everything the session had changed.
+    expect(payload.changes.map((c: any) => c.filePath)).toEqual([
+      "src/first.ts",
+      "src/second.ts",
+    ]);
+    expect(payload.changes.map((c: any) => c.turnIndex)).toEqual([1, 2]);
+    expect(payload.turns.map((t: any) => t.label)).toEqual(["earlier prompt", "carry on"]);
+  });
+
+  it("leaves no change section for a prompt the engine refused", async () => {
+    const { provider, api, postMessage } = createProvider();
+    withAnEarlierTurn(provider);
+
+    await sendRefused(provider, api, "carry on then", [turn("turn-running", "in_progress")]);
+    (provider as any).refreshChangesPanel();
+
+    // The refused prompt is not a turn of this session: it must not stand as a
+    // section header labelled with text the user was handed back.
+    const payload = lastChanges(postMessage);
+    expect(payload.turns.map((t: any) => t.label)).toEqual(["earlier prompt"]);
+    expect(payload.changes.map((c: any) => c.turnIndex)).toEqual([1]);
+  });
+});

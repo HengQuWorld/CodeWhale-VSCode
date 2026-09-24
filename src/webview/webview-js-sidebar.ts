@@ -27,7 +27,16 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
   var workState = { checklist: [], checklistCompletionPct: 0, strategy: [] };
 
   // ── Changes state ──
+  // changesState holds the whole session's changes, in turn order;
+  // changeTurnsState names the turns they are grouped by. (The panel was
+  // turn-scoped once, so a caller that publishes only a change list — an older
+  // host, or a test — still renders, as one ungrouped list.)
   var changesState = [];
+  var changeTurnsState = [];
+  /** Turn indices the reader folded shut, keyed by String(index). Purely
+   *  presentational: a re-render (every detected change re-renders) must not
+   *  spring open a group the reader collapsed. */
+  var collapsedChangeTurns = Object.create(null);
 
   // ── Agent runs state ──
   var agentRuns = [];
@@ -312,8 +321,9 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
       }
     };
   }
+  // Shared with the message cards' own Diff actions; this panel keys its rows
+  // by the change's identity (see changeRowHtml) rather than by a counter.
   var _diffStore = window.__wvDiffStore;
-  var _diffIdCounter = window.__wvDiffIdCounter;
 
   // ── Render Sessions ──
   var _sessionSearchInited = false;
@@ -1305,16 +1315,125 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
     return count;
   }
 
+  /** One change row. Shared by the grouped and the flat list so a row can only
+   *  ever be spelled one way — the Locate identity it carries is what keeps a
+   *  file changed twice from scrolling to the wrong card. */
+  function changeRowHtml(fc) {
+    var changeIcon = fc.changeType === 'created' ? 'A' : fc.changeType === 'deleted' ? 'D' : 'M';
+    var changeTypeLabel = fc.changeType === 'created' ? __i18n.fileCreated : fc.changeType === 'deleted' ? __i18n.fileDeleted : __i18n.fileModified;
+    var shortP = fc.filePath.replace(/\\\\/g, '/').split('/').slice(-3).join('/');
+    var displayPath = fc.filePath.replace(/\\\\/g, '/').split('/').length > 3 ? '\u2026/' + shortP : fc.filePath;
+    // A key that belongs to the change, not to this draw. The panel re-renders
+    // on every detected change and now holds every turn's diffs, so a key
+    // minted per render would leave a copy of every diff behind on each one —
+    // and a key reused by two rows would open the wrong patch.
+    //
+    // The path and the change's own index already identify it: the host numbers
+    // diffs per file, in order, so no two diff-bearing records share the pair.
+    // The call id is appended only to keep two rows apart in a payload that
+    // breaks that (one call reporting changes to two files, both at index 0).
+    var diffKey = 'k:' + normalizeChangePath(fc.filePath) +
+      ':' + (fc.changeIndex === undefined || fc.changeIndex === null ? 'x' : fc.changeIndex) +
+      ':' + (fc.callId || '-');
+    if (fc.diff) _diffStore.set(diffKey, fc.diff);
+    var html = '<div class="change-item change-type-' + fc.changeType + '">';
+    html += '<span class="change-badge change-badge-' + fc.changeType + '" title="' + __wvEscapeHtml(changeTypeLabel) + '">' + changeIcon + '</span>';
+    html += '<span class="change-path" title="' + __wvEscapeHtml(fc.filePath) + '">' + __wvEscapeHtml(displayPath) + '</span>';
+    if (fc.addedLines > 0 || fc.removedLines > 0) {
+      html += '<span class="change-stats">';
+      if (fc.addedLines > 0) html += '<span class="change-added">+' + fc.addedLines + '</span>';
+      if (fc.removedLines > 0) html += '<span class="change-removed">-' + fc.removedLines + '</span>';
+      html += '</span>';
+    }
+    html += '<span class="change-actions">';
+    if (fc.diff) {
+      html += '<button class="change-btn change-view-diff" data-file-path="' + __wvEscapeHtml(fc.filePath) + '" data-diff-key="' + __wvEscapeHtml(diffKey) + '" data-change-index="' + (fc.changeIndex !== undefined ? fc.changeIndex : '') + '" title="' + __wvEscapeHtml(__i18n.viewDiffTooltip) + '">Diff</button>';
+    }
+    if (fc.changeType !== 'deleted') {
+      html += '<button class="change-btn change-open-file" data-file-path="' + __wvEscapeHtml(fc.filePath) + '" title="' + __wvEscapeHtml(__i18n.openFileTooltip) + '">Open</button>';
+    }
+    // Locate, not open: this change also has a card in the stream, inside the
+    // tool call that made it, and that card is the context this row only
+    // summarizes. The row carries the same identity the card does (see
+    // revealFileChangeCard), so one file changing several times cannot send
+    // the reader to the wrong change.
+    html += '<button class="change-btn change-goto-card" data-file-path="' + __wvEscapeHtml(fc.filePath) + '" data-change-index="' + (fc.changeIndex !== undefined && fc.changeIndex !== null ? fc.changeIndex : '') + '" data-call-id="' + __wvEscapeHtml(fc.callId || '') + '" title="' + __wvEscapeHtml(__i18n.locateChangeTooltip) + '">' + __wvEscapeHtml(__i18n.locateChange) + '</button>';
+    html += '</span>';
+    html += '</div>';
+    return html;
+  }
+
+  /** The changes of one turn, in the order they were recorded. */
+  function changesOfTurn(turnIndex) {
+    var own = [];
+    for (var i = 0; i < changesState.length; i++) {
+      if (changesState[i].turnIndex === turnIndex) own.push(changesState[i]);
+    }
+    return own;
+  }
+
+  /** The per-turn reading a group header carries: how many changes, and the
+   *  line delta. The file count stays in the session-wide summary — a header
+   *  is read at a glance, and four numbers at a glance is three too many. */
+  function turnMetaLabel(changes) {
+    var added = 0, removed = 0;
+    for (var i = 0; i < changes.length; i++) {
+      added += changes[i].addedLines || 0;
+      removed += changes[i].removedLines || 0;
+    }
+    var parts = [__i18n.changesCount.replace('{n}', String(changes.length))];
+    if (added > 0 || removed > 0) parts.push('+' + added + ' -' + removed);
+    return parts.join(' \u00B7 ');
+  }
+
+  /** Forget folds that name a turn this payload no longer lists.
+   *
+   *  The map is keyed by the turn's ordinal, which is per-session, so a fold can
+   *  outlive its turn and (for the same ordinal in a later session) outlive its
+   *  session. Pruning bounds the map and keeps it honest about what is on
+   *  screen; a fold inherited by another session's same-numbered turn is left
+   *  alone, because nothing in the payload tells the two sessions apart and a
+   *  section that stays folded is not worth a session id on the wire. */
+  function pruneCollapsedChangeTurns() {
+    var live = Object.create(null);
+    for (var i = 0; i < changeTurnsState.length; i++) {
+      live[String(changeTurnsState[i].index)] = true;
+    }
+    for (var key in collapsedChangeTurns) {
+      if (!live[key]) delete collapsedChangeTurns[key];
+    }
+  }
+
+  /** Whether every change can be placed in a published group.
+   *
+   *  If one cannot — a host that names turns but forgets to mark a change, or a
+   *  group the extension dropped while a change still points at it — the list is
+   *  drawn flat. An ungrouped row is a smaller problem than a row the panel
+   *  silently drops, and this is the only place that can be decided. */
+  function canGroupByTurn() {
+    if (!changeTurnsState || changeTurnsState.length === 0) return false;
+    var known = Object.create(null);
+    for (var i = 0; i < changeTurnsState.length; i++) {
+      known[String(changeTurnsState[i].index)] = true;
+    }
+    for (var j = 0; j < changesState.length; j++) {
+      var index = changesState[j].turnIndex;
+      if (index === undefined || index === null || !known[String(index)]) return false;
+    }
+    return true;
+  }
+
   function renderChanges() {
     var container = document.getElementById('tab-changes');
     if (!container) return;
     container.innerHTML = '';
-    // NOTE: Do NOT clear _diffStore or reset _diffIdCounter here.
-    // Message cards in the stream share this store; clearing it invalidates
-    // their diff keys (especially during real-time inference where
-    // fileChangeDetected is sent before refreshWorkPanel).
-    // The store is cleared on loadHistory/clearChat instead.
+    // NOTE: Do NOT clear _diffStore here. Message cards in the stream share
+    // this store; clearing it invalidates their diff keys (especially during
+    // real-time inference where fileChangeDetected is sent before
+    // refreshWorkPanel). It is cleared on loadHistory/clearChat instead.
     if (!changesState || changesState.length === 0) {
+      changeTurnsState = [];
+      collapsedChangeTurns = Object.create(null);
       var el = document.createElement('div');
       el.className = 'work-empty';
       el.innerHTML = '<div class="work-empty-icon">\\uD83D\\uDCC4</div><div class="work-empty-text">' + __wvEscapeHtml(__i18n.noFileChanges) + '</div>';
@@ -1343,7 +1462,8 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
       summaryParts.push('<span class="change-summary-item change-summary-lines"><span class="change-added">+' + totalAdded + '</span> <span class="change-removed">-' + totalRemoved + '</span></span>');
     }
     // The two readings side by side: how many change records are listed, and
-    // how many distinct files those records touch.
+    // how many distinct files those records touch. This header covers the whole
+    // session; each group below carries its own turn's reading.
     var countLabel = __i18n.changesCount.replace('{n}', String(changesState.length)) +
       ' \\u00B7 ' + __i18n.filesCount.replace('{n}', String(fileCount));
     header.innerHTML = '<div class="work-section-title"><span class="work-section-title-icon">\\uD83D\\uDCC1</span>' + __wvEscapeHtml(__i18n.fileChanges) + ' <span class="work-section-subtitle">(' + __wvEscapeHtml(countLabel) + ')</span></div><div class="change-summary-row">' + summaryParts.join(' ') + '</div>';
@@ -1352,54 +1472,79 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
     // Change list
     var list = document.createElement('div');
     list.className = 'work-section change-list';
-    var html = '';
-    for (var fi = 0; fi < changesState.length; fi++) {
-      var fc = changesState[fi];
-      var changeIcon = fc.changeType === 'created' ? 'A' : fc.changeType === 'deleted' ? 'D' : 'M';
-      var changeTypeLabel = fc.changeType === 'created' ? __i18n.fileCreated : fc.changeType === 'deleted' ? __i18n.fileDeleted : __i18n.fileModified;
-      var shortP = fc.filePath.replace(/\\\\/g, '/').split('/').slice(-3).join('/');
-      var displayPath = fc.filePath.replace(/\\\\/g, '/').split('/').length > 3 ? '\\u2026/' + shortP : fc.filePath;
-      var diffKey = fc.filePath + '@' + (++_diffIdCounter.value);
-      if (fc.diff) _diffStore.set(diffKey, fc.diff);
-      html += '<div class="change-item change-type-' + fc.changeType + '">';
-      html += '<span class="change-badge change-badge-' + fc.changeType + '" title="' + __wvEscapeHtml(changeTypeLabel) + '">' + changeIcon + '</span>';
-      html += '<span class="change-path" title="' + __wvEscapeHtml(fc.filePath) + '">' + __wvEscapeHtml(displayPath) + '</span>';
-      if (fc.addedLines > 0 || fc.removedLines > 0) {
-        html += '<span class="change-stats">';
-        if (fc.addedLines > 0) html += '<span class="change-added">+' + fc.addedLines + '</span>';
-        if (fc.removedLines > 0) html += '<span class="change-removed">-' + fc.removedLines + '</span>';
-        html += '</span>';
+
+    if (!canGroupByTurn()) {
+      // No turn grouping was published (an older host, or a caller that only
+      // sets the change list), or a change cannot be placed in one: a single
+      // flat list, as before. Folds cannot be drawn here, and the turns they
+      // name are gone: drop them rather than let them come back later.
+      collapsedChangeTurns = Object.create(null);
+      var flat = '';
+      for (var fi = 0; fi < changesState.length; fi++) flat += changeRowHtml(changesState[fi]);
+      list.innerHTML = flat;
+    } else {
+      // One group per turn, oldest first, so the list reads like the
+      // conversation. Only turns with changes are drawn — a turn that touched
+      // nothing has nothing to review — and a gap in the numbering is honest:
+      // the indices are the turns' own ordinals, so "Turn 3" still names the
+      // third turn of the conversation.
+      pruneCollapsedChangeTurns();
+      for (var ti = 0; ti < changeTurnsState.length; ti++) {
+        var turn = changeTurnsState[ti];
+        var own = changesOfTurn(turn.index);
+        if (own.length === 0) continue;
+        var group = document.createElement('div');
+        group.className = 'change-turn-group';
+        if (collapsedChangeTurns[String(turn.index)]) group.classList.add('collapsed');
+        var turnHeader = document.createElement('div');
+        turnHeader.className = 'change-turn-header';
+        turnHeader.setAttribute('data-turn-index', String(turn.index));
+        var turnTitle = __i18n.changeTurnLabel.replace('{n}', String(turn.index));
+        var turnHtml = '<span class="change-turn-arrow">\\u25BE</span>';
+        turnHtml += '<span class="change-turn-title">' + __wvEscapeHtml(turnTitle) + '</span>';
+        if (turn.label) {
+          turnHtml += '<span class="change-turn-preview" title="' + __wvEscapeHtml(turn.label) + '">' + __wvEscapeHtml(turn.label) + '</span>';
+        }
+        turnHtml += '<span class="change-turn-meta">' + __wvEscapeHtml(turnMetaLabel(own)) + '</span>';
+        turnHeader.innerHTML = turnHtml;
+        var items = document.createElement('div');
+        items.className = 'change-turn-items';
+        var rows = '';
+        for (var ci = 0; ci < own.length; ci++) rows += changeRowHtml(own[ci]);
+        items.innerHTML = rows;
+        group.appendChild(turnHeader);
+        group.appendChild(items);
+        list.appendChild(group);
       }
-      html += '<span class="change-actions">';
-      if (fc.diff) {
-        html += '<button class="change-btn change-view-diff" data-file-path="' + __wvEscapeHtml(fc.filePath) + '" data-diff-key="' + diffKey + '" data-change-index="' + (fc.changeIndex !== undefined ? fc.changeIndex : '') + '" title="' + __wvEscapeHtml(__i18n.viewDiffTooltip) + '">Diff</button>';
-      }
-      if (fc.changeType !== 'deleted') {
-        html += '<button class="change-btn change-open-file" data-file-path="' + __wvEscapeHtml(fc.filePath) + '" title="' + __wvEscapeHtml(__i18n.openFileTooltip) + '">Open</button>';
-      }
-      // Locate, not open: this change also has a card in the stream, inside the
-      // tool call that made it, and that card is the context this row only
-      // summarizes. The row carries the same identity the card does (see
-      // revealFileChangeCard), so one file changing several times cannot send
-      // the reader to the wrong change.
-      html += '<button class="change-btn change-goto-card" data-file-path="' + __wvEscapeHtml(fc.filePath) + '" data-change-index="' + (fc.changeIndex !== undefined && fc.changeIndex !== null ? fc.changeIndex : '') + '" data-call-id="' + __wvEscapeHtml(fc.callId || '') + '" title="' + __wvEscapeHtml(__i18n.locateChangeTooltip) + '">' + __wvEscapeHtml(__i18n.locateChange) + '</button>';
-      html += '</span>';
-      html += '</div>';
     }
-    list.innerHTML = html;
     container.appendChild(list);
 
-    // Click delegation for the diff / open / locate actions
+    // Click delegation for the diff / open / locate actions, and for folding a
+    // turn's group shut.
     list.addEventListener('click', function(e) {
       var target = e.target;
-      if (target.classList.contains('change-view-diff')) {
+      var turnHeaderEl = target.closest && target.closest('.change-turn-header');
+      if (turnHeaderEl) {
+        // A header only ever exists inside a group (see renderChanges), so its
+        // parent is that group — nothing else to check, and nothing to drift
+        // out of sync with how the group was drawn.
+        var groupEl = turnHeaderEl.parentElement;
+        var turnIndex = turnHeaderEl.getAttribute('data-turn-index');
+        if (groupEl && turnIndex !== null) {
+          var folded = groupEl.classList.toggle('collapsed');
+          // Remembered so the next render (any detected change re-renders the
+          // panel) does not unfold what the reader folded.
+          if (folded) collapsedChangeTurns[String(turnIndex)] = true;
+          else delete collapsedChangeTurns[String(turnIndex)];
+        }
+      } else if (target.classList.contains('change-view-diff')) {
         var filePath = target.getAttribute('data-file-path');
         var diffKey = target.getAttribute('data-diff-key');
         var changeIdx = target.getAttribute('data-change-index');
         vscode.postMessage({ type: 'openDiff', filePath: filePath, diff: (diffKey ? _diffStore.get(diffKey) : undefined) || undefined, changeIndex: changeIdx !== null && changeIdx !== '' ? parseInt(changeIdx) : undefined });
       } else if (target.classList.contains('change-open-file')) {
-        var filePath = target.getAttribute('data-file-path');
-        vscode.postMessage({ type: 'openFile', filePath: filePath });
+        var openPath = target.getAttribute('data-file-path');
+        vscode.postMessage({ type: 'openFile', filePath: openPath });
       } else if (target.classList.contains('change-goto-card')) {
         // The card lives in this same document, so this is a scroll rather than
         // a round trip through the extension. The messages module owns the
@@ -1898,7 +2043,15 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
     getWorkState: function() { return workState; },
     setWorkState: function(v) { workState = v; },
     getChangesState: function() { return changesState; },
-    setChangesState: function(v) { changesState = v; },
+    getChangeTurnsState: function() { return changeTurnsState; },
+    /** Publish the session's changes and the turns they are grouped by. The
+     *  turn list is optional: a caller with only a flat list (older host, a
+     *  test) gets the ungrouped rendering, and omitting it clears the groups
+     *  so a stale grouping cannot survive a reset. */
+    setChangesState: function(v, turns) {
+      changesState = v || [];
+      changeTurnsState = turns || [];
+    },
     getAgentRuns: function() { return agentRuns; },
     setAgentRuns: function(v) { agentRuns = v; },
     getSessionSearchQuery: function() { return sessionSearchQuery; },
