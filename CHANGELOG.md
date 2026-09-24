@@ -1,5 +1,28 @@
 # Change Log
 
+## 0.7.5
+
+Client-side only; verified against engine **v0.10.0**.
+
+### New Features
+
+- **A compaction now says what it did, right there in the conversation** — Pressing Compact used to answer with a bare "Context compacted" the instant the engine accepted the request, before a single message had moved, and the transcript stayed silent about the whole thing. Now both ends of the pass show up exactly where you are reading: a note when it starts, then the engine's own result — the messages and tokens before and after, and how much of the last round it kept. Tucked beneath that result is the handoff summary the engine just committed, folded away so you can read it without burying the chat it describes, and still there after a reload. The click is answered honestly at the edges too: with no conversation open, or with a turn already running, it tells you so instead of going quiet or handing back a raw engine error. A compaction also stops disturbing the last answer — its token usage is no longer stamped onto that answer, and in Plan mode it is no longer offered as a plan to approve. Because the pass has nothing to stream, the status bar quietly carries the same activity dot a running turn does, and the composer keeps offering Send the whole time.
+
+- **The Changes panel now keeps the whole session, grouped by turn** — The panel used to hold only the turn in flight: send a message and its list was wiped, so everything the session had changed before that vanished from view. Now it keeps the whole story and tells it one section per turn — "Turn 3" with the prompt that started it, that turn's own change count and line delta, and the changes themselves — all beneath the session-wide summary. Click a section and it folds away, staying folded as the rest of the panel re-renders. Every change keeps its place in its file's history, so Diff, Locate and Revert still act on the very change you clicked, and switching to a thread or session with no changes clears the panel instead of leaving the previous one's rows behind.
+
+### Improvements
+
+- **Every release is now something you can check against what was built** — Tagged releases attach the VSIX and its SHA-256 checksums to a GitHub Release, right beside the changelog section for that version.
+- **A lighter download** — The packaged extension no longer ships the Chinese README or the ESLint config, trimming about 19 KB off the VSIX.
+
+### Bug Fixes
+
+- **Undo and the Changes panel's per-file Revert roll back files again** — A conversation this client saved was bound to a session document that owned none of its workspace snapshots, so an undo forked the conversation and left every edited file on disk, while a per-file Revert answered `409` for a snapshot that did exist — a broken promise, in the one place you go to take a change back. The fix lives in the engine rather than the client ([Codewhale#6483](https://github.com/Hmbown/Codewhale/pull/6483), still open — see below), so the rollback starts landing once an engine carrying it is installed; the client half is already in place.
+
+### Upstream TUI PRs
+
+- [Codewhale#6483](https://github.com/Hmbown/Codewhale/pull/6483) — **open, unmerged.** `fix(tui): let undo roll back files for the turn it is undoing`. A welcome fix for this client's **Undo** and the Changes panel's per-file **Revert**, landed upstream in the engine rather than here: against engine v0.10.0, both leave the changed files on disk, and the Revert answers `409` for a snapshot that does exist. The client side is already in place; the rollback starts landing the moment an engine carrying this is installed.
+
 ## 0.7.4
 
 Client-side only; verified against engine **v0.10.0**.
