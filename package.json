@@ -178,16 +178,16 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.2",
-    "@types/node": "^20.11.0",
-    "@types/vscode": "^1.85.0",
+    "@types/node": "^20.19.43",
+    "@types/vscode": "^1.138.0",
     "@vscode/vsce": "^2.22.0",
     "eslint": "^9.39.2",
-    "marked": "^18.0.4",
-    "ts-loader": "^9.5.0",
+    "marked": "^18.0.13",
+    "ts-loader": "^9.6.2",
     "typescript": "^5.4.0",
     "typescript-eslint": "^8.52.0",
-    "vitest": "^4.1.7",
-    "webpack": "^5.90.0",
+    "vitest": "^4.1.11",
+    "webpack": "^5.111.1",
     "webpack-cli": "^5.1.0"
   },
   "capabilities": {
