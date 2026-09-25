@@ -316,6 +316,67 @@ describe("ChatProvider thread history rendering", () => {
     ]);
   });
 
+  it("anchors each finished turn's closing answer, and leaves the running one open", async () => {
+    // The per-turn branch action sends this id and the engine resolves it, so
+    // the turn's last assistant message must carry the runtime's own turn id
+    // while every other bubble carries none: the row belongs under the answer
+    // a person continues from, and a stale anchor would cut the new
+    // conversation at the wrong turn while reporting success.
+    const detail = {
+      latest_seq: 30,
+      thread: { id: "thread-1", model: "deepseek-v4-pro" },
+      turns: [
+        {
+          id: "turn-A",
+          input_summary: "first",
+          created_at: "2026-08-20T10:00:00Z",
+          ended_at: "2026-08-20T10:00:10Z",
+          status: "completed",
+          item_ids: ["u1", "a1", "u2", "a2"],
+        },
+        {
+          // Still running: its answer is not written yet, so it is not a
+          // branch point — but the finished turn above it stays branchable.
+          id: "turn-B",
+          input_summary: "second",
+          created_at: "2026-08-20T10:01:00Z",
+          status: "in_progress",
+          item_ids: ["u3", "a3"],
+        },
+      ],
+      items: [
+        { id: "u1", kind: "user_message", summary: "first", detail: "first", status: "completed", started_at: "2026-08-20T10:00:00Z" },
+        { id: "a1", kind: "agent_message", summary: "Starting...", detail: "Starting...", status: "completed" },
+        { id: "u2", kind: "user_message", summary: "focus", detail: "focus", status: "completed", started_at: "2026-08-20T10:00:04Z" },
+        { id: "a2", kind: "agent_message", summary: "Focused", detail: "Focused", status: "completed" },
+        { id: "u3", kind: "user_message", summary: "second", detail: "second", status: "completed", started_at: "2026-08-20T10:01:00Z" },
+        { id: "a3", kind: "agent_message", summary: "Second answer", detail: "Second answer", status: "completed" },
+      ],
+    };
+
+    const { provider } = createProvider(detail);
+
+    await (provider as any).loadHistory("thread-1");
+
+    const anchors = provider.messages.map((m) => `${m.id}:${m.branchTurnId ?? "-"}`);
+    expect(anchors.slice(0, 5)).toEqual([
+      "user-turn-A:-",
+      "assistant-turn-A:-",
+      "user-steer-u2:-",
+      "assistant-turn-A-s1:turn-A",
+      "user-turn-B:-",
+    ]);
+    // The running turn's own bubble is the streaming placeholder loadHistory
+    // adopts for it, and it carries no anchor either: a fork naming that turn
+    // would keep an answer that has not been written yet.
+    // The running turn is not a branch point: the answer being written carries
+    // no anchor, and neither does the streaming placeholder loadHistory adopts
+    // for it. A fork naming that turn would keep a half-turn.
+    expect(anchors[5]).toBe("assistant-turn-B:-");
+    expect(anchors).toHaveLength(7);
+    expect(anchors[6]).toMatch(/^assistant-\d+:-$/);
+  });
+
   it("stamps turn usage onto the final assistant message so reload shows the token chip", async () => {
     const detail = {
       latest_seq: 12,

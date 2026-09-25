@@ -278,6 +278,7 @@ undo / retry / patch-undo / 快照恢复这条链路**已完成对齐**：
 |------|----------|----------|------|
 | `/undo` | `POST /v1/threads/{id}/patch-undo` | `chat-provider.ts` `handleUndoLastTurn()` 调 `patchUndoThreadTurn()`，先快照回滚文件再删对话轮 | 已对齐 |
 | `/retry` | `POST /v1/threads/{id}/retry` | `handleRetryLastTurn()` 调 `retryThreadTurn()`（服务端 undo + 重发） | 已对齐 |
+| 从指定轮次分叉（GUI 主导） | `POST /v1/threads/{id}/fork-at-turn` | 每条回答（每轮的最后一个 assistant 消息）下方的“分叉”行 → `handleForkFromTurn(turnId)`；引擎解析 turn id，GUI 不数轮次 | 已对齐（路由为本功能新增，旧引擎无此路由 → 该行不渲染） |
 | `/restore` | `GET /v1/snapshots` + `POST /v1/snapshots/{id}/restore` | `api-client.ts` 已有 `listSnapshots()` / `restoreSnapshot()`；`chat-provider.ts` 用 pre-turn 快照做恢复 | API 已对接，**`/restore` 斜杠命令入口缺失**（slash-commands.ts 仍标 unavailable） |
 
 当前真实缺口集中在「平台管理面」（TUI 有 API，GUI 未对接）：
@@ -294,6 +295,20 @@ undo / retry / patch-undo / 快照恢复这条链路**已完成对齐**：
 | Memory | `/v1/memory` 全套 | **违反复用原则**：`slash-command-handler.ts` 的 `/memory` 直接读写 `~/.deepseek/memory.md` 本地文件，应改走 API |
 
 > 本表是对齐检查的**快照**，会过时。做新功能前先重新核对源码：TUI 端点查 `runtime_api.rs` 的 `build_router()`，GUI 对接查 `src/api/api-client.ts`，命令查 `commands/mod.rs` 的 `execute()` 与 `src/commands/slash-commands.ts`。不要把此表当全量清单。
+
+### 由 GUI 主导新增的引擎端点：`fork-at-turn`
+
+TUI 的 `/fork` 只能整会话复制，`fork_at_user_message` 又只按「距尾部多少轮」定位，所以「从某一轮分叉」**没有现成的 TUI 命令**，是 GUI 提出、并由 TUI 已有能力（`fork_at_user_message`）实现的：
+
+- 锚点必须是 **turn id**（`GET /v1/threads/{id}` 返回的那个），不是 GUI 自己数出来的轮次序号。GUI 渲染出的对话（有 steer、纯图片输入、内部 handoff 等情况）和引擎的 turn store 不是同一份列表，客户端算出来的 depth 错一格就会分叉到错误的轮次，而且还返回 201。
+- 语义是「**保留**锚点那一轮及之前的全部轮次」（不是丢掉锚点轮），所以入口画在**每条回答的下方**（`branchTurnId` 只打在每轮的最后一个 assistant 消息上），而不是用户消息上——分叉点是用户正在看的那条回答；锚点选最后一轮就等于整会话复制。回执里的 `original_user_text` 是**第一个被丢掉的轮次**的提问（即“原会话接下来问的”），GUI 把它放回输入框。
+- **已保存会话（Sessions 轨道里查看的会话）不能直接分叉**：分叉要的是 turn id，而一个被查看的会话只是一份 messages 文档，没有 turn。GUI 的做法是提供 **Continue**（工具栏按钮，`handleContinueSession` → `resumeViewedSessionForAction()`，不发任何消息）：把会话 resume 成活动线程后，它的每一轮都带上精确锚点、都有分叉行。undo/retry 早就静默做这一步，现在抽成同一个 helper，三个动作共用。按钮只在 `sessionLoaded` 时显示、`threadLoaded`/`clearChat` 时隐藏。
+- 该端点**不回滚文件**：分叉出的会话与原会话共用一个工作区，回滚会连带改掉被留下的那一支。文件回滚只属于 `/undo` 与 `/patch-undo`。
+- 分叉**可以在有轮次运行时进行**（用户明确要求）：运行时拥有在跑的轮次，切视图只是把它 parked，**不中断**——所以 `adoptForkedThread` 和 retry 都在改 `currentThread` **之前**调 `parkCurrentThread()`（否则 park 读到的是刚赋上的新线程，源会话就丢了后台订阅；该信号就是 `backgroundThreads`/`streamEvents`）。**尚未跑完的轮次不作为分叉点**（`loadHistory` 的 `turnIsRunning` 判定）：否则会把一个半成品回答复制进新会话。
+- 分叉 / 撤销 / 重试共用 `hostOperationInFlight`：同一时刻只允许一个「换掉当前对话」的操作，后来者得到 `operationBusy` 提示而不是真的开始。
+- 点击到落地之间有几秒：`chat-provider.ts` 先发 `status` + `hostOperation(active:true)`，webview 用它点亮状态栏活动点、把被点的那行标成 `is-pending`、并**暂缓**这一组控件：输入区的发送（`webview-js-input.ts` 的 `setHostOperation`，只拦发送不锁输入；`keydown`/按钮都走 `sendMessage()` 这一个漏斗）+ 工具栏的 Undo / Retry / New Thread / Compact（它们作用在同一段对话上，跟发送一样会和在飞的切换抢）。理由：分叉会**换掉输入区所属的那段对话**，这几秒里发出的消息或触发的动作没有确定的落点（很可能落在原会话、然后从视野里消失），而输入框里的字是用户自己的，锁住它更糟。释放时统一把能力状态交还给 `applyApiCapabilities()`，不要手写回滚（否则 Old engine 上 Undo 会被永久置灰）。对比：压缩（compact）只发 `busy` 而不拦发送，因为它**不换对话**——`busy` 只画活动点，`hostOperation` 才是「这段对话暂时归宿主所有」。
+- 同一个分叉在飞行中时第二次点击会被 `forkInFlight` 丢掉：否则会分叉出两个新线程、两份 session 文档，而第二次是从用户已经离开的源上切的。这个守卫在后端，因为那一行在整个等待期间都留在屏幕上。
+- 能力检测用**路由探测**（`api-client.ts` 的 `probeRuntimeCapabilities()`：用 GET 探这条 POST-only 路由得到 405 → true，旧引擎 404 → false）。旧引擎上整行都不渲染，而不是退化成“分叉最后一轮”那件事——那样会在别的轮次上下刀还报告成功。
 
 ### TUI 关键源码位置
 

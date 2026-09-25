@@ -470,6 +470,12 @@ export interface RuntimeApiCapabilities {
    *  the whole-workspace snapshot restore, which would silently roll back
    *  unrelated files. */
   threadFileRevert: boolean;
+  /** `POST /v1/threads/{id}/fork-at-turn` exists (TUI ≥ the version that let a
+   *  client name the turn to fork at). When false the transcript offers no
+   *  per-turn branch action at all — the older engines can only fork the last
+   *  turn, and a UI that offered "branch from this turn" through that one
+   *  would cut somewhere else while reporting success. */
+  threadForkAtTurn: boolean;
 }
 
 /**

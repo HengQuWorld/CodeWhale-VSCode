@@ -1,5 +1,17 @@
 # Change Log
 
+## Unreleased
+
+Client-side only; verified against an engine built from `feat/fork-at-turn` (Codewhale `main` at `8a835d7c4`), the branch that adds the endpoint it needs.
+
+### New Features
+
+- **Undo and Retry now say they are working** — Both used to go quiet for the few seconds they take: the click was answered by a still screen, with no sign that anything was happening. The status bar now carries the activity dot a running turn gets, the conversation's own buttons and the composer's send hold for the duration with the reason on hover, and everything is released on success or failure. Asking for one while another is still running says so rather than starting a second.
+
+- **A saved session can be opened as a live conversation** — Browsing an old conversation from the Sessions rail used to be read-only: the turns could be read, but nothing could be done with them, and a branch needs turns. The toolbar now offers **Continue** in exactly that view — it opens the session as a live conversation without sending anything — after which every finished turn offers Branch. Same action the Undo and Retry buttons were already performing silently on a viewed session, now available on purpose.
+
+- **Branch a conversation from any of its answers** — Every answer in a live conversation now ends with a small **Branch** row. Click it and a new conversation opens holding that turn and everything before it, while the turns after it stay where they were, in a conversation left exactly as it was: what you had asked next is already in the input box, ready to edit or replace. Branching at the newest answer keeps the whole conversation, so you can carry on in a copy. No files are rolled back — both conversations work in the same workspace. Creating a branch takes a moment, so the click is answered where it happened: the row says it is working, the status bar keeps the same activity dot a running turn gets, and the composer holds its send until the branch lands — you can keep typing, and your text is still there (and sendable) the instant it does. Undo, Retry, New Thread and Compact hold for the same few seconds, because they act on the conversation that is being replaced; a second click cannot start a second branch. This needs an engine that has `POST /v1/threads/{id}/fork-at-turn` (a Codewhale build newer than v0.10.0); on an older engine the row is not offered at all, because the only fork those engines can do is of the last turn — which would cut somewhere other than the turn you clicked.
+
 ## 0.7.5
 
 Client-side only; verified against engine **v0.10.0**.

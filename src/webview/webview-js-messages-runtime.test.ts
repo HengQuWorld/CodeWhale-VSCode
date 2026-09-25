@@ -17,25 +17,36 @@ import vm from "node:vm";
 import { getMessagesScript } from "./webview-js-messages";
 import { makeTr } from "./webview-test-helpers";
 
+/** `className` is the source of truth, as it is in a browser: the scripts
+ *  under test set one and query the other, so a set that drifted from the
+ *  string would hide exactly the wiring these tests exist to check. */
 class FakeClassList {
-  private values = new Set<string>();
+  constructor(private readonly owner: FakeElement) {}
 
-  add(name: string): void {
-    this.values.add(name);
+  private values(): string[] {
+    return this.owner.className.split(/\s+/).filter(Boolean);
   }
 
-  remove(name: string): void {
-    this.values.delete(name);
+  private write(values: string[]): void {
+    this.owner.className = values.join(" ");
   }
 
   contains(name: string): boolean {
-    return this.values.has(name);
+    return this.values().includes(name);
+  }
+
+  add(name: string): void {
+    if (!this.contains(name)) this.write([...this.values(), name]);
+  }
+
+  remove(name: string): void {
+    this.write(this.values().filter((value) => value !== name));
   }
 
   toggle(name: string, force?: boolean): boolean {
-    const next = force === undefined ? !this.values.has(name) : force;
-    if (next) this.values.add(name);
-    else this.values.delete(name);
+    const next = force === undefined ? !this.contains(name) : force;
+    if (next) this.add(name);
+    else this.remove(name);
     return next;
   }
 }
@@ -64,7 +75,8 @@ function matchesSelector(element: FakeElement, selector?: string): boolean {
 
 class FakeElement {
   public className = "";
-  public classList = new FakeClassList();
+  public id = "";
+  public classList = new FakeClassList(this);
   public textContent = "";
   public value = "";
   public style: Record<string, string> = {};
@@ -104,6 +116,18 @@ class FakeElement {
     for (const child of this.children) child.parentElement = null;
     this.children = [];
     this.html = value;
+    // `addMessage` builds a bubble as an HTML string and then looks pieces of
+    // it up by class (`el.querySelector('.message-body')`). Hand the string a
+    // flat stand-in per `class`/`id` attribute so those lookups resolve;
+    // nested markup is flattened, which is all the elements this module
+    // queries by class need.
+    for (const match of value.matchAll(/class="([^"]+)"|id="([^"]+)"/g)) {
+      const element = new FakeElement();
+      if (match[1]) element.className = match[1];
+      if (match[2]) element.id = match[2];
+      element.parentElement = this;
+      this.children.push(element);
+    }
   }
 
   addEventListener(name: string, handler: (event: unknown) => void): void {
@@ -190,9 +214,18 @@ function createHarness() {
     addEventListener: () => {},
   };
 
+  // Every element the script creates, so a lookup by id (`msg-<id>` for a
+  // message it drew, the way `renderPlanApproveButton` and
+  // `renderTurnForkAction` find their host) resolves to the element that is
+  // actually in the tree instead of a fresh detached one.
+  const created: FakeElement[] = [];
   const documentObj = {
-    getElementById: (id: string) => getEl(id),
-    createElement: () => new FakeElement(),
+    getElementById: (id: string) => created.find((el) => el.id === id) ?? getEl(id),
+    createElement: () => {
+      const element = new FakeElement();
+      created.push(element);
+      return element;
+    },
     querySelectorAll: () => [] as FakeElement[],
     addEventListener: () => {},
   };
@@ -202,6 +235,9 @@ function createHarness() {
     document: documentObj,
     setTimeout: () => 0,
     clearTimeout: () => {},
+    // `addMessage` schedules its nav-dot refresh on a frame; the stand-in only
+    // has to exist, since nothing in these tests waits for a frame.
+    requestAnimationFrame: () => 0,
     console,
   });
   vm.runInContext(getMessagesScript(makeTr()), context);
@@ -220,7 +256,7 @@ function createHarness() {
     return card;
   };
 
-  return { messages, messagesEl, addCard };
+  return { messages, messagesEl, addCard, window: windowObj };
 }
 
 describe("revealFileChangeCard", () => {
@@ -403,5 +439,162 @@ describe("addMessage system notes", () => {
 
     const note = messagesEl.children[messagesEl.children.length - 1];
     expect(note.innerHTML).not.toContain("details");
+  });
+});
+
+describe("branch from a turn", () => {
+  /** The message that closes a turn, as `loadHistory` builds one. */
+  const answerBubble = (overrides: Record<string, unknown> = {}) => ({
+    id: "assistant-turn_1",
+    role: "assistant",
+    content: "the answer",
+    status: "complete",
+    timestamp: 2,
+    branchTurnId: "turn_1",
+    ...overrides,
+  });
+
+  /** A transcript holding one turn, drawn from history. */
+  const drawTurn = (
+    harness: ReturnType<typeof createHarness>,
+    overrides: Record<string, unknown> = {},
+  ) => {
+    harness.messages.addMessage(
+      { id: "user-turn_1", role: "user", content: "the question", status: "complete", timestamp: 1 },
+      true,
+    );
+    harness.messages.addMessage(answerBubble(overrides), true);
+  };
+
+  it("offers the action under the answer that closes a turn, and posts the turn id", () => {
+    const harness = createHarness();
+    const { messagesEl, window } = harness;
+    window.__wvApiCapabilities.forkFromTurn = true;
+    const posted: Array<Record<string, unknown>> = [];
+    window.__wvVscode.postMessage = (msg: Record<string, unknown>) => posted.push(msg);
+
+    drawTurn(harness);
+
+    const buttons = messagesEl.querySelectorAll(".turn-fork-btn");
+    expect(buttons).toHaveLength(1);
+    // The anchor is the engine's own turn id: nothing here counts turns or
+    // positions, because the rendered transcript is not the turn list the
+    // engine cuts.
+    expect(buttons[0].getAttribute("data-turn-id")).toBe("turn_1");
+    // The row belongs to the answer, not the question above it.
+    expect(buttons[0].closest(".message")?.className).toContain("assistant");
+
+    messagesEl.dispatch("click", { target: buttons[0] });
+    expect(posted).toEqual([{ type: "forkFromTurn", turnId: "turn_1" }]);
+  });
+
+  it("keeps the action off the question and off a turn that has no anchor", () => {
+    const harness = createHarness();
+    const { messagesEl, window } = harness;
+    window.__wvApiCapabilities.forkFromTurn = true;
+
+    drawTurn(harness, { branchTurnId: undefined });
+
+    // A viewed saved session is drawn from stored messages, not from turns, so
+    // it carries no anchor to send; the question never carries one either.
+    expect(messagesEl.querySelectorAll(".turn-fork-btn")).toHaveLength(0);
+  });
+
+  it("renders no dead control on an engine without the route", () => {
+    const harness = createHarness();
+    const { messagesEl, window } = harness;
+    window.__wvApiCapabilities.forkFromTurn = false;
+
+    // The older engines fork the last turn only, so the button's promise
+    // ("continue from here") cannot be kept: it is not drawn at all rather than
+    // disabled on every message.
+    drawTurn(harness);
+
+    expect(messagesEl.querySelectorAll(".turn-fork-btn")).toHaveLength(0);
+  });
+
+  it("gives a turn that just finished the row a reloaded one would carry", () => {
+    const harness = createHarness();
+    const { messages, messagesEl, window } = harness;
+    window.__wvApiCapabilities.forkFromTurn = true;
+
+    messages.addMessage(
+      {
+        id: "assistant-live",
+        role: "assistant",
+        content: "an answer sent in this session",
+        status: "complete",
+        timestamp: 3,
+      },
+      true,
+    );
+    // The turn id only exists once the turn is over, so the row arrives with
+    // the finalize message rather than with the bubble.
+    expect(messagesEl.querySelectorAll(".turn-fork-btn")).toHaveLength(0);
+
+    messages.renderTurnForkAction("assistant-live", "turn_live");
+
+    const buttons = messagesEl.querySelectorAll(".turn-fork-btn");
+    expect(buttons).toHaveLength(1);
+    expect(buttons[0].getAttribute("data-turn-id")).toBe("turn_live");
+  });
+
+  it("marks the row that was clicked while the fork is being created", () => {
+    const harness = createHarness();
+    const { messagesEl, window } = harness;
+    window.__wvApiCapabilities.forkFromTurn = true;
+    const tr = makeTr();
+    const posted: Array<Record<string, unknown>> = [];
+    window.__wvVscode.postMessage = (msg: Record<string, unknown>) => posted.push(msg);
+
+    drawTurn(harness);
+    const btn = messagesEl.querySelectorAll(".turn-fork-btn")[0];
+    messagesEl.dispatch("click", { target: btn });
+
+    // The wait has nothing else to show where the click happened, so the row
+    // says it is working and cannot be clicked a second time.
+    expect(btn.classList.contains("is-pending")).toBe(true);
+    expect(btn.getAttribute("aria-disabled")).toBe("true");
+    expect(btn.getAttribute("title")).toBe(tr.forkRunning);
+    expect(posted).toHaveLength(1);
+
+    messagesEl.dispatch("click", { target: btn });
+    expect(posted).toHaveLength(1);
+  });
+
+  it("releases every pending row when the fork settles", () => {
+    const harness = createHarness();
+    const { messages, messagesEl, window } = harness;
+    window.__wvApiCapabilities.forkFromTurn = true;
+    const tr = makeTr();
+
+    drawTurn(harness);
+    const btn = messagesEl.querySelectorAll(".turn-fork-btn")[0];
+    messagesEl.dispatch("click", { target: btn });
+
+    messages.clearPendingTurnFork();
+
+    // A failed fork leaves the transcript exactly as it was: the row is a
+    // branch point again, with nothing claiming a wait that ended.
+    expect(btn.classList.contains("is-pending")).toBe(false);
+    expect(btn.getAttribute("aria-disabled")).toBe("false");
+    expect(btn.getAttribute("title")).toBe(tr.forkFromTurnTooltip);
+
+    const posted: Array<Record<string, unknown>> = [];
+    window.__wvVscode.postMessage = (msg: Record<string, unknown>) => posted.push(msg);
+    messagesEl.dispatch("click", { target: btn });
+    expect(posted).toEqual([{ type: "forkFromTurn", turnId: "turn_1" }]);
+  });
+
+  it("does not stack a second row on a bubble that already has one", () => {
+    const harness = createHarness();
+    const { messages, messagesEl, window } = harness;
+    window.__wvApiCapabilities.forkFromTurn = true;
+
+    drawTurn(harness);
+    messages.renderTurnForkAction("assistant-turn_1", "turn_1");
+
+    // A reload plus a late finalize must not offer the same branch point twice.
+    expect(messagesEl.querySelectorAll(".turn-fork-btn")).toHaveLength(1);
   });
 });

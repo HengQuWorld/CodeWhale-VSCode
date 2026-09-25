@@ -307,6 +307,25 @@ interface Translations {
   retryInterrupted: string;
   retryNotSupported: string;
   retryUnsupportedTooltip: string;
+  // Fork from a chosen turn
+  forkFromTurnLabel: string;
+  forkFromTurnTooltip: string;
+  forkNotSupported: string;
+  forkNoThread: string;
+  forkBadTurn: string;
+  forkRunning: string;
+  hostOperationHint: string;
+  undoRunning: string;
+  retryRunning: string;
+  operationBusy: string;
+  continueSessionLabel: string;
+  continueSessionTooltip: string;
+  continueSessionRunning: string;
+  continueSessionSuccess: string;
+  continueSessionNoSession: string;
+  continueSessionFailed: string;
+  forkSuccess: (turnId: string) => string;
+  forkFailed: string;
   // Last-turn summary
   lastTurnLabel: string;
   lastTurnNoPrevious: string;
@@ -666,6 +685,25 @@ const en: Translations = {
   retryInterrupted: "Retry was interrupted. A turn is already running — use /interrupt first.",
   retryNotSupported: "Retry is unavailable because the connected TUI runtime does not support server-side retry yet.",
   retryUnsupportedTooltip: "Retry is unavailable in the connected TUI runtime",
+  // Fork from a chosen turn
+  forkFromTurnLabel: "Branch",
+  forkFromTurnTooltip: "Continue in a new conversation from this answer: it keeps this turn and everything before it, leaves the rest here, and puts what you asked next into the input box.",
+  forkNotSupported: "Branching from a chosen turn is unavailable because the connected TUI runtime does not support fork-at-turn yet.",
+  forkNoThread: "Branching needs an open conversation. Use Continue to open this saved session, then branch from one of its turns.",
+  forkBadTurn: "That turn is no longer a branch point in this conversation. Reload it and pick again — nothing was changed.",
+  forkRunning: "Branching this conversation…",
+  hostOperationHint: "This is still being created — sending waits for it so your message lands in the conversation you are looking at.",
+  undoRunning: "Undoing the last turn…",
+  retryRunning: "Retrying the last turn…",
+  operationBusy: "Another action is still finishing. One moment, then try again.",
+  continueSessionLabel: "Continue",
+  continueSessionTooltip: "Open this saved session as a live conversation so you can keep working in it — or branch from one of its turns. Nothing is sent.",
+  continueSessionRunning: "Opening this conversation…",
+  continueSessionSuccess: "Opened as a live conversation. Every finished turn now offers Branch.",
+  continueSessionNoSession: "No saved session is open to continue.",
+  continueSessionFailed: "Could not open this conversation",
+  forkSuccess: (turnId) => `Branched into ${turnId}. It holds this turn and everything before it; what you asked next is back in the input box. The conversation you branched from is untouched.`,
+  forkFailed: "Fork failed",
   // Last-turn summary
   lastTurnLabel: "Last turn",
   lastTurnNoPrevious: "No previous turn found.",
@@ -1025,6 +1063,25 @@ const zhCn: Translations = {
   retryInterrupted: "重试被中断:当前已有一个轮次正在运行,请先使用 /interrupt。",
   retryNotSupported: "当前连接的 TUI 运行时尚未提供 retry 接口,无法执行重试。",
   retryUnsupportedTooltip: "当前 TUI 运行时不支持重试",
+  // 从指定轮次分叉
+  forkFromTurnLabel: "分叉",
+  forkFromTurnTooltip: "从这条回答继续:新会话保留这一轮及之前的对话,之后的对话留在原会话,并把原来接下来问的内容放回输入框。",
+  forkNotSupported: "当前连接的 TUI 运行时尚未提供 fork-at-turn 接口,无法从指定轮次分叉。",
+  forkNoThread: "分叉需要一个已打开的会话:点「继续」把该会话打开,再从其中某一轮分叉。",
+  forkBadTurn: "该轮次已不是这次对话的分叉点。请重新加载后再次选择,当前没有任何内容被改动。",
+  forkRunning: "正在分叉这段对话…",
+  hostOperationHint: "操作还在进行中——发送会等到它完成,这样消息才会落在你正在看的这段对话里。",
+  undoRunning: "正在撤销上一轮…",
+  retryRunning: "正在重试上一轮…",
+  operationBusy: "另一个操作还没结束,请稍候再试。",
+  continueSessionLabel: "继续",
+  continueSessionTooltip: "把这个已保存的会话打开成活动会话,以便在它里面继续工作,或从其中某一轮分叉。不会发送任何内容。",
+  continueSessionRunning: "正在打开该会话…",
+  continueSessionSuccess: "已作为活动会话打开。现在每条回答下方都有「分叉」。",
+  continueSessionNoSession: "当前没有可继续的已保存会话。",
+  continueSessionFailed: "打开该会话失败",
+  forkSuccess: (turnId) => `已分叉到 ${turnId}:新会话保留这一轮及之前的对话,原来接下来问的内容已放回输入框;原会话保持不变。`,
+  forkFailed: "分叉失败",
   // 上一轮信息
   lastTurnLabel: "上一轮",
   lastTurnNoPrevious: "没有可用的上一轮。",
@@ -1432,6 +1489,13 @@ export function webviewTranslations(tr: Translations) {
     retryInterrupted: tr.retryInterrupted,
     retryNotSupported: tr.retryNotSupported,
     retryUnsupportedTooltip: tr.retryUnsupportedTooltip,
+    // Fork from a chosen turn
+    forkFromTurnLabel: tr.forkFromTurnLabel,
+    forkFromTurnTooltip: tr.forkFromTurnTooltip,
+    continueSessionLabel: tr.continueSessionLabel,
+    continueSessionTooltip: tr.continueSessionTooltip,
+    forkRunning: tr.forkRunning,
+    hostOperationHint: tr.hostOperationHint,
     lastTurnLabel: tr.lastTurnLabel,
     lastTurnNoPrevious: tr.lastTurnNoPrevious,
     revertWillDelete: tr.revertWillDelete,

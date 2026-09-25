@@ -101,6 +101,17 @@ export interface ChatMessage {
   timestamp: number;
   /** True when this user message was sent as mid-turn steering (TUI steer). */
   steered?: boolean;
+  /** The runtime turn this bubble *closes*, on a live thread's transcript.
+   *
+   *  Set only on the last assistant message of a turn: that bubble is the
+   *  turn's end, and that is where the branch action belongs — branching keeps
+   *  the turn it names, so the row sits under the answer a person is looking
+   *  at rather than on the question above it. It is the anchor the action
+   *  sends and the engine resolves against its own turn list, so the client
+   *  never counts turns to guess which one was clicked. Absent in a viewed
+   *  saved session, whose transcript is reconstructed from stored messages
+   *  rather than from turns. */
+  branchTurnId?: string;
   /** Per-turn usage, stamped onto a turn's final assistant message so the
    *  reloaded view shows the same ↑/↓ token chip as the live view. */
   usage?: {

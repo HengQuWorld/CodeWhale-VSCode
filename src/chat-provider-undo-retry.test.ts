@@ -36,6 +36,14 @@ function createProvider() {
     ensureReady: vi.fn(async () => undefined),
     patchUndoThreadTurn: vi.fn(),
     retryThreadTurn: vi.fn(),
+    // Undo and retry park the conversation they replace before switching to
+    // the fork: the parked thread keeps its own stream, so the switch needs
+    // one to open.
+    streamEvents: vi.fn(() => ({ abort: vi.fn() })),
+    listThreadsSummary: vi.fn(async () => ({ threads: [] })),
+    getThreadGoal: vi.fn(async () => null),
+    getSession: vi.fn(),
+    resumeSessionThread: vi.fn(),
   };
   const provider = new ChatProvider({} as any, {} as any, api as any);
 
@@ -541,5 +549,102 @@ describe("single-file revert boundary", () => {
         message: expect.stringContaining(expected),
       });
     }
+  });
+  it("says it is working while the undo runs, and releases the hold after", async () => {
+    // Rolling the workspace back and forking the conversation takes seconds
+    // and streams nothing: without this the click is answered by a still
+    // screen, and the composer looks free to send into a conversation that is
+    // being replaced.
+    const { provider, api, postMessage } = createProvider();
+    (provider as any).currentThread = { id: "thread-1", trust_mode: true };
+    let settle: (value: unknown) => void = () => {};
+    api.patchUndoThreadTurn.mockImplementation(
+      () => new Promise((resolve) => { settle = resolve; })
+    );
+
+    const inFlight = provider.handleUndoLastTurn();
+    await vi.waitFor(() => expect(api.patchUndoThreadTurn).toHaveBeenCalled());
+
+    expect(postMessage).toHaveBeenCalledWith({
+      type: "hostOperation",
+      active: true,
+      label: expect.stringContaining("Undoing"),
+      hint: expect.stringContaining("sending waits"),
+    });
+    expect(postMessage).toHaveBeenCalledWith({
+      type: "status",
+      text: expect.stringContaining("Undoing"),
+    });
+
+    settle({
+      patch_result: { files_restored: false, summary: null },
+      thread: { id: "thread-2" },
+      original_user_text: null,
+    });
+    await inFlight;
+
+    expect(postMessage).toHaveBeenCalledWith({ type: "hostOperation", active: false });
+  });
+
+  it("says it is working while the retry runs", async () => {
+    const { provider, api, postMessage } = createProvider();
+    let settle: (value: unknown) => void = () => {};
+    api.retryThreadTurn.mockImplementation(
+      () => new Promise((resolve) => { settle = resolve; })
+    );
+
+    const inFlight = provider.handleRetryLastTurn();
+    await vi.waitFor(() => expect(api.retryThreadTurn).toHaveBeenCalled());
+
+    expect(postMessage).toHaveBeenCalledWith({
+      type: "hostOperation",
+      active: true,
+      label: expect.stringContaining("Retrying"),
+      hint: expect.stringContaining("sending waits"),
+    });
+
+    settle({ thread: { id: "thread-2" }, turn: { id: "turn-2" } });
+    await inFlight;
+
+    expect(postMessage).toHaveBeenCalledWith({ type: "hostOperation", active: false });
+  });
+
+  it("resumes a viewed session before undoing in it", async () => {
+    // A recording has no turns to undo. The resume used to be written out in
+    // both undo and retry; it now lives in one helper, and this pins that the
+    // helper is actually on the path.
+    const { provider, api } = createProvider();
+    provider.currentThread = null;
+    (provider as any).viewingSessionId = "sess-1";
+    api.getSession.mockResolvedValue({ metadata: { id: "sess-1" } });
+    api.resumeSessionThread.mockResolvedValue({ thread_id: "thread-9" });
+    // The real loadThread puts the resumed thread on screen; the undo needs one
+    // to act on.
+    (provider as any).loadThread = vi.fn(async () => {
+      (provider as any).currentThread = { id: "thread-9" };
+    });
+    api.patchUndoThreadTurn.mockResolvedValue({
+      patch_result: { files_restored: false, summary: null },
+      thread: { id: "thread-10" },
+      original_user_text: null,
+    });
+
+    await provider.handleUndoLastTurn();
+
+    expect(api.resumeSessionThread).toHaveBeenCalledWith("sess-1");
+    expect(api.patchUndoThreadTurn).toHaveBeenCalledWith("thread-9");
+  });
+
+  it("releases the hold when the undo fails", async () => {
+    // A composer left holding its send with nothing running behind it is worse
+    // than the silence this replaced.
+    const { provider, api, postMessage } = createProvider();
+    (provider as any).currentThread = { id: "thread-1", trust_mode: true };
+    api.patchUndoThreadTurn.mockRejectedValue(new Error("API error 500: boom"));
+
+    await provider.handleUndoLastTurn();
+
+    expect(postMessage).toHaveBeenCalledWith({ type: "hostOperation", active: false });
+    expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({ type: "error" }));
   });
 });

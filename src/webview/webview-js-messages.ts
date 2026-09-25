@@ -605,10 +605,81 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
       el.appendChild(usageEl);
     }
 
+    // Per-turn branch action. The anchor is the runtime turn id this bubble
+    // carries: only the turn's closing assistant message has one, and only a
+    // live thread's transcript has them at all — a viewed saved session is
+    // drawn from stored messages, not from turns. The engine resolves the id
+    // against its own turn list, so nothing here counts turns or positions to
+    // guess which one was clicked.
+    if (msg.branchTurnId) {
+      var actionsEl = buildTurnForkAction(msg.branchTurnId);
+      if (actionsEl) el.appendChild(actionsEl);
+    }
+
     smartScrollToBottom();
     scheduleNavUpdate();
     flushPendingApprovals(pendingApprovals);
     markClippedBlocks(el);
+  }
+
+  // ── Branch from a turn ──
+  /**
+   * The branch row for one turn, or null when the engine cannot honour it.
+   *
+   * One home for the markup, used both by addMessage (a transcript rebuilt
+   * from history) and by renderTurnForkAction (a turn that finished in this
+   * session), so a live turn and a reloaded one offer the same control.
+   */
+  function buildTurnForkAction(turnId) {
+    var caps = window.__wvApiCapabilities || {};
+    // An engine without the route forks only the last turn, so a button
+    // promising "continue from here" would cut at the wrong turn and still
+    // answer success. It is not drawn at all rather than left dead.
+    if (!caps.forkFromTurn) return null;
+    var actionsEl = document.createElement('div');
+    actionsEl.className = 'message-actions';
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'turn-fork-btn';
+    btn.setAttribute('data-turn-id', turnId);
+    btn.setAttribute('title', __i18n.forkFromTurnTooltip);
+    btn.setAttribute('aria-label', __i18n.forkFromTurnLabel);
+    btn.textContent = '\u2442 ' + __i18n.forkFromTurnLabel;
+    actionsEl.appendChild(btn);
+    return actionsEl;
+  }
+
+  /** Mark the row that was clicked as the one being worked on. Creating a fork
+   *  takes a few seconds; without this the click is answered only by a status
+   *  line somewhere else, and a second click looks free. */
+  function markTurnForkPending(btn) {
+    if (!btn) return;
+    btn.classList.add('is-pending');
+    btn.setAttribute('aria-disabled', 'true');
+    btn.textContent = '\u2442 ' + __i18n.forkRunning;
+    btn.setAttribute('title', __i18n.forkRunning);
+  }
+
+  /** Release every pending row: the fork landed or failed. */
+  function clearPendingTurnFork() {
+    var pending = messagesEl.querySelectorAll('.turn-fork-btn.is-pending');
+    for (var i = 0; i < pending.length; i++) {
+      pending[i].classList.remove('is-pending');
+      pending[i].setAttribute('aria-disabled', 'false');
+      pending[i].textContent = '\u2442 ' + __i18n.forkFromTurnLabel;
+      pending[i].setAttribute('title', __i18n.forkFromTurnTooltip);
+    }
+  }
+
+  /** Give a turn that just finished on screen the branch row it will keep
+   *  offering after a reload. Called when the host finalizes a turn, because
+   *  the anchor only exists once the turn has an id. */
+  function renderTurnForkAction(messageId, turnId) {
+    var msgEl = document.getElementById('msg-' + messageId);
+    if (!msgEl) return;
+    if (msgEl.querySelector('.message-actions')) return;
+    var actionsEl = buildTurnForkAction(turnId);
+    if (actionsEl) msgEl.appendChild(actionsEl);
   }
 
   // ── Plan approval (plan mode → Act) ──
@@ -749,6 +820,21 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
       var filePath = target.getAttribute('data-file-path');
       if (filePath) {
         vscode.postMessage({ type: 'openFile', filePath: filePath });
+      }
+      return;
+    }
+
+    // Branch the conversation at this turn: a live thread's bubble carries
+    // the turn id the engine resolves, so the click never guesses a position.
+    if (target.classList.contains('turn-fork-btn')) {
+      if (target.getAttribute('aria-disabled') === 'true') return;
+      var forkTurnId = target.getAttribute('data-turn-id');
+      if (forkTurnId) {
+        // Acknowledge where the click happened, before the host's own status
+        // line arrives: this row is the thing that will look broken if the
+        // next few seconds pass in silence.
+        markTurnForkPending(target);
+        vscode.postMessage({ type: 'forkFromTurn', turnId: forkTurnId });
       }
       return;
     }
@@ -1011,6 +1097,8 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
     updateThinkingBlock: updateThinkingBlock,
     markClippedBlocks: markClippedBlocks,
     renderPlanApproveButton: renderPlanApproveButton,
+    renderTurnForkAction: renderTurnForkAction,
+    clearPendingTurnFork: clearPendingTurnFork,
     renderCompactionSummary: renderCompactionSummary,
   };
 

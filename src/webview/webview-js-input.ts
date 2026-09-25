@@ -18,6 +18,7 @@ export function getInputScript(tr: WebviewTranslations): string {
   var slashMenuEl = document.getElementById('slash-menu');
   var newThreadBtn = document.getElementById('btn-new-thread');
   var compactBtn = document.getElementById('btn-compact');
+  var continueSessionBtn = document.getElementById('btn-continue-session');
   var undoBtn = document.getElementById('btn-undo');
   var retryBtn = document.getElementById('btn-retry');
   var undoDefaultTitle = undoBtn ? (undoBtn.getAttribute('title') || '') : '';
@@ -212,6 +213,9 @@ export function getInputScript(tr: WebviewTranslations): string {
   function sendMessage() {
     var text = inputEl.value.trim();
     var isStreaming = window.__wvMessages.isStreaming();
+    // Nothing goes anywhere while the host is replacing the conversation: the
+    // text stays in the box and is sendable the moment the fork lands.
+    if (hostOperationLabel) return;
     if (!text && currentAttachments.length === 0) return;
     var isSlash = text.startsWith('/');
     var slashAllowedWhileStreaming = text.startsWith('/interrupt') || text.startsWith('/clear');
@@ -267,7 +271,9 @@ export function getInputScript(tr: WebviewTranslations): string {
   function updateInputPlaceholder() {
     var isStreaming = !!(window.__wvMessages && window.__wvMessages.isStreaming());
     var placeholder = inputDefaultPlaceholder;
-    if (isStreaming && steerCapable()) {
+    if (hostOperationLabel) {
+      placeholder = hostOperationLabel;
+    } else if (isStreaming && steerCapable()) {
       placeholder = (__i18n && __i18n.steerPlaceholder) || inputDefaultPlaceholder;
     } else if (isStreaming) {
       placeholder = (__i18n && __i18n.steerUnavailablePlaceholder) || inputDefaultPlaceholder;
@@ -281,6 +287,13 @@ export function getInputScript(tr: WebviewTranslations): string {
   var sendLabel = (__i18n && __i18n.send) || 'Send';
   var stopLabel = (__i18n && __i18n.interrupt) || 'Stop';
 
+  // Set while an operation the host started owns the conversation (a fork, an
+  // undo, a retry). See setHostOperation below for what it holds and why. The
+  // label names the operation in the box; the hint says why sending waits, on
+  // the held button's hover, where the number of characters is free.
+  var hostOperationLabel = '';
+  var hostOperationHint = '';
+
   function updateSendStopButton(isStreaming) {
     if (sendStopBtn) {
       if (isStreaming) {
@@ -291,9 +304,56 @@ export function getInputScript(tr: WebviewTranslations): string {
       var label = isStreaming ? stopLabel : sendLabel;
       sendStopBtn.setAttribute('title', label);
       sendStopBtn.setAttribute('aria-label', label);
+      // While the host owns the conversation (a fork being created) the button
+      // is marked unavailable, never disabled: a disabled button swallows
+      // the hover, and the hover is where it explains what it is waiting for.
+      // The click guard below is what makes it inert.
+      var held = !!hostOperationLabel && !isStreaming;
+      setButtonCapabilityState(sendStopBtn, !held, label, hostOperationHint || hostOperationLabel || label);
     }
     updateInputPlaceholder();
     updateSteerButtonState();
+  }
+
+  // ── Host operation in flight ──
+  // One operation can own the conversation for a few seconds without
+  // streaming anything: creating a fork clones turns and writes a session
+  // document, and the fork replaces which conversation the composer belongs
+  // to. A message sent into that window would land in the one being left, so
+  // sending waits — while typing does not, because the text is the user's and
+  // the wait is short. The box says why through its placeholder and the button
+  // through its hover.
+
+  /** The controls that start or replace the conversation on screen. The send
+   *  is not the only way to race the swap a fork performs: Undo, Retry, New
+   *  Thread and Compact all act on the conversation the composer is pointing
+   *  at, and a click landing mid-fork would either disappear or act on the
+   *  conversation the person just left. Held together, released together. */
+  function conversationControls() {
+    return [undoBtn, retryBtn, compactBtn, newThreadBtn, continueSessionBtn];
+  }
+
+  function setHostOperation(label, hint) {
+    hostOperationLabel = label || '';
+    hostOperationHint = hint || '';
+    var held = !!hostOperationLabel;
+    var controls = conversationControls();
+    for (var i = 0; i < controls.length; i++) {
+      if (!controls[i]) continue;
+      if (held) setButtonCapabilityState(controls[i], false, '', label);
+      // Released: the capability-derived buttons recompute below; the rest
+      // carry no capability and only have to stop being marked unavailable.
+      else setButtonCapabilityState(controls[i], true, '', '');
+    }
+    if (held) {
+      updateSendStopButton(!!(window.__wvMessages && window.__wvMessages.isStreaming()));
+    } else {
+      // Both, and in this order: the toolbar controls recompute from the
+      // engine's capabilities, and the send button goes back to the face its
+      // own state calls for (Send, or Stop for a turn that is still running).
+      applyApiCapabilities();
+      updateSendStopButton(!!(window.__wvMessages && window.__wvMessages.isStreaming()));
+    }
   }
 
   // ── Steer button: the running turn's own send ──
@@ -632,8 +692,25 @@ export function getInputScript(tr: WebviewTranslations): string {
     updateSteerButtonState();
   });
 
-  newThreadBtn.addEventListener('click', function() { vscode.postMessage({ type: 'newThread' }); });
-  compactBtn.addEventListener('click', function() { vscode.postMessage({ type: 'compact' }); });
+  // Marked unavailable rather than disabled (see setButtonCapabilityState), so
+  // the click is what has to be inert — the same guard the undo/retry buttons
+  // have used all along.
+  newThreadBtn.addEventListener('click', function() {
+    if (newThreadBtn.getAttribute('aria-disabled') === 'true') return;
+    vscode.postMessage({ type: 'newThread' });
+  });
+  compactBtn.addEventListener('click', function() {
+    if (compactBtn.getAttribute('aria-disabled') === 'true') return;
+    vscode.postMessage({ type: 'compact' });
+  });
+  // Offered only while a saved session is being viewed: a live conversation
+  // has nothing to continue.
+  if (continueSessionBtn) {
+    continueSessionBtn.addEventListener('click', function() {
+      if (continueSessionBtn.getAttribute('aria-disabled') === 'true') return;
+      vscode.postMessage({ type: 'continueSession' });
+    });
+  }
   undoBtn.addEventListener('click', function() {
     if (undoBtn.getAttribute('aria-disabled') === 'true') return;
     vscode.postMessage({ type: 'undoLastTurn' });
@@ -652,6 +729,7 @@ export function getInputScript(tr: WebviewTranslations): string {
     setAttachmentPreview: setAttachmentPreview,
     updateSendStopButton: updateSendStopButton,
     setComposerText: setComposerText,
+    setHostOperation: setHostOperation,
   };
 
   applyApiCapabilities();

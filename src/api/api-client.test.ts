@@ -1002,3 +1002,77 @@ describe("CodeWhaleApiClient - manual compaction", () => {
     ]);
   });
 });
+
+describe("CodeWhaleApiClient - fork from a turn", () => {
+  type RawResponse = { statusCode: number; data: string };
+
+  /** Stub the raw HTTP layer so the test asserts the wire contract the engine
+   *  sees — method, path and body — instead of the transport. */
+  function clientStubbingRaw(
+    respond: (method: string, path: string, body: unknown) => RawResponse
+  ) {
+    const client = new CodeWhaleApiClient("http://localhost:54321");
+    const calls: { method: string; path: string; body: unknown }[] = [];
+    (client as any).requestRaw = vi.fn(
+      async (method: string, path: string, body: unknown) => {
+        calls.push({ method, path, body });
+        return respond(method, path, body);
+      }
+    );
+    return { client, calls };
+  }
+
+  it("probes fork-at-turn with GET and reports it unavailable when the route 404s", async () => {
+    // GET, not POST: the route is POST-only, so a POST probe would run the
+    // handler and read its unknown-`__probe__`-thread 404 as "no such route" —
+    // a false negative that would hide the branch action on an engine that has
+    // the endpoint.
+    const { client, calls } = clientStubbingRaw(() => ({ statusCode: 404, data: "{}" }));
+
+    const caps = await client.probeRuntimeCapabilities();
+
+    expect(caps.threadForkAtTurn).toBe(false);
+    expect(calls).toContainEqual({
+      method: "GET",
+      path: "/v1/threads/__probe__/fork-at-turn",
+      body: undefined,
+    });
+  });
+
+  it("treats a 405 on the GET probe as the endpoint being available", async () => {
+    const { client } = clientStubbingRaw((_method, path) =>
+      path === "/v1/threads/__probe__/fork-at-turn"
+        ? { statusCode: 405, data: "{}" }
+        : { statusCode: 404, data: "{}" }
+    );
+
+    const caps = await client.probeRuntimeCapabilities();
+
+    expect(caps.threadForkAtTurn).toBe(true);
+  });
+
+  it("posts the anchor turn id to the thread-scoped fork-at-turn route", async () => {
+    const { client, calls } = clientStubbingRaw(() => ({
+      statusCode: 201,
+      data: JSON.stringify({
+        thread: { id: "thread-2" },
+        original_user_text: "try this instead",
+      }),
+    }));
+
+    const result = await client.forkThreadAtTurn("thread-1", "turn_abc");
+
+    // The anchor travels as the engine's own turn id: the engine resolves it
+    // against the turn list it cuts, so the client never sends a depth it
+    // counted from a transcript that is not that list.
+    expect(calls).toEqual([
+      {
+        method: "POST",
+        path: "/v1/threads/thread-1/fork-at-turn",
+        body: { turn_id: "turn_abc" },
+      },
+    ]);
+    expect(result.thread.id).toBe("thread-2");
+    expect(result.original_user_text).toBe("try this instead");
+  });
+});

@@ -21,6 +21,10 @@ ${PROVIDER_PICKER_JS}
   var messagesEl = document.getElementById('messages');
   var inputEl = document.getElementById('input');
   var statusTextEl = document.getElementById('status-text');
+  /** The status line a host operation set, while it is the one on screen. See
+   *  the hostOperation case: the operation owns the line only until something
+   *  else posts one. */
+  var hostOperationStatusText = '';
   var statusStatsEl = document.getElementById('status-stats');
   var currentModeEl = document.getElementById('current-mode');
   var currentPostureEl = document.getElementById('current-posture');
@@ -168,6 +172,14 @@ ${PROVIDER_PICKER_JS}
   // flickered between send and stop throughout a turn.
   function setStatusText(text) {
     if (statusTextEl) statusTextEl.textContent = text;
+  }
+
+  /** Continue is for a viewed saved session only: with a live thread on screen
+   *  there is nothing to open. One function so the two views cannot both think
+   *  they are the other. */
+  function showContinueSession(visible) {
+    var btn = document.getElementById('btn-continue-session');
+    if (btn) btn.hidden = !visible;
   }
 
   /** Bound how long the view waits for a turn it has armed to say something.
@@ -662,6 +674,10 @@ ${PROVIDER_PICKER_JS}
         break;
 
       case 'sessionLoaded':
+        // A viewed session can be opened as a live conversation, which is what
+        // makes its turns branchable at all — so the action belongs to this
+        // view and only this view.
+        showContinueSession(true);
         window.__wvSidebar.setActiveSessionId(msg.sessionId || null);
         window.__wvSidebar.renderSessions();
         // A saved session is viewed without a thread, so no thread is the one
@@ -679,6 +695,7 @@ ${PROVIDER_PICKER_JS}
         break;
 
       case 'threadLoaded':
+        showContinueSession(false);
         window.__wvSidebar.setActiveThreadId(msg.threadId || msg.thread?.id || null);
         window.__wvSidebar.renderThreads();
         // Close any open detail overlay from the previous thread
@@ -1198,6 +1215,12 @@ ${PROVIDER_PICKER_JS}
         if (msg.planApproval && window.__wvMessages.renderPlanApproveButton) {
           window.__wvMessages.renderPlanApproveButton(msg.messageId);
         }
+        // The turn just ended, so this bubble now closes it: give it the branch
+        // row a reloaded transcript would carry. Without this the turns sent in
+        // this session would offer no branch point until it was reopened.
+        if (msg.branchTurnId && window.__wvMessages.renderTurnForkAction) {
+          window.__wvMessages.renderTurnForkAction(msg.messageId, msg.branchTurnId);
+        }
         window.__wvMessages.setStreaming(false);
         var st = window.__wvMessages.getStreamingTimeout();
         if (st) { clearTimeout(st); window.__wvMessages.setStreamingTimeout(null); }
@@ -1245,6 +1268,37 @@ ${PROVIDER_PICKER_JS}
         setStatusText(msg.text);
         break;
 
+      case 'hostOperation': {
+        // The host is doing something that owns this conversation for a few
+        // seconds and produces nothing to stream: creating a fork, or undoing
+        // a turn. Same activity dot as the busy message, plus a reason the
+        // composer can show while it holds its send — the conversation is
+        // being replaced under it, so a message sent now would land in a
+        // transcript the person is about to leave. The textarea stays open,
+        // because the typing is theirs.
+        var hostLabel = msg.active ? (msg.label || '') : '';
+        if (statusBarEl) statusBarEl.classList.toggle('is-streaming', !!msg.active);
+        if (window.__wvInput && window.__wvInput.setHostOperation) {
+          window.__wvInput.setHostOperation(hostLabel, msg.active ? (msg.hint || '') : '');
+        }
+        if (hostLabel) {
+          // Remembered so the end of the operation can tell whether the line it
+          // set is still the one on screen: an operation that ends with no
+          // result of its own (a refused turn, say) would otherwise leave the
+          // status bar claiming work that is over. A result that did land —
+          // the new thread's line, or an error — has already replaced it, and
+          // must not be overwritten here.
+          hostOperationStatusText = msg.label || '';
+        } else if (statusTextEl && statusTextEl.textContent === hostOperationStatusText) {
+          setStatusText(__i18n.ready);
+          hostOperationStatusText = '';
+        }
+        if (!msg.active && window.__wvMessages && window.__wvMessages.clearPendingTurnFork) {
+          window.__wvMessages.clearPendingTurnFork();
+        }
+        break;
+      }
+
       case 'busy': {
         // A pass that produces no tokens still has to look alive. Context
         // compaction is exactly that — one non-streaming summary call, so no
@@ -1288,6 +1342,7 @@ ${PROVIDER_PICKER_JS}
         break;
 
       case 'clearChat':
+        showContinueSession(false);
         window.__wvSidebar.closeTaskDetail();
         window.__wvSidebar.closeAgentDetail();
         if (window.__wvFleet) window.__wvFleet.closeFleetDetail();

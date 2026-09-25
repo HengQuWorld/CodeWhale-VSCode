@@ -284,12 +284,20 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     snapshotRestore: false,
     threadUsage: false,
     threadFileRevert: false,
+    threadForkAtTurn: false,
   };
   // Guard to prevent concurrent autoSaveSession calls.  When multiple
   // turn.completed events fire in quick succession (e.g. SSE reconnection
   // replaying buffered events) and currentSessionId is null, each call
   // would create a new session on the server, producing duplicates.
   private autoSaveInProgress = false;
+  /** True while an action this client started is replacing the conversation on
+   *  screen — fork, undo, retry. It is both the single-flight guard (one click
+   *  must not start the same swap twice) and the reason the webview holds the
+   *  controls that act on a conversation: while the swap is in flight, a
+   *  message or a second action has no destination that is still true when it
+   *  lands. */
+  private hostOperationInFlight = false;
   private readonly textArtifactPreviewStore = new Map<string, { content: string; language?: string }>();
 
   // ── Background (non-viewed) thread support ──
@@ -642,6 +650,12 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         break;
       case "undoLastTurn":
         await this.handleUndoLastTurn();
+        break;
+      case "forkFromTurn":
+        await this.handleForkFromTurn(msg.turnId as string);
+        break;
+      case "continueSession":
+        await this.handleContinueSession();
         break;
       case "retryLastTurn":
         await this.handleRetryLastTurn();
@@ -1290,6 +1304,27 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
             status: turn.status === "completed" ? "complete" : "error",
             timestamp: new Date(turn.ended_at || turn.created_at).getTime(),
           });
+        }
+
+        // The turn's last assistant bubble closes it, and that is where the
+        // branch action belongs: a fork keeps the turn it names, so the row
+        // sits under the answer rather than on the question. Only the closing
+        // segment carries it — a steered turn's earlier segments are the same
+        // turn, and a compaction is not a conversation turn at all.
+        //
+        // A turn still in flight is not a branch point either: its answer is
+        // not written yet, so a fork naming it would keep a half-turn. Every
+        // finished turn before it stays branchable, which is how a person
+        // branches away from a turn that is going the wrong way without
+        // stopping it.
+        const turnIsRunning = turn.status === "in_progress" || turn.status === "queued";
+        if (!isCompactionTurn && !turnIsRunning) {
+          for (let mi = this.messages.length - 1; mi >= turnStartIdx; mi--) {
+            if (this.messages[mi].role === "assistant") {
+              this.messages[mi].branchTurnId = turn.id;
+              break;
+            }
+          }
         }
       }
 
@@ -3915,6 +3950,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     retryLastTurn: boolean;
     revertFileChange: boolean;
     turnSteer: boolean;
+    forkFromTurn: boolean;
   } {
     return {
       saveSession: this.apiCapabilities.saveSession,
@@ -3926,6 +3962,11 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       // restore, which would silently roll back unrelated files.
       revertFileChange: this.apiCapabilities.threadFileRevert,
       turnSteer: this.apiCapabilities.turnSteer,
+      // Branching from a chosen turn needs the engine's `fork-at-turn` route.
+      // Without it the transcript grows no per-turn branch action: the older
+      // engines fork only the last turn, so a button that promised "continue
+      // from here" would cut at the wrong turn and still answer success.
+      forkFromTurn: this.apiCapabilities.threadForkAtTurn,
     };
   }
 
@@ -3958,6 +3999,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         snapshotRestore: false,
         threadUsage: false,
         threadFileRevert: false,
+        threadForkAtTurn: false,
       };
     }
     this.postApiCapabilities();
@@ -5031,47 +5073,29 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       return;
     }
 
-    // If viewing a session (not a live thread), resume it first.
-    if (this.viewingSessionId && !this.currentThread) {
-      try {
-        await this.api.ensureReady();
-        const sessionId = this.viewingSessionId;
-        // Stash cost before resume — loadThread will zero stats.
-        const session = await this.api.getSession(sessionId);
-        const cost = session.metadata.cost;
-        if (cost) {
-          this.pendingSessionCost = {
-            sessionCostUsd: cost.session_cost_usd || 0,
-            sessionCostCny: cost.session_cost_cny || 0,
-            subagentCostUsd: cost.subagent_cost_usd || 0,
-            subagentCostCny: cost.subagent_cost_cny || 0,
-            displayedCostHighWaterUsd: cost.displayed_cost_high_water_usd || 0,
-            displayedCostHighWaterCny: cost.displayed_cost_high_water_cny || 0,
-            totalTokens: session.metadata.total_tokens || 0,
-            cumulativeTurnSecs: session.metadata.cumulative_turn_secs || 0,
-          };
-        }
-        const result = await this.api.resumeSessionThread(sessionId);
-        this.viewingSessionId = null;
-        await this.loadThread(result.thread_id);
-        // Restore cost (merge with max — see the resume-restore comment
-        // above) and preserve original session ID for auto-save.
-        if (this.pendingSessionCost) {
-          this.sessionCostUsd = Math.max(this.sessionCostUsd, this.pendingSessionCost.sessionCostUsd);
-          this.sessionCostCny = Math.max(this.sessionCostCny, this.pendingSessionCost.sessionCostCny);
-          this.displayedCostHighWaterUsd = Math.max(this.displayedCostHighWaterUsd, this.pendingSessionCost.displayedCostHighWaterUsd);
-          this.displayedCostHighWaterCny = Math.max(this.displayedCostHighWaterCny, this.pendingSessionCost.displayedCostHighWaterCny);
-          this.totalTokens = Math.max(this.totalTokens, this.pendingSessionCost.totalTokens);
-          this.cumulativeTurnSecs = Math.max(this.cumulativeTurnSecs, this.pendingSessionCost.cumulativeTurnSecs);
-          this.pendingSessionCost = null;
-          this.sendSessionStats();
-        }
-        this.currentSessionId = sessionId;
-        this.refreshSessionList();
-      } catch (err) {
-        this.postMessage({ type: "error", message: formatError("Failed to resume session", err) });
-        return;
-      }
+    // Undoing rolls the workspace back and forks the conversation: seconds of
+    // work that streams nothing, and the same swap a fork performs. Announced
+    // and held the same way, and refused while another swap is still running.
+    if (!this.beginHostOperation(t().undoRunning)) {
+      this.postMessage({ type: "info", message: t().operationBusy });
+      return;
+    }
+    try {
+      await this.runUndoLastTurn();
+    } finally {
+      this.endHostOperation();
+    }
+  }
+
+  private async runUndoLastTurn(): Promise<void> {
+    // A turn is what these actions need and a viewed recording does not have
+    // one, so the session is resumed into a live thread first — the same step
+    // `handleContinueSession` offers on its own.
+    try {
+      await this.resumeViewedSessionForAction();
+    } catch (err) {
+      this.postMessage({ type: "error", message: formatError("Failed to resume session", err) });
+      return;
     }
 
     if (!this.currentThread) {
@@ -5099,36 +5123,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         this.postMessage({ type: "info", message: result.patch_result.summary });
       }
 
-      // Which document the thread being forked writes to. A runtime that gives
-      // a fork a document of its own answers with a different id below; one that
-      // predates that hands the fork the source's id.
-      const forkedFromSession = this.currentSessionId;
-
-      // Switch to the new forked thread.
-      this.currentThread = result.thread;
-      this.messages = [];
-      this.resetChangeGroups();
-      this.currentTurnId = null;
-      this.activeItems.clear();
-      this.currentTextBlockIdx = -1;
-      this.currentThinkingBlockIdx = -1;
-      this.lastEventSeq = 0;
-
-      // Load the forked thread's history.
-      await this.loadThread(result.thread.id);
-      // A fork's history is a prefix of the thread it came from, so that
-      // thread's document is the one it must not rewrite: `PUT /v1/sessions`
-      // replaces the stored transcript, and the source thread would be left
-      // describing bytes that are gone. Nothing to do when the runtime gave the
-      // fork a document of its own.
-      if (this.currentSessionId && this.currentSessionId === forkedFromSession) {
-        this.forgetSessionBinding();
-      }
-
-      // Put the user's message back in the input box so they can edit & re-send.
-      if (result.original_user_text) {
-        this.postMessage({ type: "setInputText", text: result.original_user_text });
-      }
+      await this.adoptForkedThread(result.thread, result.original_user_text);
 
       this.postMessage({
         type: "info",
@@ -5154,6 +5149,209 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
   }
 
   /**
+   * A viewed saved session is a recording, not a conversation the runtime can
+   * act on: nothing that wants a turn — undo, retry, a branch — can name one
+   * until the session has been resumed into a live thread. This is that step,
+   * and the one place it happens, so all three agree on what a resume does:
+   * the session's cost is stashed across `loadThread` (which zeroes the stats)
+   * and restored, and the binding to the session document is kept so the
+   * resumed conversation still auto-saves where it came from.
+   *
+   * No-op when a live thread is already on screen. Throws what the resume
+   * throws; callers report it in their own terms.
+   */
+  private async resumeViewedSessionForAction(): Promise<void> {
+    if (!this.viewingSessionId || this.currentThread) return;
+    await this.api.ensureReady();
+    const sessionId = this.viewingSessionId;
+    // Stash cost before resume — loadThread will zero stats.
+    const session = await this.api.getSession(sessionId);
+    const cost = session.metadata.cost;
+    if (cost) {
+      this.pendingSessionCost = {
+        sessionCostUsd: cost.session_cost_usd || 0,
+        sessionCostCny: cost.session_cost_cny || 0,
+        subagentCostUsd: cost.subagent_cost_usd || 0,
+        subagentCostCny: cost.subagent_cost_cny || 0,
+        displayedCostHighWaterUsd: cost.displayed_cost_high_water_usd || 0,
+        displayedCostHighWaterCny: cost.displayed_cost_high_water_cny || 0,
+        totalTokens: session.metadata.total_tokens || 0,
+        cumulativeTurnSecs: session.metadata.cumulative_turn_secs || 0,
+      };
+    }
+    const result = await this.api.resumeSessionThread(sessionId);
+    this.viewingSessionId = null;
+    await this.loadThread(result.thread_id);
+    // Restore cost (merge with max — see the resume-restore comment above) and
+    // preserve the original session id for auto-save.
+    if (this.pendingSessionCost) {
+      this.sessionCostUsd = Math.max(this.sessionCostUsd, this.pendingSessionCost.sessionCostUsd);
+      this.sessionCostCny = Math.max(this.sessionCostCny, this.pendingSessionCost.sessionCostCny);
+      this.displayedCostHighWaterUsd = Math.max(this.displayedCostHighWaterUsd, this.pendingSessionCost.displayedCostHighWaterUsd);
+      this.displayedCostHighWaterCny = Math.max(this.displayedCostHighWaterCny, this.pendingSessionCost.displayedCostHighWaterCny);
+      this.totalTokens = Math.max(this.totalTokens, this.pendingSessionCost.totalTokens);
+      this.cumulativeTurnSecs = Math.max(this.cumulativeTurnSecs, this.pendingSessionCost.cumulativeTurnSecs);
+      this.pendingSessionCost = null;
+      this.sendSessionStats();
+    }
+    this.currentSessionId = sessionId;
+    this.refreshSessionList();
+  }
+
+  /**
+   * Open the saved session being viewed as a live conversation, without
+   * sending anything.
+   *
+   * A branch names the turn it is cut at, and turns only exist on a live
+   * thread — a saved session is a document of messages. So this is what makes
+   * a session branchable in the view a person actually browses: it is the same
+   * resume undo and retry already perform silently, given a button because
+   * "look at this old conversation, then continue it somewhere else" is a
+   * thing people ask for by name.
+   */
+  public async handleContinueSession(): Promise<void> {
+    if (!this.viewingSessionId || this.currentThread) {
+      this.postMessage({ type: "info", message: t().continueSessionNoSession });
+      return;
+    }
+    if (!this.beginHostOperation(t().continueSessionRunning)) {
+      this.postMessage({ type: "info", message: t().operationBusy });
+      return;
+    }
+    try {
+      await this.resumeViewedSessionForAction();
+      this.postMessage({ type: "info", message: t().continueSessionSuccess });
+    } catch (err) {
+      this.postMessage({ type: "error", message: formatError(t().continueSessionFailed, err) });
+    } finally {
+      this.endHostOperation();
+    }
+  }
+
+  /**
+   * Adopt the thread a fork answered with: put it on screen, load its
+   * history, hand the dropped prompt back to the composer, and stop writing
+   * to the document the fork was cut from.
+   *
+   * Shared by `/undo` (which forks the last turn away) and the per-turn
+   * branch action, because both answer with the same receipt and both switch
+   * the conversation. Kept in one place because the steps are not optional:
+   * a path that skips the session unbind lets the next autosave write the
+   * fork's shorter history over the thread it was cut from, and the source
+   * conversation is then no longer loadable at all.
+   */
+  private async adoptForkedThread(
+    forked: ThreadRecord,
+    originalUserText?: string | null
+  ): Promise<void> {
+    // Which document the thread being forked writes to. A runtime that gives
+    // a fork a document of its own answers with a different id below; one that
+    // predates that hands the fork the source's id.
+    const forkedFromSession = this.currentSessionId;
+
+    // Park the conversation being left before its place is taken. A fork can
+    // be cut while the source is still working, and the runtime keeps that
+    // turn running: the background watch is what keeps its badge, its
+    // completion and its auto-save alive while this view is elsewhere. Parked
+    // here, not inside `loadThread`, because `parkCurrentThread` reads whatever
+    // `currentThread` names and the next line replaces it.
+    this.parkCurrentThread();
+
+    // Switch to the new forked thread.
+    this.currentThread = forked;
+    this.messages = [];
+    this.resetChangeGroups();
+    this.currentTurnId = null;
+    this.activeItems.clear();
+    this.currentTextBlockIdx = -1;
+    this.currentThinkingBlockIdx = -1;
+    this.lastEventSeq = 0;
+
+    // Load the forked thread's history.
+    await this.loadThread(forked.id);
+    // A fork's history is a prefix of the thread it came from, so that
+    // thread's document is the one it must not rewrite: `PUT /v1/sessions`
+    // replaces the stored transcript, and the source thread would be left
+    // describing bytes that are gone. Nothing to do when the runtime gave the
+    // fork a document of its own.
+    if (this.currentSessionId && this.currentSessionId === forkedFromSession) {
+      this.forgetSessionBinding();
+    }
+
+    // Put the user's message back in the input box so they can edit & re-send.
+    if (originalUserText) {
+      this.postMessage({ type: "setInputText", text: originalUserText });
+    }
+  }
+
+  /**
+   * Branch the conversation at one of its turns — the transcript's per-turn
+   * "continue from here" action, and the fork form of TUI's Esc-Esc backtrack.
+   *
+   * The new thread keeps the chosen turn and everything before it; the turns
+   * after it stay behind in a source conversation this never touches, and the
+   * question that followed the branch point comes back to the composer as the
+   * place to continue from (or clear). Choosing the last turn keeps the whole
+   * conversation, which is a fork of it. No file rollback happens: both
+   * conversations share one workspace, so rewinding it would rewind the one
+   * that was left behind.
+   *
+   * `turnId` is the anchor the runtime resolves against its own turn list.
+   * Nothing here counts turns or maps positions — a client-side count of the
+   * rendered transcript is not the same list the engine cuts (steers,
+   * image-only prompts and injected handoffs differ), and an off-by-one there
+   * forks the wrong prefix while reporting success.
+   *
+   * A viewed saved session has no per-turn anchors (it is drawn from stored
+   * messages, not from turns), so this action exists only on a live thread.
+   */
+  public async handleForkFromTurn(turnId: string): Promise<void> {
+    if (!this.apiCapabilities.threadForkAtTurn) {
+      this.postMessage({ type: "info", message: t().forkNotSupported });
+      return;
+    }
+    if (!this.currentThread) {
+      this.postMessage({ type: "info", message: t().forkNoThread });
+      return;
+    }
+    // A branch can be taken while the source conversation is still working —
+    // that is exactly when a person wants one ("this turn is going the wrong
+    // way, take me back before it") — and taking it never interrupts that
+    // turn: the runtime owns the running turn, and switching the view parks
+    // the source with a watch that keeps its badge, its completion and its
+    // auto-save alive. The one thing this refuses is starting a second swap
+    // while the first is still running.
+    //
+    // The wait is announced before the engine is ensured ready, so starting a
+    // cold engine is part of the wait the person is being told about rather
+    // than silence in front of it.
+    if (!this.beginHostOperation(t().forkRunning)) {
+      this.postMessage({ type: "info", message: t().operationBusy });
+      return;
+    }
+
+    try {
+      await this.api.ensureReady();
+      const result = await this.api.forkThreadAtTurn(this.currentThread.id, turnId);
+      await this.adoptForkedThread(result.thread, result.original_user_text);
+
+      this.postMessage({ type: "info", message: t().forkSuccess(result.thread.id) });
+      this.refreshWorkPanel();
+      this.refreshSessionList();
+      this.postMessage({ type: "historyUpdated" });
+    } catch (err) {
+      const msg = getErrorMessage(err);
+      if (msg.includes("not a user turn")) {
+        this.postMessage({ type: "info", message: t().forkBadTurn });
+      } else {
+        this.postMessage({ type: "error", message: formatError(t().forkFailed, err) });
+      }
+    } finally {
+      this.endHostOperation();
+    }
+  }
+
+  /**
    * Retry the last turn via the server-side undo + re-send API.
    * This creates a new thread with the last turn removed and immediately
    * starts a new turn with the original user message, matching TUI's
@@ -5165,47 +5363,29 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       return;
     }
 
-    // If viewing a session (not a live thread), resume it first.
-    if (this.viewingSessionId && !this.currentThread) {
-      try {
-        await this.api.ensureReady();
-        const sessionId = this.viewingSessionId;
-        // Stash cost before resume — loadThread will zero stats.
-        const session = await this.api.getSession(sessionId);
-        const cost = session.metadata.cost;
-        if (cost) {
-          this.pendingSessionCost = {
-            sessionCostUsd: cost.session_cost_usd || 0,
-            sessionCostCny: cost.session_cost_cny || 0,
-            subagentCostUsd: cost.subagent_cost_usd || 0,
-            subagentCostCny: cost.subagent_cost_cny || 0,
-            displayedCostHighWaterUsd: cost.displayed_cost_high_water_usd || 0,
-            displayedCostHighWaterCny: cost.displayed_cost_high_water_cny || 0,
-            totalTokens: session.metadata.total_tokens || 0,
-            cumulativeTurnSecs: session.metadata.cumulative_turn_secs || 0,
-          };
-        }
-        const result = await this.api.resumeSessionThread(sessionId);
-        this.viewingSessionId = null;
-        await this.loadThread(result.thread_id);
-        // Restore cost (merge with max — see the resume-restore comment
-        // above) and preserve original session ID for auto-save.
-        if (this.pendingSessionCost) {
-          this.sessionCostUsd = Math.max(this.sessionCostUsd, this.pendingSessionCost.sessionCostUsd);
-          this.sessionCostCny = Math.max(this.sessionCostCny, this.pendingSessionCost.sessionCostCny);
-          this.displayedCostHighWaterUsd = Math.max(this.displayedCostHighWaterUsd, this.pendingSessionCost.displayedCostHighWaterUsd);
-          this.displayedCostHighWaterCny = Math.max(this.displayedCostHighWaterCny, this.pendingSessionCost.displayedCostHighWaterCny);
-          this.totalTokens = Math.max(this.totalTokens, this.pendingSessionCost.totalTokens);
-          this.cumulativeTurnSecs = Math.max(this.cumulativeTurnSecs, this.pendingSessionCost.cumulativeTurnSecs);
-          this.pendingSessionCost = null;
-          this.sendSessionStats();
-        }
-        this.currentSessionId = sessionId;
-        this.refreshSessionList();
-      } catch (err) {
-        this.postMessage({ type: "error", message: formatError("Failed to resume session", err) });
-        return;
-      }
+    // A retry forks the conversation and starts a turn in the new thread, so
+    // it takes the same wait, the same hold, and the same single-flight rule
+    // as a fork.
+    if (!this.beginHostOperation(t().retryRunning)) {
+      this.postMessage({ type: "info", message: t().operationBusy });
+      return;
+    }
+    try {
+      await this.runRetryLastTurn();
+    } finally {
+      this.endHostOperation();
+    }
+  }
+
+  private async runRetryLastTurn(): Promise<void> {
+    // A turn is what these actions need and a viewed recording does not have
+    // one, so the session is resumed into a live thread first — the same step
+    // `handleContinueSession` offers on its own.
+    try {
+      await this.resumeViewedSessionForAction();
+    } catch (err) {
+      this.postMessage({ type: "error", message: formatError("Failed to resume session", err) });
+      return;
     }
 
     if (!this.currentThread) {
@@ -5221,6 +5401,11 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       // Which document the thread being retried writes to — see the same
       // capture in `handleUndoLastTurn`.
       const forkedFromSession = this.currentSessionId;
+
+      // Park the conversation being left before its place is taken, for the
+      // same reason `adoptForkedThread` does: a retry can be asked for while
+      // the turn it replaces is still running, and that turn keeps running.
+      this.parkCurrentThread();
 
       // Switch to the new forked thread and subscribe to its events.
       this.currentThread = result.thread;
@@ -6042,11 +6227,21 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
             );
             this.postMessage({ type: "removeMessage", messageId: lastMsg.id });
           } else {
+            // The bubble now closes the turn: keep the anchor on the message
+            // this host holds as well as on the payload, so a later re-render
+            // from `this.messages` draws the same row the finalize message
+            // just drew.
+            lastMsg.branchTurnId = pl.turn?.id;
             const payload = finalizeAssistantMessage(
               lastMsg,
               isTerminalError ? "error" : "complete",
               {
                 usage: pl.turn?.usage,
+                // The row itself is drawn from this payload — without it, a
+                // turn sent in this session would offer no branch point until
+                // the conversation was reopened, which is the case where
+                // branching is most wanted.
+                branchTurnId: lastMsg.branchTurnId,
                 // In plan mode a successfully completed turn is the plan the
                 // agent just produced; surface an "approve & execute" action
                 // so the user can switch to Act and continue in one click.
@@ -6871,6 +7066,35 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
   private getCurrentReasoningEffort(): string {
     const cfg = vscode.workspace.getConfiguration("brotherwhale");
     return cfg.get<string>("reasoningEffort", "auto");
+  }
+
+  /** Announce work that takes seconds and streams nothing, and hold the
+   *  controls that act on the conversation while it runs.
+   *
+   *  Returns false when another such operation already owns the conversation:
+   *  the caller then does nothing, because two forks — or a fork and an undo —
+   *  would each replace what the other is swapping away from. The label is
+   *  what the composer, the toolbar and the status bar show.
+   *
+   *  Every caller must pair this with `endHostOperation` on every path,
+   *  refusals and failures included: a view left holding its send with nothing
+   *  running behind it is worse than the silence this replaced. */
+  private beginHostOperation(label: string): boolean {
+    if (this.hostOperationInFlight) return false;
+    this.hostOperationInFlight = true;
+    this.postMessage({ type: "status", text: label });
+    this.postMessage({
+      type: "hostOperation",
+      active: true,
+      label,
+      hint: t().hostOperationHint,
+    });
+    return true;
+  }
+
+  private endHostOperation(): void {
+    this.hostOperationInFlight = false;
+    this.postMessage({ type: "hostOperation", active: false });
   }
 
   /** Post a message to the webview, pre-rendering markdown fields */

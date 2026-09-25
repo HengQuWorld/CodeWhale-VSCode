@@ -1297,6 +1297,60 @@ export function getWebviewCss(): string {
       text-align: right;
     }
 
+    /* Per-turn branch action, drawn under the assistant message that closes a
+       turn. It stays visible rather than appearing on hover: the point of
+       moving it here is that it is where someone looks when they want to
+       continue from an answer, and a control that only exists on hover is not
+       findable — nor does it exist at all on touch. It is kept quiet instead,
+       so a long conversation does not become a wall of buttons. */
+    .message.assistant .message-actions {
+      display: flex;
+      justify-content: flex-end;
+      margin-top: 4px;
+    }
+
+    .turn-fork-btn {
+      font: inherit;
+      font-size: 0.75em;
+      line-height: 1.4;
+      padding: 1px 8px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      opacity: 0.45;
+      transition: opacity 0.15s ease, background 0.15s ease, color 0.15s ease;
+    }
+
+    .message.assistant:hover .turn-fork-btn,
+    .turn-fork-btn:hover,
+    .turn-fork-btn:focus-visible {
+      opacity: 1;
+    }
+
+    .turn-fork-btn:hover,
+    .turn-fork-btn:focus-visible {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: white;
+    }
+
+    /* The row that was clicked, while the fork is being created: it stays put
+       and says what it is doing, because the wait has nothing else to show
+       where the click happened. */
+    .turn-fork-btn.is-pending {
+      opacity: 0.8;
+      cursor: progress;
+      border-color: var(--brand-primary);
+      color: var(--brand-primary);
+    }
+
+    .turn-fork-btn.is-pending:hover {
+      background: transparent;
+      color: var(--brand-primary);
+    }
+
     .plan-approve-btn {
       display: inline-block;
       margin-top: 8px;
@@ -1604,6 +1658,11 @@ export function getWebviewCss(): string {
       font-size: 0.8em;
     }
     #toolbar button:hover { color: var(--fg); border-color: var(--fg); }
+
+    /* Continue belongs to a viewed saved session only, and the view toggles it
+       with the hidden attribute — which has to keep winning over whatever
+       display rule a later change gives the toolbar's buttons. */
+    #toolbar button[hidden] { display: none; }
     #toolbar button.is-unavailable,
     #toolbar button[aria-disabled="true"] {
       background: linear-gradient(

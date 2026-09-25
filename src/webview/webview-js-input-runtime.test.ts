@@ -674,3 +674,118 @@ describe("webview-js-input runtime: the steer button, and not the Stop button", 
     expect(h.input.getAttribute("placeholder")).toBe("");
   });
 });
+
+describe("webview-js-input runtime: continuing a viewed session", () => {
+  it("asks the host to open the session, and sends nothing else", () => {
+    const h = createHarness();
+
+    h.getElement("btn-continue-session").dispatch("click", syntheticEvent());
+
+    expect(h.postMessages).toEqual([{ type: "continueSession" }]);
+  });
+});
+
+describe("webview-js-input runtime: the composer while the host owns the conversation", () => {
+  const tr = makeTr();
+
+  it("holds the send and keeps the typing while a fork is being created", () => {
+    const h = createHarness();
+    h.windowObj.__wvInput.setHostOperation(tr.forkRunning);
+    h.input.value = "typed during the wait";
+
+    h.getElement("btn-send-stop").dispatch("click", syntheticEvent());
+    h.input.dispatch("keydown", syntheticEvent({ key: "Enter", shiftKey: false }));
+
+    // Nothing left the composer: the fork is about to replace which
+    // conversation it belongs to, so a send now has no destination.
+    expect(h.postMessages).toEqual([]);
+    // The typing is the user's, and the wait is short.
+    expect(h.input.value).toBe("typed during the wait");
+  });
+
+  it("says what it is doing in the box, and why on the button", () => {
+    // The box has room for the name of the operation; the button's hover, which
+    // costs no layout, carries the reason sending is waiting.
+    const h = createHarness();
+    const btn = h.getElement("btn-send-stop");
+
+    h.windowObj.__wvInput.setHostOperation(tr.forkRunning, tr.hostOperationHint);
+
+    expect(h.input.getAttribute("placeholder")).toBe(tr.forkRunning);
+    expect(btn.getAttribute("data-tooltip")).toBe(tr.hostOperationHint);
+    expect(btn.getAttribute("aria-disabled")).toBe("true");
+  });
+
+  it("sends again the moment the host is done", () => {
+    const h = createHarness();
+    h.windowObj.__wvInput.setHostOperation(tr.forkRunning);
+    h.input.value = "typed during the wait";
+    h.getElement("btn-send-stop").dispatch("click", syntheticEvent());
+
+    h.windowObj.__wvInput.setHostOperation("");
+    h.getElement("btn-send-stop").dispatch("click", syntheticEvent());
+
+    expect(h.postMessages).toEqual([{ type: "sendMessage", text: "typed during the wait" }]);
+    expect(h.getElement("btn-send-stop").getAttribute("aria-disabled")).toBe("false");
+  });
+
+  it("holds the other actions that would race the same swap", () => {
+    // Undo, Retry, New Thread and Compact all act on the conversation the
+    // composer points at: a click landing mid-fork would either vanish or act
+    // on the conversation the person just left.
+    const h = createHarness();
+    const controls = [
+      "btn-undo",
+      "btn-retry",
+      "btn-compact",
+      "btn-new-thread",
+      "btn-continue-session",
+    ];
+    // Undo and Retry are capability-driven: on an engine that has them, the
+    // hold must not be the thing that keeps them greyed out afterwards.
+    h.windowObj.__wvApiCapabilities.undoLastTurn = true;
+    h.windowObj.__wvApiCapabilities.retryLastTurn = true;
+    h.windowObj.__wvInput.applyApiCapabilities();
+
+    h.windowObj.__wvInput.setHostOperation(tr.forkRunning);
+
+    for (const id of controls) {
+      const btn = h.getElement(id);
+      expect(btn.getAttribute("aria-disabled")).toBe("true");
+      btn.dispatch("click", syntheticEvent());
+    }
+    expect(h.postMessages).toEqual([]);
+
+    h.windowObj.__wvInput.setHostOperation("");
+
+    for (const id of controls) {
+      expect(h.getElement(id).getAttribute("aria-disabled")).toBe("false");
+    }
+  });
+
+  it("gives the capabilities back when the hold ends", () => {
+    // The held buttons are the same ones the API-capability probe drives: a
+    // hold that cleared them would leave Undo dead on an engine that has it.
+    const h = createHarness();
+    h.windowObj.__wvApiCapabilities.undoLastTurn = true;
+    h.windowObj.__wvInput.applyApiCapabilities();
+
+    h.windowObj.__wvInput.setHostOperation(tr.forkRunning);
+    h.windowObj.__wvInput.setHostOperation("");
+
+    expect(h.getElement("btn-undo").getAttribute("aria-disabled")).toBe("false");
+  });
+
+  it("still offers Stop for a running turn rather than holding it", () => {
+    // A fork never starts mid-turn (the host refuses it), but if the two ever
+    // overlap the interrupt must stay reachable: stopping is how the person
+    // gets out of the turn.
+    const h = createHarness();
+    h.windowObj.__wvMessages.isStreaming = () => true;
+
+    h.windowObj.__wvInput.setHostOperation(tr.forkRunning);
+    h.getElement("btn-send-stop").dispatch("click", syntheticEvent());
+
+    expect(h.postMessages).toEqual([{ type: "interrupt" }]);
+  });
+});

@@ -407,6 +407,25 @@ export class CodeWhaleApiClient {
     )) as RetryTurnResponse;
   }
 
+  /** Fork a thread at one named user turn — the transcript's per-turn branch
+   *  action. The fork keeps the turns *before* `turnId`, drops that turn and
+   *  everything after, and answers with the same receipt `/undo` does, so the
+   *  dropped prompt can go back into the composer for editing.
+   *
+   *  `turnId` comes from `GET /v1/threads/{id}` and must name a user turn.
+   *  The engine resolves it deliberately: a client that counts turns to build
+   *  a `depth` counts a different list (steers, image-only prompts and
+   *  injected handoffs each sit on one side only) and forks the wrong prefix
+   *  while reporting success. */
+  async forkThreadAtTurn(
+    threadId: string,
+    turnId: string
+  ): Promise<UndoTurnResponse> {
+    return (await this.post(`/v1/threads/${threadId}/fork-at-turn`, {
+      turn_id: turnId,
+    })) as UndoTurnResponse;
+  }
+
   // ── Snapshots ──
 
   async listSnapshots(opts?: { limit?: number }): Promise<SnapshotEntry[]> {
@@ -670,6 +689,7 @@ export class CodeWhaleApiClient {
       snapshotRestore,
       threadUsage,
       threadFileRevert,
+      threadForkAtTurn,
     ] = await Promise.all([
       this.probePath("/v1/sessions"),
       this.probePath("/v1/threads/__probe__/undo"),
@@ -688,6 +708,11 @@ export class CodeWhaleApiClient {
       // the handler and get 404 for the unknown `__probe__` thread — a false
       // negative that would disable the button on an engine that supports it.
       this.probePath("/v1/threads/__probe__/file-revert"),
+      // GET-probe for the same reason: fork-at-turn is POST-only, so GET
+      // answers 405 on the engine that has it and 404 on one that predates
+      // it. A POST probe would run the handler instead and read its
+      // unknown-thread 404 as "no such route".
+      this.probePath("/v1/threads/__probe__/fork-at-turn"),
     ]);
 
     return {
@@ -700,6 +725,7 @@ export class CodeWhaleApiClient {
       snapshotRestore,
       threadUsage,
       threadFileRevert,
+      threadForkAtTurn,
     };
   }
 

@@ -247,6 +247,25 @@ export interface WebviewTranslations {
   retryLabel: string;
   undoUnsupportedTooltip: string;
   retryUnsupportedTooltip: string;
+  /** The transcript's per-turn branch action, drawn under the assistant
+   *  message that closes a live thread's turn — and only when the engine has
+   *  the `fork-at-turn` route, because the older engines fork the last turn
+   *  only, so a button promising "continue from here" would cut somewhere
+   *  else. */
+  /** The toolbar's action for a viewed saved session: open it as a live
+   *  conversation, which is what makes its turns branchable. */
+  continueSessionLabel: string;
+  continueSessionTooltip: string;
+  forkFromTurnLabel: string;
+  forkFromTurnTooltip: string;
+  /** Shown while the fork is being created: on the status bar, on the row that
+   *  was clicked, and (as a placeholder) in the composer, whose send is held
+   *  until the conversation stops moving. */
+  forkRunning: string;
+  /** Why the composer is holding: the message would otherwise land in the
+   *  conversation being replaced. Shown on the held send button's hover, where
+   *  the composer explains itself. */
+  hostOperationHint: string;
   revertUnsupportedTooltip: string;
   fileCreated: string;
   fileDeleted: string;
@@ -542,6 +561,7 @@ ${css}
       </div>
       <div id="toolbar">
         <button id="btn-new-thread">${tr.newThread}</button>
+        <button id="btn-continue-session" title="${tr.continueSessionTooltip}" hidden>${tr.continueSessionLabel}</button>
         <button id="btn-compact">${tr.compact}</button>
         <button id="btn-undo" title="${tr.undoLastTurn}">↩ ${tr.undoLabel}</button>
         <button id="btn-retry" title="${tr.retryLastTurn}">🔁 ${tr.retryLabel}</button>
@@ -615,7 +635,7 @@ ${css}
       window.__wvDiffIdCounter = { value: 0 };
 
       // Shared API capabilities
-      window.__wvApiCapabilities = { saveSession: false, undoLastTurn: false, retryLastTurn: false, revertFileChange: false };
+      window.__wvApiCapabilities = { saveSession: false, undoLastTurn: false, retryLastTurn: false, revertFileChange: false, forkFromTurn: false };
 
       // Sidebar state exposed for event handler
       window.__wvSidebar = {

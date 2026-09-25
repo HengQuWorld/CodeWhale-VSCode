@@ -56,6 +56,8 @@ function matchesSelector(element: FakeElement | null, selector?: string): boolea
 class FakeElement {
   public textContent = "";
   public value = "";
+  /** What a toolbar button carries while the view hides it. */
+  public hidden = false;
   public scrollTop = 0;
   public scrollHeight = 0;
   public clientHeight = 0;
@@ -168,6 +170,9 @@ function createRuntimeHarness() {
 
   const postMessages: Array<Record<string, unknown>> = [];
   const sendStopCalls: boolean[] = [];
+  /** Labels the handler handed the input module's host-operation hold. */
+  const hostOperationCalls: string[] = [];
+  let clearPendingCalls = 0;
   const composerTextCalls: string[] = [];
   // The streaming flag is the webview's one record of "a turn is running":
   // the input routing reads it and the send/stop button follows it. The
@@ -278,6 +283,9 @@ function createRuntimeHarness() {
       renderPlanApproveButton: (messageId: string) => {
         planApproveCalls.push(messageId);
       },
+      clearPendingTurnFork: () => {
+        clearPendingCalls += 1;
+      },
       renderCompactionSummary: (summary: string) => {
         compactionSummaryCalls.push(summary);
         return '<details>' + summary + '</details>';
@@ -286,6 +294,9 @@ function createRuntimeHarness() {
     __wvInput: {
       updateSendStopButton: (streaming: boolean) => {
         sendStopCalls.push(streaming);
+      },
+      setHostOperation: (label: string, hint: string) => {
+        hostOperationCalls.push(label + '|' + hint);
       },
       setComposerText: (text: string) => {
         composerTextCalls.push(text);
@@ -353,6 +364,8 @@ function createRuntimeHarness() {
     getElement: getEl,
     postMessages,
     sendStopCalls,
+    hostOperationCalls,
+    clearPendingCalls: () => clearPendingCalls,
     composerTextCalls,
     streamingCalls,
     streamingTimers,
@@ -672,6 +685,68 @@ describe("webview-js-event-handler runtime", () => {
 
     expect(harness.sendStopCalls).toEqual([true, false]);
     expect(harness.getElement("status").classList.contains("is-streaming")).toBe(false);
+  });
+
+  it("offers Continue while a saved session is viewed, and not around a thread", () => {
+    // Continue is what makes a browsed session branchable at all (a branch
+    // names a turn, and turns belong to a live thread), so it has to appear
+    // exactly in the view that needs it.
+    const harness = createRuntimeHarness();
+    const btn = harness.getElement("btn-continue-session");
+
+    harness.dispatchMessage({ type: "sessionLoaded", sessionId: "sess-1" });
+    expect(btn.hidden).toBe(false);
+
+    harness.dispatchMessage({ type: "threadLoaded", threadId: "thr_1" });
+    expect(btn.hidden).toBe(true);
+
+    harness.dispatchMessage({ type: "sessionLoaded", sessionId: "sess-2" });
+    harness.dispatchMessage({ type: "clearChat" });
+    expect(btn.hidden).toBe(true);
+  });
+
+  it("shows a host operation as activity, and holds the composer for its duration", () => {
+    // Forking, undoing and retrying take seconds and stream nothing: the status
+    // bar has to look alive and the composer has to know why it is holding.
+    const harness = createRuntimeHarness();
+
+    // The host posts the line and then the hold, the way the provider does.
+    harness.dispatchMessage({ type: "status", text: "Branching…" });
+    harness.dispatchMessage({
+      type: "hostOperation",
+      active: true,
+      label: "Branching…",
+      hint: "This is still being created",
+    });
+
+    expect(harness.getElement("status-text").textContent).toBe("Branching…");
+    expect(harness.getElement("status").classList.contains("is-streaming")).toBe(true);
+    // Both travel: the label for the box, the hint for the held button's hover.
+    expect(harness.hostOperationCalls).toEqual(["Branching…|This is still being created"]);
+
+    harness.dispatchMessage({ type: "hostOperation", active: false });
+
+    expect(harness.hostOperationCalls).toEqual(["Branching…|This is still being created", "|"]);
+    expect(harness.getElement("status").classList.contains("is-streaming")).toBe(false);
+    // The row that was clicked stops claiming a wait that is over.
+    expect(harness.clearPendingCalls()).toBe(1);
+    // Nothing else reported, so the line the operation owned goes back to idle
+    // instead of claiming work that is over.
+    expect(harness.getElement("status-text").textContent).toBe(makeTr().ready);
+  });
+
+  it("does not overwrite a result that replaced the operation's own status line", () => {
+    // A fork that lands posts the new thread's line before the operation ends;
+    // an error posts its own. Either way the wait's line is already gone and
+    // the end of the operation must leave what took its place alone.
+    const harness = createRuntimeHarness();
+
+    harness.dispatchMessage({ type: "hostOperation", active: true, label: "Branching…" });
+    harness.dispatchMessage({ type: "status", text: "Thread thr_2: 4 messages" });
+
+    harness.dispatchMessage({ type: "hostOperation", active: false });
+
+    expect(harness.getElement("status-text").textContent).toBe("Thread thr_2: 4 messages");
   });
 
   it("never returns the button to send while reasoning deltas and item-start statuses interleave", () => {
