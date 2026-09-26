@@ -27,6 +27,9 @@ function makeTr(): WebviewTranslations {
     sessionsTabHint: "Saved sessions",
     threadsTabHint: "Active threads",
     activityTabHint: "Agent activity",
+    activitySectionsTitle: "Sections to show",
+    activitySectionsHint: "Untick a section to hide it here — your choice is remembered.",
+    activityAllHidden: "Every section is hidden. Open ⚙ above to bring one back.",
     newThread: "New Thread",
     compact: "Compact",
     interrupt: "Interrupt",
@@ -439,6 +442,21 @@ describe("webview-html.ts assembler", () => {
     const positions = ordered.map((id) => html.indexOf(`id="${id}"`));
     positions.forEach((pos) => expect(pos).toBeGreaterThan(-1));
     expect(positions).toEqual([...positions].sort((a, b) => a - b));
+  });
+
+  it("ships the Activity section picker above the sections it governs", () => {
+    const html = getWebviewHtml(makeMockWebview(), makeMockExtensionUri(), makeTr());
+    expect(html).toContain('id="activity-sections-toggle"');
+    expect(html).toContain('id="activity-sections-picker"');
+    expect(html).toContain('id="activity-sections-empty"');
+    // The picker is the only way back to a hidden section, so it has to sit
+    // above the sections and outside every one of them.
+    expect(html.indexOf('id="activity-sections-picker"')).toBeLessThan(
+      html.indexOf('id="sidebar-work"'),
+    );
+    expect(html.indexOf('id="activity-sections-empty"')).toBeLessThan(
+      html.indexOf('id="sidebar-work"'),
+    );
   });
 
   it("keeps the goal inside the Work panel instead of its own section", () => {

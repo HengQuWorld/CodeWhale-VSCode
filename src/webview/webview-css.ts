@@ -179,16 +179,10 @@ export function getWebviewCss(): string {
     }
     .sidebar-section-body {
       overflow-y: auto;
-      max-height: 200px;
-      transition: max-height 0.25s ease;
-    }
-    .sidebar-section.collapsed .sidebar-section-body {
-      max-height: 0 !important;
-      overflow: hidden;
     }
     /* Top-level tab bodies (Sessions / Threads / Activity) fill the sidebar
        and are shown/hidden by data-active-tab. The direct-child selector
-       keeps the nested Activity sections' own collapse behaviour intact. */
+       keeps the nested Activity sections' own behaviour intact. */
     #sidebar-threads > .sidebar-section-body {
       max-height: none;
       flex: 1;
@@ -196,9 +190,46 @@ export function getWebviewCss(): string {
       display: none;
     }
     #sidebar-threads[data-active-tab="sessions"] > #tab-sessions,
-    #sidebar-threads[data-active-tab="threads"] > #tab-threads-list,
-    #sidebar-threads[data-active-tab="activity"] > #tab-activity {
+    #sidebar-threads[data-active-tab="threads"] > #tab-threads-list {
       display: block;
+    }
+    #sidebar-threads[data-active-tab="activity"] > #tab-activity {
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* The Activity tab is a column of sections that share the height it has:
+       an open section grows into whatever a folded or hidden one frees, and
+       shrinks when another needs the room, with its body scrolling once its
+       content is taller than its share.
+
+       The fold is a grid track ('auto 1fr' ↔ 'auto 0fr') rather than a
+       max-height, because a share is only known after layout: the old rule had
+       to cap every body at a fixed 200px to stay animatable, which is exactly
+       what stopped the sections from sharing. A collapsed section still keeps
+       its header, and an open one at least a couple of rows, so nothing is
+       squeezed out of reach; when even those floors do not fit, the tab itself
+       scrolls. */
+    #tab-activity > .sidebar-tab-hint,
+    #tab-activity > .activity-sections-picker,
+    #tab-activity > .activity-sections-empty {
+      flex: 0 0 auto;
+    }
+    #tab-activity > .sidebar-section {
+      display: grid;
+      grid-template-rows: auto 1fr;
+      flex: 1 1 auto;
+      min-height: 5.5em;
+      transition: grid-template-rows 0.25s ease;
+    }
+    #tab-activity > .sidebar-section.collapsed {
+      grid-template-rows: auto 0fr;
+      flex-grow: 0;
+      min-height: 0;
+    }
+    #tab-activity > .sidebar-section > .sidebar-section-body {
+      min-height: 0;
+      max-height: none;
     }
 
     .sidebar-tabs {
@@ -448,6 +479,88 @@ export function getWebviewCss(): string {
       color: var(--muted);
       line-height: 1.4;
       border-bottom: 1px solid var(--border);
+    }
+
+    /* The Activity hint doubles as the row that carries the section picker's
+       ⚙, and the picker opens directly under it. */
+    .sidebar-tab-hint-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 6px;
+    }
+    .sidebar-tab-hint-row > span {
+      flex: 1;
+      min-width: 0;
+    }
+    .sidebar-sections-toggle {
+      flex: 0 0 auto;
+      background: none;
+      border: 0;
+      padding: 0 2px;
+      font: inherit;
+      line-height: 1.2;
+      color: var(--muted);
+      cursor: pointer;
+    }
+    .sidebar-sections-toggle:hover,
+    .sidebar-sections-toggle[aria-expanded="true"] {
+      color: var(--fg);
+    }
+    .activity-sections-picker {
+      display: none;
+      padding: 6px 10px 8px;
+      border-bottom: 1px solid var(--border);
+      background: var(--card-bg);
+    }
+    .activity-sections-picker.open {
+      display: block;
+    }
+    .activity-sections-title {
+      font-size: 0.78em;
+      font-weight: 600;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 4px;
+    }
+    .activity-sections-hint {
+      font-size: 0.75em;
+      color: var(--muted);
+      line-height: 1.4;
+      margin-bottom: 6px;
+    }
+    .activity-section-option {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 3px 0;
+      font-size: 0.82em;
+      cursor: pointer;
+    }
+    .activity-section-option input {
+      margin: 0;
+      cursor: pointer;
+    }
+    .activity-sections-empty {
+      display: none;
+      padding: 8px 10px;
+      font-size: 0.8em;
+      color: var(--muted);
+      line-height: 1.4;
+    }
+    .activity-sections-empty.visible {
+      display: block;
+    }
+    /* Hidden, unlike collapsed: a collapsed section keeps its header, which is
+       what the reader clicks to reopen it — a hidden one leaves nothing behind.
+       That is why the picker lists every section, hidden ones included. The
+       second selector is not redundant: the Activity sections carry a
+       'display: grid' rule scoped by an id, which outranks a plain
+       '.sidebar-section.hidden' and would otherwise leave the section on
+       screen. */
+    .sidebar-section.hidden,
+    #tab-activity > .sidebar-section.hidden {
+      display: none;
     }
 
     /* Session search bar */

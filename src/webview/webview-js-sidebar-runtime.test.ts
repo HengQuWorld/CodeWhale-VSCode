@@ -169,7 +169,7 @@ class FakeElement {
   }
 }
 
-function createHarness() {
+function createHarness(options?: { storage?: Record<string, string> }) {
   const elements = new Map<string, FakeElement>();
   const getEl = (id: string): FakeElement => {
     let element = elements.get(id);
@@ -181,6 +181,20 @@ function createHarness() {
   };
 
   const postMessages: Array<Record<string, unknown>> = [];
+  // The Activity section picker keeps the reader's choice in the webview's own
+  // store, so the stand-in has to be there before the IIFE reads it.
+  const storageValues = new Map<string, string>(
+    Object.entries(options?.storage ?? {}),
+  );
+  const storage = {
+    getItem: (key: string): string | null => storageValues.get(key) ?? null,
+    setItem: (key: string, value: string): void => {
+      storageValues.set(key, String(value));
+    },
+    removeItem: (key: string): void => {
+      storageValues.delete(key);
+    },
+  };
   // The Changes panel's Locate action scrolls the stream itself rather than
   // calling back into the extension, so it reaches the messages module here.
   const revealCalls: Array<Record<string, unknown>> = [];
@@ -200,6 +214,7 @@ function createHarness() {
       },
     },
     addEventListener: () => {},
+    localStorage: storage,
   };
   const documentObj = {
     getElementById: (id: string) => getEl(id),
@@ -233,6 +248,17 @@ function createHarness() {
     sidebarSection: getEl("sidebar-threads"),
     agentsPanel: getEl("tab-agents"),
     changesPanel: getEl("tab-changes"),
+    activityPicker: getEl("activity-sections-picker"),
+    activityToggle: getEl("activity-sections-toggle"),
+    activityEmpty: getEl("activity-sections-empty"),
+    sections: {
+      work: getEl("sidebar-work"),
+      changes: getEl("sidebar-changes"),
+      fleet: getEl("sidebar-fleet"),
+      tasks: getEl("sidebar-tasks"),
+      agents: getEl("sidebar-agents"),
+    },
+    storage,
     postMessages,
     revealCalls,
     diffStore: windowObj.__wvDiffStore as Map<string, string>,
@@ -1236,5 +1262,118 @@ describe("Changes panel keeps every row visible", () => {
     sidebar.renderChanges();
 
     expect(changesPanel.children[1].innerHTML).toContain("src/a.ts");
+  });
+});
+
+describe("Activity section visibility", () => {
+  const ALL = ["work", "changes", "fleet", "tasks", "agents"] as const;
+
+  it("shows every section until the reader hides one", () => {
+    const { sections, activityEmpty } = createHarness();
+
+    for (const key of ALL) {
+      expect(sections[key].classList.contains("hidden")).toBe(false);
+    }
+    // The note that stands in for an empty Activity tab stays out of the way
+    // while there is something on it.
+    expect(activityEmpty.classList.contains("visible")).toBe(false);
+  });
+
+  it("hides a section, and writes the choice down for the next load", () => {
+    const { sections, sidebar, storage } = createHarness();
+
+    sidebar.setActivitySectionVisible("fleet", false);
+
+    expect(sections.fleet.classList.contains("hidden")).toBe(true);
+    expect(sections.work.classList.contains("hidden")).toBe(false);
+    expect(sidebar.getHiddenActivitySections()).toEqual(["fleet"]);
+    expect(storage.getItem("codewhale:activitySections")).toBe('["fleet"]');
+  });
+
+  it("brings a hidden section back and clears it from the store", () => {
+    const { sections, sidebar, storage } = createHarness();
+
+    sidebar.setActivitySectionVisible("fleet", false);
+    sidebar.setActivitySectionVisible("fleet", true);
+
+    expect(sections.fleet.classList.contains("hidden")).toBe(false);
+    expect(storage.getItem("codewhale:activitySections")).toBe("[]");
+  });
+
+  it("paints the reader's earlier choice on the next load", () => {
+    const { sections, activityEmpty } = createHarness({
+      storage: { "codewhale:activitySections": '["tasks","agents"]' },
+    });
+
+    expect(sections.tasks.classList.contains("hidden")).toBe(true);
+    expect(sections.agents.classList.contains("hidden")).toBe(true);
+    expect(sections.work.classList.contains("hidden")).toBe(false);
+    expect(activityEmpty.classList.contains("visible")).toBe(false);
+  });
+
+  it("says where the sections went once the last one is hidden", () => {
+    const { sections, sidebar, activityEmpty } = createHarness();
+
+    for (const key of ALL) sidebar.setActivitySectionVisible(key, false);
+
+    for (const key of ALL) {
+      expect(sections[key].classList.contains("hidden")).toBe(true);
+    }
+    // The picker is the way back and lives in the hint row, above the sections,
+    // so hiding every section must not hide the control that restores them.
+    expect(activityEmpty.classList.contains("visible")).toBe(true);
+  });
+
+  it("ignores a stored value it cannot read", () => {
+    const { sections } = createHarness({
+      storage: { "codewhale:activitySections": "{ not json" },
+    });
+
+    for (const key of ALL) {
+      expect(sections[key].classList.contains("hidden")).toBe(false);
+    }
+  });
+
+  it("ignores a stored section name this build does not know", () => {
+    const { sections } = createHarness({
+      storage: { "codewhale:activitySections": '["objectives","fleet"]' },
+    });
+
+    // A section shipped later starts visible rather than hidden by a preference
+    // written before it existed.
+    expect(sections.work.classList.contains("hidden")).toBe(false);
+    expect(sections.fleet.classList.contains("hidden")).toBe(true);
+  });
+
+  it("opens the picker from the gear and hides from its checkbox", () => {
+    const { activityToggle, activityPicker, sections } = createHarness();
+
+    activityToggle.dispatch("click", { stopPropagation: () => {} });
+    expect(activityPicker.classList.contains("open")).toBe(true);
+    // Every section is listed, the hidden ones included — otherwise a hidden
+    // section could never be found again.
+    for (const key of ALL) {
+      expect(activityPicker.innerHTML).toContain(`data-activity-section="${key}"`);
+    }
+    // Labelled with the same words as the section headers it governs: the
+    // Changes section is "Changes", not the Changes panel's "File Changes".
+    expect(activityPicker.innerHTML).toContain(">Changes<");
+    expect(activityPicker.innerHTML).not.toContain("File Changes");
+
+    activityPicker.dispatch("change", {
+      target: {
+        getAttribute: (name: string) =>
+          name === "data-activity-section" ? "agents" : null,
+        checked: false,
+      },
+    });
+
+    expect(sections.agents.classList.contains("hidden")).toBe(true);
+    // The rows are rebuilt from the store, not from the click that just landed.
+    expect(activityPicker.innerHTML).toContain('data-activity-section="work" checked');
+    expect(activityPicker.innerHTML).not.toContain('data-activity-section="agents" checked');
+
+    activityToggle.dispatch("click", { stopPropagation: () => {} });
+    expect(activityPicker.classList.contains("open")).toBe(false);
   });
 });

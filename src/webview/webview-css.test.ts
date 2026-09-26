@@ -270,6 +270,52 @@ describe("webview-css.ts", () => {
     expect(block).toContain("flex-wrap: wrap");
   });
 
+  it("lets the Activity sections share the height the tab has", () => {
+    const css = getWebviewCss();
+
+    // The tab is a column and each section a flex item, so an open section
+    // grows into whatever a folded or hidden one frees.
+    expect(css).toMatch(
+      /#sidebar-threads\[data-active-tab="activity"\] > #tab-activity \{[\s\S]*?display: flex;/,
+    );
+    expect(css).toMatch(/#tab-activity > \.sidebar-section \{[\s\S]*?flex: 1 1 auto;/);
+    // The rule that used to be the whole story: a flat 200px cap on every body
+    // means a section cannot grow past 200px however much room is free.
+    expect(css).not.toMatch(
+      /\.sidebar-section-body \{[\s\S]{0,80}?max-height: 200px;/,
+    );
+  });
+
+  it("folds a section as a grid track, which is animatable at any height", () => {
+    const css = getWebviewCss();
+
+    // max-height has to be either a fixed cap — which is what stopped the
+    // sections sharing — or `none`, which cannot be animated. A grid track can
+    // be both.
+    expect(css).toMatch(
+      /#tab-activity > \.sidebar-section \{[\s\S]*?grid-template-rows: auto 1fr;/,
+    );
+    expect(css).toMatch(
+      /#tab-activity > \.sidebar-section\.collapsed \{[\s\S]*?grid-template-rows: auto 0fr;/,
+    );
+    expect(css).toMatch(
+      /#tab-activity > \.sidebar-section \{[\s\S]*?transition: grid-template-rows/,
+    );
+    expect(css).not.toMatch(/\.sidebar-section\.collapsed \.sidebar-section-body \{/);
+  });
+
+  it("takes a hidden Activity section off screen despite the grid rule", () => {
+    const css = getWebviewCss();
+
+    // An id-scoped `display: grid` outranks a bare `.sidebar-section.hidden`,
+    // so the scoped selector is the one that actually hides the section — and
+    // it has to keep the generator's own specificity, not just the class.
+    expect(css).toMatch(/\.sidebar-section\.hidden,\s*#tab-activity > \.sidebar-section\.hidden \{/);
+    expect(css).toMatch(
+      /#tab-activity > \.sidebar-section\.hidden \{[\s\S]*?display: none;/,
+    );
+  });
+
   it("does not contain template literal syntax", () => {
     const css = getWebviewCss();
     expect(css).not.toContain("${");

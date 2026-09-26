@@ -24,6 +24,15 @@ interface Translations {
   sessionsTabHint: string;
   threadsTabHint: string;
   activityTabHint: string;
+  /** Activity tab's section picker: the ⚙ button's tooltip and the heading of
+   *  the list it opens. */
+  activitySectionsTitle: string;
+  /** Activity tab's section picker: what unticking a box does, and that the
+   *  choice outlives the reload. */
+  activitySectionsHint: string;
+  /** Activity tab, shown once every section is hidden: the picker above it is
+   *  the only way back, so the message has to point at it. */
+  activityAllHidden: string;
   newThread: string;
   compact: string;
   interrupt: string;
@@ -476,6 +485,7 @@ const en: Translations = {
   agentStatus: "Agent", agentStatusTitle: "Open agent panel — sessions, threads, activity", closePanel: "Close panel",
   agentStatusWaiting: "{count} waiting", agentStatusWaitingOne: "“{title}” is waiting for your approval or input — click to answer it here", agentStatusWaitingMany: "{count} threads need you — click to answer the longest-waiting “{title}”",
   sessionsTabHint: "Saved, archived conversations", threadsTabHint: "Active conversation threads", activityTabHint: "Live agent status: work, changes, tasks, agents",
+  activitySectionsTitle: "Sections to show", activitySectionsHint: "Untick a section to hide it here — your choice is remembered.", activityAllHidden: "Every section is hidden. Open ⚙ above to bring one back.",
   newThread: "+ New", compact: "⬒ Compact", interrupt: "■ Stop",
   togglePanel: "Open or close the panel — sessions, threads, and anything waiting on you", send: "Send",
   inputPlaceholder: "Ask CodeWhale...",
@@ -854,6 +864,7 @@ const zhCn: Translations = {
   agentStatus: "智能体", agentStatusTitle: "打开智能体面板 — 会话、线程、活动", closePanel: "关闭面板",
   agentStatusWaiting: "{count} 项待处理", agentStatusWaitingOne: "「{title}」正在等待你的审批或输入 — 点击在此答复", agentStatusWaitingMany: "{count} 条线程等你处理 — 点击答复等待最久的「{title}」",
   sessionsTabHint: "已保存归档的会话", threadsTabHint: "进行中的对话线程", activityTabHint: "智能体实时状态：工作、变更、任务、子代理",
+  activitySectionsTitle: "显示哪些区块", activitySectionsHint: "取消勾选即可隐藏该区块，选择会被记住。", activityAllHidden: "所有区块都已隐藏，点上方 ⚙ 可恢复。",
   newThread: "+ 新建", compact: "⬒ 压缩", interrupt: "■ 停止",
   togglePanel: "打开或关闭面板 — 会话、线程，以及等待你的请求", send: "发送",
   inputPlaceholder: "向 CodeWhale 提问...",
@@ -1268,6 +1279,9 @@ export function webviewTranslations(tr: Translations) {
     sessionsTabHint: tr.sessionsTabHint,
     threadsTabHint: tr.threadsTabHint,
     activityTabHint: tr.activityTabHint,
+    activitySectionsTitle: tr.activitySectionsTitle,
+    activitySectionsHint: tr.activitySectionsHint,
+    activityAllHidden: tr.activityAllHidden,
     newThread: tr.newThread,
     compact: tr.compact,
     interrupt: tr.interrupt,

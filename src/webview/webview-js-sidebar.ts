@@ -23,6 +23,19 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
   var sessionSearchQuery = '';
   var taskDraftPrompt = '';
 
+  // ── Activity section visibility ──
+  // The reader decides which of the Activity tab's sections are on screen, and
+  // that choice is kept in localStorage so it survives a reload. Only the
+  // hidden keys are stored: a section shipped later starts visible instead of
+  // being hidden by an older preference that never knew about it. Hiding is not
+  // collapsing — a collapsed section keeps its header (the thing you click to
+  // reopen it), a hidden one leaves nothing behind, which is why the picker
+  // lists every section including the hidden ones.
+  var ACTIVITY_SECTION_KEYS = ['work', 'changes', 'fleet', 'tasks', 'agents'];
+  var ACTIVITY_SECTIONS_STORAGE_KEY = 'codewhale:activitySections';
+  var hiddenActivitySections = [];
+  var activitySectionsPickerOpen = false;
+
   // ── Work state ──
   var workState = { checklist: [], checklistCompletionPct: 0, strategy: [] };
 
@@ -1953,6 +1966,124 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
     setThreadsPanelOpen(!(threadsPanel && threadsPanel.classList.contains('open')));
   }
 
+  // ── Activity section visibility: the store and the picker ──
+  /** The webview's own store; absent under a locked-down host, in which case a
+   *  section choice simply does not outlive the panel. */
+  function activitySectionsStorage() {
+    try { return window.localStorage || null; } catch (e) { return null; }
+  }
+
+  function loadHiddenActivitySections() {
+    var storage = activitySectionsStorage();
+    if (!storage) return;
+    var raw;
+    try { raw = storage.getItem(ACTIVITY_SECTIONS_STORAGE_KEY); } catch (e) { return; }
+    if (!raw) return;
+    var parsed;
+    try { parsed = JSON.parse(raw); } catch (e) { return; }
+    if (!Array.isArray(parsed)) return;
+    // Drop keys this build does not know, so a stale list cannot hide a section
+    // twice over or bring back a name that no longer exists.
+    hiddenActivitySections = ACTIVITY_SECTION_KEYS.filter(function(key) {
+      return parsed.indexOf(key) !== -1;
+    });
+  }
+
+  function saveHiddenActivitySections() {
+    var storage = activitySectionsStorage();
+    if (!storage) return;
+    try {
+      storage.setItem(ACTIVITY_SECTIONS_STORAGE_KEY, JSON.stringify(hiddenActivitySections));
+    } catch (e) { /* a full or blocked store is not worth failing the click */ }
+  }
+
+  function isActivitySectionVisible(key) {
+    return hiddenActivitySections.indexOf(key) === -1;
+  }
+
+  function activitySectionLabel(key) {
+    // Same words the section headers use, so a ticked row and the section it
+    // governs read as the same thing.
+    var labels = {
+      work: __i18n.work,
+      changes: __i18n.changes,
+      fleet: __i18n.fleet,
+      tasks: __i18n.tasks,
+      agents: __i18n.agents,
+    };
+    return labels[key] || key;
+  }
+
+  function activitySectionIcon(key) {
+    var icons = {
+      work: '\uD83C\uDFAF',
+      changes: '\uD83D\uDCDD',
+      fleet: '\uD83D\uDE80',
+      tasks: '\u2699',
+      agents: '\uD83E\uDD16',
+    };
+    return icons[key] || '';
+  }
+
+  function renderActivitySectionsPicker() {
+    var picker = document.getElementById('activity-sections-picker');
+    if (!picker) return;
+    var html = '<div class="activity-sections-title">' + __wvEscapeHtml(__i18n.activitySectionsTitle) + '</div>';
+    html += '<div class="activity-sections-hint">' + __wvEscapeHtml(__i18n.activitySectionsHint) + '</div>';
+    for (var i = 0; i < ACTIVITY_SECTION_KEYS.length; i++) {
+      var key = ACTIVITY_SECTION_KEYS[i];
+      html += '<label class="activity-section-option">' +
+        '<input type="checkbox" class="activity-section-checkbox" data-activity-section="' + key + '"' +
+        (isActivitySectionVisible(key) ? ' checked' : '') + '>' +
+        '<span class="activity-section-option-icon">' + activitySectionIcon(key) + '</span>' +
+        '<span class="activity-section-option-label">' + __wvEscapeHtml(activitySectionLabel(key)) + '</span>' +
+        '</label>';
+    }
+    picker.innerHTML = html;
+  }
+
+  /** Fold the choice into the DOM: the sections themselves, the picker's own
+   *  checkboxes (rebuilt so they match the truth rather than the click), and the
+   *  note that stands in when nothing is left showing. */
+  function applyActivitySectionVisibility() {
+    var anyVisible = false;
+    for (var i = 0; i < ACTIVITY_SECTION_KEYS.length; i++) {
+      var key = ACTIVITY_SECTION_KEYS[i];
+      var visible = isActivitySectionVisible(key);
+      if (visible) anyVisible = true;
+      var section = document.getElementById('sidebar-' + key);
+      if (section) section.classList.toggle('hidden', !visible);
+    }
+    var empty = document.getElementById('activity-sections-empty');
+    if (empty) empty.classList.toggle('visible', !anyVisible);
+    renderActivitySectionsPicker();
+  }
+
+  function setActivitySectionVisible(key, visible) {
+    if (ACTIVITY_SECTION_KEYS.indexOf(key) === -1) return;
+    var shouldHide = !visible;
+    if (shouldHide === !isActivitySectionVisible(key)) return;
+    if (shouldHide) {
+      hiddenActivitySections.push(key);
+    } else {
+      hiddenActivitySections = hiddenActivitySections.filter(function(item) { return item !== key; });
+    }
+    saveHiddenActivitySections();
+    applyActivitySectionVisibility();
+  }
+
+  function setActivitySectionsPickerOpen(open) {
+    activitySectionsPickerOpen = !!open;
+    var picker = document.getElementById('activity-sections-picker');
+    if (picker) picker.classList.toggle('open', activitySectionsPickerOpen);
+    var button = document.getElementById('activity-sections-toggle');
+    if (button) button.setAttribute('aria-expanded', activitySectionsPickerOpen ? 'true' : 'false');
+  }
+
+  function toggleActivitySectionsPicker() {
+    setActivitySectionsPickerOpen(!activitySectionsPickerOpen);
+  }
+
   // ── Sidebar section collapse toggle ──
   document.querySelectorAll('.sidebar-section-header').forEach(function(header) {
     header.addEventListener('click', function() {
@@ -1960,6 +2091,33 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
       section.classList.toggle('collapsed');
     });
   });
+
+  // ── Activity section picker ──
+  var activitySectionsToggle = document.getElementById('activity-sections-toggle');
+  if (activitySectionsToggle) {
+    activitySectionsToggle.addEventListener('click', function(e) {
+      if (e && e.stopPropagation) e.stopPropagation();
+      toggleActivitySectionsPicker();
+    });
+  }
+  var activitySectionsPicker = document.getElementById('activity-sections-picker');
+  if (activitySectionsPicker) {
+    // Delegated: the rows are rebuilt on every change, so one listener per
+    // checkbox would have to be re-attached to each of them.
+    activitySectionsPicker.addEventListener('change', function(e) {
+      var target = e && e.target;
+      if (!target || !target.getAttribute) return;
+      var key = target.getAttribute('data-activity-section');
+      // Checked here as well as in the setter below: this key goes into a
+      // selector, so it has to be one of ours before it goes anywhere.
+      if (ACTIVITY_SECTION_KEYS.indexOf(key) === -1) return;
+      setActivitySectionVisible(key, !!target.checked);
+      // Rebuilding the rows replaces the box the reader just used, which would
+      // drop a keyboard reader back to the top of the panel after every tick.
+      var restored = activitySectionsPicker.querySelector('[data-activity-section="' + key + '"]');
+      if (restored && restored.focus) restored.focus();
+    });
+  }
 
   // ── Tab switching ──
   document.getElementById('tab-sessions-btn').addEventListener('click', function() {
@@ -2026,6 +2184,10 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
     renderWork: renderWork,
     renderChanges: renderChanges,
     switchSidebarTab: switchSidebarTab,
+    /** The reader's choice of Activity sections: the one mutator that keeps the
+     *  sections, the picker and the store in step, and a copy of it. */
+    setActivitySectionVisible: setActivitySectionVisible,
+    getHiddenActivitySections: function() { return hiddenActivitySections.slice(); },
     closeTaskDetail: closeTaskDetail,
     showTaskDetail: showTaskDetail,
     closeAgentDetail: closeAgentDetail,
@@ -2057,6 +2219,11 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
     getSessionSearchQuery: function() { return sessionSearchQuery; },
     setSessionSearchQuery: function(v) { sessionSearchQuery = v; },
   };
+
+  // Paint what the reader chose last time before anything else can draw a
+  // section, so a hidden one never flashes on the way to being hidden.
+  loadHiddenActivitySections();
+  applyActivitySectionVisibility();
 
   closeTaskDetail();
   closeAgentDetail();

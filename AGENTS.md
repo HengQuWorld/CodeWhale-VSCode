@@ -115,7 +115,10 @@ DeepSeek-GUI/
 
 ### 4. 侧边栏状态
 - 侧边栏三个并列标签页：Sessions（默认激活）、Threads、Activity；没有设置可以隐藏其中任何一个
-- Activity 标签内汇集 Work、Fleet、Tasks、Agents、Changes 区块（各自仍可折叠）
+- Activity 标签内汇集 Work、Changes、Fleet、Tasks、Agents 区块（各自仍可折叠）
+- Activity 区块的**显示/隐藏**由用户决定：提示行右侧的 ⚙（`#activity-sections-toggle`）展开勾选列表（`#activity-sections-picker`），取消勾选即隐藏，选择写进 `localStorage` 的 `codewhale:activitySections`（**只存隐藏的 key**，这样以后新增的区块默认可见）。隐藏 ≠ 折叠：折叠保留表头，那是用户重新展开的点击目标；隐藏则什么都不留，所以勾选列表必须列出**全部**区块（含已隐藏的），并且它自己不能被区块的隐藏一并藏掉（它在提示行里，不在区块内）。全部隐藏时 `#activity-sections-empty` 给出提示。
+- Activity 区块的**高度是共享的**：`#tab-activity` 是纵向 flex 容器，打开着的区块 `flex: 1 1 auto`，随其他区块折叠/隐藏而涨、随别人需要空间而缩，内容超出自己那份就在区块内滚动。折叠用的是**网格轨道**（`grid-template-rows: auto 1fr` ↔ `auto 0fr`）而不是 `max-height`：一份“份额”要布局完才知道，而 `max-height` 要么写死上限（正是它让区块无法共享空间的原因）、要么是 `none`（无法过渡）。`min-height: 5.5em` 是保底（表头 + 两行左右）；份额不够时**滚整个 tab**（`#tab-activity` 自带 `overflow-y: auto`），而不是把某个区块挤没。
+- 踩过的坑：`#tab-activity > .sidebar-section` 的 `display: grid` 是 **id 选择器**（具体度 1,1,0），会赢过普通的 `.sidebar-section.hidden`（0,2,0）。所以隐藏规则必须写成 `.sidebar-section.hidden, #tab-activity > .sidebar-section.hidden`，否则被隐藏的区块依然 `display: grid` 留在屏幕上（已用无头 Chrome 实测确认过这一点）。
 - Threads 面板与对话并排（`#threads-panel` 是 `#layout` 里的普通 flex 子项，靠 `.open` 显示），从对话区让出宽度而不是盖住它；不要改回绝对定位的覆盖写法
 - 打开后保持打开状态，除非用户明确关闭（✕ 按钮或 `Esc`）
 - 点击线程项不会自动关闭侧边栏

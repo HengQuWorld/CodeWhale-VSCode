@@ -62,6 +62,15 @@ export interface WebviewTranslations {
   sessionsTabHint: string;
   threadsTabHint: string;
   activityTabHint: string;
+  /** Activity tab's section picker: the ⚙ button's tooltip and the heading of
+   *  the list it opens. */
+  activitySectionsTitle: string;
+  /** Activity tab's section picker: what unticking a box does, and that the
+   *  choice outlives the reload. */
+  activitySectionsHint: string;
+  /** Activity tab, shown once every section is hidden: the picker above it is
+   *  the only way back, so the message has to point at it. */
+  activityAllHidden: string;
   newThread: string;
   compact: string;
   interrupt: string;
@@ -471,7 +480,12 @@ ${css}
           <div class="sidebar-tab-hint">${tr.threadsTabHint}</div>
         </div>
         <div class="sidebar-section-body" id="tab-activity">
-          <div class="sidebar-tab-hint">${tr.activityTabHint}</div>
+          <div class="sidebar-tab-hint sidebar-tab-hint-row">
+            <span>${tr.activityTabHint}</span>
+            <button type="button" class="sidebar-sections-toggle" id="activity-sections-toggle" title="${tr.activitySectionsTitle}" aria-label="${tr.activitySectionsTitle}" aria-expanded="false">⚙</button>
+          </div>
+          <div class="activity-sections-picker" id="activity-sections-picker"></div>
+          <div class="activity-sections-empty" id="activity-sections-empty">${tr.activityAllHidden}</div>
           <div class="sidebar-section" id="sidebar-work">
             <div class="sidebar-section-header" id="work-section-toggle">
               <span class="sidebar-section-title">🎯 ${tr.work}</span>
