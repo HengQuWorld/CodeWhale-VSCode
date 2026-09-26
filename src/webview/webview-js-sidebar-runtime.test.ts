@@ -962,6 +962,105 @@ describe("Changes panel grouped by turn", () => {
     expect(groups[0].header.innerHTML).toContain("Turn 3");
   });
 
+  it("says what it cannot list in a turn that ran shell commands", () => {
+    // The panel is fed by the engine's file-change items, which only the file
+    // tools produce: a file written by a shell command is a command execution.
+    // Without this note, a turn whose edits all came from a script reads as a
+    // turn that changed nothing.
+    const { changesPanel, sidebar } = createHarness();
+    sidebar.setChangesState(
+      [recordedChange({ filePath: "src/a.ts", turnIndex: 2, changeIndex: 0 })],
+      [
+        { index: 1, label: "ran a script", shellCommands: 3 },
+        { index: 2, label: "used the file tools" },
+      ],
+    );
+    sidebar.renderChanges();
+
+    const groups = drawnGroups(changesPanel);
+    expect(groups).toHaveLength(2);
+    // The note is the count and nothing else: why the panel cannot list those
+    // commands is the panel's own hint, said once above the list.
+    expect(groups[0].items.innerHTML).toContain(
+      '<div class="change-turn-note">3 shell command(s) ran in this turn</div>',
+    );
+    expect(groups[0].header.innerHTML).toContain("Turn 1");
+    // A turn that changed files through the tools has a complete list, and a
+    // note there would only be noise.
+    expect(groups[1].items.innerHTML).not.toContain('class="change-turn-note"');
+  });
+
+  it("states the panel's scope once, in the header rather than per turn", () => {
+    // Two turns ran shell commands: the rule that explains them belongs to the
+    // panel, so it is said once — the notes in the groups carry only counts.
+    const { changesPanel, sidebar } = createHarness();
+    sidebar.setChangesState(
+      [recordedChange({ filePath: "src/a.ts", turnIndex: 3, changeIndex: 0 })],
+      [
+        { index: 1, label: "ran a script", shellCommands: 2 },
+        { index: 2, label: "ran another", shellCommands: 1 },
+        { index: 3, label: "used the file tools" },
+      ],
+    );
+    sidebar.renderChanges();
+
+    const header = changesPanel.children[0].innerHTML;
+    expect(header.split('class="change-panel-hint"')).toHaveLength(2);
+    expect(header).toContain("Lists only the changes made by the file tools");
+    for (const group of drawnGroups(changesPanel)) {
+      expect(group.items.innerHTML).not.toContain('class="change-panel-hint"');
+    }
+  });
+
+  it("leaves the panel's scope unsaid when no turn ran a shell command", () => {
+    // Nothing in this session was hidden from the panel, so a sentence about
+    // what it cannot list would explain an absence that never happened.
+    const { changesPanel, sidebar } = createHarness();
+    sidebar.setChangesState(
+      [recordedChange({ filePath: "src/a.ts", turnIndex: 1, changeIndex: 0 })],
+      [{ index: 1, label: "used the file tools" }],
+    );
+    sidebar.renderChanges();
+
+    expect(changesPanel.children[0].innerHTML).not.toContain('class="change-panel-hint"');
+  });
+
+  it("shows the shell note for a turn with no changes at all", () => {
+    // Exactly the case that reads as "this panel is lying": a turn listed with
+    // no rows is worth a group only because the note explains the emptiness.
+    const { changesPanel, sidebar } = createHarness();
+    sidebar.setChangesState(
+      [],
+      [{ index: 1, label: "edited files with a script", shellCommands: 1 }],
+    );
+    sidebar.renderChanges();
+
+    const groups = drawnGroups(changesPanel);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].items.innerHTML).toContain('class="change-turn-note"');
+    // The panel's scope is stated for this session too: it has changes in it
+    // that no list here can account for.
+    expect(changesPanel.children[0].innerHTML).toContain('class="change-panel-hint"');
+    // Not the empty state: there is something to say about this session.
+    expect(changesPanel.innerHTML).not.toContain("work-empty");
+  });
+
+  it("leaves a turn that neither changed nor scripted anything out", () => {
+    const { changesPanel, sidebar } = createHarness();
+    sidebar.setChangesState(
+      [recordedChange({ filePath: "src/a.ts", turnIndex: 2, changeIndex: 0 })],
+      [
+        { index: 1, label: "nothing here" },
+        { index: 2, label: "this one changed a file" },
+      ],
+    );
+    sidebar.renderChanges();
+
+    const groups = drawnGroups(changesPanel);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].header.innerHTML).toContain("Turn 2");
+  });
+
   it("tells an unlabelled turn apart without inventing words for it", () => {
     const { changesPanel, sidebar } = createHarness();
     // A turn the runtime started on its own: the client never saw the prompt.

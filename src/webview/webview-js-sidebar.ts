@@ -1385,6 +1385,17 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
     return own;
   }
 
+  /** How many shell commands the session's turns ran, as far as this panel was
+   *  told. Zero is the ordinary case, and it is also the answer for a panel
+   *  fed by a host that does not count them. */
+  function countShellCommands() {
+    var total = 0;
+    for (var i = 0; i < changeTurnsState.length; i++) {
+      total += changeTurnsState[i].shellCommands || 0;
+    }
+    return total;
+  }
+
   /** The per-turn reading a group header carries: how many changes, and the
    *  line delta. The file count stays in the session-wide summary — a header
    *  is read at a glance, and four numbers at a glance is three too many. */
@@ -1444,7 +1455,12 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
     // this store; clearing it invalidates their diff keys (especially during
     // real-time inference where fileChangeDetected is sent before
     // refreshWorkPanel). It is cleared on loadHistory/clearChat instead.
-    if (!changesState || changesState.length === 0) {
+    // A session can list no changes at all and still have something to say:
+    // a turn that ran shell commands is reported for what this panel cannot
+    // see (see the panel hint below), so only a payload with neither changes
+    // nor a shell count is genuinely empty.
+    var shellCommandTotal = countShellCommands();
+    if ((!changesState || changesState.length === 0) && shellCommandTotal === 0) {
       changeTurnsState = [];
       collapsedChangeTurns = Object.create(null);
       var el = document.createElement('div');
@@ -1480,6 +1496,14 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
     var countLabel = __i18n.changesCount.replace('{n}', String(changesState.length)) +
       ' \\u00B7 ' + __i18n.filesCount.replace('{n}', String(fileCount));
     header.innerHTML = '<div class="work-section-title"><span class="work-section-title-icon">\\uD83D\\uDCC1</span>' + __wvEscapeHtml(__i18n.fileChanges) + ' <span class="work-section-subtitle">(' + __wvEscapeHtml(countLabel) + ')</span></div><div class="change-summary-row">' + summaryParts.join(' ') + '</div>';
+    // What this panel is, said once for the whole list rather than in every
+    // turn's note: its rows are the file tools' change records, so a file a
+    // shell command wrote is not among them. Only said when the session ran a
+    // shell command — otherwise the sentence would explain an absence that
+    // never happened. The per-turn notes below say which turns those were.
+    if (shellCommandTotal > 0) {
+      header.innerHTML += '<div class="change-panel-hint">' + __wvEscapeHtml(__i18n.changePanelHint) + '</div>';
+    }
     container.appendChild(header);
 
     // Change list
@@ -1497,15 +1521,17 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
       list.innerHTML = flat;
     } else {
       // One group per turn, oldest first, so the list reads like the
-      // conversation. Only turns with changes are drawn — a turn that touched
-      // nothing has nothing to review — and a gap in the numbering is honest:
-      // the indices are the turns' own ordinals, so "Turn 3" still names the
-      // third turn of the conversation.
+      // conversation. Turns with changes are drawn, and so are turns that ran
+      // shell commands: a turn whose edits all came from a script would
+      // otherwise read as a turn that changed nothing. A gap in the numbering
+      // is honest: the indices are the turns' own ordinals, so "Turn 3" still
+      // names the third turn of the conversation.
       pruneCollapsedChangeTurns();
       for (var ti = 0; ti < changeTurnsState.length; ti++) {
         var turn = changeTurnsState[ti];
         var own = changesOfTurn(turn.index);
-        if (own.length === 0) continue;
+        var shellCount = turn.shellCommands || 0;
+        if (own.length === 0 && shellCount === 0) continue;
         var group = document.createElement('div');
         group.className = 'change-turn-group';
         if (collapsedChangeTurns[String(turn.index)]) group.classList.add('collapsed');
@@ -1524,6 +1550,14 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
         items.className = 'change-turn-items';
         var rows = '';
         for (var ci = 0; ci < own.length; ci++) rows += changeRowHtml(own[ci]);
+        if (shellCount > 0) {
+          // What the panel cannot list, in the terms of this one turn: how many
+          // commands it ran. Why that matters is the panel's own hint, said
+          // once above the list rather than here, once per turn.
+          rows += '<div class="change-turn-note">' +
+            __wvEscapeHtml(__i18n.changeTurnShellNote.replace('{n}', String(shellCount))) +
+            '</div>';
+        }
         items.innerHTML = rows;
         group.appendChild(turnHeader);
         group.appendChild(items);

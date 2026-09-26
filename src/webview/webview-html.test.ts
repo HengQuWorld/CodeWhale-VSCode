@@ -218,6 +218,8 @@ function makeTr(): WebviewTranslations {
     revertFileTooltip: "Revert file changes",
     fileChanges: "File Changes",
     changesCount: "{n} change(s)",
+    changeTurnShellNote: "{n} shell command(s) ran in this turn",
+    changePanelHint: "Lists only the changes made by the file tools (edit / write / patch)",
     filesCount: "{n} file(s)",
     changeTurnLabel: "Turn {n}",
     locateChange: "Locate",

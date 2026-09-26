@@ -291,6 +291,13 @@ export interface WebviewTranslations {
   changesCount: string;
   /** "{n} file(s)" — the distinct-file reading of the same list. */
   filesCount: string;
+  /** Shown inside a turn's group when that turn ran shell commands: this panel
+   *  lists what the file tools changed, and a file written by a shell command
+   *  is not one of those. `{n}` is how many commands the turn ran. */
+  changeTurnShellNote: string;
+  /** The Changes panel's scope, drawn once above the list: rows come from the
+   *  file tools' change records, so a file a shell command wrote is not here. */
+  changePanelHint: string;
   /** "Turn {n}" — the header of one turn's section in the Changes panel. */
   changeTurnLabel: string;
   locateChange: string;

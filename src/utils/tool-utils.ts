@@ -297,6 +297,38 @@ export function buildApprovalSummary(toolName: string, input: Record<string, unk
   return friendlyToolName(toolName);
 }
 
+// ── Shell commands ──
+
+/** Tools that run a command or a script.
+ *
+ *  Two places need this predicate and cannot share code: the host (this file)
+ *  and the webview script, which is a template string. The webview's copy is
+ *  `isShellTool` in `webview-js-messages.ts` and must keep the same rules — it
+ *  decides how a tool row is drawn, while this one decides whether a turn is
+ *  marked as having run a shell command (the Changes panel says so, because a
+ *  file written by a shell command is recorded as a command execution, not as
+ *  a file change, and would otherwise look like a turn that changed nothing). */
+export const SHELL_TOOL_NAMES = new Set([
+  "exec_shell",
+  "exec_shell_wait",
+  "exec_shell_interact",
+  "task_shell_start",
+  "task_shell_wait",
+  "code_execution",
+  "js_execution",
+]);
+
+/** Whether a tool call runs a shell command, by exact name or by a shell-ish
+ *  token as a whole segment of a dynamic name (`run_bash`, `mcp__shell`).
+ *
+ *  Deliberately not a substring match: `db_command` and `command_parser` are
+ *  not shell tools, and a turn wrongly marked would put a note in front of a
+ *  complete change list. */
+export function isShellTool(toolName: string): boolean {
+  if (SHELL_TOOL_NAMES.has(toolName)) return true;
+  return /(?:^|[_/.-])(shell|bash|sh|exec|cmd)(?:[_/.-]|$)/i.test(toolName || "");
+}
+
 // ── Task refresh trigger ──
 
 export const TASK_REFRESH_TOOL_NAMES = new Set([

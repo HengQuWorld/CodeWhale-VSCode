@@ -86,6 +86,14 @@ export interface ChangeTurnInfo {
   turnId?: string;
   /** Turn start, in ms. Absent for a live turn the client could not timestamp. */
   timestamp?: number;
+  /** How many shell commands this turn ran.
+   *
+   *  The Changes panel lists what the *file* tools changed; a file written by a
+   *  shell command is recorded by the engine as a command execution, and the
+   *  panel is fed by file-change items only. A turn that ran one is therefore
+   *  marked, and the panel says so — otherwise a turn whose edits all came from
+   *  a script reads as a turn that changed nothing. */
+  shellCommands?: number;
 }
 
 export interface ChatMessage {

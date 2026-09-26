@@ -123,6 +123,7 @@ DeepSeek-GUI/
 - 打开后保持打开状态，除非用户明确关闭（✕ 按钮或 `Esc`）
 - 点击线程项不会自动关闭侧边栏
 - Changes 区块列出**整个会话**的文件变更，按轮次分组（每条变更带 `turnIndex`，`changesState` 消息同时带 `turns` 分组元数据）。轮次边界只**新开一个分组**，不清空列表：`sendMessage` / 外部回合开始时调 `beginChangeTurn`，只有重建整个面板的路径（`loadHistory`、fork/retry、切会话）才调 `resetChangeGroups`。`changeIndex` 与 diff 重建都是按文件、跨整个会话编号的，改回「只留本轮」会让 Diff/回滚/Revert 的目标错位。
+- Changes 只能列**文件工具**产生的改动：引擎按工具名分类（`crates/tui/src/runtime_threads.rs` 的 `tool_kind_for_name`：名字含 patch / write / edit → `file_change`；`exec_shell*` → `command_execution`；其余 → `tool_call`），**用 shell（python 脚本、sed、git）改文件不会产生 `file_change`**，面板因此看不到。所以：每轮带 `shellCommands` 计数（`noteShellCommandInChangeTurn`；三条路径都要标：实时 `item.started`、`loadHistory` 的 `command_execution` 与工具名 `isShellTool`、按 `loadSessionMessages` 重建的已存会话走工具名 `isShellTool`），计数按事件里的 `turn_id` 归到那一轮的分组，找不到才退回「正在填写的分组」——被拒绝的发送会先开一个分组、稍后才收回，只按当前分组会把正在运行那一轮的命令记到即将撤销的分组上。文案分两处：每组里只写 `changeTurnShellNote`（本轮执行了 N 条 shell 命令。），「面板只列文件工具改动」那句在面板表头的 `changePanelHint` 里、整个面板只说一次，且只在会话里确实跑过 shell 时显示。`refreshChangesPanel` 也会把「只有 shell、没有变更」的轮次留在 payload 里，否则那条说明没有落点。排查“用户说面板里看不到这一轮改动”时，先确认那轮是不是全靠 shell 改的文件。
 
 ## 常见问题修复
 

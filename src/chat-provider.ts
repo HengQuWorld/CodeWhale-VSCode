@@ -68,6 +68,7 @@ import {
 import {
   friendlyToolName,
   isFileChangeTool,
+  isShellTool,
   extractFilePath,
   extractToolNameFromSummary,
   buildApprovalSummary,
@@ -1077,6 +1078,15 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
           .filter((item): item is TurnItemRecord => !!item);
 
         for (const item of turnItems) {
+          // A shell command this turn ran. The engine classifies its own shell
+          // tool as a command execution, which the reloaded transcript does not
+          // draw as a tool row at all — but the turn still ran one, and the
+          // Changes panel has to know, because its list cannot include what
+          // that command wrote. Name-based tools (`bash` and friends) come
+          // through the tool-call case below.
+          if (item.kind === "command_execution") {
+            this.noteShellCommandInChangeTurn(turn.id);
+          }
           switch (item.kind) {
             case "context_compaction": {
               // Nothing was asked and no model answer was produced. Replaying
@@ -1197,6 +1207,11 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
                 status: item.status === "completed" ? "complete" : "error",
                 itemId: typeof metadata.tool_use_id === "string" ? metadata.tool_use_id : item.id,
               };
+              // A turn that ran a shell command may have changed files through
+              // it, and this panel only lists what the file tools changed.
+              if (isShellTool(tc.name)) {
+                this.noteShellCommandInChangeTurn(turn.id);
+              }
               if (tc.itemId) {
                 toolCallById.set(tc.itemId, tc);
               }
@@ -1700,6 +1715,14 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
               updateFileChangeCard(toolCall, false);
               globalToolCalls.push(toolCall);
               changeTurnByCallIdx.push(this.currentChangeTurn);
+              // A command run through a shell tool: this turn's changes may all
+              // have come through it, and the Changes panel lists file-tool
+              // changes only. Marked against the group this call was created
+              // in — the index recorded just above, which the batch below also
+              // replays — so the note lands on the turn that ran the command.
+              if (isShellTool(toolCall.name)) {
+                this.noteShellCommandInChangeTurn();
+              }
               blocks.push({ type: "tool_call", toolCallIdx: idx });
               turnToolCallIndices.push(idx);
             } else if (block.type === "tool_result" && block.tool_use_id) {
@@ -3822,6 +3845,30 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     if (current) current.turnId = turnId;
   }
 
+  /** Record that a turn ran a shell command.
+   *
+   *  The Changes panel is fed by the engine's file-change items, which only the
+   *  file tools produce: a file written by a shell command is a command
+   *  execution, so a turn whose edits all came from a script would otherwise
+   *  read as a turn that changed nothing. Counting them lets the panel say so
+   *  instead.
+   *
+   *  `turnId` names the engine turn the command belonged to when the caller
+   *  knows it, and the group being filled is the fallback. Naming the turn
+   *  matters while another one is still running: a send the runtime refuses
+   *  opens a group of its own before the refusal is known, and the running
+   *  turn's commands must not be counted into a section that is about to be
+   *  taken back. It is also the ordinary case for the first events of a turn
+   *  this client accepted, whose id arrives after them. */
+  private noteShellCommandInChangeTurn(turnId?: string | null): void {
+    const named = turnId
+      ? this.changeTurns.find((turn) => turn.turnId === turnId)
+      : undefined;
+    const turn = named ?? this.changeTurns.find((t) => t.index === this.currentChangeTurn);
+    if (!turn) return;
+    turn.shellCommands = (turn.shellCommands ?? 0) + 1;
+  }
+
   /** Drop every recorded change and every group. For a rebuild of the whole
    *  panel (a thread load, a fork) — never for a turn boundary, which keeps the
    *  session's earlier turns and opens a group instead (`beginChangeTurn`). */
@@ -3929,7 +3976,12 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     const populated = new Set(this.turnFileChanges.map((fc) => fc.turnIndex));
     this.postMessage({
       type: "changesState",
-      turns: this.changeTurns.filter((turn) => populated.has(turn.index)),
+      // A turn that ran shell commands is listed even with no change records:
+      // the panel's own note about what it cannot see is the only thing it has
+      // to report for such a turn, and dropping the group would hide it.
+      turns: this.changeTurns.filter(
+        (turn) => populated.has(turn.index) || (turn.shellCommands ?? 0) > 0
+      ),
       changes: this.turnFileChanges.map(fc => ({
         filePath: fc.filePath,
         changeType: fc.changeType,
@@ -6681,6 +6733,14 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
             blockIdx,
             toolCall: tc,
           });
+          // A shell command this turn ran: the Changes panel lists file-tool
+          // changes only, so the turn is marked and the panel says why its list
+          // may be incomplete. The engine's own shell tool arrives as a command
+          // execution; a name-based one (`bash` and friends) as a tool call.
+          if (kind === "command_execution" || isShellTool(tc.name)) {
+            this.noteShellCommandInChangeTurn(event.turn_id);
+            this.refreshChangesPanel();
+          }
         }
         this.postMessage({ type: "status", text: `${kind} started` });
         break;

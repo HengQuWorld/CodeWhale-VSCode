@@ -902,6 +902,140 @@ describe("ChatProvider thread history rendering", () => {
     expect(tc.input).toEqual({ tool_use_id: "tool-1" });
   });
 
+  it("marks the turn that ran a shell command, and keeps it in the panel payload", async () => {
+    // A shell command's file writes are recorded by the engine as a command
+    // execution, not as a file change: the panel cannot list them, so it has to
+    // say so — and it has to keep the turn in its payload, because the note is
+    // the only thing there is to show for a turn like this.
+    const detail = {
+      latest_seq: 9,
+      thread: { id: "thread-1", model: "deepseek-v4-pro" },
+      turns: [
+        {
+          id: "turn-1",
+          input_summary: "wrote files with a script",
+          created_at: "2026-08-20T10:00:00Z",
+          ended_at: "2026-08-20T10:00:10Z",
+          status: "completed",
+          item_ids: ["u1", "t1", "a1"],
+        },
+        {
+          id: "turn-2",
+          input_summary: "edited a file with the tools",
+          created_at: "2026-08-20T10:01:00Z",
+          ended_at: "2026-08-20T10:01:10Z",
+          status: "completed",
+          item_ids: ["u2", "t2", "a2"],
+        },
+      ],
+      items: [
+        { id: "u1", kind: "user_message", summary: "wrote files with a script", detail: "wrote files with a script", status: "completed" },
+        // The extension's engine calls its shell tool `bash`; the engine's own
+        // TUI tool arrives as `command_execution`.
+        { id: "t1", kind: "tool_call", summary: "bash: python3 - <<PY", detail: "wrote 3 files", status: "completed", metadata: {} },
+        { id: "a1", kind: "agent_message", summary: "Done", detail: "Done", status: "completed" },
+        { id: "u2", kind: "user_message", summary: "edited a file with the tools", detail: "edited a file with the tools", status: "completed" },
+        {
+          id: "t2",
+          kind: "file_change",
+          summary: "edit: Successfully replaced 1 block(s) in src/app.ts",
+          detail: "Successfully replaced 1 block(s) in src/app.ts",
+          status: "completed",
+          metadata: { tool_name: "edit", file_path: "src/app.ts" },
+        },
+        { id: "a2", kind: "agent_message", summary: "Done", detail: "Done", status: "completed" },
+      ],
+    };
+
+    const { provider, postMessage } = createProvider(detail);
+
+    await (provider as any).loadHistory("thread-1");
+
+    // The harness stands in for `refreshWorkPanel` (which is what publishes
+    // this in the running extension), so the payload is asked for directly.
+    (provider as any).refreshChangesPanel();
+    const changesState = postMessage.mock.calls
+      .map((call: unknown[]) => call[0] as Record<string, any>)
+      .filter((message: Record<string, any>) => message.type === "changesState")
+      .pop();
+    expect(changesState).toBeDefined();
+    const shellTurn = changesState.turns.find((turn: Record<string, any>) => turn.index === 1);
+    expect(shellTurn?.shellCommands).toBe(1);
+    // A turn that changed a file through the tools is listed for its changes,
+    // and carries no shell note.
+    const toolTurn = changesState.turns.find((turn: Record<string, any>) => turn.index === 2);
+    expect(toolTurn?.shellCommands).toBeUndefined();
+  });
+
+  it("marks a viewed session's shell turn, not only a live thread's", async () => {
+    // A session opened from the Sessions rail rebuilds its own transcript
+    // (`loadSessionMessages`) — a third path into the panel besides the live
+    // stream and a thread load. Its turns are grouped the same way, so a turn
+    // whose edits all came from a script has to carry the same note there.
+    const session = {
+      metadata: { id: "sess-shell", title: "scripted edits", workspace: "/workspace" },
+      messages: [
+        { role: "user", content: [{ type: "text", text: "wrote files with a script" }] },
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "tool_use",
+              id: "tool-shell-1",
+              name: "exec_shell",
+              input: { command: "python3 - <<PY" },
+            },
+          ],
+        },
+        {
+          role: "user",
+          content: [{ type: "tool_result", tool_use_id: "tool-shell-1", content: "wrote 3 files" }],
+        },
+        { role: "assistant", content: [{ type: "text", text: "done" }] },
+      ],
+    };
+
+    const { provider, postMessage } = createProvider(session);
+
+    await provider.loadSessionMessages("sess-shell");
+
+    const changesState = postMessage.mock.calls
+      .map((call: unknown[]) => call[0] as Record<string, any>)
+      .filter((message: Record<string, any>) => message.type === "changesState")
+      .pop();
+    expect(changesState).toBeDefined();
+    // Nothing to list, and still worth a group: the note is the whole report.
+    expect(changesState.changes).toHaveLength(0);
+    const shellTurn = changesState.turns.find((turn: Record<string, any>) => turn.index === 1);
+    expect(shellTurn?.shellCommands).toBe(1);
+  });
+
+  it("counts a command against its own turn, not the group being filled", async () => {
+    // A send the runtime refuses opens a group of its own before the refusal is
+    // known, so the group being filled is not always the turn a command came
+    // from: counting by that group would charge the running turn's command to a
+    // section about to be taken back, and lose it with the section.
+    const { provider } = createProvider({});
+    (provider as any).beginChangeTurn("the running turn", 1, "turn-a");
+    (provider as any).beginChangeTurn("a send the runtime refused");
+
+    (provider as any).noteShellCommandInChangeTurn("turn-a");
+
+    const turns = (provider as any).changeTurns as Array<{
+      index: number;
+      shellCommands?: number;
+    }>;
+    expect(turns[0].shellCommands).toBe(1);
+    expect(turns[1].shellCommands).toBeUndefined();
+
+    // A turn whose id this client never recorded still counts against the group
+    // being filled: the first events of an accepted turn arrive before its id
+    // does.
+    (provider as any).noteShellCommandInChangeTurn("turn-never-seen");
+    expect(turns[1].shellCommands).toBe(1);
+    expect(turns[0].shellCommands).toBe(1);
+  });
+
   it("rebuilds a replay's missing diff from the recorded edit inputs", async () => {
     // A saved session keeps no `file.mutation` receipt: the runtime stores the
     // authoritative diff on turn items, and the contract `edit` tool answers
