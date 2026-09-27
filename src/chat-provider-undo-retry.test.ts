@@ -27,6 +27,7 @@ vi.mock("vscode", () => ({
   },
 }));
 
+import type { ThreadRecord } from "./types";
 import { ChatProvider } from "./chat-provider";
 import type { FileChangeInfo } from "./utils/session-state";
 
@@ -41,6 +42,7 @@ function createProvider() {
     // one to open.
     streamEvents: vi.fn(() => ({ abort: vi.fn() })),
     listThreadsSummary: vi.fn(async () => ({ threads: [] })),
+    listThreads: vi.fn(async () => [] as ThreadRecord[]),
     getThreadGoal: vi.fn(async () => null),
     getSession: vi.fn(),
     resumeSessionThread: vi.fn(),

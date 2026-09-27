@@ -166,6 +166,7 @@ function createProvider(): Harness {
     blockThreadGoal: vi.fn(async () => makeGoal({ status: "blocked" })),
     deleteThreadGoal: vi.fn(async () => undefined),
     listThreadsSummary: vi.fn(async () => [] as ThreadSummary[]),
+    listThreads: vi.fn(async () => [] as ThreadRecord[]),
     listSessions: vi.fn(async () => ({ sessions: [] })),
     listTasks: vi.fn(async () => ({ tasks: [], counts: { active: 0, completed: 0, failed: 0 } })),
     listAgentRuns: vi.fn(async () => ({ runs: [] })),

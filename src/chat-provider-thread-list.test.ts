@@ -43,7 +43,7 @@ vi.mock("vscode", () => ({
 }));
 
 import { ChatProvider } from "./chat-provider";
-import type { ThreadSummary } from "./types";
+import type { ThreadRecord, ThreadSummary } from "./types";
 
 function makeSummary(id: string, overrides: Partial<ThreadSummary> = {}): ThreadSummary {
   return {
@@ -94,6 +94,7 @@ function newProvider() {
       async (_opts?: { limit?: number; search?: string; timeoutMs?: number }) =>
         [] as ThreadSummary[],
     ),
+    listThreads: vi.fn(async () => [] as ThreadRecord[]),
     listSessions: vi.fn(async () => ({ sessions: [] })),
   };
   const provider = new ChatProvider({} as any, {} as any, api as any);
@@ -221,6 +222,52 @@ describe("refreshThreadList()", () => {
     expect(loading).toHaveLength(2);
     expect(loading[1]).toEqual({ type: "threadListLoading", loading: true });
     expect(threadListMessages(provider)).toHaveLength(1);
+  });
+
+  it("merges each thread's session onto its row, so the rail can draw a branch", async () => {
+    const { provider, api } = newProvider();
+    api.listThreadsSummary.mockResolvedValue([
+      makeSummary("thr-branch"),
+      makeSummary("thr-plain"),
+    ]);
+    api.listThreads.mockResolvedValue([
+      { id: "thr-branch", session_id: "sess-branch" },
+      { id: "thr-plain", session_id: null },
+    ] as unknown as ThreadRecord[]);
+
+    await refresh(provider);
+
+    const rows = threadListMessages(provider)[0].threads as ThreadSummary[];
+    // The summary route omits the binding, and it is the only link from a live
+    // branch back to the conversation it was cut from.
+    expect(rows.find((row) => row.id === "thr-branch")?.session_id).toBe("sess-branch");
+    // A thread with no document of its own keeps the field absent rather than
+    // gaining an empty one: the rail reads absence as "nothing to draw".
+    expect(rows.find((row) => row.id === "thr-plain")?.session_id).toBeUndefined();
+  });
+
+  it("publishes the rows even when the session lookup fails", async () => {
+    const { provider, api } = newProvider();
+    api.listThreadsSummary.mockResolvedValue([makeSummary("thread-a")]);
+    api.listThreads.mockRejectedValue(socketError("ECONNRESET"));
+
+    await refresh(provider);
+
+    // The branch lines are a decoration on the rail, so losing them may not
+    // cost the rail a row — or leave a failure mark behind.
+    const rows = threadListMessages(provider)[0].threads as ThreadSummary[];
+    expect(rows.map((row) => row.id)).toEqual(["thread-a"]);
+    expect(messagesOf(provider, "threadListLoading").at(-1)).not.toMatchObject({ failed: true });
+  });
+
+  it("does not ask for the session lookup on a quiet pass, which never paints", async () => {
+    const { provider, api } = newProvider();
+
+    await (provider as any).refreshThreadList(true);
+
+    expect(api.listThreadsSummary).toHaveBeenCalled();
+    expect(api.listThreads).not.toHaveBeenCalled();
+    expect(threadListMessages(provider)).toHaveLength(0);
   });
 
   it("still publishes the list when the watcher reconcile throws", async () => {

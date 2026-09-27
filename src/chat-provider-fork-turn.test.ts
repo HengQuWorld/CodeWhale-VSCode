@@ -23,6 +23,7 @@ vi.mock("vscode", () => ({
   },
 }));
 
+import type { ThreadRecord } from "./types";
 import { ChatProvider } from "./chat-provider";
 
 function createProvider() {
@@ -46,6 +47,7 @@ function createProvider() {
     updateThread: vi.fn(async () => thread),
     getThreadGoal: vi.fn(async () => null),
     listThreadsSummary: vi.fn(async () => ({ threads: [] })),
+    listThreads: vi.fn(async () => [] as ThreadRecord[]),
     streamEvents: vi.fn((threadId: string, sinceSeq: number) => {
       streams.push({ threadId, sinceSeq });
       return { abort: vi.fn() };

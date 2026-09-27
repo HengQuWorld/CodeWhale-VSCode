@@ -1673,3 +1673,101 @@ describe("session rail fork families", () => {
     });
   });
 });
+
+/** One thread row, found the way a reader finds it: by the thread it names. */
+function threadRow(rail: FakeElement, id: string): FakeElement {
+  return rail.querySelector(`.thread-item[data-thread-id="${id}"]`)!;
+}
+
+describe("thread rail branch lineage", () => {
+  it("says inline which conversation a live thread was branched from", () => {
+    const { rail, sidebar } = createHarness();
+    sidebar.setSessions([
+      savedSession("sess-source", { title: "Tidy the login flow" }),
+      savedSession("sess-branch", {
+        title: "Tidy the login flow",
+        parent_session_id: "sess-source",
+        forked_from_message_count: 6,
+      }),
+    ]);
+    sidebar.setThreads([{ ...threadSummary("thr-branch"), session_id: "sess-branch" }]);
+
+    sidebar.renderThreads();
+
+    const line = threadRow(rail, "thr-branch").querySelector(".thread-fork-origin")!;
+    expect(line.textContent).toBe("Branched from “Tidy the login flow”");
+    // How much the source held at the cut is the detail, not the headline.
+    expect(line.title).toContain("6");
+  });
+
+  it("names the source by its live thread when the rail holds it", () => {
+    const { rail, sidebar } = createHarness();
+    sidebar.setSessions([
+      savedSession("sess-source", { title: "Saved words" }),
+      savedSession("sess-branch", { parent_session_id: "sess-source" }),
+    ]);
+    sidebar.setThreads([
+      { ...threadSummary("thr-branch"), session_id: "sess-branch" },
+      { ...threadSummary("thr-source"), title: "Live words", session_id: "sess-source" },
+    ]);
+
+    sidebar.renderThreads();
+
+    // The row a reader can click is the one that should be named.
+    const branch = threadRow(rail, "thr-branch");
+    expect(branch.querySelector(".thread-fork-origin")!.textContent).toBe(
+      "Branched from “Live words”",
+    );
+    // The source is a conversation in its own right, not a branch of anything.
+    expect(threadRow(rail, "thr-source").querySelector(".thread-fork-origin")).toBeNull();
+  });
+
+  it("falls back to the id when the source is in neither listing", () => {
+    const { rail, sidebar } = createHarness();
+    sidebar.setSessions([
+      savedSession("sess-branch", { parent_session_id: "sess-gone-9f8e7d6c" }),
+    ]);
+    sidebar.setThreads([{ ...threadSummary("thr-branch"), session_id: "sess-branch" }]);
+
+    sidebar.renderThreads();
+
+    const line = threadRow(rail, "thr-branch").querySelector(".thread-fork-origin")!;
+    expect(line.textContent).toContain("sess-gon");
+    expect(line.textContent).toContain("not in this list");
+  });
+
+  it("marks nothing it cannot name", () => {
+    const { rail, sidebar } = createHarness();
+    sidebar.setSessions([savedSession("sess-plain")]);
+    sidebar.setThreads([
+      { ...threadSummary("thr-plain"), session_id: "sess-plain" },
+      threadSummary("thr-unbound"),
+      // An id that names a member of Object.prototype must not be answered by
+      // Object's own, which is how a row grows a "Branched from undefined".
+      threadSummary("constructor"),
+    ]);
+
+    sidebar.renderThreads();
+
+    // A thread that was never branched from anything has no line, and neither
+    // has one whose session this client cannot see: a mark that names no
+    // source is a claim the rail cannot back.
+    expect(threadRow(rail, "thr-plain").querySelector(".thread-fork-origin")).toBeNull();
+    expect(threadRow(rail, "thr-unbound").querySelector(".thread-fork-origin")).toBeNull();
+    expect(threadRow(rail, "constructor").querySelector(".thread-fork-origin")).toBeNull();
+  });
+
+  it("still opens the thread the line is drawn under", () => {
+    const { rail, sidebar, postMessages } = createHarness();
+    sidebar.setSessions([
+      savedSession("sess-source", { title: "Tidy the login flow" }),
+      savedSession("sess-branch", { parent_session_id: "sess-source" }),
+    ]);
+    sidebar.setThreads([{ ...threadSummary("thr-branch"), session_id: "sess-branch" }]);
+    sidebar.renderThreads();
+
+    threadRow(rail, "thr-branch").dispatch("click", { stopPropagation: () => {} });
+
+    expect(postMessages).toContainEqual({ type: "loadThread", threadId: "thr-branch" });
+  });
+});

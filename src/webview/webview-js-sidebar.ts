@@ -693,7 +693,54 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
     return s === 'in_progress' || s === 'inprogress' || s === 'queued';
   }
 
-  function renderThreadItem(t) {
+  /** Where each live thread was branched from, keyed by thread id.
+   *
+   *  Read from what the two listings already say: the thread's own session
+   *  (merged onto every row by the extension, because the summary route omits
+   *  it) and that session's parent. A branch takes its title from the same
+   *  first user message as the conversation it was cut from, so a live branch
+   *  and its source arrive here reading exactly alike — this is the fact that
+   *  can tell them apart. Threads with no session, or whose session records no
+   *  source, get no entry: the rail marks nothing it cannot name.
+   */
+  function threadForkOrigins() {
+    var sessionsById = Object.create(null);
+    for (var i = 0; i < sessions.length; i++) {
+      var session = sessions[i];
+      if (session && session.id) sessionsById[session.id] = session;
+    }
+    var threadBySession = Object.create(null);
+    for (var j = 0; j < threads.length; j++) {
+      var thread = threads[j];
+      if (thread && thread.id && thread.session_id) {
+        threadBySession[String(thread.session_id)] = thread;
+      }
+    }
+    var origins = Object.create(null);
+    for (var k = 0; k < threads.length; k++) {
+      var row = threads[k];
+      if (!row || !row.id || !row.session_id) continue;
+      var ownSessionId = String(row.session_id);
+      var own = mapLookup(sessionsById, ownSessionId);
+      var sourceSessionId = own && own.parent_session_id ? String(own.parent_session_id) : '';
+      if (!sourceSessionId || sourceSessionId === ownSessionId) continue;
+      // The source is named by its thread when that thread is on the rail —
+      // the row the user can click — and by its saved session otherwise.
+      var sourceThread = mapLookup(threadBySession, sourceSessionId);
+      var sourceSession = mapLookup(sessionsById, sourceSessionId);
+      var title = '';
+      if (sourceThread && sourceThread.title) title = String(sourceThread.title);
+      else if (sourceSession && sourceSession.title) title = String(sourceSession.title);
+      origins[row.id] = {
+        title: title,
+        sessionId: sourceSessionId,
+        branchPoint: own.forked_from_message_count || 0,
+      };
+    }
+    return origins;
+  }
+
+  function renderThreadItem(t, forkFrom) {
     var el = document.createElement('div');
     el.className = 'thread-item' + (t.id === activeThreadId ? ' active' : '');
     el.setAttribute('data-thread-id', t.id);
@@ -728,6 +775,23 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
     }
 
     el.appendChild(headRow);
+
+    if (forkFrom) {
+      // Inline, not nested: this rail is grouped by what each thread is doing
+      // (needs you / running / recent), and a branch often sits in a different
+      // group from the thread it came from. Marrying a branch to its children
+      // here would have to break that grouping or draw a row twice.
+      var forkEl = document.createElement('div');
+      forkEl.className = 'thread-fork-origin';
+      forkEl.textContent = forkFrom.title
+        ? __i18n.threadForkFrom.replace('{source}', forkFrom.title)
+        : __i18n.forkFromMissing.replace('{source}', String(forkFrom.sessionId).slice(0, 8));
+      forkEl.title = forkTooltipText(
+        forkFrom.title || String(forkFrom.sessionId).slice(0, 8),
+        forkFrom.branchPoint
+      );
+      el.appendChild(forkEl);
+    }
 
     if (t.preview) {
       var previewEl = document.createElement('div');
@@ -956,6 +1020,7 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
       else recent.push(t);
     }
 
+    var forkOrigins = threadForkOrigins();
     var groups = [
       { label: __i18n.threadsNeedsYou, items: needsYou },
       { label: __i18n.threadsRunning, items: running },
@@ -965,7 +1030,8 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
       if (groups[g].items.length === 0) continue;
       container.appendChild(renderThreadGroupHeader(groups[g].label));
       for (var j = 0; j < groups[g].items.length; j++) {
-        container.appendChild(renderThreadItem(groups[g].items[j]));
+        var item = groups[g].items[j];
+        container.appendChild(renderThreadItem(item, mapLookup(forkOrigins, item.id)));
       }
     }
     // Every one of those items is new, so an expanded attention card was

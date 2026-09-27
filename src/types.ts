@@ -51,6 +51,16 @@ export interface ThreadSummary {
    *  Non-zero on a background thread (e.g. a goal loop waiting for a tool
    *  approval) is surfaced as an attention badge in the sidebar. */
   pending_attention_count?: number | null;
+  /** The saved session this thread reads and writes.
+   *
+   *  `GET /v1/threads/summary` does not carry the binding — this client reads
+   *  it from `GET /v1/threads` and merges it onto the row. It is the only link
+   *  from a branch back to the conversation it was cut from: the session a
+   *  fork is given names its source in `parent_session_id`, while the two
+   *  conversations carry the same title, both deriving it from the same first
+   *  user message. Absent when the runtime reports no session, which is also
+   *  read as "no branch to draw". */
+  session_id?: string | null;
 }
 
 export interface TurnRecord {

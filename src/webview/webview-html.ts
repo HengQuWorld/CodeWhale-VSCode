@@ -321,6 +321,10 @@ export interface WebviewTranslations {
    *  showing — archived, deleted, or filtered out by search or workspace.
    *  `{source}` is the source session's shortened id, the only name there is. */
   forkFromMissing: string;
+  /** The Threads rail's inline lineage line: which conversation a live thread
+   *  was branched from. `{source}` is that conversation's title, or its
+   *  shortened session id when it is not in either listing. */
+  threadForkFrom: string;
   /** Tooltip behind either rail's branch mark — the Sessions rail's Fork chip,
    *  the Threads rail's lineage line. `{source}` is the source's title when one
    *  is known and its shortened id otherwise. */

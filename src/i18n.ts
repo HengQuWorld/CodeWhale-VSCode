@@ -360,10 +360,14 @@ interface Translations {
   noSearchResults: string;
   /** Badge on a session the engine recorded a source for: it was branched from
    *  another conversation. See webview-html.ts for the full contract of this
-   *  family of strings (sessionForkBadge, forkFromMissing, forkTooltip,
-   *  forkTooltipPoint). */
+   *  family of strings (sessionForkBadge, forkFromMissing, threadForkFrom,
+   *  forkTooltip, forkTooltipPoint). */
   sessionForkBadge: string;
   forkFromMissing: string;
+  /** The Threads rail's inline lineage line: which conversation a live thread
+   *  was branched from. `{source}` is that conversation's title, or its
+   *  shortened session id when it is not in either listing. */
+  threadForkFrom: string;
   forkTooltip: string;
   forkTooltipPoint: string;
   // Agent panel
@@ -749,6 +753,7 @@ const en: Translations = {
   noSearchResults: "No matching sessions",
   sessionForkBadge: "Fork",
   forkFromMissing: "Branched from “{source}” — not in this list",
+  threadForkFrom: "Branched from “{source}”",
   forkTooltip: "Branched from “{source}”: the branch keeps that conversation up to the point it was cut, and the turns after it stayed behind.",
   forkTooltipPoint: "The conversation it came from had {count} messages at that point.",
   // Agent panel
@@ -1134,6 +1139,7 @@ const zhCn: Translations = {
   noSearchResults: "没有匹配的会话",
   sessionForkBadge: "分叉",
   forkFromMissing: "分叉自「{source}」— 不在当前列表中",
+  threadForkFrom: "分叉自「{source}」",
   forkTooltip: "分叉自「{source}」：此分支保留到分叉点为止的对话，其后的轮次留在原会话。",
   forkTooltipPoint: "分叉时原会话已有 {count} 条消息。",
   // Agent panel
@@ -1555,6 +1561,7 @@ export function webviewTranslations(tr: Translations) {
     noSearchResults: tr.noSearchResults,
     sessionForkBadge: tr.sessionForkBadge,
     forkFromMissing: tr.forkFromMissing,
+    threadForkFrom: tr.threadForkFrom,
     forkTooltip: tr.forkTooltip,
     forkTooltipPoint: tr.forkTooltipPoint,
     // Agent panel

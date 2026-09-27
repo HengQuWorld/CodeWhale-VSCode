@@ -2735,8 +2735,15 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
 
     this.threadListFetchInFlight = true;
     let threads: ThreadSummary[] | null;
+    let sessionByThread: Map<string, string> | null = null;
     try {
-      threads = await this.fetchThreadSummaries(token);
+      // The branch lines the rail draws come from the other fetch, which is
+      // best-effort: losing it costs the lines, never the rows. A quiet pass
+      // never paints, so it never asks for them at all.
+      [threads, sessionByThread] = await Promise.all([
+        this.fetchThreadSummaries(token),
+        quiet ? Promise.resolve(null) : this.fetchThreadSessions(token),
+      ]);
     } finally {
       this.threadListFetchInFlight = false;
     }
@@ -2748,6 +2755,13 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       // A quiet pass has nothing to report to, so it just tries again later.
       if (!quiet) this.postMessage({ type: "threadListLoading", loading: false, failed: true });
       return;
+    }
+
+    if (sessionByThread) {
+      for (const row of threads) {
+        const session = sessionByThread.get(row.id);
+        if (session) row.session_id = session;
+      }
     }
 
     this.threadTitles.clear();
@@ -2771,6 +2785,32 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       threads,
       showAllWorkspaces: this.showAllWorkspaces,
     });
+  }
+
+  /**
+   * Which saved session each live thread writes to, keyed by thread id.
+   *
+   * `GET /v1/threads/summary` — the route the rail paints from — omits the
+   * binding, and the binding is what links a branch to the conversation it was
+   * cut from: the document a fork is given names its source in
+   * `parent_session_id`, while the two conversations carry the same title.
+   * Read from `GET /v1/threads`, which answers with the thread records
+   * themselves. Best-effort by design — a failure here leaves every row in
+   * place and every row unmarked, which is what the rail did before this.
+   */
+  private async fetchThreadSessions(token: number): Promise<Map<string, string> | null> {
+    try {
+      const records = await this.api.listThreads({ limit: 100 });
+      if (token !== this.threadListRefreshToken) return null;
+      const byThread = new Map<string, string>();
+      for (const record of records) {
+        if (record.id && record.session_id) byThread.set(record.id, record.session_id);
+      }
+      return byThread;
+    } catch (err) {
+      this.debugLog(`fetchThreadSessions failed: ${getErrorMessage(err)}`);
+      return null;
+    }
   }
 
   /**

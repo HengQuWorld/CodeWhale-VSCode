@@ -325,6 +325,23 @@ export function getWebviewCss(): string {
       text-overflow: ellipsis;
       margin-top: 1px;
     }
+    /* A live thread branched from another conversation, said inline. The rail
+       groups by what a thread is doing, so a branch can sit in a different
+       group from its source; the line is what ties the two rows together when
+       both carry the same title. */
+    .thread-item .thread-fork-origin {
+      font-size: 0.9em;
+      color: var(--accent);
+      opacity: 0.85;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      margin-top: 1px;
+    }
+    .thread-item.active .thread-fork-origin {
+      color: rgba(255,255,255,0.85);
+      opacity: 1;
+    }
     .thread-item .thread-meta {
       display: flex;
       gap: 6px;
