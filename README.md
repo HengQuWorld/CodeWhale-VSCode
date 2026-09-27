@@ -1,6 +1,6 @@
 # CodeWhale for VS Code — a lightweight GUI frontend for the CodeWhale agent
 
-[![Version](https://img.shields.io/badge/version-0.8.0-blue)](https://github.com/HengQuWorld/CodeWhale-VSCode)
+[![Version](https://img.shields.io/badge/version-0.8.1-blue)](https://github.com/HengQuWorld/CodeWhale-VSCode)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![CI](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/ci.yml/badge.svg)](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/ci.yml)
 [![Release](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/release.yml/badge.svg)](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/release.yml)
@@ -18,7 +18,7 @@ The split is deliberate: **the agent stays in the engine, the ergonomics stay in
 
 | | |
 |---|---|
-| VSIX size (0.8.0) | ~350 KB |
+| VSIX size (0.8.1) | ~350 KB |
 | Runtime npm dependencies | **none** — webpack inlines the extension's own TypeScript (and `marked` for rendering) |
 | Bundled engine or model | **none** — `codewhale` is a separate native binary |
 | Duplicated agent logic | **none** — the GUI is an adapter over the engine's local runtime API |
@@ -28,9 +28,9 @@ The frontend is a webview. `ChatProvider` runs in the extension host, speaks HTT
 
 Because nothing about the agent is copied into the extension, the engine can ship new capabilities and fixes without a frontend release.
 
-### Engine compatibility for 0.8.0
+### Engine compatibility for 0.8.1
 
-0.8.0 is verified against engine **v0.10.0**, and everything it ships is client-side — it all lights up on v0.10.0 the moment you install it, except the **Branch** row, which waits on an engine route no published engine carries yet. The behaviours below need engine work newer than v0.10.0, and no published engine carries any of it:
+0.8.1 is verified against engine **v0.10.0**, and everything it ships is client-side — it all lights up on v0.10.0 the moment you install it. The behaviours below, carried from earlier releases, still need engine work newer than v0.10.0, and no published engine carries any of it:
 
 - **Branch a conversation from any of its answers** — needs [Codewhale#6580](https://github.com/Hmbown/Codewhale/pull/6580), merged 2026-09-26 and not yet released. On v0.10.0 the Branch row is not offered at all, rather than degrading to a fork of the last turn.
 - **A branch's first message, when the turn it was cut from lost a tool call** — needs [Codewhale#6664](https://github.com/Hmbown/Codewhale/pull/6664), still open. A fork of a conversation holding a failed or interrupted tool call could fail its first message until an engine carries the fix.
@@ -112,12 +112,12 @@ npx @vscode/vsce package --no-dependencies
 Then install the generated `.vsix` (`Extensions: Install from VSIX...`), or from a terminal:
 
 ```bash
-code --install-extension ./brotherwhale-vscode-0.8.0.vsix --force
+code --install-extension ./brotherwhale-vscode-0.8.1.vsix --force
 ```
 
 > **Trae CN users:** if `code` is not on your `PATH`, use the bundled CLI:
 > ```bash
-> "/Applications/Trae CN.app/Contents/Resources/app/bin/code" --install-extension ./brotherwhale-vscode-0.8.0.vsix --force
+> "/Applications/Trae CN.app/Contents/Resources/app/bin/code" --install-extension ./brotherwhale-vscode-0.8.1.vsix --force
 > ```
 
 ### 3. Open it
@@ -280,7 +280,7 @@ Reloading or closing the extension stops that window's Runtime and interrupts ac
 
 **Installing a VSIX**
 ```bash
-code --install-extension /path/to/brotherwhale-vscode-0.8.0.vsix --force
+code --install-extension /path/to/brotherwhale-vscode-0.8.1.vsix --force
 ```
 
 ## Privacy & data

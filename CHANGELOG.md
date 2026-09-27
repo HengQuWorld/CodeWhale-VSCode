@@ -1,8 +1,8 @@
 # Change Log
 
-## Unreleased
+## 0.8.1
 
-Everything here is client-side; nothing in this section needs a newer engine than 0.8.0 did.
+Client-side only; verified against engine **v0.10.0**.
 
 ### Bug Fixes
 
