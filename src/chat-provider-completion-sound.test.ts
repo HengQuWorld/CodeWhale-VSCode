@@ -2,11 +2,11 @@
  * When the host rings the completion cue.
  *
  * The cue is played by `utils/completion-sound` (which owns the setting, the
- * floor between cues and the platform player); what these tests pin is the
- * *timing*: a finished turn rings, a turn that failed or was interrupted does
- * not, a compaction pass is not a conversation turn and does not ring, and a
- * turn finishing on a thread the view is not on rings too — that last case is
- * what the cue is for.
+ * floor between cues, the path it is willing to vouch for and the platform
+ * player); what these tests pin is the *timing*: a finished turn rings, a turn
+ * that failed or was interrupted does not, a compaction pass is not a
+ * conversation turn and does not ring, and a turn finishing on a thread the
+ * view is not on rings too — that last case is what the cue is for.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -38,7 +38,7 @@ import { playCompletionSound } from "./utils/completion-sound";
 const cue = playCompletionSound as unknown as ReturnType<typeof vi.fn>;
 const EXTENSION_PATH = "/ext";
 
-function createProvider() {
+function createProvider(extensionPath: string | null = EXTENSION_PATH) {
   const api = {
     bindEngine: vi.fn(),
     ensureReady: vi.fn(async () => undefined),
@@ -49,7 +49,11 @@ function createProvider() {
     listSessions: vi.fn(async () => ({ sessions: [] })),
     listTasks: vi.fn(async () => ({ tasks: [], counts: { active: 0, completed: 0, failed: 0 } })),
   };
-  const provider = new ChatProvider({ fsPath: EXTENSION_PATH } as any, {} as any, api as any);
+  const provider = new ChatProvider(
+    (extensionPath === null ? {} : { fsPath: extensionPath }) as any,
+    {} as any,
+    api as any,
+  );
 
   provider.postMessage = vi.fn();
   provider.refreshWorkPanel = vi.fn();
@@ -92,6 +96,19 @@ describe("the cue for the conversation being watched", () => {
     (provider as any).handleRuntimeEvent(turnCompleted("turn-1", "completed"));
 
     expect(cue).toHaveBeenCalledExactlyOnceWith(EXTENSION_PATH);
+  });
+
+  it("is never asked for when the host has no extension path", () => {
+    // A provider built without an extension URI — a harness, a view resolved
+    // before the extension is in place — must not ask for a cue at all: the
+    // path it would pass is a stand-in, and a player resolves a stand-in
+    // against the process's working directory, which is how the extension's
+    // own tests came to ring the chime out of the repository they ran in.
+    const { provider } = createProvider(null);
+
+    (provider as any).handleRuntimeEvent(turnCompleted("turn-1", "completed"));
+
+    expect(cue).not.toHaveBeenCalled();
   });
 
   it("stays silent when the turn failed", () => {

@@ -239,6 +239,19 @@ threadsPanel.classList.remove('open');
 - [ ] 至少在 IDE 重新加载一次 webview 验证状态从 "Initializing" 变 "Ready"
 - [ ] 修改量 > 50 行时，分批 commit，便于 `git bisect` 定位问题
 
+### 宿主副作用（提示音、通知、外部进程）只能从"自己的东西"触发
+
+> 根因案例（2026-09-27 提示音测试期乱响）：`playCompletionCue()` 用 `this.extensionUri?.fsPath ?? ""` 兜底，测试里 `new ChatProvider({} as any, ...)` 于是传入空串；`path.join("", "media", "completion-chime.wav")` 得到的是**相对路径**，而 `/usr/bin/afplay` 是按**宿主进程的工作目录**解析它的——仓库根目录下真有这个 WAV，所以 `npm test` 在开发机上真的播了提示音（一次全量测试 5 次，几个 vitest worker 各一次；页面里看到的是"会话过程中连续响好几次"）。
+
+规则：
+
+- 提示音只播**扩展自己带的那个文件**：路径必须来自**绝对**扩展目录，且 `media/completion-chime.wav` **确实存在**，两条缺一即静默（`utils/completion-sound.ts` 的 `bundledCuePath`）。相对路径、或不存在的文件，一律不播——播放器拿相对路径去问"当前工作目录"，那不是我们能担保的对象。
+- 空路径不做兜底：`playCompletionCue()` 在没有 `extensionUri.fsPath` 时直接返回，不传 `""`。
+- 写测试时：
+  - 验证"某一轮会响"→ 把 `./utils/completion-sound` mock 掉（见 `chat-provider-completion-sound.test.ts`），只测接线，不碰播放器。
+  - 验证播放本身（设置开关、间隔下限、播放器选择）→ 用 `completion-sound.test.ts` 的注入宿主：时钟 / 平台 / PATH 查找全部注入，需要真文件就建临时扩展目录。
+  - 别给 `ChatProvider` 传真实扩展目录，除非你真的想让这次测试发声。
+
 ---
 
 ## TUI / GUI 功能一致性原则

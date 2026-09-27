@@ -9,6 +9,12 @@
  * a bundled WAV handed to the platform's player, best-effort and out of band, so
  * a machine with no player costs a silent skip and never the turn that just
  * ended. The cue itself is an original two-note chime — see `media/README.md`.
+ *
+ * The cue is that bundled file and nothing else: it is played from the
+ * extension's own absolute path only while the file is really there, because a
+ * path this host cannot vouch for is resolved by the player against whatever
+ * directory the process runs in, and a unit test must never be able to make the
+ * user's speakers a side effect.
  */
 
 import { spawn } from "child_process";
@@ -106,6 +112,34 @@ function commandIsRunnable(command: string): boolean {
 }
 
 /**
+ * The bundled cue's absolute path, or undefined when this host cannot vouch for
+ * the file.
+ *
+ * A cue is *this extension's own* file and nothing else, so two things have to
+ * hold before a player is even considered: `extensionPath` is the absolute
+ * directory the provider was handed (`extensionUri.fsPath`), and the cue is
+ * really there.
+ *
+ * A relative path fails the first test, and that is not pedantry: the player
+ * resolves it against whatever directory the host process happens to run in.
+ * That is how `npm test` came to ring the cue out of the repository under test
+ * — a provider built without an extension URI passed `""`, the path degraded to
+ * `media/completion-chime.wav`, and that file really does sit in the repository
+ * the tests run from, so a unit test played the chime for real (five times per
+ * full run on the machine of whoever ran it). Silence is the only safe answer
+ * for a path we cannot vouch for.
+ */
+export function bundledCuePath(extensionPath: string): string | undefined {
+  if (!extensionPath || !path.isAbsolute(extensionPath)) return undefined;
+  const file = path.join(extensionPath, "media", COMPLETION_SOUND_FILE);
+  try {
+    return fs.existsSync(file) ? file : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * What this machine says about playing a cue: the clock, the platform and
  * whether a player can be run. All three default to the real host, and all
  * three are injectable so a test pins them instead of inheriting them — the
@@ -120,7 +154,8 @@ export interface CompletionSoundHost {
 /**
  * Play the cue for a finished turn. Returns true when a player was started.
  *
- * Silent no-ops: the setting is off, the last cue is still within the floor, or
+ * Silent no-ops: the setting is off, the extension path names no cue we can
+ * vouch for (see `bundledCuePath`), the last cue is still within the floor, or
  * this host has no player to run.
  */
 export function playCompletionSound(
@@ -129,8 +164,12 @@ export function playCompletionSound(
 ): boolean {
   const { nowMs = Date.now(), platform = process.platform, isRunnable } = host;
   if (!completionSoundEnabled()) return false;
+  // Settled before the floor and before any player is looked up: a path this
+  // host cannot vouch for is not a cue, so nothing downstream has to reason
+  // about it (and no PATH walk is spent on it).
+  const file = bundledCuePath(extensionPath);
+  if (!file) return false;
   if (nowMs - lastPlayedMs < COMPLETION_SOUND_MIN_INTERVAL_MS) return false;
-  const file = path.join(extensionPath, "media", COMPLETION_SOUND_FILE);
   const resolved = resolveSoundCommand(platform, file, isRunnable);
   if (!resolved) return false;
   // Take the slot before spawning: a burst of completions is throttled whether

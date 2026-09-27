@@ -3,15 +3,16 @@
  *
  * What matters here is that the cue is *stoppable and quiet when it should be*:
  * the user's setting wins over everything, a burst of finished turns is one
- * sound rather than a rattle, and a machine without a player costs nothing but
- * a false. Every test gets a fresh module, because the floor between cues is
- * module state and one test's clock must not leak into the next.
+ * sound rather than a rattle, a path this host cannot vouch for is silence, and
+ * a machine without a player costs nothing but a false. Every test gets a fresh
+ * module, because the floor between cues is module state and one test's clock
+ * must not leak into the next.
  *
  * Which player this machine happens to have is not part of any expectation: the
  * host's clock, platform and PATH check are all injected, so these tests answer
  * the same on macOS and on the Linux machine CI runs them on.
  */
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -37,10 +38,19 @@ vi.mock("child_process", async (importOriginal) => ({
   spawn: (...args: unknown[]) => state.spawn(...args),
 }));
 
-const EXTENSION = "/ext";
-const CHIME = "/ext/media/completion-chime.wav";
-/** A host that can always play: the player choice is what is under test. */
+/** A player that is always there: the player *choice* is what those tests pin. */
 const HOST = { platform: "darwin" as NodeJS.Platform, isRunnable: () => true };
+
+/** A path for the player-selection tests, which never touch the filesystem. */
+const ANY_CUE = "/ext/media/completion-chime.wav";
+
+/**
+ * A real extension directory for the delivery tests, because a cue is played
+ * only from a path this extension can vouch for: absolute, and holding the
+ * bundled file.
+ */
+let extensionDir = "";
+let cue = "";
 
 beforeEach(() => {
   state.enabled = true;
@@ -51,6 +61,14 @@ beforeEach(() => {
     state.children.push(child);
     return child;
   });
+  extensionDir = fs.mkdtempSync(path.join(os.tmpdir(), "completion-cue-ext-"));
+  fs.mkdirSync(path.join(extensionDir, "media"), { recursive: true });
+  fs.writeFileSync(path.join(extensionDir, "media", "completion-chime.wav"), "");
+  cue = path.join(extensionDir, "media", "completion-chime.wav");
+});
+
+afterEach(() => {
+  fs.rmSync(extensionDir, { recursive: true, force: true });
 });
 
 /** A module instance whose floor starts fresh. */
@@ -62,16 +80,16 @@ async function freshModule() {
 describe("completion sound players", () => {
   it("uses afplay on macOS", async () => {
     const { completionSoundCommands } = await freshModule();
-    expect(completionSoundCommands("darwin", CHIME)).toEqual([
-      { command: "/usr/bin/afplay", args: [CHIME] },
+    expect(completionSoundCommands("darwin", ANY_CUE)).toEqual([
+      { command: "/usr/bin/afplay", args: [ANY_CUE] },
     ]);
   });
 
   it("tries paplay before aplay on Linux", async () => {
     const { completionSoundCommands } = await freshModule();
-    expect(completionSoundCommands("linux", CHIME)).toEqual([
-      { command: "paplay", args: [CHIME] },
-      { command: "aplay", args: ["-q", CHIME] },
+    expect(completionSoundCommands("linux", ANY_CUE)).toEqual([
+      { command: "paplay", args: [ANY_CUE] },
+      { command: "aplay", args: ["-q", ANY_CUE] },
     ]);
   });
 
@@ -86,21 +104,21 @@ describe("completion sound players", () => {
 
   it("offers nothing on a platform it has no player for", async () => {
     const { completionSoundCommands } = await freshModule();
-    expect(completionSoundCommands("sunos", CHIME)).toEqual([]);
+    expect(completionSoundCommands("sunos", ANY_CUE)).toEqual([]);
   });
 
   it("resolves to the first player that is actually there", async () => {
     const { resolveSoundCommand } = await freshModule();
     const present = (command: string) => command === "aplay";
-    expect(resolveSoundCommand("linux", CHIME, present)).toEqual({
+    expect(resolveSoundCommand("linux", ANY_CUE, present)).toEqual({
       command: "aplay",
-      args: ["-q", CHIME],
+      args: ["-q", ANY_CUE],
     });
   });
 
   it("resolves to nothing when no candidate is installed", async () => {
     const { resolveSoundCommand } = await freshModule();
-    expect(resolveSoundCommand("linux", CHIME, () => false)).toBeUndefined();
+    expect(resolveSoundCommand("linux", ANY_CUE, () => false)).toBeUndefined();
   });
 
   it("looks for a bare player name on PATH, and finds nothing when it is not there", async () => {
@@ -113,9 +131,9 @@ describe("completion sound players", () => {
       // The default check is the one under test here: a name it can only
       // answer for by walking PATH.
       process.env.PATH = withPlayer;
-      expect(resolveSoundCommand("linux", CHIME)).toEqual({ command: "paplay", args: [CHIME] });
+      expect(resolveSoundCommand("linux", ANY_CUE)).toEqual({ command: "paplay", args: [ANY_CUE] });
       process.env.PATH = withoutPlayer;
-      expect(resolveSoundCommand("linux", CHIME)).toBeUndefined();
+      expect(resolveSoundCommand("linux", ANY_CUE)).toBeUndefined();
     } finally {
       process.env.PATH = previousPath;
       fs.rmSync(withPlayer, { recursive: true, force: true });
@@ -124,12 +142,45 @@ describe("completion sound players", () => {
   });
 });
 
+describe("the cue this host will play", () => {
+  it("is the bundled file under an absolute extension path", async () => {
+    const { bundledCuePath } = await freshModule();
+    expect(bundledCuePath(extensionDir)).toBe(cue);
+  });
+
+  it("is nothing for a relative path, however real the file it names", async () => {
+    const { bundledCuePath } = await freshModule();
+    // `media/completion-chime.wav` exists relative to this repository — the
+    // directory vitest runs in — which is exactly the trap: a player resolves a
+    // relative path against the working directory, so this path would play the
+    // repository's own cue. It is not this extension's file, and it is not a cue.
+    expect(fs.existsSync(path.join("media", "completion-chime.wav"))).toBe(true);
+
+    expect(bundledCuePath("")).toBeUndefined();
+    expect(bundledCuePath("media")).toBeUndefined();
+    expect(bundledCuePath(".")).toBeUndefined();
+  });
+
+  it("is nothing when the file is not on disk", async () => {
+    const { bundledCuePath } = await freshModule();
+    const bare = fs.mkdtempSync(path.join(os.tmpdir(), "completion-cue-bare-"));
+    try {
+      expect(bundledCuePath(bare)).toBeUndefined();
+      // A media directory without the cue in it is still not a cue.
+      fs.mkdirSync(path.join(bare, "media"));
+      expect(bundledCuePath(bare)).toBeUndefined();
+    } finally {
+      fs.rmSync(bare, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("playCompletionSound", () => {
   it("starts the platform player on the bundled cue", async () => {
     const { playCompletionSound } = await freshModule();
 
-    expect(playCompletionSound(EXTENSION, { ...HOST, nowMs: 1_000 })).toBe(true);
-    expect(state.spawn).toHaveBeenCalledExactlyOnceWith("/usr/bin/afplay", [CHIME], {
+    expect(playCompletionSound(extensionDir, { ...HOST, nowMs: 1_000 })).toBe(true);
+    expect(state.spawn).toHaveBeenCalledExactlyOnceWith("/usr/bin/afplay", [cue], {
       stdio: "ignore",
       windowsHide: true,
     });
@@ -139,13 +190,13 @@ describe("playCompletionSound", () => {
     const { playCompletionSound } = await freshModule();
 
     expect(
-      playCompletionSound(EXTENSION, {
+      playCompletionSound(extensionDir, {
         nowMs: 1_000,
         platform: "linux",
         isRunnable: (command) => command === "aplay",
       }),
     ).toBe(true);
-    expect(state.spawn).toHaveBeenCalledExactlyOnceWith("aplay", ["-q", CHIME], {
+    expect(state.spawn).toHaveBeenCalledExactlyOnceWith("aplay", ["-q", cue], {
       stdio: "ignore",
       windowsHide: true,
     });
@@ -156,15 +207,38 @@ describe("playCompletionSound", () => {
     state.enabled = false;
 
     expect(completionSoundEnabled()).toBe(false);
-    expect(playCompletionSound(EXTENSION, { ...HOST, nowMs: 1_000 })).toBe(false);
+    expect(playCompletionSound(extensionDir, { ...HOST, nowMs: 1_000 })).toBe(false);
     expect(state.spawn).not.toHaveBeenCalled();
+  });
+
+  it("stays silent for a path it cannot vouch for, and still rings the next real cue", async () => {
+    const { playCompletionSound } = await freshModule();
+
+    // The regression this pins: a provider built without an extension URI asks
+    // with `""`, which used to be joined into the relative path
+    // `media/completion-chime.wav` and played — out of the working directory,
+    // making the chime a side effect of `npm test`.
+    expect(playCompletionSound("", { ...HOST, nowMs: 1_000 })).toBe(false);
+    expect(playCompletionSound("media", { ...HOST, nowMs: 2_000 })).toBe(false);
+    const bare = fs.mkdtempSync(path.join(os.tmpdir(), "completion-cue-nocue-"));
+    try {
+      expect(playCompletionSound(bare, { ...HOST, nowMs: 3_000 })).toBe(false);
+    } finally {
+      fs.rmSync(bare, { recursive: true, force: true });
+    }
+    expect(state.spawn).not.toHaveBeenCalled();
+
+    // None of that was a cue: the next finished turn rings as usual, and nothing
+    // about the refusals is carried over into it.
+    expect(playCompletionSound(extensionDir, { ...HOST, nowMs: 4_000 })).toBe(true);
+    expect(state.spawn).toHaveBeenCalledTimes(1);
   });
 
   it("stays silent when this host has no player", async () => {
     const { playCompletionSound } = await freshModule();
 
-    expect(playCompletionSound(EXTENSION, { nowMs: 1_000, isRunnable: () => false })).toBe(false);
-    expect(playCompletionSound(EXTENSION, { nowMs: 2_000, platform: "sunos" })).toBe(false);
+    expect(playCompletionSound(extensionDir, { nowMs: 1_000, isRunnable: () => false })).toBe(false);
+    expect(playCompletionSound(extensionDir, { nowMs: 2_000, platform: "sunos" })).toBe(false);
     expect(state.spawn).not.toHaveBeenCalled();
   });
 
@@ -172,12 +246,12 @@ describe("playCompletionSound", () => {
     const { COMPLETION_SOUND_MIN_INTERVAL_MS, playCompletionSound } = await freshModule();
     const host = { ...HOST, nowMs: 10_000 };
 
-    expect(playCompletionSound(EXTENSION, host)).toBe(true);
+    expect(playCompletionSound(extensionDir, host)).toBe(true);
     expect(
-      playCompletionSound(EXTENSION, { ...host, nowMs: 10_000 + COMPLETION_SOUND_MIN_INTERVAL_MS - 1 }),
+      playCompletionSound(extensionDir, { ...host, nowMs: 10_000 + COMPLETION_SOUND_MIN_INTERVAL_MS - 1 }),
     ).toBe(false);
     expect(
-      playCompletionSound(EXTENSION, { ...host, nowMs: 10_000 + COMPLETION_SOUND_MIN_INTERVAL_MS }),
+      playCompletionSound(extensionDir, { ...host, nowMs: 10_000 + COMPLETION_SOUND_MIN_INTERVAL_MS }),
     ).toBe(true);
     expect(state.spawn).toHaveBeenCalledTimes(2);
   });
@@ -185,7 +259,7 @@ describe("playCompletionSound", () => {
   it("listens for the player failing, so a broken one never reaches the turn", async () => {
     const { playCompletionSound } = await freshModule();
 
-    playCompletionSound(EXTENSION, { ...HOST, nowMs: 1_000 });
+    playCompletionSound(extensionDir, { ...HOST, nowMs: 1_000 });
     const child = state.children[0];
     // Not awaited and not reported: an 'error' with no listener would take the
     // extension host down with it.
@@ -199,6 +273,6 @@ describe("playCompletionSound", () => {
       throw new Error("EMFILE");
     });
 
-    expect(playCompletionSound(EXTENSION, { ...HOST, nowMs: 1_000 })).toBe(false);
+    expect(playCompletionSound(extensionDir, { ...HOST, nowMs: 1_000 })).toBe(false);
   });
 });

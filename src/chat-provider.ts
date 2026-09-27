@@ -441,9 +441,16 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
    * one being watched or a parked one whose watch is reporting. The setting,
    * the floor between cues and the platform player all live in
    * `utils/completion-sound`.
+   *
+   * A provider with no extension URI asks for nothing. The alternative — a
+   * stand-in empty path — is what let a test-harness provider play the chime
+   * for real: the player resolves a relative path against the process's own
+   * working directory, and this repository's working directory holds the cue.
    */
   private playCompletionCue(): void {
-    playCompletionSound(this.extensionUri?.fsPath ?? "");
+    const extensionPath = this.extensionUri?.fsPath;
+    if (!extensionPath) return;
+    playCompletionSound(extensionPath);
   }
 
   private debugLog(msg: string): void {
