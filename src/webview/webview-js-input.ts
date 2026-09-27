@@ -241,6 +241,11 @@ export function getInputScript(tr: WebviewTranslations): string {
     } else {
       vscode.postMessage({ type: 'sendMessage', text: text });
     }
+    // The disk copy: the host persists per workspace, mirroring exactly the
+    // unshift + cap above, so the list survives a window reload / restart and
+    // comes back via 'inputHistory'. Sent after the action itself, so the
+    // turn is never kept waiting on bookkeeping.
+    vscode.postMessage({ type: 'inputHistoryPush', text: text });
   }
 
   // ── Button capability state ──
@@ -630,6 +635,18 @@ export function getInputScript(tr: WebviewTranslations): string {
   var historyIndex = -1;
   var draftBeforeHistory = '';
 
+  /** Replace the in-memory history with the host's persisted copy, newest
+   *  first. Arrives once per webview load, before the user has sent anything
+   *  here, so replacing wholesale cannot drop entries they are browsing. */
+  function setInputHistory(entries) {
+    if (!Array.isArray(entries)) return;
+    messageHistory = entries.filter(function(e) {
+      return typeof e === 'string' && e.length > 0;
+    }).slice(0, 200);
+    historyIndex = -1;
+    draftBeforeHistory = '';
+  }
+
   inputEl.addEventListener('keydown', function(e) {
     if (isComposing) return;
     if (slashMenuOpen) {
@@ -727,6 +744,7 @@ export function getInputScript(tr: WebviewTranslations): string {
     getCurrentAttachments: function() { return currentAttachments; },
     setCurrentAttachments: function(v) { currentAttachments = v; },
     setAttachmentPreview: setAttachmentPreview,
+    setInputHistory: setInputHistory,
     updateSendStopButton: updateSendStopButton,
     setComposerText: setComposerText,
     setHostOperation: setHostOperation,

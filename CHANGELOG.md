@@ -6,6 +6,8 @@ Everything here is client-side; nothing in this section needs a newer engine tha
 
 ### Bug Fixes
 
+- **The input box remembers what you sent, even after a restart** — Pressing ↑ to bring back an earlier prompt only worked within one session: restart the window (or reload the panel) and the list was empty, so a prompt you had spent time writing had to be retyped from memory. What you send is now kept per workspace on disk and handed back when the panel comes up, so ↑/↓ walk the same entries as before. Each workspace keeps its own list, it holds the same 200 entries as before, and slash commands are kept too.
+
 - **The chime only rings when something has finished** — It could also be heard while nothing had: the cue was looked up relative to the directory the host process happened to run in, so running this extension's own tests played it, several times per run, on whoever ran them. The cue now comes only from the extension's own bundled file, by absolute path, and only if that file is really there — any other path is silence.
 
 - **The sidebar comes back the way you left it** — Keeping the sidebar open lasted only until the window was reloaded: the next launch showed it shut again, and closing it was forgotten the same way, so a sidebar you actually work with had to be reopened every time. Whether it is open is now written down beside the width — the same way the Activity sections you hide are — and restored before the panel first paints, so a sidebar left open is never shown shut first. The 📋 toggle, the ✕ and `Esc` all record the choice; a window that has never made one keeps the old default and opens shut.

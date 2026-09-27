@@ -50,6 +50,7 @@ import {
   type RecordedEdit,
 } from "./utils/diff-utils";
 import { resolveRecordedFilePath } from "./utils/file-paths";
+import { loadInputHistory, pushInputHistory } from "./utils/input-history";
 import { extractCompactionSummary } from "./utils/compaction-summary";
 import { playCompletionSound } from "./utils/completion-sound";
 import { MAX_EAGER_HASH_BYTES, sha256OfFile } from "./utils/file-hash";
@@ -598,6 +599,13 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
           this.refreshTaskList(),
         ]);
         break;
+      case "inputHistoryPush":
+        // The composer records what was sent so ↑/↓ can walk it back. The
+        // webview's copy dies with the panel; this is the disk copy.
+        if (typeof msg.text === "string") {
+          pushInputHistory(this.currentWorkspaceKey(), msg.text);
+        }
+        break;
       case "webviewReady":
         try {
           // A reloaded webview has lost both its preview cache and its copy
@@ -607,6 +615,9 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
           // their thumbs come back together.
           this.reannounceAttachmentPreviews();
           this.postAttachmentsChanged();
+          // Its input history went with it: hand back the disk copy so ↑/↓
+          // walk the same entries after a reload as before.
+          this.postInputHistory();
           await this.api.ensureReady();
           await this.syncWebviewState();
         } catch (err) {
@@ -2119,6 +2130,23 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       type: "attachmentPreview",
       id: att.id,
       previewUrl: att.previewUrl,
+    });
+  }
+
+  /** The workspace whose input-history file the panel reads and writes. The
+   *  same folder the engine keys its runtime store by, so a window reopening
+   *  a workspace comes back to the history it wrote — and a different
+   *  workspace does not inherit it. */
+  private currentWorkspaceKey(): string {
+    return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? "";
+  }
+
+  /** Publish the composer's persisted input history, newest first, for a
+   *  webview that just (re)loaded and therefore has an empty copy. */
+  private postInputHistory(): void {
+    this.postMessage({
+      type: "inputHistory",
+      entries: loadInputHistory(this.currentWorkspaceKey()),
     });
   }
 

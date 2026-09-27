@@ -1357,6 +1357,13 @@ ${PROVIDER_PICKER_JS}
         window.__wvInput.setAttachmentPreview(msg.id, msg.previewUrl);
         break;
 
+      // The host's persisted copy of what this workspace has sent, newest
+      // first. Replaces the in-memory list wholesale — it arrives only when
+      // the webview (re)loads and its own copy is empty or stale.
+      case 'inputHistory':
+        window.__wvInput.setInputHistory(Array.isArray(msg.entries) ? msg.entries : []);
+        break;
+
       case 'clearChat':
         showContinueSession(false);
         window.__wvSidebar.closeTaskDetail();

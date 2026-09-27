@@ -164,6 +164,8 @@ function createHarness() {
       windowObj.__wvInput.renderAttachments();
     } else if (msg.type === "attachmentPreview") {
       windowObj.__wvInput.setAttachmentPreview(msg.id, msg.previewUrl);
+    } else if (msg.type === "inputHistory") {
+      windowObj.__wvInput.setInputHistory(msg.entries || []);
     }
   };
 
@@ -470,7 +472,10 @@ describe("webview-js-input runtime: typing never resizes the textarea", () => {
     h.input.value = "hello";
     h.input.dispatch("keydown", syntheticEvent({ key: "Enter", shiftKey: false }));
 
-    expect(h.postMessages).toEqual([{ type: "sendMessage", text: "hello" }]);
+    expect(h.postMessages).toEqual([
+      { type: "sendMessage", text: "hello" },
+      { type: "inputHistoryPush", text: "hello" },
+    ]);
     expect(h.input.style.height).toBe("150px");
   });
 });
@@ -496,7 +501,10 @@ describe("webview-js-input runtime: the send button is the Stop button mid-turn"
 
     h.getElement("btn-send-stop").dispatch("click", syntheticEvent());
 
-    expect(h.postMessages).toEqual([{ type: "sendMessage", text: "hello" }]);
+    expect(h.postMessages).toEqual([
+      { type: "sendMessage", text: "hello" },
+      { type: "inputHistoryPush", text: "hello" },
+    ]);
   });
 
   it("names the button for the action it will take", () => {
@@ -532,7 +540,10 @@ describe("webview-js-input runtime: Enter steers the turn that is running", () =
 
     h.input.dispatch("keydown", syntheticEvent({ key: "Enter", shiftKey: false }));
 
-    expect(h.postMessages).toEqual([{ type: "steer", text: "focus on the tests" }]);
+    expect(h.postMessages).toEqual([
+      { type: "steer", text: "focus on the tests" },
+      { type: "inputHistoryPush", text: "focus on the tests" },
+    ]);
   });
 
   it("blocks the prompt when the engine cannot steer", () => {
@@ -556,7 +567,77 @@ describe("webview-js-input runtime: Enter steers the turn that is running", () =
 
     h.input.dispatch("keydown", syntheticEvent({ key: "Enter", shiftKey: false }));
 
-    expect(h.postMessages).toEqual([{ type: "sendMessage", text: "hello" }]);
+    expect(h.postMessages).toEqual([
+      { type: "sendMessage", text: "hello" },
+      { type: "inputHistoryPush", text: "hello" },
+    ]);
+  });
+});
+
+describe("webview-js-input runtime: persisted input history", () => {
+  /** The restart: a fresh harness is a fresh webview — empty memory — being
+   *  handed the host's disk copy, which is exactly what the inputHistory
+   *  message carries. */
+  function restartedWith(entries: string[]) {
+    const h = createHarness();
+    h.receive({ type: "inputHistory", entries });
+    return h;
+  }
+
+  function pressUp(el: any): void {
+    el.selectionStart = 0;
+    el.selectionEnd = 0;
+    el.dispatch("keydown", syntheticEvent({ key: "ArrowUp" }));
+  }
+
+  function pressDown(el: any): void {
+    el.selectionStart = el.value.length;
+    el.selectionEnd = el.value.length;
+    el.dispatch("keydown", syntheticEvent({ key: "ArrowDown" }));
+  }
+
+  it("walks the restored entries with ↑ after a restart", () => {
+    const h = restartedWith(["newest", "oldest"]);
+    pressUp(h.input);
+    expect(h.input.value).toBe("newest");
+    pressUp(h.input);
+    expect(h.input.value).toBe("oldest");
+    // ↓ walks back toward the draft, which was empty.
+    pressDown(h.input);
+    expect(h.input.value).toBe("newest");
+  });
+
+  it("sends a restored entry and reports it to the host again", () => {
+    const h = restartedWith(["earlier question"]);
+    pressUp(h.input);
+    expect(h.input.value).toBe("earlier question");
+    h.input.dispatch("keydown", syntheticEvent({ key: "Enter", shiftKey: false }));
+    const pushes = h.postMessages.filter((m) => m.type === "inputHistoryPush");
+    expect(pushes).toEqual([{ type: "inputHistoryPush", text: "earlier question" }]);
+  });
+
+  it("drops junk from a malformed hand-back instead of crashing", () => {
+    const h = restartedWith([42, "real", null, ""] as any);
+    pressUp(h.input);
+    expect(h.input.value).toBe("real");
+  });
+
+  it("keeps a fresh session usable when nothing was ever sent", () => {
+    const h = restartedWith([]);
+    h.input.value = "first ever";
+    h.input.dispatch("keydown", syntheticEvent({ key: "Enter", shiftKey: false }));
+    expect(h.postMessages).toContainEqual({ type: "inputHistoryPush", text: "first ever" });
+    // ↑ now reaches the entry just sent.
+    pressUp(h.input);
+    expect(h.input.value).toBe("first ever");
+  });
+
+  it("ignores a hand-back that is not a list", () => {
+    const h = restartedWith("not a list" as any);
+    h.input.value = "typed";
+    h.input.dispatch("keydown", syntheticEvent({ key: "Enter", shiftKey: false }));
+    pressUp(h.input);
+    expect(h.input.value).toBe("typed");
   });
 });
 
@@ -580,7 +661,10 @@ describe("webview-js-input runtime: the steer button, and not the Stop button", 
 
     h.getElement("btn-steer").dispatch("click", syntheticEvent());
 
-    expect(h.postMessages).toEqual([{ type: "steer", text: "focus on the tests" }]);
+    expect(h.postMessages).toEqual([
+      { type: "steer", text: "focus on the tests" },
+      { type: "inputHistoryPush", text: "focus on the tests" },
+    ]);
     // Nothing is left behind: the guidance left the box the way Enter takes it.
     expect(h.input.value).toBe("");
   });
@@ -725,7 +809,10 @@ describe("webview-js-input runtime: the composer while the host owns the convers
     h.windowObj.__wvInput.setHostOperation("");
     h.getElement("btn-send-stop").dispatch("click", syntheticEvent());
 
-    expect(h.postMessages).toEqual([{ type: "sendMessage", text: "typed during the wait" }]);
+    expect(h.postMessages).toEqual([
+      { type: "sendMessage", text: "typed during the wait" },
+      { type: "inputHistoryPush", text: "typed during the wait" },
+    ]);
     expect(h.getElement("btn-send-stop").getAttribute("aria-disabled")).toBe("false");
   });
 
