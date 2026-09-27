@@ -154,6 +154,7 @@ code --install-extension ./brotherwhale-vscode-0.7.5.vsix --force
 - **跨工作区恢复** —— 载入其他项目的会话时，会自动重新绑定到当前工作区。
 - **工作区过滤** —— 可查看全部工作区的会话，或只看当前工作区。
 - **注意力提示** —— 等待审批或等待你输入的线程，会在它的卡片上显示待办数量（归入 *Needs you* 分组），工具栏 **Agent** 标签上显示总数，并弹出 VS Code 通知（可用 `brotherwhale.backgroundThreadNotifications` 关闭）。其它线程的审批与提问可以直接在它的卡片内联回答，不用先切过去。
+- **一轮跑完时的一声提示音** —— 人不在屏幕前也听得见：正在看的会话、以及后台线程跑完的轮次都会响。失败或中断的轮次不发声，同时完成的轮次只响一次；`brotherwhale.completionSound` 可关闭。
 - **监视而非轮询** —— 每个正在运行或等待你的后台线程各持有一条轻量 SSE 流，徽章、通知与自动保存都是实时的，不再有定时轮询。
 - 侧边栏三个并列标签页 —— **Sessions**（已保存的会话）、**Threads**（进行中的线程）、**Activity**（智能体实时状态：工作、变更、车队、任务、子代理），每个标签下都有一行说明它装了什么。
 
@@ -231,6 +232,7 @@ code --install-extension ./brotherwhale-vscode-0.7.5.vsix --force
 | `brotherwhale.autoApprove` | `false` | 自动批准的旧兜底项。建议改用 **Full Access** 权限姿态，它本身已隐含自动批准 |
 | `brotherwhale.costCurrency` | `"auto"` | `auto` 跟随界面语言（中文 → CNY，否则 USD），也可强制 `usd` / `cny`。没有原生 CNY 价格时回退到 USD |
 | `brotherwhale.backgroundThreadNotifications` | `true` | 后台线程需要你审批或输入时弹出 VS Code 通知（每次等待只提醒一次；Threads 侧栏徽章与计数始终实时） |
+| `brotherwhale.completionSound` | `true` | 一轮对话跑完时发出提示音 —— 正在看的会话与后台线程都包括。失败或中断的轮次不发声；同一时刻完成的轮次只响一次 |
 
 ## 工作原理
 

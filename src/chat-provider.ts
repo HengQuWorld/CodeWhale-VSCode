@@ -51,6 +51,7 @@ import {
 } from "./utils/diff-utils";
 import { resolveRecordedFilePath } from "./utils/file-paths";
 import { extractCompactionSummary } from "./utils/compaction-summary";
+import { playCompletionSound } from "./utils/completion-sound";
 import { MAX_EAGER_HASH_BYTES, sha256OfFile } from "./utils/file-hash";
 import { t, webviewTranslations, currentLocale } from "./i18n";
 import { ConfigPanel } from "./config-panel";
@@ -433,6 +434,16 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     this.api = api;
     this.api.bindEngine(engine);
     this.slashHandler = new SlashCommandHandler(this);
+  }
+
+  /**
+   * The audible "a turn finished" cue for a turn observed from the host — the
+   * one being watched or a parked one whose watch is reporting. The setting,
+   * the floor between cues and the platform player all live in
+   * `utils/completion-sound`.
+   */
+  private playCompletionCue(): void {
+    playCompletionSound(this.extensionUri?.fsPath ?? "");
   }
 
   private debugLog(msg: string): void {
@@ -4758,6 +4769,13 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       case "turn.completed": {
         st.running = false;
         st.currentTurnId = null;
+        // Finishing on a thread the user is not looking at is the case the cue
+        // exists for. A background watch sees the same turn record the view
+        // does, so the terminal status is read the same way.
+        const bgPayload = event.payload as { turn?: TurnRecord; recovered?: boolean };
+        if ((bgPayload.turn?.status ?? "completed") === "completed" && !bgPayload.recovered) {
+          this.playCompletionCue();
+        }
         void this.autoSaveSessionForThread(threadId);
         if (st.goalChecked && st.goal) void this.refreshBackgroundGoal(threadId);
         this.scheduleThreadListRefresh();
@@ -6256,7 +6274,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       }
 
       case "turn.completed": {
-        const pl = event.payload as { turn?: TurnRecord };
+        const pl = event.payload as { turn?: TurnRecord; recovered?: boolean };
         // A compaction turn is not a conversation turn: it must not finalize
         // the last answer standing in the transcript, nor stamp the
         // compaction's usage (and, in Plan mode, a plan-approval action) onto
@@ -6324,6 +6342,16 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         // Clear pending approvals and active items for this turn.
         this.pendingApprovals.clear();
         this.activeItems.clear();
+
+        // The cue belongs to work that finished: a turn that failed or was
+        // interrupted already says so in the transcript, a compaction pass is
+        // not a conversation turn, and a turn whose completion the runtime
+        // *recovered* (it died before publishing one) is history, not news.
+        // TUI parity — `notification_delivery.rs` prepares a sound only for a
+        // freshly completed `RuntimeTurnStatus::Completed` turn.
+        if (turnStatus === "completed" && !isCompactionTurn && !pl.recovered) {
+          this.playCompletionCue();
+        }
 
         if (!isCompactionTurn && lastMsg?.role === "assistant") {
           // TUI parity (flush_active_cell): a streaming placeholder that

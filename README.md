@@ -154,6 +154,7 @@ Switch from the status bar or with `/mode` (shortcuts `1`/`2`/`3`) and `/auto`. 
 - **Cross-workspace resumption** — loading a session from another project rebinds it to the workspace you are in.
 - **Workspace filter** — show sessions from all workspaces or only the current one.
 - **Attention surfacing** — a thread waiting on an approval or your input carries a count on its rail card (grouped under *Needs you*), a total on the toolbar's **Agent** label, and a VS Code notification you can turn off with `brotherwhale.backgroundThreadNotifications`. Approvals and questions from another thread can be answered inline in its rail card, without switching to it.
+- **A chime when a turn finishes** — audible from wherever you are: the cue rings for the conversation you are watching and for a parked thread finishing in the background. A failed or interrupted turn stays silent, turns finishing together are heard once, and `brotherwhale.completionSound` turns it off.
 - **Watched, not polled** — every background thread that is running or waiting on you holds one lightweight SSE stream, so badges, notifications and the auto-save stay live without a polling timer.
 - Three peer sidebar tabs — **Sessions** (saved conversations), **Threads** (the active ones) and **Activity** (live agent status: Work, Changes, Fleet, Tasks, Agents) — each with a hint line saying what it holds.
 
@@ -231,6 +232,7 @@ Search for `brotherwhale` in VS Code settings (`Cmd/Ctrl+,`).
 | `brotherwhale.autoApprove` | `false` | Legacy fallback for auto-approval. Prefer the **Full Access** posture, which already implies it |
 | `brotherwhale.costCurrency` | `"auto"` | `auto` follows the UI language (Chinese → CNY, otherwise USD), or force `usd` / `cny`. Falls back to USD when no native CNY price exists |
 | `brotherwhale.backgroundThreadNotifications` | `true` | Show a VS Code notification when a background thread needs your approval or input (once per attention episode; the rail badge and its count stay live either way) |
+| `brotherwhale.completionSound` | `true` | Play a chime when a turn finishes — in the conversation you are reading or in a background thread. Failed and interrupted turns stay silent, and turns finishing at the same moment are heard once |
 
 ## How it works
 

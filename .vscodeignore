@@ -30,6 +30,7 @@ CODE_OF_CONDUCT.md
 
 # Docs and demo media (guides + recordings — never shipped; keeps the VSIX ~200 KB)
 docs/**
+media/README.md
 
 # Package lock & gitignore (not needed at runtime)
 package-lock.json
