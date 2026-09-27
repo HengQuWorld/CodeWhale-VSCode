@@ -173,6 +173,8 @@ function createRuntimeHarness() {
   /** Labels the handler handed the input module's host-operation hold. */
   const hostOperationCalls: string[] = [];
   let clearPendingCalls = 0;
+  /** How many times the handler asked the rail to empty itself. */
+  let railClearCalls = 0;
   const composerTextCalls: string[] = [];
   // The streaming flag is the webview's one record of "a turn is running":
   // the input routing reads it and the send/stop button follows it. The
@@ -290,6 +292,9 @@ function createRuntimeHarness() {
         compactionSummaryCalls.push(summary);
         return '<details>' + summary + '</details>';
       },
+      clearNavDots: () => {
+        railClearCalls += 1;
+      },
     },
     __wvInput: {
       updateSendStopButton: (streaming: boolean) => {
@@ -366,6 +371,7 @@ function createRuntimeHarness() {
     sendStopCalls,
     hostOperationCalls,
     clearPendingCalls: () => clearPendingCalls,
+    railClearCalls: () => railClearCalls,
     composerTextCalls,
     streamingCalls,
     streamingTimers,
@@ -781,6 +787,30 @@ describe("webview-js-event-handler runtime", () => {
 
     expect(harness.sendStopCalls).toEqual([true, false]);
     expect(harness.getElement("status").classList.contains("is-streaming")).toBe(false);
+  });
+
+  it("takes the message rail down with the transcript it mirrors", () => {
+    // The rail's dots describe the messages in the container, so a replace of
+    // the whole conversation has to empty it: only addMessage() used to touch
+    // the rail, and a transcript that is cleared and rebuilt with no messages
+    // (a new session, a thread with no turns) never reaches addMessage — the
+    // new session kept the previous conversation's dots on an empty rail.
+    const harness = createRuntimeHarness();
+
+    harness.dispatchMessage({ type: "clearChat" });
+    expect(harness.railClearCalls()).toBe(1);
+
+    // A rebuild clears first whether or not it ends up drawing anything: a
+    // shorter transcript must not leave dots pointing at messages that are
+    // gone.
+    harness.dispatchMessage({ type: "loadHistory", messages: [] });
+    expect(harness.railClearCalls()).toBe(2);
+
+    harness.dispatchMessage({
+      type: "loadHistory",
+      messages: [{ id: "m1", role: "user", content: "hi", status: "complete", timestamp: 1 }],
+    });
+    expect(harness.railClearCalls()).toBe(3);
   });
 
   it("re-arms the running turn a rebuilt conversation still holds", () => {

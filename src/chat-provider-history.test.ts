@@ -316,6 +316,39 @@ describe("ChatProvider thread history rendering", () => {
     ]);
   });
 
+  it("numbers a viewed session's bubbles by the groups it rebuilds for it", async () => {
+    // Opening a saved session rebuilds its transcript from the stored
+    // messages, which is the third path into the conversation (besides a live
+    // turn and a thread load). The rail's dots and the panel's sections are
+    // numbered off the same counter here too, and the counter is opened by the
+    // turn's *first* user text — a second, consecutive one is the steer the
+    // engine records inside the same turn.
+    const session = {
+      metadata: { id: "sess-turns", title: "a conversation", workspace: "/workspace" },
+      messages: [
+        { role: "user", content: [{ type: "text", text: "run the tests" }] },
+        { role: "user", content: [{ type: "text", text: "focus on vitest" }] },
+        { role: "assistant", content: [{ type: "text", text: "done" }] },
+        { role: "user", content: [{ type: "text", text: "now the docs" }] },
+        { role: "assistant", content: [{ type: "text", text: "documented" }] },
+      ],
+    };
+
+    const { provider } = createProvider(session);
+
+    await provider.loadSessionMessages("sess-turns");
+
+    const bubbles = provider.messages.filter((message) => message.role === "user");
+    expect(bubbles.map((message) => (message.steered ? "steer" : "turn"))).toEqual([
+      "turn",
+      "steer",
+      "turn",
+    ]);
+    // The steer shares the number of the turn it was sent into; only the next
+    // turn's own text opens the next one.
+    expect(bubbles.map((message) => message.turnIndex)).toEqual([1, 1, 2]);
+  });
+
   it("anchors each finished turn's closing answer, and leaves the running one open", async () => {
     // The per-turn branch action sends this id and the engine resolves it, so
     // the turn's last assistant message must carry the runtime's own turn id
@@ -1888,6 +1921,60 @@ describe("ChatProvider Changes panel spans the session's turns", () => {
     expect(payload.turns.map((t: any) => t.index)).toEqual([1, 2]);
     expect(payload.turns[0].label).toBe("create the first file");
     expect(payload.turns[1].label).toBe("now the second one");
+  });
+
+  it("numbers each user bubble the way the panel numbers its turns", async () => {
+    // The rail names a turn in a dot's tooltip and the panel names one in a
+    // section header, and a reader carries one number over to the other. So
+    // both have to come from the same counter: counting user bubbles instead
+    // would drift, because a steer is a second bubble inside its turn (the
+    // first turn below has one) while the panel opens a group per turn.
+    const detail = {
+      latest_seq: 40,
+      thread: { id: "thread-1", model: "deepseek-v4-pro" },
+      turns: [
+        {
+          id: "turn-A",
+          input_summary: "create the first file",
+          created_at: "2026-09-18T10:00:00Z",
+          ended_at: "2026-09-18T10:00:02Z",
+          status: "completed",
+          item_ids: ["u1", "t1", "u2", "a1"],
+        },
+        {
+          id: "turn-B",
+          input_summary: "now the second one",
+          created_at: "2026-09-18T10:05:00Z",
+          ended_at: "2026-09-18T10:05:02Z",
+          status: "completed",
+          item_ids: ["u3", "t2", "a2"],
+        },
+      ],
+      items: [
+        { id: "u1", kind: "user_message", summary: "create the first file", detail: "create the first file", status: "completed" },
+        mutationCall("t1", "tool-1", "src/first.ts"),
+        { id: "u2", kind: "user_message", summary: "focus on the header", detail: "focus on the header", status: "completed" },
+        { id: "a1", kind: "agent_message", summary: "Done", detail: "Done", status: "completed", metadata: null },
+        { id: "u3", kind: "user_message", summary: "now the second one", detail: "now the second one", status: "completed" },
+        mutationCall("t2", "tool-2", "src/second.ts"),
+        { id: "a2", kind: "agent_message", summary: "Done again", detail: "Done again", status: "completed", metadata: null },
+      ],
+    };
+
+    const { provider, postMessage } = createProviderWithLiveWorkPanel(detail);
+
+    await (provider as any).loadHistory("thread-1");
+
+    const userBubbles = provider.messages.filter((m) => m.role === "user");
+    expect(userBubbles.map((m) => m.id)).toEqual(["user-turn-A", "user-steer-u2", "user-turn-B"]);
+    // The steer wears the number of the turn it was sent into, not the next
+    // turn's — the rail has a dot for it, the panel has no section for it.
+    expect(userBubbles.map((m) => m.turnIndex)).toEqual([1, 1, 2]);
+
+    // The panel's own numbering, from the payload the sidebar renders.
+    const payload = lastChangesPayload(postMessage);
+    expect(payload.turns.map((t: any) => t.index)).toEqual([1, 2]);
+    expect(payload.changes.map((c: any) => c.turnIndex)).toEqual([1, 2]);
   });
 
   it("opens a new group for the next turn instead of restarting the panel", async () => {

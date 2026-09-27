@@ -520,6 +520,14 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
     var el = document.createElement('div');
     el.className = 'message ' + msg.role + (msg.steered ? ' steered' : '');
     el.id = 'msg-' + msg.id;
+    // The turn this bubble belongs to, as the Changes panel numbers turns. The
+    // rail reads it back off the element to name the turn in a dot's tooltip,
+    // so it is carried here rather than counted out of the user messages — a
+    // steer is a second bubble inside the same turn and a compaction consumes
+    // a number without leaving one.
+    if (typeof msg.turnIndex === 'number' && msg.turnIndex > 0) {
+      el.setAttribute('data-turn-index', String(msg.turnIndex));
+    }
 
     var html = '';
     if (showRole !== false) {
@@ -936,6 +944,38 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
     return text.length > 80 ? text.slice(0, 77) + '...' : text;
   }
 
+  /** What a dot's tooltip says: which turn the message opens, then its words.
+   *
+   *  The number is the provider's own (data-turn-index, the Changes panel's
+   *  group index), so the rail and the panel name a turn the same way and a
+   *  reader can carry one over to the other. A transcript that carries none —
+   *  an older payload, a message the provider could not place — shows the
+   *  words alone rather than a number invented here, which would be a
+   *  different count wearing the same label. */
+  function navDotTooltip(el) {
+    var preview = getUserMsgPreview(el);
+    var turnIndex = parseInt(el.getAttribute('data-turn-index') || '', 10);
+    if (isNaN(turnIndex) || turnIndex <= 0) return preview;
+    var label = __i18n.changeTurnLabel.replace('{n}', String(turnIndex));
+    // A bubble can carry no words at all (an attachment-only send), and a
+    // separator with nothing after it reads as a tooltip that lost its text.
+    return preview ? label + ' \\u00B7 ' + preview : label;
+  }
+
+  /** Empty the rail and forget which dot was active.
+   *
+   *  The dots are a mirror of the transcript, not state of their own, so a
+   *  transcript replaced wholesale — a new session, a switch to a thread with
+   *  no turns — has to take them with it. A dot left behind points at a
+   *  message that is no longer on screen; the rail's own CSS only hides an
+   *  empty one, it cannot notice that the messages under it are gone. */
+  function clearNavDots() {
+    if (!navRail) return;
+    while (navRail.firstChild) navRail.removeChild(navRail.firstChild);
+    navDots = [];
+    activeDotIndex = -1;
+  }
+
   /** Rebuild the navigation dots to match current user messages. */
   function updateNavDots() {
     if (!navRail) return;
@@ -943,9 +983,7 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
     var userMsgs = messagesEl.querySelectorAll('.message.user');
     if (userMsgs.length === 0) {
       // No user messages: clear dots (rail hidden via :empty CSS)
-      while (navRail.firstChild) navRail.removeChild(navRail.firstChild);
-      navDots = [];
-      activeDotIndex = -1;
+      clearNavDots();
       return;
     }
 
@@ -957,8 +995,7 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
     }
 
     // Clear existing dots
-    while (navRail.firstChild) navRail.removeChild(navRail.firstChild);
-    navDots = [];
+    clearNavDots();
 
     for (var i = 0; i < userMsgs.length; i++) {
       var msg = userMsgs[i];
@@ -969,7 +1006,7 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
       var pct = Math.min(98, Math.max(2, (msgOffset / scrollHeight) * 100));
       dot.style.top = pct + '%';
       dot.setAttribute('data-msg-id', msg.id);
-      dot.setAttribute('data-preview', getUserMsgPreview(msg));
+      dot.setAttribute('data-preview', navDotTooltip(msg));
       dot.setAttribute('data-index', String(i));
 
       dot.addEventListener('click', function(e) {
@@ -1091,6 +1128,7 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
     getUserScrolledUp: function() { return userScrolledUp; },
     setUserScrolledUp: function(v) { userScrolledUp = v; },
     updateNavDots: updateNavDots,
+    clearNavDots: clearNavDots,
     jumpToUserMessage: jumpToUserMessage,
     scrollToMessage: scrollToMessage,
     createThinkingBlock: createThinkingBlock,

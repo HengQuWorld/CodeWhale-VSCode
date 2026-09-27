@@ -97,6 +97,22 @@ ${PROVIDER_PICKER_JS}
     approvalFloatEl.setAttribute('hidden', '');
   }
 
+  /** Empty the transcript for a wholesale replace — a history load, a new chat.
+   *
+   *  The message rail's dots are a mirror of what this container holds, so
+   *  wiping the container alone leaves the previous conversation's dots on the
+   *  empty one: a new session kept the old rail because only addMessage()
+   *  refreshed it, and a cleared transcript never reaches addMessage(). Both
+   *  replaces go through here, so the rail can only fall out of step by
+   *  bypassing this function. */
+  function clearTranscript() {
+    messagesEl.innerHTML = '';
+    if (window.__wvMessages && window.__wvMessages.clearNavDots) {
+      window.__wvMessages.clearNavDots();
+    }
+    hideApprovalFloat();
+  }
+
   // The panel is the only place an approval can be answered, so the message
   // renderer re-shows every approval that is still pending after it rebuilds a
   // conversation (view switch, reopened sidebar, restored session) — buttons
@@ -826,8 +842,7 @@ ${PROVIDER_PICKER_JS}
           window.__wvMessages.setStreamingTimeout(null);
         }
         setStreamingState(false, __i18n.ready);
-        messagesEl.innerHTML = '';
-        hideApprovalFloat();
+        clearTranscript();
         for (var i = 0; i < msg.messages.length; i++) {
           var m = msg.messages[i];
           var showRole = !msg.compactMode || !!m._realContent;
@@ -858,8 +873,9 @@ ${PROVIDER_PICKER_JS}
           showThinkingActivity(lastLoaded.id, __i18n.thinking);
           setStreamingState(true, __i18n.thinking);
         }
-        // Nav dots are rebuilt by addMessage() via scheduleNavUpdate(); no
-        // explicit call needed here.
+        // The rail was cleared with the container by clearTranscript; the
+        // messages drawn below rebuild it through addMessage() once there are
+        // any, and a load with none leaves it empty rather than stale.
         break;
 
       case 'addMessage':
@@ -1349,8 +1365,7 @@ ${PROVIDER_PICKER_JS}
         // Clear shared diff store when starting a new chat.
         _diffStore.clear();
         _diffIdCounter.value = 0;
-        messagesEl.innerHTML = '';
-        hideApprovalFloat();
+        clearTranscript();
         window.__wvMessages.setStreaming(false);
         var st = window.__wvMessages.getStreamingTimeout();
         if (st) { clearTimeout(st); window.__wvMessages.setStreamingTimeout(null); }

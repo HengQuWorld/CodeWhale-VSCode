@@ -307,6 +307,24 @@ describe("ChatProvider Changes panel across a send", () => {
     expect(payload.turns.map((t: any) => t.label)).toEqual(["earlier prompt", "carry on"]);
   });
 
+  it("numbers the bubble a send opens the way the panel numbers its turn", async () => {
+    // The bubble is the rail's dot and the turn is the panel's section, and a
+    // reader carries the number between them: both are stamped from the group
+    // this send just opened, so the earlier turn's changes stay under 1 and
+    // this one's under 2.
+    const { provider, api, postMessage } = createProvider();
+    withAnEarlierTurn(provider);
+    api.startTurn.mockResolvedValue({ turn: { id: "turn-2" }, thread: { id: "thread-1" } });
+
+    await (provider as any).handleSendMessage("carry on");
+
+    const bubble = messagesOfType(postMessage, "addMessage")
+      .map((msg: any) => msg.message)
+      .find((message: any) => message.role === "user");
+    expect(bubble.content).toBe("carry on");
+    expect(bubble.turnIndex).toBe(2);
+  });
+
   it("leaves no change section for a prompt the engine refused", async () => {
     const { provider, api, postMessage } = createProvider();
     withAnEarlierTurn(provider);

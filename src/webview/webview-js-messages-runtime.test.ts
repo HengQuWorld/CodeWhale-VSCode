@@ -145,6 +145,18 @@ class FakeElement {
     return child;
   }
 
+  /** The rail's clearing walks its children one at a time — it cannot assign
+   *  innerHTML there, the rail is the element doing the clearing — so the
+   *  stand-in has to offer both ends of that walk. */
+  get firstChild(): FakeElement | null {
+    return this.children[0] ?? null;
+  }
+
+  removeChild(child: FakeElement): FakeElement {
+    this.detach(child);
+    return child;
+  }
+
   remove(): void {
     if (this.parentElement) this.parentElement.detach(this);
     this.parentElement = null;
@@ -256,7 +268,7 @@ function createHarness() {
     return card;
   };
 
-  return { messages, messagesEl, addCard, window: windowObj };
+  return { messages, messagesEl, addCard, getEl, window: windowObj };
 }
 
 describe("revealFileChangeCard", () => {
@@ -596,5 +608,139 @@ describe("branch from a turn", () => {
 
     // A reload plus a late finalize must not offer the same branch point twice.
     expect(messagesEl.querySelectorAll(".turn-fork-btn")).toHaveLength(1);
+  });
+});
+
+describe("message navigation rail", () => {
+  /** Draw a user bubble the way the provider sends one, with its words where
+   *  the rail reads them.
+   *
+   *  The DOM stand-in flattens a bubble's markup and keeps no text of its own,
+   *  so the textContent the preview reads has to be placed by hand. */
+  const drawUserBubble = (
+    harness: ReturnType<typeof createHarness>,
+    id: string,
+    text: string,
+    turnIndex?: number,
+  ) => {
+    harness.messages.addMessage(
+      {
+        id,
+        role: "user",
+        content: text,
+        status: "complete",
+        timestamp: 1,
+        ...(turnIndex === undefined ? {} : { turnIndex }),
+      },
+      true,
+    );
+    const bubble = harness.messagesEl
+      .querySelectorAll(".message.user")
+      .find((el) => el.id === "msg-" + id)!;
+    bubble.querySelector(".message-body")!.textContent = text;
+  };
+
+  /** The rail the script is drawing into, with a container that reports a
+   *  height: the dots are placed proportionally, so a zero height would mean
+   *  "layout is not ready" and draw nothing. */
+  const railOf = (harness: ReturnType<typeof createHarness>) => {
+    harness.messagesEl.scrollHeight = 1000;
+    return harness.getEl("message-nav");
+  };
+
+  it("names each dot's turn the way the Changes panel numbers turns", () => {
+    const harness = createHarness();
+    const rail = railOf(harness);
+
+    drawUserBubble(harness, "user-1", "run the tests", 1);
+    // A steer is a second bubble inside the turn above it, not a turn of its
+    // own, so it wears that turn's number rather than the next one.
+    drawUserBubble(harness, "user-2", "focus on vitest", 1);
+    drawUserBubble(harness, "user-3", "now the docs", 2);
+    harness.messages.updateNavDots();
+
+    expect(rail.children).toHaveLength(3);
+    expect(rail.children.map((dot) => dot.getAttribute("data-preview"))).toEqual([
+      "Turn 1 \u00B7 run the tests",
+      "Turn 1 \u00B7 focus on vitest",
+      "Turn 2 \u00B7 now the docs",
+    ]);
+  });
+
+  it("shows the words alone for a bubble the provider could not place", () => {
+    const harness = createHarness();
+    const rail = railOf(harness);
+
+    // No turnIndex: an older payload, or a message that belongs to no group.
+    // A number counted out of the user messages here would be a different
+    // count wearing the panel's label.
+    drawUserBubble(harness, "user-1", "no turn recorded");
+    harness.messages.updateNavDots();
+
+    expect(rail.children[0].getAttribute("data-preview")).toBe("no turn recorded");
+  });
+
+  it("names the turn alone when the bubble carries no words", () => {
+    const harness = createHarness();
+    const rail = railOf(harness);
+
+    // An attachment-only send has no text to preview, and "Turn 4 · " with
+    // nothing after the separator reads as a tooltip that lost its words.
+    drawUserBubble(harness, "user-1", "", 4);
+    harness.messages.updateNavDots();
+
+    expect(rail.children[0].getAttribute("data-preview")).toBe("Turn 4");
+  });
+
+  it("keeps the nearest dot lit across a rebuild", () => {
+    const harness = createHarness();
+    const rail = railOf(harness);
+
+    drawUserBubble(harness, "user-1", "the first question", 1);
+    harness.messages.updateNavDots();
+    expect(rail.children[0].classList.contains("active")).toBe(true);
+
+    // Every addMessage() asks for a rail rebuild on the next frame, and this
+    // is the frame it asked for (the stand-in's frames do not run on their
+    // own). The marker used to be carried over from the draw before, so it
+    // matched the dot about to be marked and the highlight was silently
+    // dropped — it only came back once a scroll moved the nearest message.
+    // The rebuild starts from nothing now.
+    drawUserBubble(harness, "user-2", "and the second one", 2);
+    harness.messages.updateNavDots();
+
+    expect(rail.children).toHaveLength(2);
+    expect(rail.children[0].classList.contains("active")).toBe(true);
+  });
+
+  it("empties the rail when the transcript it mirrors is replaced", () => {
+    const harness = createHarness();
+    const rail = railOf(harness);
+    drawUserBubble(harness, "user-1", "the old conversation", 1);
+    harness.messages.updateNavDots();
+    expect(rail.children).toHaveLength(1);
+
+    // What a new session does: the container is emptied and the fresh one has
+    // no messages yet, so the dots have to be taken down with it — the rail's
+    // CSS only hides an empty rail, it cannot notice the messages underneath
+    // are gone.
+    harness.messagesEl.innerHTML = "";
+    harness.messages.clearNavDots();
+
+    expect(rail.children).toHaveLength(0);
+  });
+
+  it("empties the rail itself when a rebuilt transcript has no user messages", () => {
+    const harness = createHarness();
+    const rail = railOf(harness);
+    drawUserBubble(harness, "user-1", "the old conversation", 1);
+    harness.messages.updateNavDots();
+
+    // A rebuild that draws nothing (a load of a thread with no turns) reaches
+    // no addMessage, so the rebuild has to clear the rail on its own.
+    harness.messagesEl.innerHTML = "";
+    harness.messages.updateNavDots();
+
+    expect(rail.children).toHaveLength(0);
   });
 });

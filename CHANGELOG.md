@@ -18,6 +18,14 @@ Client-side only; verified against an engine built from `feat/fork-at-turn` (Cod
 - **The Activity tab now shows only the sections you want** — Work, Changes, Fleet, Tasks and Agents used to take their slots whether or not you ever looked at them. A ⚙ beside the Activity hint opens a checklist of all five: untick one and it leaves the tab, tick it back and it returns, and the choice is still in place the next time you open the panel. Hiding is not the same as folding — a folded section keeps the header you click to reopen it, a hidden one leaves nothing behind — which is why that checklist always lists every section, hidden ones included, and stays where it is even when nothing else is left showing.
 - **The Activity sections now share the height the panel has** — Work, Changes, Fleet, Tasks and Agents each used to stop at a fixed height, so folding one left everything it freed sitting empty at the bottom of the tab while a long list stayed in a small box. The open sections now share whatever the tab has: fold one and the others grow as it closes, hide one and they take the space at once, and a section with more to show gets more of it — a long Changes list ends up taller than a short Work panel. Each keeps its header and at least a couple of rows and scrolls the rest, and when even that will not fit, the tab itself scrolls rather than squeezing a section away.
 
+### Improvements
+
+- **The message rail now says which turn each dot is** — Hovering a dot on the rail gave you the first line of the message and nothing else, so a dot could only be matched to a turn by reading it. The tooltip now opens with the turn number — "Turn 3 · …" — and it is the same number the Changes panel heads its sections with, so a dot and a section can be read against each other instead of counted out.
+
+### Bug Fixes
+
+- **A new session no longer keeps the previous conversation's rail** — Starting a new session cleared the conversation but not the dots beside it: the rail was refreshed only when a message was drawn, and an emptied conversation draws none, so the old dots stayed on screen pointing at messages that were gone. The rail is now taken down with the transcript it mirrors, whether that is a new session or a switch to a conversation with no turns — and redrawing it no longer loses the one dot that was lit, which used to go out every time a message arrived and only come back once you scrolled.
+
 ## 0.7.5
 
 Client-side only; verified against engine **v0.10.0**.

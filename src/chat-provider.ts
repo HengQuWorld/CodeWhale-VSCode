@@ -1109,6 +1109,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
                   content: text.slice(0, 280),
                   status: "complete",
                   timestamp: new Date(item.started_at || turn.created_at).getTime(),
+                  turnIndex: this.currentBubbleTurnIndex(),
                 });
               } else {
                 // Steer (TUI parity): flush the segment above it, then the
@@ -1122,6 +1123,9 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
                   status: "complete",
                   timestamp: new Date(item.started_at || turn.created_at).getTime(),
                   steered: true,
+                  // A steer is a second bubble inside the turn above it, so it
+                  // carries that turn's number rather than opening one.
+                  turnIndex: this.currentBubbleTurnIndex(),
                 });
               }
               break;
@@ -1270,6 +1274,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
             content: turn.input_summary.trim().slice(0, 280),
             status: "complete",
             timestamp: new Date(turn.created_at).getTime(),
+            turnIndex: this.currentBubbleTurnIndex(),
           });
         }
 
@@ -1678,19 +1683,26 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
           if (!combined.trim()) continue;
           if (isInternalRuntimeHandoff(textBlocks)) continue;
 
+          const isSteer = !isFirstUserText;
+          // The turn's first user text opens its group; a steer is a second
+          // user message *inside* the same turn, so it must not open one. The
+          // group is opened before the bubble is built so the bubble can carry
+          // the number the panel files it under, not the previous turn's.
+          const turnIndex = isFirstUserText
+            ? this.beginChangeTurn(combined, Date.now())
+            : this.currentChangeTurn;
+          isFirstUserText = false;
+
           this.messages.push({
             id: `user-turn-${this.messages.length}`,
             role: "user",
             content: combined,
             status: "complete" as const,
             timestamp: Date.now(),
-            steered: !isFirstUserText || undefined,
+            steered: isSteer || undefined,
+            turnIndex,
             _realContent: true,
           } as ChatMessage & { _realContent: boolean });
-          // The turn's first user text opens its group; a steer is a second
-          // user message *inside* the same turn, so it must not open one.
-          if (isFirstUserText) this.beginChangeTurn(combined, Date.now());
-          isFirstUserText = false;
         }
       } else {
         const blocks: ContentBlock[] = [];
@@ -2399,6 +2411,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         content: fullText,
         status: "complete",
         timestamp: Date.now(),
+        turnIndex: this.currentBubbleTurnIndex(),
       };
       this.messages.push(userMsg);
       this.postMessage({ type: "addMessage", message: userMsg });
@@ -2584,6 +2597,9 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       status: "complete",
       timestamp: Date.now(),
       steered: true,
+      // The running turn's own number: guidance is asked inside a turn, so the
+      // rail names it the way the Changes panel files guidance-driven edits.
+      turnIndex: this.currentBubbleTurnIndex(),
     };
     // Display-only: do NOT push into this.messages. The SSE router keys
     // item deltas and turn completion off this.messages[last] being the
@@ -3856,12 +3872,12 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
    * resumes the live turn, and the second call must land on the group that is
    * already there rather than open a second section for one turn.
    */
-  private beginChangeTurn(label?: string, timestamp?: number, turnId?: string): void {
+  private beginChangeTurn(label?: string, timestamp?: number, turnId?: string): number {
     if (turnId) {
       const existing = this.changeTurns.find((turn) => turn.turnId === turnId);
       if (existing) {
         this.currentChangeTurn = existing.index;
-        return;
+        return existing.index;
       }
     }
     // One past the highest group, not one past the current one: adopting an
@@ -3874,6 +3890,17 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       turnId,
       timestamp,
     });
+    return index;
+  }
+
+  /** The Changes panel's number for the turn now being filled, or undefined if
+   *  no group is open.
+   *
+   *  A user bubble carries this so the message rail can name a turn the way the
+   *  panel's sections do. `0` is "no group", not the first one — a bubble that
+   *  wore it would point at a section that does not exist. */
+  private currentBubbleTurnIndex(): number | undefined {
+    return this.currentChangeTurn > 0 ? this.currentChangeTurn : undefined;
   }
 
   /** Name the engine turn the group now being filled belongs to. Called once

@@ -109,6 +109,16 @@ export interface ChatMessage {
   timestamp: number;
   /** True when this user message was sent as mid-turn steering (TUI steer). */
   steered?: boolean;
+  /** The conversation turn this bubble belongs to, numbered the way the
+   *  Changes panel numbers its groups.
+   *
+   *  Stamped by the provider from the same counter `beginChangeTurn` opens
+   *  groups with, so the message rail's dots and the panel's "Turn N" headers
+   *  agree on which turn is which — including a steer, which is a second user
+   *  bubble inside its turn, and a compaction, which consumes a number without
+   *  leaving a bubble at all. Nothing in the webview counts user messages to
+   *  guess it. Absent when no group was open for the bubble to belong to. */
+  turnIndex?: number;
   /** The runtime turn this bubble *closes*, on a live thread's transcript.
    *
    *  Set only on the last assistant message of a turn: that bubble is the
