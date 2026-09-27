@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { getWebviewHtml, WebviewTranslations } from "./webview-html";
+import { ACTIVITY_SECTION_KEYS } from "./webview-js-sidebar";
 
 // Mock vscode since webview-html.ts imports it
 vi.mock("vscode", () => ({
@@ -777,5 +778,17 @@ describe("webview-html.ts assembler", () => {
     const html = getWebviewHtml(makeMockWebview(), makeMockExtensionUri(), makeTr());
     expect(html).toContain('id="tab-sessions-btn"');
     expect(html).toContain('id="tab-threads-btn"');
+  });
+
+  it("draws a section and a header for every Activity section key", () => {
+    // The script walks ACTIVITY_SECTION_KEYS to hide a section, to fold it and
+    // to bind the header that folds it, and it skips an element it cannot find
+    // — silently. So the ids the template writes have to answer to those keys:
+    // a renamed header would otherwise be a section that quietly stops folding.
+    const html = getWebviewHtml(makeMockWebview(), makeMockExtensionUri(), makeTr());
+    for (const key of ACTIVITY_SECTION_KEYS) {
+      expect(html).toContain(`id="sidebar-${key}"`);
+      expect(html).toContain(`id="${key}-section-toggle"`);
+    }
   });
 });

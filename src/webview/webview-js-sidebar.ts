@@ -4,6 +4,15 @@
  */
 import type { WebviewTranslations } from "./webview-html";
 
+/** The Activity tab's sections, in the order the tab draws them.
+ *
+ * One roster for four things that must agree: the template's section blocks and
+ * their headers (`webview-html.ts`), the sections the picker lists and hides,
+ * the sections whose fold is remembered, and the header each fold is bound to.
+ * It is injected into the script below rather than written twice, and the
+ * template's own ids are checked against it by `webview-html.test.ts`. */
+export const ACTIVITY_SECTION_KEYS = ['work', 'changes', 'fleet', 'tasks', 'agents'] as const;
+
 export function getSidebarScript(_tr: WebviewTranslations): string {
   return `(function(){
   'use strict';
@@ -31,10 +40,26 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
   // collapsing — a collapsed section keeps its header (the thing you click to
   // reopen it), a hidden one leaves nothing behind, which is why the picker
   // lists every section including the hidden ones.
-  var ACTIVITY_SECTION_KEYS = ['work', 'changes', 'fleet', 'tasks', 'agents'];
+  var ACTIVITY_SECTION_KEYS = ${JSON.stringify(ACTIVITY_SECTION_KEYS)};
   var ACTIVITY_SECTIONS_STORAGE_KEY = 'codewhale:activitySections';
   var hiddenActivitySections = [];
   var activitySectionsPickerOpen = false;
+
+  // ── Activity section folding ──
+  // Which of those sections the reader folded shut, kept the same way as the
+  // hidden ones: folded keys only, so a section shipped later starts open, and
+  // in its own key so the two choices cannot overwrite each other. Folding is
+  // not hiding — a folded section keeps the header you click to reopen it.
+  var COLLAPSED_SECTIONS_STORAGE_KEY = 'codewhale:collapsedSections';
+  var collapsedActivitySections = [];
+
+  // ── Sidebar panel open state ──
+  // Whether the sidebar is open is a layout choice, not a fact about this one
+  // look: it is kept in the same store as the width, so the window reopens the
+  // way the reader left it. Nothing stored — a first run — leaves the panel's
+  // own default, which is shut; the ✕, Esc and the 📋 toggle all record the
+  // choice through setThreadsPanelOpen, the one mutator.
+  var SIDEBAR_OPEN_STORAGE_KEY = 'codewhale:sidebarOpen';
 
   // ── Work state ──
   var workState = { checklist: [], checklistCompletionPct: 0, strategy: [] };
@@ -2261,11 +2286,52 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
   }
 
   // ── Sidebar toggle ──
+  /** The webview's own store; absent under a locked-down host, in which case a
+   *  layout choice — which sections are shown, whether the panel is open —
+   *  simply does not outlive the panel. */
+  function webviewLocalStorage() {
+    try { return window.localStorage || null; } catch (e) { return null; }
+  }
+
+  function loadSidebarOpen() {
+    var storage = webviewLocalStorage();
+    if (!storage) return null;
+    var raw;
+    try { raw = storage.getItem(SIDEBAR_OPEN_STORAGE_KEY); } catch (e) { return null; }
+    // Only the two values this module writes count as a choice. Anything else
+    // (a hand-edited store, or a shape another build wrote) is not a choice to
+    // honour, so it leaves the default alone rather than reading as "closed".
+    if (raw === 'true') return true;
+    if (raw === 'false') return false;
+    return null;
+  }
+
+  function saveSidebarOpen(open) {
+    var storage = webviewLocalStorage();
+    if (!storage) return;
+    try {
+      storage.setItem(SIDEBAR_OPEN_STORAGE_KEY, open ? 'true' : 'false');
+    } catch (e) { /* a full or blocked store is not worth failing the click */ }
+  }
+
+  /** Paint the stored choice. Used for the first paint and nowhere else (the
+   *  toggle above writes; this reads), and it posts nothing: the host pushes the
+   *  panel's contents on its own first sync whether or not the sidebar is
+   *  visible, and a message sent this early would outrun the handler that would
+   *  read the answer. */
+  function applyStoredSidebarOpen() {
+    var threadsPanel = document.getElementById('threads-panel');
+    if (threadsPanel) threadsPanel.classList.toggle('open', loadSidebarOpen() === true);
+  }
+
+  /** The one mutator: the 📋 toggle, the ✕ and Esc all open and close through
+   *  here, so what is stored cannot drift from what is on screen. */
   function setThreadsPanelOpen(open) {
     var threadsPanel = document.getElementById('threads-panel');
     if (!threadsPanel) return;
     var opening = open && !threadsPanel.classList.contains('open');
     threadsPanel.classList.toggle('open', open);
+    saveSidebarOpen(open);
     if (opening) {
       void threadsPanel.offsetHeight;
       vscode.postMessage({ type: 'refreshSidebar' });
@@ -2278,14 +2344,8 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
   }
 
   // ── Activity section visibility: the store and the picker ──
-  /** The webview's own store; absent under a locked-down host, in which case a
-   *  section choice simply does not outlive the panel. */
-  function activitySectionsStorage() {
-    try { return window.localStorage || null; } catch (e) { return null; }
-  }
-
   function loadHiddenActivitySections() {
-    var storage = activitySectionsStorage();
+    var storage = webviewLocalStorage();
     if (!storage) return;
     var raw;
     try { raw = storage.getItem(ACTIVITY_SECTIONS_STORAGE_KEY); } catch (e) { return; }
@@ -2301,7 +2361,7 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
   }
 
   function saveHiddenActivitySections() {
-    var storage = activitySectionsStorage();
+    var storage = webviewLocalStorage();
     if (!storage) return;
     try {
       storage.setItem(ACTIVITY_SECTIONS_STORAGE_KEY, JSON.stringify(hiddenActivitySections));
@@ -2395,13 +2455,77 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
     setActivitySectionsPickerOpen(!activitySectionsPickerOpen);
   }
 
-  // ── Sidebar section collapse toggle ──
-  document.querySelectorAll('.sidebar-section-header').forEach(function(header) {
-    header.addEventListener('click', function() {
-      var section = header.parentElement;
-      section.classList.toggle('collapsed');
+  // ── Activity section folding: the store and the toggle ──
+  // The reader's fold is a layout choice like the ones above, so it is kept the
+  // same way and for the same reason — a section folded shut stayed folded only
+  // until the window was reloaded, which made the fold look like it had never
+  // counted.
+  function loadCollapsedActivitySections() {
+    var storage = webviewLocalStorage();
+    if (!storage) return;
+    var raw;
+    try { raw = storage.getItem(COLLAPSED_SECTIONS_STORAGE_KEY); } catch (e) { return; }
+    if (!raw) return;
+    var parsed;
+    try { parsed = JSON.parse(raw); } catch (e) { return; }
+    if (!Array.isArray(parsed)) return;
+    // Same guard as the hidden list: a stale key cannot fold a section twice
+    // over or name one that another build had and this one does not.
+    collapsedActivitySections = ACTIVITY_SECTION_KEYS.filter(function(key) {
+      return parsed.indexOf(key) !== -1;
     });
-  });
+  }
+
+  function saveCollapsedActivitySections() {
+    var storage = webviewLocalStorage();
+    if (!storage) return;
+    try {
+      storage.setItem(COLLAPSED_SECTIONS_STORAGE_KEY, JSON.stringify(collapsedActivitySections));
+    } catch (e) { /* a full or blocked store is not worth failing the click */ }
+  }
+
+  function isActivitySectionCollapsed(key) {
+    return collapsedActivitySections.indexOf(key) !== -1;
+  }
+
+  /** Fold the choice into the sections themselves. The first paint and the
+   *  mutator below both come through here, so what is on screen cannot disagree
+   *  with what is stored. */
+  function applyActivitySectionCollapse() {
+    for (var i = 0; i < ACTIVITY_SECTION_KEYS.length; i++) {
+      var key = ACTIVITY_SECTION_KEYS[i];
+      var section = document.getElementById('sidebar-' + key);
+      if (section) section.classList.toggle('collapsed', isActivitySectionCollapsed(key));
+    }
+  }
+
+  function setActivitySectionCollapsed(key, collapsed) {
+    if (ACTIVITY_SECTION_KEYS.indexOf(key) === -1) return;
+    var shouldFold = !!collapsed;
+    if (shouldFold === isActivitySectionCollapsed(key)) return;
+    if (shouldFold) {
+      collapsedActivitySections.push(key);
+    } else {
+      collapsedActivitySections = collapsedActivitySections.filter(function(item) { return item !== key; });
+    }
+    saveCollapsedActivitySections();
+    applyActivitySectionCollapse();
+  }
+
+  // ── Sidebar section collapse toggle ──
+  // Bound by the roster above rather than by the class, so the sections that
+  // can be hidden and the sections whose fold is remembered are one and the
+  // same list: a section added there is folded, remembered and listed in the
+  // picker without a second place to register it.
+  for (var sectionToggleIndex = 0; sectionToggleIndex < ACTIVITY_SECTION_KEYS.length; sectionToggleIndex++) {
+    (function(key) {
+      var header = document.getElementById(key + '-section-toggle');
+      if (!header) return;
+      header.addEventListener('click', function() {
+        setActivitySectionCollapsed(key, !isActivitySectionCollapsed(key));
+      });
+    })(ACTIVITY_SECTION_KEYS[sectionToggleIndex]);
+  }
 
   // ── Activity section picker ──
   var activitySectionsToggle = document.getElementById('activity-sections-toggle');
@@ -2443,8 +2567,9 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
 
   // ── Close (collapse) button ──
   document.getElementById('sidebar-close-btn').addEventListener('click', function() {
-    var panel = document.getElementById('threads-panel');
-    if (panel) panel.classList.remove('open');
+    // Through the mutator, not straight at the class: the click is a choice
+    // about the layout, and the choice is what gets stored for next time.
+    setThreadsPanelOpen(false);
   });
 
   // ── Workspace filter toggle ──
@@ -2479,7 +2604,7 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
     var t = e.target;
     if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) return;
     var panel = document.getElementById('threads-panel');
-    if (panel && panel.classList.contains('open')) panel.classList.remove('open');
+    if (panel && panel.classList.contains('open')) setThreadsPanelOpen(false);
   });
 
   // ── Expose for event handler module ──
@@ -2499,6 +2624,10 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
      *  sections, the picker and the store in step, and a copy of it. */
     setActivitySectionVisible: setActivitySectionVisible,
     getHiddenActivitySections: function() { return hiddenActivitySections.slice(); },
+    /** Which Activity sections are folded shut, and the one mutator that keeps
+     *  the sections and the store in step — the init paint reads it too. */
+    setActivitySectionCollapsed: setActivitySectionCollapsed,
+    getCollapsedActivitySections: function() { return collapsedActivitySections.slice(); },
     closeTaskDetail: closeTaskDetail,
     showTaskDetail: showTaskDetail,
     closeAgentDetail: closeAgentDetail,
@@ -2531,10 +2660,13 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
     setSessionSearchQuery: function(v) { sessionSearchQuery = v; },
   };
 
-  // Paint what the reader chose last time before anything else can draw a
-  // section, so a hidden one never flashes on the way to being hidden.
+  // Paint what the reader chose last time before anything else can draw the
+  // panel or a section, so neither flashes the other state on the way there.
   loadHiddenActivitySections();
   applyActivitySectionVisibility();
+  loadCollapsedActivitySections();
+  applyActivitySectionCollapse();
+  applyStoredSidebarOpen();
 
   closeTaskDetail();
   closeAgentDetail();

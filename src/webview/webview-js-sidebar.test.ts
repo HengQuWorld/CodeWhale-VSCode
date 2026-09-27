@@ -139,10 +139,16 @@ describe("webview-js-sidebar.ts", () => {
     expect(script).toContain("toggleAllWorkspaces");
   });
 
-  it("contains section collapse/expand via sidebar-section-header", () => {
+  it("binds each Activity section's header to the fold", () => {
     const script = getSidebarScript(makeTr());
-    expect(script).toContain("sidebar-section-header");
-    expect(script).toContain("collapsed");
+    // Bound by the section roster rather than by the class: the sections whose
+    // fold is remembered are the same list the picker hides, and their header
+    // ids are built from the keys. Asserted on the wiring itself — what the
+    // binding does is covered by the runtime tests, this guards that it is
+    // still there and still keyed by the roster.
+    expect(script).toContain("ACTIVITY_SECTION_KEYS[sectionToggleIndex]");
+    expect(script).toContain("document.getElementById(key + '-section-toggle')");
+    expect(script).toContain("setActivitySectionCollapsed(key, !isActivitySectionCollapsed(key))");
   });
 
   it("wires render functions to window.__wvSidebar", () => {

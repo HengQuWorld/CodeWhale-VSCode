@@ -1,5 +1,7 @@
 /**
- * Runtime tests for the thread rail's fetch status.
+ * Runtime tests for the sidebar module: the thread rail's fetch status, the
+ * panel's own open state, and the Activity sections' folds — the layout choices
+ * the reader makes and expects to find again.
  *
  * The rail is driven by `GET /v1/threads/summary`, which costs roughly a
  * quarter-second per thread on the runtime, so "still loading" and "you have no
@@ -170,7 +172,7 @@ class FakeElement {
   }
 }
 
-function createHarness(options?: { storage?: Record<string, string> }) {
+function createHarness(options?: { storage?: Record<string, string> | null }) {
   const elements = new Map<string, FakeElement>();
   const getEl = (id: string): FakeElement => {
     let element = elements.get(id);
@@ -182,6 +184,7 @@ function createHarness(options?: { storage?: Record<string, string> }) {
   };
 
   const postMessages: Array<Record<string, unknown>> = [];
+  const documentListeners = new Map<string, (event: unknown) => void>();
   // The Activity section picker keeps the reader's choice in the webview's own
   // store, so the stand-in has to be there before the IIFE reads it.
   const storageValues = new Map<string, string>(
@@ -217,6 +220,16 @@ function createHarness(options?: { storage?: Record<string, string> }) {
     addEventListener: () => {},
     localStorage: storage,
   };
+  // A host that denies the store outright: the access itself throws, the way a
+  // blocked-storage profile does. Every reader in the webview is written to
+  // survive it, so the stand-in has to be able to be that host.
+  if (options && options.storage === null) {
+    Object.defineProperty(windowObj, "localStorage", {
+      get() {
+        throw new Error("storage denied");
+      },
+    });
+  }
   const documentObj = {
     getElementById: (id: string) => getEl(id),
     createElement: () => new FakeElement(),
@@ -229,7 +242,13 @@ function createHarness(options?: { storage?: Record<string, string> }) {
       return node;
     },
     querySelectorAll: () => [] as FakeElement[],
-    addEventListener: () => {},
+    // Kept rather than dropped: the panel's Escape shortcut is only reachable
+    // through a document listener, and "closing it is remembered" has to be
+    // assertable on that path as well as on the ✕ and the 📋 toggle, which
+    // register on their own elements.
+    addEventListener: (name: string, handler: (event: unknown) => void) => {
+      documentListeners.set(name, handler);
+    },
   };
 
   const context = vm.createContext({
@@ -247,6 +266,12 @@ function createHarness(options?: { storage?: Record<string, string> }) {
     sessionRail: getEl("tab-sessions"),
     chip: getEl("agent-panel-toggle"),
     panel: getEl("threads-panel"),
+    panelCloseBtn: getEl("sidebar-close-btn"),
+    panelToggle: getEl("btn-threads"),
+    /** A key on the document, the way the panel's Escape shortcut arrives. */
+    pressKey: (key: string): void => {
+      documentListeners.get("keydown")?.({ key, target: null });
+    },
     sidebarSection: getEl("sidebar-threads"),
     agentsPanel: getEl("tab-agents"),
     changesPanel: getEl("tab-changes"),
@@ -259,6 +284,15 @@ function createHarness(options?: { storage?: Record<string, string> }) {
       fleet: getEl("sidebar-fleet"),
       tasks: getEl("sidebar-tasks"),
       agents: getEl("sidebar-agents"),
+    },
+    /** The header each of those sections is folded by, as the document's own
+     *  ids address it. */
+    sectionHeaders: {
+      work: getEl("work-section-toggle"),
+      changes: getEl("changes-section-toggle"),
+      fleet: getEl("fleet-section-toggle"),
+      tasks: getEl("tasks-section-toggle"),
+      agents: getEl("agents-section-toggle"),
     },
     storage,
     postMessages,
@@ -611,6 +645,256 @@ describe("toolbar Agent chip", () => {
     chip.dispatch("keydown", { key: "Enter", preventDefault: () => undefined });
 
     expect(postMessages).toContainEqual({ type: "showThreadAttention", threadId: "thread-a" });
+  });
+});
+
+// ── The sidebar panel's own state ──
+//
+// Whether the sidebar is open is a layout choice, not something to re-decide
+// on every window: reopening with the sidebar flipped — one the reader left
+// open coming back shut, every time — made the choice look like it had never
+// counted. It is kept in the webview's store beside the width, and every way
+// of opening or closing the panel writes it through the one mutator, so what
+// is stored cannot drift from what is on screen.
+
+describe("sidebar panel open state", () => {
+  it("reopens a sidebar that was left open", () => {
+    const { panel } = createHarness({ storage: { "codewhale:sidebarOpen": "true" } });
+
+    expect(panel.classList.contains("open")).toBe(true);
+  });
+
+  it("leaves the panel shut when no choice is on record", () => {
+    // A first run has nothing stored, so the panel's own default stands.
+    const { panel } = createHarness();
+
+    expect(panel.classList.contains("open")).toBe(false);
+  });
+
+  it("leaves the panel shut when the last choice was to close it", () => {
+    const { panel } = createHarness({ storage: { "codewhale:sidebarOpen": "false" } });
+
+    expect(panel.classList.contains("open")).toBe(false);
+  });
+
+  it("reads only the two values it writes as a choice", () => {
+    // A hand-edited store, or a shape another build wrote, is not a choice to
+    // honour: the default stands instead of the junk reading as "closed".
+    const { panel } = createHarness({ storage: { "codewhale:sidebarOpen": "1" } });
+
+    expect(panel.classList.contains("open")).toBe(false);
+  });
+
+  it("writes the choice down when the ✕ closes the panel", () => {
+    const { panel, panelCloseBtn, storage } = createHarness({
+      storage: { "codewhale:sidebarOpen": "true" },
+    });
+
+    panelCloseBtn.dispatch("click");
+
+    expect(panel.classList.contains("open")).toBe(false);
+    expect(storage.getItem("codewhale:sidebarOpen")).toBe("false");
+  });
+
+  it("writes the choice down when the 📋 toggle opens the panel", () => {
+    const { panel, panelToggle, storage } = createHarness();
+
+    panelToggle.dispatch("click");
+
+    expect(panel.classList.contains("open")).toBe(true);
+    expect(storage.getItem("codewhale:sidebarOpen")).toBe("true");
+  });
+
+  it("writes the choice down when Escape closes the panel", () => {
+    const { panel, panelToggle, pressKey, storage } = createHarness();
+
+    // Opened here rather than restored from the store, so this test fails only
+    // for its own reason: a panel that is not open is not Escape's business.
+    panelToggle.dispatch("click");
+    expect(panel.classList.contains("open")).toBe(true);
+
+    pressKey("Escape");
+
+    expect(panel.classList.contains("open")).toBe(false);
+    expect(storage.getItem("codewhale:sidebarOpen")).toBe("false");
+  });
+
+  it("records nothing when Escape reaches a panel that is already shut", () => {
+    // Escape is a shortcut for the ✕, not a second way to write "closed": a
+    // sidebar the reader has never opened must not end up on record as one
+    // they chose to close.
+    const { panel, pressKey, storage } = createHarness();
+
+    pressKey("Escape");
+
+    expect(panel.classList.contains("open")).toBe(false);
+    expect(storage.getItem("codewhale:sidebarOpen")).toBe(null);
+  });
+
+  it("writes the choice down when the chip opens the panel on a waiting thread", () => {
+    const { chip, panel, sidebar, storage } = createHarness();
+    sidebar.setThreads([waitingThread("thread-a", "2026-09-17T00:00:00Z")]);
+    sidebar.renderThreads();
+
+    chip.dispatch("click");
+
+    expect(panel.classList.contains("open")).toBe(true);
+    expect(storage.getItem("codewhale:sidebarOpen")).toBe("true");
+  });
+
+  it("still works, and simply forgets, when the host denies the store", () => {
+    // A locked-down host: reading the store throws. The module has to survive
+    // it — a throw in this block takes the whole webview down (see AGENTS.md) —
+    // so the layout falls back to its defaults for the session, and the two
+    // choices still hold for as long as the panel lives.
+    const { panel, panelToggle, sidebar } = createHarness({ storage: null });
+
+    expect(panel.classList.contains("open")).toBe(false);
+
+    panelToggle.dispatch("click");
+    expect(panel.classList.contains("open")).toBe(true);
+
+    sidebar.setActivitySectionCollapsed("changes", true);
+    expect(sidebar.getCollapsedActivitySections()).toEqual(["changes"]);
+  });
+});
+
+// ── Activity section folding ──
+//
+// A fold is a layout choice the reader made, and it used to last only until
+// the window was reloaded — every section they had folded shut came back open.
+// It is kept the same way as the sections they hid, in its own key so the two
+// choices cannot overwrite each other.
+
+describe("Activity section folding", () => {
+  it("folds the sections that were folded last time", () => {
+    const { sections } = createHarness({
+      storage: { "codewhale:collapsedSections": '["changes"]' },
+    });
+
+    expect(sections.changes.classList.contains("collapsed")).toBe(true);
+    expect(sections.work.classList.contains("collapsed")).toBe(false);
+  });
+
+  it("leaves every section open when nothing is on record", () => {
+    const { sections } = createHarness();
+
+    expect(sections.work.classList.contains("collapsed")).toBe(false);
+    expect(sections.agents.classList.contains("collapsed")).toBe(false);
+  });
+
+  it("folds a section from its header and writes the key down", () => {
+    const { sectionHeaders, sections, storage } = createHarness();
+
+    sectionHeaders.changes.dispatch("click");
+
+    expect(sections.changes.classList.contains("collapsed")).toBe(true);
+    expect(storage.getItem("codewhale:collapsedSections")).toBe('["changes"]');
+  });
+
+  it("binds a header to every Activity section, not just some of them", () => {
+    // The binding walks the roster and skips a header it cannot find, so a
+    // section whose header id drifted would fail silently — as a fold that
+    // does nothing. Each one is folded from its own header here.
+    for (const key of ["work", "changes", "fleet", "tasks", "agents"] as const) {
+      const { sectionHeaders, sections, sidebar } = createHarness();
+
+      sectionHeaders[key].dispatch("click");
+
+      expect(sections[key].classList.contains("collapsed")).toBe(true);
+      expect(sidebar.getCollapsedActivitySections()).toEqual([key]);
+    }
+  });
+
+  it("reopens it on the next click and clears the key", () => {
+    const { sectionHeaders, sections, storage } = createHarness({
+      storage: { "codewhale:collapsedSections": '["changes"]' },
+    });
+
+    sectionHeaders.changes.dispatch("click");
+
+    expect(sections.changes.classList.contains("collapsed")).toBe(false);
+    expect(storage.getItem("codewhale:collapsedSections")).toBe("[]");
+  });
+
+  it("keeps each section's fold to itself", () => {
+    const { sectionHeaders, sections, storage } = createHarness();
+
+    sectionHeaders.tasks.dispatch("click");
+    sectionHeaders.fleet.dispatch("click");
+
+    expect(sections.tasks.classList.contains("collapsed")).toBe(true);
+    expect(sections.fleet.classList.contains("collapsed")).toBe(true);
+    expect(sections.work.classList.contains("collapsed")).toBe(false);
+    // Which keys are folded is the choice; the order they are written in is
+    // the order they were clicked, and a reload normalises it anyway.
+    const written = JSON.parse(storage.getItem("codewhale:collapsedSections")!) as string[];
+    expect(written.sort()).toEqual(["fleet", "tasks"]);
+  });
+
+  it("drops keys this build does not know instead of carrying them", () => {
+    // A section another build had, or a hand-edited store: keeping the unknown
+    // key would write it back on the next fold and outlive the section itself.
+    const { sectionHeaders, sidebar, storage } = createHarness({
+      storage: { "codewhale:collapsedSections": '["changes","objectives"]' },
+    });
+
+    expect(sidebar.getCollapsedActivitySections()).toEqual(["changes"]);
+
+    sectionHeaders.changes.dispatch("click");
+
+    expect(storage.getItem("codewhale:collapsedSections")).toBe("[]");
+  });
+
+  it("ignores a stored value it cannot read", () => {
+    // The loader's guard is not decoration: a throw in this script block takes
+    // the whole webview down (see AGENTS.md), so an unreadable store has to
+    // leave every section as it was.
+    const { sections } = createHarness({
+      storage: { "codewhale:collapsedSections": "{ not json" },
+    });
+
+    expect(sections.changes.classList.contains("collapsed")).toBe(false);
+    expect(sections.work.classList.contains("collapsed")).toBe(false);
+  });
+
+  it("ignores a stored value of the wrong shape", () => {
+    const { sections } = createHarness({
+      storage: { "codewhale:collapsedSections": '{"changes":true}' },
+    });
+
+    expect(sections.changes.classList.contains("collapsed")).toBe(false);
+  });
+
+  it("writes nothing when the fold asked for is the one already in place", () => {
+    const { sidebar, storage } = createHarness({
+      storage: { "codewhale:collapsedSections": '["changes"]' },
+    });
+    // The guard is only worth having if it really is no write: count the ones
+    // that reach the store rather than trusting the value to look unchanged.
+    const writes: string[] = [];
+    const setItem = storage.setItem.bind(storage);
+    storage.setItem = (key: string, value: string) => {
+      writes.push(`${key}=${value}`);
+      setItem(key, value);
+    };
+
+    sidebar.setActivitySectionCollapsed("changes", true);
+
+    expect(writes).toEqual([]);
+    expect(sidebar.getCollapsedActivitySections()).toEqual(["changes"]);
+  });
+
+  it("ignores a key that is not an Activity section", () => {
+    // The mutator is reachable from the event handler module, so the roster
+    // check is what keeps an unknown key out of the store and out of a
+    // selector built from it.
+    const { sidebar, storage } = createHarness();
+
+    sidebar.setActivitySectionCollapsed("objectives", true);
+
+    expect(sidebar.getCollapsedActivitySections()).toEqual([]);
+    expect(storage.getItem("codewhale:collapsedSections")).toBe(null);
   });
 });
 

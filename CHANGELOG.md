@@ -1,5 +1,15 @@
 # Change Log
 
+## Unreleased
+
+Everything here is client-side; nothing in this section needs a newer engine than 0.8.0 did.
+
+### Bug Fixes
+
+- **The sidebar comes back the way you left it** — Keeping the sidebar open lasted only until the window was reloaded: the next launch showed it shut again, and closing it was forgotten the same way, so a sidebar you actually work with had to be reopened every time. Whether it is open is now written down beside the width — the same way the Activity sections you hide are — and restored before the panel first paints, so a sidebar left open is never shown shut first. The 📋 toggle, the ✕ and `Esc` all record the choice; a window that has never made one keeps the old default and opens shut.
+
+- **A section you folded stays folded** — Folding Work, Changes, Fleet, Tasks or Agents away lasted only until the next window too: every one of them came back open, so a tab you had arranged yourself had to be arranged again each time. Each section's fold is now remembered the same way the sections you hide are kept, in its own choice so the two cannot overwrite each other, and it is applied before the tab first paints — a section folded shut is never drawn open on the way to being folded.
+
 ## 0.8.0
 
 Everything below is client-side, and all of it lights up on engine **v0.10.0** the moment you install it — except the **Branch** row, which calls an engine route v0.10.0 does not have, so on v0.10.0 no Branch row is drawn at all. Verified end to end against an engine built from the branch that adds the route (Codewhale `main` at `8a835d7c4`). The upstream PRs behind these features are listed with their status under **Upstream TUI PRs** at the end of this section.
