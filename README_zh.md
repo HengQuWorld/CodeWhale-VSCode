@@ -1,11 +1,11 @@
 # CodeWhale for VS Code —— CodeWhale 代理的轻量图形前端
 
-[![Version](https://img.shields.io/badge/version-0.7.5-blue)](https://github.com/HengQuWorld/CodeWhale-VSCode)
+[![Version](https://img.shields.io/badge/version-0.8.0-blue)](https://github.com/HengQuWorld/CodeWhale-VSCode)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![CI](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/ci.yml/badge.svg)](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/ci.yml)
 [![Release](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/release.yml/badge.svg)](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/release.yml)
 [![VS Code](https://img.shields.io/badge/VS%20Code-1.85+-informational)](https://code.visualstudio.com/)
-[![VSIX](https://img.shields.io/badge/VSIX-~300%20KB-brightgreen)](https://github.com/HengQuWorld/CodeWhale-VSCode/releases)
+[![VSIX](https://img.shields.io/badge/VSIX-~320%20KB-brightgreen)](https://github.com/HengQuWorld/CodeWhale-VSCode/releases)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
 CodeWhale for VS Code 是 [CodeWhale](https://github.com/Hmbown/CodeWhale) 的**图形化前端**。CodeWhale 是一个开源且持续活跃开发的编程代理，本扩展把它装进 VS Code 原生侧边栏：读取工作区、修改文件、执行命令、搜索网络、派发子代理，全程不必离开编辑器。
@@ -18,7 +18,7 @@ CodeWhale for VS Code 是 [CodeWhale](https://github.com/Hmbown/CodeWhale) 的**
 
 | | |
 |---|---|
-| VSIX 体积（0.7.5） | 约 300 KB |
+| VSIX 体积（0.8.0） | 约 320 KB |
 | 运行时 npm 依赖 | **零** —— 扩展自身的 TypeScript（以及用于渲染的 `marked`）都被 webpack 内联 |
 | 打包的引擎或模型 | **无** —— `codewhale` 是独立的原生二进制 |
 | 重复实现的代理逻辑 | **无** —— GUI 只是引擎本地 runtime API 之上的适配层 |
@@ -28,11 +28,14 @@ CodeWhale for VS Code 是 [CodeWhale](https://github.com/Hmbown/CodeWhale) 的**
 
 正因为代理的任何一部分都没有被复制进扩展，引擎可以独立发布新能力和修复，而不需要前端跟着发版。
 
-### 0.7.5 的引擎兼容性
+### 0.8.0 的引擎兼容性
 
-0.7.5 针对引擎 **v0.10.0** 验证，本版交付的每一项改动都在客户端侧 —— 装上即在 v0.10.0 上生效，无需去追引擎升级。以下行为仍需要比 v0.10.0 更新的引擎修复，目前没有任何已发布引擎包含；每一项的客户端部分都已就位，只等引擎那一半：
+0.8.0 针对引擎 **v0.10.0** 验证，本版交付的每一项改动都在客户端侧 —— 除 **Branch** 行外，装上即在 v0.10.0 上生效，无需去追引擎升级（Branch 行等待的引擎端点目前没有任何已发布引擎携带）。以下行为仍需要比 v0.10.0 更新的引擎修复，目前没有任何已发布引擎包含：
 
-- **Undo 与 Changes 面板的按文件 Revert** —— 需要 [Codewhale#6483](https://github.com/Hmbown/Codewhale/pull/6483)，仍为 open。在 v0.10.0 上，两者都会把已改动的文件留在磁盘上，Revert 还会对一个确实存在的快照返回 `409`；客户端这一半在本版交付，引擎那一半还没有。
+- **从任意一条回答分叉会话** —— 需要 [Codewhale#6580](https://github.com/Hmbown/Codewhale/pull/6580)，已于 2026-09-26 合并、尚未发布。在 v0.10.0 上不显示 Branch 行，而不是退化成对最后一轮的分叉。
+- **分叉出的会话在源轮次丢失工具调用时的首条消息** —— 需要 [Codewhale#6664](https://github.com/Hmbown/Codewhale/pull/6664)，仍为 open。在引擎携带该修复之前，从一个包含失败或被中断的工具调用的会话分叉出的分支，第一条消息可能失败。
+- **线程栏在大 store 上保持流畅** —— 需要 [Codewhale#6646](https://github.com/Hmbown/Codewhale/pull/6646)，仍为 open。在 v0.10.0 上，线程数量多的 store 会让列线程与打开线程在引擎侧变慢（在 140 线程的 store 上实测冷 6.7 秒 / 热 1.3 秒）；该修复把引擎的读取范围限制在客户端实际请求的内容，客户端没有任何部分被它阻塞。
+- **Undo 与 Changes 面板的按文件 Revert** —— 需要 [Codewhale#6483](https://github.com/Hmbown/Codewhale/pull/6483)，已于 2026-09-25 合并、尚未发布。在 v0.10.0 上，两者都会把已改动的文件留在磁盘上，Revert 还会对一个确实存在的快照返回 `409`；客户端这一半自 0.7.5 起就已就位。
 - **选择器中的用户自定义 provider** —— 需要 [Codewhale#6404](https://github.com/Hmbown/Codewhale/pull/6404)，已于 2026-09-23 合并、尚未发布。在 v0.10.0 上，你在 TUI 中配置的 `[providers.<name>]` 路由依然不会出现在 provider 列表里。
 - **fork 保留自己的会话文档** —— 需要 [Codewhale#6406](https://github.com/Hmbown/Codewhale/pull/6406)，已于 2026-09-23 合并、尚未发布。在 v0.10.0 上，fork 首次保存时仍会新建一份自己的会话文档，而不是沿用原本绑定的那一份。
 
@@ -109,12 +112,12 @@ npx @vscode/vsce package --no-dependencies
 然后安装生成的 `.vsix`（`Extensions: Install from VSIX...`），或在终端执行：
 
 ```bash
-code --install-extension ./brotherwhale-vscode-0.7.5.vsix --force
+code --install-extension ./brotherwhale-vscode-0.8.0.vsix --force
 ```
 
 > **Trae CN 用户：** 如果 `code` 不在 `PATH` 中，使用自带的 CLI：
 > ```bash
-> "/Applications/Trae CN.app/Contents/Resources/app/bin/code" --install-extension ./brotherwhale-vscode-0.7.5.vsix --force
+> "/Applications/Trae CN.app/Contents/Resources/app/bin/code" --install-extension ./brotherwhale-vscode-0.8.0.vsix --force
 > ```
 
 ### 3. 打开它
@@ -279,7 +282,7 @@ codewhale serve（引擎 —— 单独安装与升级）
 
 **安装 VSIX**
 ```bash
-code --install-extension /path/to/brotherwhale-vscode-0.7.5.vsix --force
+code --install-extension /path/to/brotherwhale-vscode-0.8.0.vsix --force
 ```
 
 ## 隐私与数据

@@ -1,8 +1,8 @@
 # Change Log
 
-## Unreleased
+## 0.8.0
 
-Client-side only; verified against an engine built from `feat/fork-at-turn` (Codewhale `main` at `8a835d7c4`), the branch that adds the endpoint it needs.
+Everything below is client-side, and all of it lights up on engine **v0.10.0** the moment you install it — except the **Branch** row, which calls an engine route v0.10.0 does not have, so on v0.10.0 no Branch row is drawn at all. Verified end to end against an engine built from the branch that adds the route (Codewhale `main` at `8a835d7c4`). The upstream PRs behind these features are listed with their status under **Upstream TUI PRs** at the end of this section.
 
 ### New Features
 
@@ -27,6 +27,14 @@ Client-side only; verified against an engine built from `feat/fork-at-turn` (Cod
 ### Bug Fixes
 
 - **A new session no longer keeps the previous conversation's rail** — Starting a new session cleared the conversation but not the dots beside it: the rail was refreshed only when a message was drawn, and an emptied conversation draws none, so the old dots stayed on screen pointing at messages that were gone. The rail is now taken down with the transcript it mirrors, whether that is a new session or a switch to a conversation with no turns — and redrawing it no longer loses the one dot that was lit, which used to go out every time a message arrived and only come back once you scrolled.
+
+### Upstream TUI PRs
+
+- [Codewhale#6580](https://github.com/Hmbown/Codewhale/pull/6580) — **merged 2026-09-26, not yet in any engine release.** `feat(runtime-api): fork a thread at a named turn` — the engine half of "Branch a conversation from any of its answers". The Branch row is capability-gated on this route: against engine v0.10.0 the row is not drawn at all, and it appears the moment an engine carrying this is installed. Naming the turn keeps it and everything before it, and the receipt carries the first dropped turn's prompt — the text the composer hands back to you.
+
+- [Codewhale#6664](https://github.com/Hmbown/Codewhale/pull/6664) — **open, unmerged.** `fix(tui): a fork continues when a turn lost its tool call` — found while using the Branch rows this release adds. A fork cut from a conversation holding a tool call that never produced a result — a failed tool, or a process that died mid-call — could fail its first message with `400 No tool output found for tool call …`, and a retry refuse to identify the history boundary. Until an engine carries the fix, a branch of such a conversation may refuse to continue; branching a conversation whose tool calls all completed is unaffected.
+
+- [Codewhale#6646](https://github.com/Hmbown/Codewhale/pull/6646) — **open, unmerged.** `perf(tui): stop walking the whole item store to list or open a thread` — the engine half of the rails staying quick on a large store. Listing threads and opening one used to read every item file in the store — measured on a 140-thread store, opening took 1.3s warm / 6.7s cold and a page of the list 1.27s, costs the rails pay on every refresh and every click — and the fix bounds both reads to what the client asked for. Nothing here is blocked on it; until an engine carries it, a large store is simply slower engine-side than it needs to be.
 
 ## 0.7.5
 

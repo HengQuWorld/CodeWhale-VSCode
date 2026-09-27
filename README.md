@@ -1,11 +1,11 @@
 # CodeWhale for VS Code — a lightweight GUI frontend for the CodeWhale agent
 
-[![Version](https://img.shields.io/badge/version-0.7.5-blue)](https://github.com/HengQuWorld/CodeWhale-VSCode)
+[![Version](https://img.shields.io/badge/version-0.8.0-blue)](https://github.com/HengQuWorld/CodeWhale-VSCode)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![CI](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/ci.yml/badge.svg)](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/ci.yml)
 [![Release](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/release.yml/badge.svg)](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/release.yml)
 [![VS Code](https://img.shields.io/badge/VS%20Code-1.85+-informational)](https://code.visualstudio.com/)
-[![VSIX](https://img.shields.io/badge/VSIX-~300%20KB-brightgreen)](https://github.com/HengQuWorld/CodeWhale-VSCode/releases)
+[![VSIX](https://img.shields.io/badge/VSIX-~320%20KB-brightgreen)](https://github.com/HengQuWorld/CodeWhale-VSCode/releases)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
 CodeWhale for VS Code is the **graphical frontend** for [CodeWhale](https://github.com/Hmbown/CodeWhale) — an open-source, actively developed coding agent. It brings the agent into a native VS Code sidebar, so you get the full engine (reading your workspace, editing files, running commands, searching the web, delegating to sub-agents) without leaving the editor.
@@ -18,7 +18,7 @@ The split is deliberate: **the agent stays in the engine, the ergonomics stay in
 
 | | |
 |---|---|
-| VSIX size (0.7.5) | ~300 KB |
+| VSIX size (0.8.0) | ~320 KB |
 | Runtime npm dependencies | **none** — webpack inlines the extension's own TypeScript (and `marked` for rendering) |
 | Bundled engine or model | **none** — `codewhale` is a separate native binary |
 | Duplicated agent logic | **none** — the GUI is an adapter over the engine's local runtime API |
@@ -28,11 +28,14 @@ The frontend is a webview. `ChatProvider` runs in the extension host, speaks HTT
 
 Because nothing about the agent is copied into the extension, the engine can ship new capabilities and fixes without a frontend release.
 
-### Engine compatibility for 0.7.5
+### Engine compatibility for 0.8.0
 
-0.7.5 is verified against engine **v0.10.0**, and everything it ships is client-side — it lights up on v0.10.0 the moment you install it, with no engine upgrade to chase. A few behaviours below still need engine fixes that are newer than v0.10.0, and no published engine carries them yet; each one is a client half already in place, just waiting on its engine half:
+0.8.0 is verified against engine **v0.10.0**, and everything it ships is client-side — it all lights up on v0.10.0 the moment you install it, except the **Branch** row, which waits on an engine route no published engine carries yet. The behaviours below need engine work newer than v0.10.0, and no published engine carries any of it:
 
-- **Undo and the Changes panel's per-file Revert** — need [Codewhale#6483](https://github.com/Hmbown/Codewhale/pull/6483), still open. On v0.10.0 both leave the changed files on disk and the Revert answers `409` for a snapshot that exists; the client side ships here, the engine half does not.
+- **Branch a conversation from any of its answers** — needs [Codewhale#6580](https://github.com/Hmbown/Codewhale/pull/6580), merged 2026-09-26 and not yet released. On v0.10.0 the Branch row is not offered at all, rather than degrading to a fork of the last turn.
+- **A branch's first message, when the turn it was cut from lost a tool call** — needs [Codewhale#6664](https://github.com/Hmbown/Codewhale/pull/6664), still open. A fork of a conversation holding a failed or interrupted tool call could fail its first message until an engine carries the fix.
+- **The thread rails stay quick on a large store** — needs [Codewhale#6646](https://github.com/Hmbown/Codewhale/pull/6646), still open. On v0.10.0 a store holding many threads makes listing and opening them slow engine-side (measured 1.3s warm / 6.7s cold on a 140-thread store); the fix bounds the engine's reads to what the client asked for, and nothing in the client is blocked on it.
+- **Undo and the Changes panel's per-file Revert** — need [Codewhale#6483](https://github.com/Hmbown/Codewhale/pull/6483), merged 2026-09-25 and not yet released. On v0.10.0 both leave the changed files on disk and the Revert answers `409` for a snapshot that exists; the client half has been in place since 0.7.5.
 - **User-defined providers in the picker** — needs [Codewhale#6404](https://github.com/Hmbown/Codewhale/pull/6404), merged 2026-09-23 and not yet released. On v0.10.0 a `[providers.<name>]` route you configured in the TUI is still missing from the provider list, exactly as before.
 - **A fork keeping its session document** — needs [Codewhale#6406](https://github.com/Hmbown/Codewhale/pull/6406), merged 2026-09-23 and not yet released. On v0.10.0 a fork starts a session document of its own on its first save instead of keeping the one it was bound to.
 
@@ -109,12 +112,12 @@ npx @vscode/vsce package --no-dependencies
 Then install the generated `.vsix` (`Extensions: Install from VSIX...`), or from a terminal:
 
 ```bash
-code --install-extension ./brotherwhale-vscode-0.7.5.vsix --force
+code --install-extension ./brotherwhale-vscode-0.8.0.vsix --force
 ```
 
 > **Trae CN users:** if `code` is not on your `PATH`, use the bundled CLI:
 > ```bash
-> "/Applications/Trae CN.app/Contents/Resources/app/bin/code" --install-extension ./brotherwhale-vscode-0.7.5.vsix --force
+> "/Applications/Trae CN.app/Contents/Resources/app/bin/code" --install-extension ./brotherwhale-vscode-0.8.0.vsix --force
 > ```
 
 ### 3. Open it
@@ -277,7 +280,7 @@ Reloading or closing the extension stops that window's Runtime and interrupts ac
 
 **Installing a VSIX**
 ```bash
-code --install-extension /path/to/brotherwhale-vscode-0.7.5.vsix --force
+code --install-extension /path/to/brotherwhale-vscode-0.8.0.vsix --force
 ```
 
 ## Privacy & data
