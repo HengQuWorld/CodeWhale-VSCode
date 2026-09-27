@@ -313,6 +313,21 @@ export interface WebviewTranslations {
   deleteSessionSuccess: string;
   deleteSessionFailed: string;
   noSearchResults: string;
+  /** Badge on a session the engine recorded a source for.
+   *  (`SessionMetadata.parent_session_id` is written when a fork gets its own
+   *  document.) */
+  sessionForkBadge: string;
+  /** Origin line for a branch whose source is not in the list the rail is
+   *  showing — archived, deleted, or filtered out by search or workspace.
+   *  `{source}` is the source session's shortened id, the only name there is. */
+  forkFromMissing: string;
+  /** Tooltip behind either rail's branch mark — the Sessions rail's Fork chip,
+   *  the Threads rail's lineage line. `{source}` is the source's title when one
+   *  is known and its shortened id otherwise. */
+  forkTooltip: string;
+  /** Appended to `forkTooltip` when the engine recorded how much the source
+   *  held at the cut; `{count}` is that message count. */
+  forkTooltipPoint: string;
   // Agent panel
   agents: string;
   noAgentRuns: string;

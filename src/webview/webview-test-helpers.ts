@@ -238,6 +238,10 @@ export function makeTr(overrides?: Partial<WebviewTranslations>): WebviewTransla
     deleteSessionSuccess: "Session deleted",
     deleteSessionFailed: "Failed to delete session",
     noSearchResults: "No matching sessions",
+    sessionForkBadge: "Fork",
+    forkFromMissing: "Branched from “{source}” — not in this list",
+    forkTooltip: "Branched from “{source}”: the branch keeps that conversation up to the point it was cut, and the turns after it stayed behind.",
+    forkTooltipPoint: "The conversation it came from had {count} messages at that point.",
     // Agent panel
     agents: "Agents",
     noAgentRuns: "No agent runs",

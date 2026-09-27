@@ -472,6 +472,45 @@ export function getWebviewCss(): string {
       font-size: 0.9em;
     }
 
+    /* A saved session branched from another one. Titles come from the first
+       user message, so a branch and its source read the same: the family is
+       drawn as a group nested under the session it was cut from, joined by a
+       guide line, instead of as one more sibling row. */
+    .session-forks {
+      margin-left: 10px;
+      border-left: 1px solid rgba(128,128,128,0.28);
+      padding-left: 4px;
+    }
+    .thread-item .session-fork-glyph {
+      color: var(--accent);
+      opacity: 0.75;
+      margin-right: 4px;
+      font-weight: 400;
+    }
+    .thread-item .session-fork-badge {
+      padding: 0 4px;
+      border-radius: 3px;
+      font-size: 0.85em;
+      font-weight: 600;
+      background: rgba(226, 185, 61, 0.15);
+      color: var(--status-warn, #e2b93d);
+    }
+    .thread-item.active .session-fork-badge {
+      background: rgba(255,255,255,0.2);
+      color: white;
+    }
+    .thread-item .session-fork-origin {
+      font-size: 0.9em;
+      color: var(--muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      margin-top: 1px;
+    }
+    .thread-item.active .session-fork-origin {
+      color: rgba(255,255,255,0.7);
+    }
+
     /* Tab hint (explains what each sidebar tab holds) */
     .sidebar-tab-hint {
       padding: 6px 10px;

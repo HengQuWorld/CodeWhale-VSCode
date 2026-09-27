@@ -357,6 +357,250 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
     _sessionSearchInited = true;
   }
 
+  /** One entry of a map built from engine ids, or null.
+   *
+   *  Every such map in this module is built without a prototype
+   *  (Object.create(null)): an id is engine data, so one spelled "constructor"
+   *  must not answer with a function and one spelled "__proto__" must not be
+   *  swallowed by an assignment. This reader then needs no hasOwnProperty of
+   *  its own, but keeps the null answer for a missing key explicit. */
+  function mapLookup(byId, id) {
+    return id && Object.prototype.hasOwnProperty.call(byId, id) ? byId[id] : null;
+  }
+
+  /** The ancestors of a session that this list actually holds, nearest first.
+   *
+   *  The engine records the fork in the session's own parent_session_id when a
+   *  branch is given a document of its own, so the rail draws the recorded
+   *  relationship instead of inferring one from titles or timestamps. The walk
+   *  stops on a repeated id: a corrupted chain must not loop the render, and a
+   *  row that cannot be placed is drawn at the top level rather than dropped.
+   */
+  function sessionAncestors(byId, session) {
+    var chain = [];
+    var seen = Object.create(null);
+    seen[session.id] = true;
+    var current = session;
+    while (true) {
+      var parentId = current.parent_session_id ? String(current.parent_session_id) : '';
+      var parent = mapLookup(byId, parentId);
+      if (!parent || seen[parent.id]) break;
+      seen[parent.id] = true;
+      chain.push(parent);
+      current = parent;
+    }
+    return chain;
+  }
+
+  /** The rail's order: whole families, each source above the sessions branched
+   *  from it.
+   *
+   *  The engine sorts sessions by recency, which is right for unrelated rows
+   *  and wrong inside a family: a branch is newer than the session it was cut
+   *  from, so recency alone floats the child above its own source with nothing
+   *  saying the two are related. A family therefore sorts where its newest
+   *  member sorts, and inside it the source leads and its branches follow.
+   */
+  function buildSessionFamilies(list) {
+    var byId = Object.create(null);
+    var appeared = Object.create(null);
+    for (var i = 0; i < list.length; i++) {
+      var entry = list[i];
+      if (entry && entry.id && !Object.prototype.hasOwnProperty.call(byId, entry.id)) {
+        byId[entry.id] = entry;
+        appeared[entry.id] = i;
+      }
+    }
+
+    var childrenOf = Object.create(null);
+    var roots = [];
+    for (var j = 0; j < list.length; j++) {
+      var session = list[j];
+      // A duplicate row was already dropped by the first pass; anything else
+      // that is not a session this list holds is not this loop's to place.
+      if (!session || !session.id || mapLookup(byId, session.id) !== session) continue;
+      var ancestors = sessionAncestors(byId, session);
+      if (ancestors.length === 0) {
+        // No source in this list — archived, deleted, or filtered out by the
+        // search box and the workspace toggle. The row is kept where the
+        // engine put it and marked as a branch, never hidden for want of the
+        // row it came from.
+        roots.push(session);
+        continue;
+      }
+      var parentId = ancestors[0].id;
+      if (!Object.prototype.hasOwnProperty.call(childrenOf, parentId)) childrenOf[parentId] = [];
+      childrenOf[parentId].push(session);
+    }
+
+    // A chain that loops — a corrupted document naming its own descendant as
+    // its source — would attach every session in the cycle to another one and
+    // leave the whole family with no root at all, i.e. off the rail. Anything
+    // no root reaches is promoted to one, so a bad link costs the nesting and
+    // never the row.
+    var reachable = Object.create(null);
+    function markReachable(session) {
+      if (reachable[session.id]) return;
+      reachable[session.id] = true;
+      var kids = Object.prototype.hasOwnProperty.call(childrenOf, session.id) ? childrenOf[session.id] : [];
+      for (var k = 0; k < kids.length; k++) markReachable(kids[k]);
+    }
+    for (var rootIndex = 0; rootIndex < roots.length; rootIndex++) markReachable(roots[rootIndex]);
+    for (var listed = 0; listed < list.length; listed++) {
+      var orphan = list[listed];
+      if (!orphan || !orphan.id || mapLookup(byId, orphan.id) !== orphan) continue;
+      if (reachable[orphan.id]) continue;
+      roots.push(orphan);
+      markReachable(orphan);
+    }
+
+    // Newest activity anywhere in the family, so both ends move together when
+    // either is touched.
+    var newest = Object.create(null);
+    function newestAt(session) {
+      if (Object.prototype.hasOwnProperty.call(newest, session.id)) return newest[session.id];
+      newest[session.id] = '';
+      var at = String(session.updated_at || '');
+      var kids = Object.prototype.hasOwnProperty.call(childrenOf, session.id) ? childrenOf[session.id] : [];
+      for (var k = 0; k < kids.length; k++) {
+        var kidAt = newestAt(kids[k]);
+        if (kidAt > at) at = kidAt;
+      }
+      newest[session.id] = at;
+      return at;
+    }
+    // A missing timestamp sorts last, and a tie keeps the engine's order.
+    function byRecency(a, b) {
+      var aAt = newestAt(a);
+      var bAt = newestAt(b);
+      if (aAt !== bAt) return aAt > bAt ? -1 : 1;
+      return appeared[a.id] - appeared[b.id];
+    }
+    roots.sort(byRecency);
+    for (var id in childrenOf) {
+      if (Object.prototype.hasOwnProperty.call(childrenOf, id)) childrenOf[id].sort(byRecency);
+    }
+    return { roots: roots, childrenOf: childrenOf };
+  }
+
+  /** The tooltip behind a branch mark: where the branch came from, and how
+   *  much the conversation it was cut from held at that point. source is a
+   *  title when one is known and the shortened id otherwise; branchPoint is
+   *  the source's message count at the cut, which the engine records only for
+   *  a branch it gave a document of its own. */
+  function forkTooltipText(source, branchPoint) {
+    var text = __i18n.forkTooltip.replace('{source}', source);
+    if (branchPoint) {
+      text += ' ' + __i18n.forkTooltipPoint.replace('{count}', String(branchPoint));
+    }
+    return text;
+  }
+
+  /** One saved session's row. The nested flag marks a row drawn under the
+   *  session it was branched from; an orphan branch keeps the mark without the
+   *  nesting. */
+  function renderSessionItem(s, parent, nested) {
+    var el = document.createElement('div');
+    el.className = 'thread-item'
+      + (s.id === activeSessionId ? ' active' : '')
+      + (nested ? ' session-fork-child' : '');
+    el.setAttribute('data-session-id', s.id);
+
+    var titleEl = document.createElement('div');
+    titleEl.className = 'thread-title';
+    var titleText = s.title || s.id.slice(0, 8);
+    if (nested) {
+      // A branch keeps the source's first user message, so the engine derives
+      // the SAME title for both. The chevron is what tells this row from the
+      // one above it; without it the pair read as two identical rows.
+      var glyph = document.createElement('span');
+      glyph.className = 'session-fork-glyph';
+      glyph.setAttribute('aria-hidden', 'true');
+      glyph.textContent = '\\u21B3';
+      titleEl.appendChild(glyph);
+      titleEl.appendChild(document.createTextNode(titleText));
+    } else {
+      titleEl.textContent = titleText;
+    }
+    el.appendChild(titleEl);
+
+    if (s.parent_session_id && !nested) {
+      // The source is not in what this list holds. Saying so is the honest
+      // half of the relationship; the badge alone would claim a source the
+      // reader cannot reach.
+      var originEl = document.createElement('div');
+      originEl.className = 'session-fork-origin';
+      originEl.textContent = __i18n.forkFromMissing.replace(
+        '{source}',
+        String(s.parent_session_id).slice(0, 8)
+      );
+      el.appendChild(originEl);
+    }
+
+    var metaEl = document.createElement('div');
+    metaEl.className = 'thread-meta';
+
+    var modeEl = document.createElement('span');
+    modeEl.className = 'session-mode-badge';
+    modeEl.textContent = s.mode || 'agent';
+    metaEl.appendChild(modeEl);
+
+    if (s.parent_session_id) {
+      var forkBadge = document.createElement('span');
+      forkBadge.className = 'session-fork-badge';
+      forkBadge.textContent = __i18n.sessionForkBadge;
+      forkBadge.title = forkTooltipText(
+        parent ? (parent.title || parent.id.slice(0, 8)) : String(s.parent_session_id).slice(0, 8),
+        s.forked_from_message_count
+      );
+      metaEl.appendChild(forkBadge);
+    }
+
+    if (showAllWorkspaces && s.workspace) {
+      var wsEl = document.createElement('span');
+      wsEl.className = 'session-workspace';
+      var wsName = s.workspace.split('/').pop() || s.workspace;
+      wsEl.textContent = wsName;
+      wsEl.title = s.workspace;
+      metaEl.appendChild(wsEl);
+    }
+
+    if (s.message_count) {
+      var msgEl = document.createElement('span');
+      msgEl.textContent = s.message_count + ' msgs';
+      metaEl.appendChild(msgEl);
+    }
+
+    // Cost (if available)
+    if (s.cost && typeof s.cost.session_cost_usd === 'number' && s.cost.session_cost_usd > 0) {
+      var costEl = document.createElement('span');
+      costEl.className = 'session-cost';
+      costEl.textContent = '$' + s.cost.session_cost_usd.toFixed(2);
+      metaEl.appendChild(costEl);
+    }
+
+    // Total tokens (if available)
+    if (typeof s.total_tokens === 'number' && s.total_tokens > 0) {
+      var tokEl = document.createElement('span');
+      tokEl.className = 'session-tokens';
+      if (s.total_tokens >= 1000) {
+        tokEl.textContent = (s.total_tokens / 1000).toFixed(1) + 'k';
+      } else {
+        tokEl.textContent = String(s.total_tokens);
+      }
+      metaEl.appendChild(tokEl);
+    }
+
+    if (s.updated_at) {
+      var timeEl = document.createElement('span');
+      timeEl.textContent = __wvFormatRelativeTime(s.updated_at);
+      metaEl.appendChild(timeEl);
+    }
+
+    el.appendChild(metaEl);
+    return el;
+  }
+
   function renderSessions() {
     var container = document.getElementById('tab-sessions');
     if (!container) return;
@@ -373,7 +617,7 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
     initSessionSearch();
 
     // Remove only session items, keep the hint and the search bar
-    var existing = container.querySelectorAll('.thread-item, .work-empty');
+    var existing = container.querySelectorAll('.thread-item, .work-empty, .session-forks');
     for (var r = 0; r < existing.length; r++) {
       existing[r].remove();
     }
@@ -387,87 +631,54 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
       return;
     }
 
-    for (var i = 0; i < sessions.length; i++) {
-      var s = sessions[i];
-      var el = document.createElement('div');
-      el.className = 'thread-item' + (s.id === activeSessionId ? ' active' : '');
+    var families = buildSessionFamilies(sessions);
+    // One row per session, whatever the recorded lineage says: a document that
+    // names two sessions each other's source is drawn as far as it can be
+    // walked rather than followed round for ever.
+    var drawn = Object.create(null);
+    for (var f = 0; f < families.roots.length; f++) {
+      appendSessionFamily(container, families, families.roots[f], 0, null, drawn);
+    }
+  }
 
-      var titleEl = document.createElement('div');
-      titleEl.className = 'thread-title';
-      titleEl.textContent = s.title || s.id.slice(0, 8);
-      el.appendChild(titleEl);
+  /** A session's row, then the sessions branched from it in a group of their
+   *  own. The group's guide line is the CSS half of the relationship; the
+   *  nesting is what makes a branch's own branch read as one level deeper. */
+  function appendSessionFamily(container, families, session, depth, parent, drawn) {
+    if (drawn[session.id]) return;
+    drawn[session.id] = true;
+    var el = renderSessionItem(session, parent, depth > 0);
 
-      var metaEl = document.createElement('div');
-      metaEl.className = 'thread-meta';
+    // Delete button
+    var deleteBtn = document.createElement('button');
+    deleteBtn.className = 'session-delete-btn';
+    deleteBtn.textContent = '\\u2715';
+    deleteBtn.title = __i18n.deleteSession;
+    (function(sessionId, sessionTitle) {
+      deleteBtn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        vscode.postMessage({ type: 'deleteSession', sessionId: sessionId, sessionTitle: sessionTitle });
+      });
+    })(session.id, session.title || session.id.slice(0, 8));
+    el.appendChild(deleteBtn);
 
-      var modeEl = document.createElement('span');
-      modeEl.className = 'session-mode-badge';
-      modeEl.textContent = s.mode || 'agent';
-      metaEl.appendChild(modeEl);
+    (function(sessionId) {
+      el.addEventListener('click', function() {
+        vscode.postMessage({ type: 'loadSession', sessionId: sessionId });
+      });
+    })(session.id);
 
-      if (showAllWorkspaces && s.workspace) {
-        var wsEl = document.createElement('span');
-        wsEl.className = 'session-workspace';
-        var wsName = s.workspace.split('/').pop() || s.workspace;
-        wsEl.textContent = wsName;
-        wsEl.title = s.workspace;
-        metaEl.appendChild(wsEl);
-      }
+    container.appendChild(el);
 
-      if (s.message_count) {
-        var msgEl = document.createElement('span');
-        msgEl.textContent = s.message_count + ' msgs';
-        metaEl.appendChild(msgEl);
-      }
-
-      // Cost (if available)
-      if (s.cost && typeof s.cost.session_cost_usd === 'number' && s.cost.session_cost_usd > 0) {
-        var costEl = document.createElement('span');
-        costEl.className = 'session-cost';
-        costEl.textContent = '$' + s.cost.session_cost_usd.toFixed(2);
-        metaEl.appendChild(costEl);
-      }
-
-      // Total tokens (if available)
-      if (typeof s.total_tokens === 'number' && s.total_tokens > 0) {
-        var tokEl = document.createElement('span');
-        tokEl.className = 'session-tokens';
-        if (s.total_tokens >= 1000) {
-          tokEl.textContent = (s.total_tokens / 1000).toFixed(1) + 'k';
-        } else {
-          tokEl.textContent = String(s.total_tokens);
-        }
-        metaEl.appendChild(tokEl);
-      }
-
-      if (s.updated_at) {
-        var timeEl = document.createElement('span');
-        timeEl.textContent = __wvFormatRelativeTime(s.updated_at);
-        metaEl.appendChild(timeEl);
-      }
-
-      el.appendChild(metaEl);
-
-      // Delete button
-      var deleteBtn = document.createElement('button');
-      deleteBtn.className = 'session-delete-btn';
-      deleteBtn.textContent = '\\u2715';
-      deleteBtn.title = __i18n.deleteSession;
-      (function(sessionId, sessionTitle) {
-        deleteBtn.addEventListener('click', function(e) {
-          e.stopPropagation();
-          vscode.postMessage({ type: 'deleteSession', sessionId: sessionId, sessionTitle: sessionTitle });
-        });
-      })(s.id, s.title || s.id.slice(0, 8));
-      el.appendChild(deleteBtn);
-
-      (function(sessionId) {
-        el.addEventListener('click', function() {
-          vscode.postMessage({ type: 'loadSession', sessionId: sessionId });
-        });
-      })(s.id);
-
-      container.appendChild(el);
+    var children = Object.prototype.hasOwnProperty.call(families.childrenOf, session.id)
+      ? families.childrenOf[session.id]
+      : [];
+    if (children.length === 0) return;
+    var group = document.createElement('div');
+    group.className = 'session-forks';
+    container.appendChild(group);
+    for (var i = 0; i < children.length; i++) {
+      appendSessionFamily(group, families, children[i], depth + 1, session, drawn);
     }
   }
 

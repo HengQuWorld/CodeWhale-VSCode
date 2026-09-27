@@ -358,6 +358,14 @@ interface Translations {
   deleteSessionSuccess: string;
   deleteSessionFailed: string;
   noSearchResults: string;
+  /** Badge on a session the engine recorded a source for: it was branched from
+   *  another conversation. See webview-html.ts for the full contract of this
+   *  family of strings (sessionForkBadge, forkFromMissing, forkTooltip,
+   *  forkTooltipPoint). */
+  sessionForkBadge: string;
+  forkFromMissing: string;
+  forkTooltip: string;
+  forkTooltipPoint: string;
   // Agent panel
   agents: string;
   noAgentRuns: string;
@@ -739,6 +747,10 @@ const en: Translations = {
   deleteSessionSuccess: "Session deleted",
   deleteSessionFailed: "Failed to delete session",
   noSearchResults: "No matching sessions",
+  sessionForkBadge: "Fork",
+  forkFromMissing: "Branched from “{source}” — not in this list",
+  forkTooltip: "Branched from “{source}”: the branch keeps that conversation up to the point it was cut, and the turns after it stayed behind.",
+  forkTooltipPoint: "The conversation it came from had {count} messages at that point.",
   // Agent panel
   agents: "Agents",
   noAgentRuns: "No agent runs",
@@ -1120,6 +1132,10 @@ const zhCn: Translations = {
   deleteSessionSuccess: "会话已删除",
   deleteSessionFailed: "删除会话失败",
   noSearchResults: "没有匹配的会话",
+  sessionForkBadge: "分叉",
+  forkFromMissing: "分叉自「{source}」— 不在当前列表中",
+  forkTooltip: "分叉自「{source}」：此分支保留到分叉点为止的对话，其后的轮次留在原会话。",
+  forkTooltipPoint: "分叉时原会话已有 {count} 条消息。",
   // Agent panel
   agents: "子代理",
   noAgentRuns: "暂无子代理运行",
@@ -1537,6 +1553,10 @@ export function webviewTranslations(tr: Translations) {
     deleteSessionSuccess: tr.deleteSessionSuccess,
     deleteSessionFailed: tr.deleteSessionFailed,
     noSearchResults: tr.noSearchResults,
+    sessionForkBadge: tr.sessionForkBadge,
+    forkFromMissing: tr.forkFromMissing,
+    forkTooltip: tr.forkTooltip,
+    forkTooltipPoint: tr.forkTooltipPoint,
     // Agent panel
     agents: tr.agents,
     noAgentRuns: tr.noAgentRuns,

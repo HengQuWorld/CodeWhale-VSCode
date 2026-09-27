@@ -87,6 +87,7 @@ class FakeElement {
   public className = "";
   public classList = new FakeClassList();
   public textContent = "";
+  public title = "";
   public style: Record<string, string> = {};
   public parentElement: FakeElement | null = null;
   public children: FakeElement[] = [];
@@ -243,6 +244,7 @@ function createHarness(options?: { storage?: Record<string, string> }) {
   const rail = getEl("tab-threads-list");
   return {
     rail,
+    sessionRail: getEl("tab-sessions"),
     chip: getEl("agent-panel-toggle"),
     panel: getEl("threads-panel"),
     sidebarSection: getEl("sidebar-threads"),
@@ -269,6 +271,24 @@ function createHarness(options?: { storage?: Record<string, string> }) {
 /** Rows the rail currently holds, in order. */
 function railChildren(rail: FakeElement): FakeElement[] {
   return rail.children;
+}
+
+/** Every saved-session row in the order the rail paints it, each tagged with
+ *  the depth it sits at, so one list asserts nesting and order together:
+ *  `["0:parent", "1:child"]` is a branch drawn under its source. */
+function sessionRailOrder(rail: FakeElement): string[] {
+  const found: string[] = [];
+  const walk = (container: FakeElement, depth: number): void => {
+    for (const child of container.children) {
+      if (child.className.startsWith("thread-item")) {
+        found.push(`${depth}:${child.getAttribute("data-session-id")}`);
+      } else if (child.className === "session-forks") {
+        walk(child, depth + 1);
+      }
+    }
+  };
+  walk(rail, 0);
+  return found;
 }
 
 function rowsMatching(rail: FakeElement, prefix: string): FakeElement[] {
@@ -1474,5 +1494,182 @@ describe("Activity section visibility", () => {
 
     activityToggle.dispatch("click", { stopPropagation: () => {} });
     expect(activityPicker.classList.contains("open")).toBe(false);
+  });
+});
+
+/** One saved session as `GET /v1/sessions` hands it over. */
+function savedSession(id: string, overrides: Record<string, unknown> = {}) {
+  return {
+    id,
+    title: `Session ${id}`,
+    created_at: "2026-09-01T00:00:00Z",
+    updated_at: "2026-09-17T00:00:00Z",
+    message_count: 4,
+    total_tokens: 0,
+    model: "deepseek-v4-pro",
+    workspace: "/w",
+    mode: "agent",
+    ...overrides,
+  };
+}
+
+describe("session rail fork families", () => {
+  it("draws a branch under the session it was cut from, not beside it", () => {
+    const { sessionRail, sidebar } = createHarness();
+    // The engine lists by recency, so a branch arrives ahead of its source:
+    // painting that order is what left two identically-titled rows side by
+    // side with nothing saying which came from which.
+    sidebar.setSessions([
+      savedSession("child", {
+        parent_session_id: "parent",
+        updated_at: "2026-09-18T00:00:00Z",
+        forked_from_message_count: 6,
+      }),
+      savedSession("parent"),
+    ]);
+
+    sidebar.renderSessions();
+
+    expect(sessionRailOrder(sessionRail)).toEqual(["0:parent", "1:child"]);
+    const child = sessionRail.querySelector('[data-session-id="child"]')!;
+    expect(child.className).toContain("session-fork-child");
+    // The branch inherits the source's first user message, so the engine
+    // derives the same title for both; the chevron is what tells them apart.
+    expect(child.children[0].children.map((c) => c.textContent).join("")).toBe("↳Session child");
+    const badge = child.querySelector(".session-fork-badge")!;
+    expect(badge.textContent).toBe("Fork");
+    // The badge names the source and how much of it the branch kept.
+    expect(badge.title).toContain("Session parent");
+    expect(badge.title).toContain("6");
+    // The source carries no badge of its own: it is the row the chevron points
+    // away from.
+    expect(
+      sessionRail.querySelector('[data-session-id="parent"]')!.querySelector(".session-fork-badge"),
+    ).toBeNull();
+  });
+
+  it("sorts a family where its newest member sorts", () => {
+    const { sessionRail, sidebar } = createHarness();
+    sidebar.setSessions([
+      savedSession("parent", { updated_at: "2026-09-17T00:00:00Z" }),
+      savedSession("other", { updated_at: "2026-09-18T00:00:00Z" }),
+      savedSession("child", { parent_session_id: "parent", updated_at: "2026-09-19T00:00:00Z" }),
+    ]);
+
+    sidebar.renderSessions();
+
+    // The branch is the newest row in the store, so the family it belongs to
+    // is what moves to the top — with the source leading it, not the branch.
+    expect(sessionRailOrder(sessionRail)).toEqual(["0:parent", "1:child", "0:other"]);
+  });
+
+  it("keeps a branch whose source is not in the list, and says so", () => {
+    const { sessionRail, sidebar } = createHarness();
+    sidebar.setSessions([savedSession("child", { parent_session_id: "parent-abcdef123" })]);
+
+    sidebar.renderSessions();
+
+    // A search query, the workspace toggle or a deletion can leave the source
+    // out of the list; none of them is a reason to drop the row itself.
+    expect(sessionRailOrder(sessionRail)).toEqual(["0:child"]);
+    const child = sessionRail.querySelector('[data-session-id="child"]')!;
+    expect(child.className).not.toContain("session-fork-child");
+    expect(child.querySelector(".session-fork-origin")!.textContent).toContain("parent-a");
+    expect(child.querySelector(".session-fork-badge")).toBeTruthy();
+  });
+
+  it("draws a branch of a branch one level deeper", () => {
+    const { sessionRail, sidebar } = createHarness();
+    sidebar.setSessions([
+      savedSession("grandchild", { parent_session_id: "child" }),
+      savedSession("child", { parent_session_id: "parent" }),
+      savedSession("parent"),
+    ]);
+
+    sidebar.renderSessions();
+
+    expect(sessionRailOrder(sessionRail)).toEqual(["0:parent", "1:child", "2:grandchild"]);
+  });
+
+  it("leaves a session with nothing to nest exactly as it was", () => {
+    const { sessionRail, sidebar } = createHarness();
+    sidebar.setSessions([savedSession("plain")]);
+
+    sidebar.renderSessions();
+
+    expect(sessionRailOrder(sessionRail)).toEqual(["0:plain"]);
+    expect(sessionRail.children).toHaveLength(1);
+    expect(sessionRail.querySelector(".session-forks")).toBeNull();
+    expect(sessionRail.querySelector(".session-fork-badge")).toBeNull();
+    expect(sessionRail.querySelector(".session-fork-origin")).toBeNull();
+  });
+
+  it("keeps both rows on the rail when the recorded lineage loops", () => {
+    const { sessionRail, sidebar } = createHarness();
+    // A corrupted pair naming each other as its source must not attach every
+    // row to another one and leave the rail with no root to draw.
+    sidebar.setSessions([
+      savedSession("a", { parent_session_id: "b" }),
+      savedSession("b", { parent_session_id: "a" }),
+    ]);
+
+    sidebar.renderSessions();
+
+    const drawn = sessionRailOrder(sessionRail).map((entry) => entry.split(":")[1]);
+    expect(drawn.sort()).toEqual(["a", "b"]);
+  });
+
+  it("draws ids that collide with Object.prototype instead of swallowing them", () => {
+    const { sessionRail, sidebar } = createHarness();
+    // Session ids are the engine's, but nothing guarantees they are safe as
+    // plain object keys: a map built with `{}` swallows the write for an id of
+    // "__proto__" and the row disappears from the rail.
+    sidebar.setSessions([
+      savedSession("__proto__"),
+      savedSession("constructor", { parent_session_id: "__proto__" }),
+    ]);
+
+    sidebar.renderSessions();
+
+    expect(sessionRailOrder(sessionRail)).toEqual(["0:__proto__", "1:constructor"]);
+  });
+
+  it("re-renders a family without duplicating its rows or its group", () => {
+    const { sessionRail, sidebar } = createHarness();
+    sidebar.setSessions([
+      savedSession("parent"),
+      savedSession("child", { parent_session_id: "parent" }),
+      savedSession("other"),
+    ]);
+
+    // Every session-list message repaints the rail, so this is the normal path
+    // rather than an edge case — and the nested group is new state that has to
+    // be cleared with the rows.
+    sidebar.renderSessions();
+    sidebar.renderSessions();
+
+    expect(sessionRailOrder(sessionRail)).toEqual(["0:parent", "1:child", "0:other"]);
+    expect(sessionRail.querySelectorAll(".session-forks")).toHaveLength(1);
+  });
+
+  it("still loads and deletes a row drawn as a branch", () => {
+    const { sessionRail, sidebar, postMessages } = createHarness();
+    sidebar.setSessions([
+      savedSession("parent"),
+      savedSession("child", { parent_session_id: "parent" }),
+    ]);
+    sidebar.renderSessions();
+
+    const child = sessionRail.querySelector('[data-session-id="child"]')!;
+    child.dispatch("click", { stopPropagation: () => {} });
+    expect(postMessages).toContainEqual({ type: "loadSession", sessionId: "child" });
+
+    const del = child.querySelector(".session-delete-btn")!;
+    del.dispatch("click", { stopPropagation: () => {} });
+    expect(postMessages).toContainEqual({
+      type: "deleteSession",
+      sessionId: "child",
+      sessionTitle: "Session child",
+    });
   });
 });
