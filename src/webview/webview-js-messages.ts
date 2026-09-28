@@ -85,6 +85,45 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
     }
   }
 
+  /** A row's height before it has ever been painted.
+   *
+   *  content-visibility: auto (webview-css) skips layout and paint for the
+   *  rows outside the viewport — laying out thousands of rendered tool outputs
+   *  is what made the panel reflow on every drag of its width. A skipped row
+   *  still has to occupy space, so the sheet gives it
+   *  contain-intrinsic-size: auto <length>, and this is that length: a rough
+   *  height from what the row draws, replaced by the browser with the real one
+   *  the first time the row is painted.
+   *
+   *  The estimate reads the message the way the transcript draws it — its text
+   *  and thinking at about 60 characters a line, a line each for the headers and
+   *  tool outputs around it. A row that guesses short only shortens the
+   *  scrollbar until the row is seen, so the cap errs high. */
+  function estimateMessageHeight(msg) {
+    var chars = 0;
+    var rows = 0;
+    if (msg.content) chars += String(msg.content).length;
+    if (msg.compactionSummary) chars += String(msg.compactionSummary).length;
+    var blocks = msg.blocks || [];
+    for (var bi = 0; bi < blocks.length; bi++) {
+      var block = blocks[bi] || {};
+      rows += 1;
+      if (block.content) chars += String(block.content).length;
+      // Rendered markup is at least half tags; count only its text's worth.
+      if (block.contentHtml) chars += String(block.contentHtml).length / 2;
+      // A tool call draws a header row and its input box on top of the block.
+      if (block.type === 'tool_call') rows += 2;
+    }
+    var toolCalls = msg.toolCalls || [];
+    for (var ti = 0; ti < toolCalls.length; ti++) {
+      rows += 2;
+      var input = toolCalls[ti] && toolCalls[ti].input;
+      if (input !== undefined && input !== null) chars += String(input).length / 2;
+    }
+    var estimate = 28 + rows * 34 + (chars / 60) * 18;
+    return Math.round(Math.max(64, Math.min(4000, estimate)));
+  }
+
   function smartScrollToBottom() {
     if (userScrolledUp) return;
     messagesEl.scrollTop = messagesEl.scrollHeight;
@@ -510,6 +549,7 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
     if (msg.role === 'system') {
       var noteEl = document.createElement('div');
       noteEl.className = 'system-message';
+      noteEl.style.containIntrinsicSize = 'auto ' + estimateMessageHeight(msg) + 'px';
       noteEl.id = 'msg-' + msg.id;
       noteEl.innerHTML = '<span class="msg-label note">' + __wvEscapeHtml(__i18n.note) + '</span><span class="msg-body">' + __wvEscapeHtml(msg.content) + '</span>' + renderCompactionSummary(msg.compactionSummary);
       messagesEl.appendChild(noteEl);
@@ -520,6 +560,10 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
     var el = document.createElement('div');
     el.className = 'message ' + msg.role + (msg.steered ? ' steered' : '');
     el.id = 'msg-' + msg.id;
+    // The space this row takes until the browser has painted it once: its
+    // content-visibility: auto skips layout offscreen, and this is the
+    // height it is skipped *at*.
+    el.style.containIntrinsicSize = 'auto ' + estimateMessageHeight(msg) + 'px';
     // The turn this bubble belongs to, as the Changes panel numbers turns. The
     // rail reads it back off the element to name the turn in a dot's tooltip,
     // so it is carried here rather than counted out of the user messages — a
@@ -1062,6 +1106,17 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
     var msgTop = el.getBoundingClientRect().top;
     var offset = msgTop - containerTop + messagesEl.scrollTop - 20;
     messagesEl.scrollTo({ top: Math.max(0, offset), behavior: 'smooth' });
+
+    // A row that was never painted sits at its estimated height (see
+    // estimateMessageHeight); scrolling to it materializes the real one,
+    // which moves it. Re-anchor once, on the frame that painted it.
+    requestAnimationFrame(function() {
+      var settledTop = el.getBoundingClientRect().top;
+      var settled = settledTop - messagesEl.getBoundingClientRect().top + messagesEl.scrollTop - 20;
+      if (Math.abs(settled - offset) > 4) {
+        messagesEl.scrollTo({ top: Math.max(0, settled), behavior: 'auto' });
+      }
+    });
 
     // Flash highlight
     el.classList.remove('jump-flash');

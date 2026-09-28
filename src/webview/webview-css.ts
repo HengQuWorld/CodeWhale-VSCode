@@ -696,6 +696,21 @@ export function getWebviewCss(): string {
       padding: 8px;
     }
 
+    /* A transcript can hold thousands of rows — a fork of a long conversation
+       cloned its source's items once per stream delta — and every row carries
+       rendered markdown and tool output. Laying all of them out is what made
+       the panel reflow on every drag of its width; the browser now skips the
+       rows outside the viewport, so a drag re-lays out what is on screen.
+       A skipped row still has to occupy space: contain-intrinsic-size: auto
+       seeds it with the estimate the script sets per row (a rough size from
+       its text and tool calls) and replaces that with the row's real height
+       the first time it is painted. */
+    #messages > .message,
+    #messages > .system-message {
+      content-visibility: auto;
+      contain-intrinsic-size: auto 220px;
+    }
+
     /* ── Message Navigation Rail ── */
 
     #message-nav {

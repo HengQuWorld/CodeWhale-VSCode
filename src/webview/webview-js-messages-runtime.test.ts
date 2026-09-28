@@ -205,7 +205,7 @@ class FakeElement {
   }
 }
 
-function createHarness() {
+function createHarness(options: { frames?: Array<() => void> } = {}) {
   const elements = new Map<string, FakeElement>();
   const getEl = (id: string): FakeElement => {
     let element = elements.get(id);
@@ -247,9 +247,13 @@ function createHarness() {
     document: documentObj,
     setTimeout: () => 0,
     clearTimeout: () => {},
-    // `addMessage` schedules its nav-dot refresh on a frame; the stand-in only
-    // has to exist, since nothing in these tests waits for a frame.
-    requestAnimationFrame: () => 0,
+    // `addMessage` schedules its nav-dot refresh on a frame, and a jump onto a
+    // row that was never painted re-anchors on the next one. Tests that wait for
+    // a frame collect the callbacks; the rest only need the stand-in to exist.
+    requestAnimationFrame: (callback: () => void) => {
+      options.frames?.push(callback);
+      return 0;
+    },
     console,
   });
   vm.runInContext(getMessagesScript(makeTr()), context);
@@ -392,6 +396,72 @@ describe("revealFileChangeCard", () => {
     expect(messages.revealFileChangeCard(null)).toBe(false);
     expect(card.classList.contains("jump-flash")).toBe(false);
     expect(messagesEl.scrollCalls).toHaveLength(0);
+  });
+});
+
+describe("lazy row layout", () => {
+  it("reserves space for a row before the browser has painted it", () => {
+    const { messages, messagesEl } = createHarness();
+    messages.addMessage({ id: "m1", role: "assistant", content: "a short answer" });
+    messages.addMessage({
+      id: "m2",
+      role: "assistant",
+      content: "x".repeat(9000),
+    });
+
+    const row = (id: string) => messagesEl.children.find((el) => el.id === id)!;
+    const short = String(row("msg-m1").style.containIntrinsicSize);
+    const long = String(row("msg-m2").style.containIntrinsicSize);
+
+    // The sheet skips layout for a row outside the viewport, so the row has to
+    // name the space it takes until it is painted once.
+    expect(short).toMatch(/^auto \d+px$/);
+    expect(long).toMatch(/^auto \d+px$/);
+    expect(Number(long.replace(/\D+/g, ""))).toBeGreaterThan(
+      Number(short.replace(/\D+/g, "")),
+    );
+  });
+
+  it("reserves space for a compaction note the same way", () => {
+    const { messages, messagesEl } = createHarness();
+    messages.addMessage({
+      id: "n1",
+      role: "system",
+      content: "a compaction note",
+      compactionSummary: "x".repeat(6000),
+    });
+
+    // The sheet's rule covers #messages > .system-message too, so a note
+    // row has to name its space as well — without this it sits at the
+    // sheet's 220px fallback wherever it is never painted.
+    const note = String(
+      messagesEl.children.find((el) => el.id === "msg-n1")!.style
+        .containIntrinsicSize,
+    );
+    expect(note).toMatch(/^auto \d+px$/);
+    expect(Number(note.replace(/\D+/g, ""))).toBeGreaterThan(220);
+  });
+
+  it("re-anchors a jump once the row's real height is known", () => {
+    const frames: Array<() => void> = [];
+    const { messages, messagesEl } = createHarness({ frames });
+    messages.addMessage({ id: "m1", role: "user", content: "go" });
+    messages.addMessage({ id: "m2", role: "assistant", content: "x".repeat(9000) });
+    const row = messagesEl.children.find((el) => el.id === "msg-m2")!;
+
+    // The row is far down the transcript, where it sits at its estimated height.
+    row.rectTop = 4000;
+    messages.scrollToMessage(row);
+    expect(messagesEl.scrollCalls).toHaveLength(1);
+    const first = messagesEl.scrollCalls[0].top as number;
+
+    // Painting it reveals a taller row than the estimate, which moved it.
+    row.rectTop = 4600;
+    frames.splice(0).forEach((callback) => callback());
+
+    expect(messagesEl.scrollCalls).toHaveLength(2);
+    expect(messagesEl.scrollCalls[1].top as number).toBeGreaterThan(first);
+    expect(messagesEl.scrollCalls[1].behavior).toBe("auto");
   });
 });
 
