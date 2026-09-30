@@ -198,7 +198,23 @@ ${PROVIDER_PICKER_JS}
     if (btn) btn.hidden = !visible;
   }
 
-  /** Bound how long the view waits for a turn it has armed to say something.
+  /** How long a running turn may say nothing before the view stops taking its
+   *  own silence for an answer and asks the engine instead. */
+  var STALL_SILENCE_MS = 300000;
+
+  /** How long the view waits for that answer before giving the composer back
+   *  anyway. The host answers from its own state or from one read of the
+   *  thread, so an answer normally lands in a moment — and the read it makes
+   *  carries a 30 s socket timeout, which is the worst an answer that is coming
+   *  at all can take. Sized above that on purpose: a slow engine still gets its
+   *  answer in before the composer is handed back, and only a host that cannot
+   *  reach the engine at all lets this deadline run out. */
+  var STALL_PROBE_GRACE_MS = 45000;
+
+  /** True between asking about a silent turn and the answer arriving. */
+  var stallProbeOutstanding = false;
+
+  /** Bound how long the view waits for a turn it has armed to *say something*.
    *
    *  Every place that arms the streaming state calls this, so an armed state
    *  always carries the same give-up deadline: a turn whose engine died, or
@@ -207,16 +223,90 @@ ${PROVIDER_PICKER_JS}
    *  forever. Re-arming restarts the deadline, which is what the streaming
    *  placeholder is for — a turn nobody can be steered into is worse than one
    *  the next prompt starts fresh.
-   */
+   *
+   *  The deadline is a bound on SILENCE, not on how long a turn may take:
+   *  every message that reports the turn's own activity renews it through
+   *  renewStallTimeoutFor() below. Armed once and never renewed it was a bound
+   *  on duration instead, so any turn running longer than five minutes — a long
+   *  build, a long-running command, an agent working through many steps —
+   *  dropped the streaming flag mid-turn: the send button went back to Send,
+   *  the steer button disappeared with it, and a conversation the engine was
+   *  still answering read as finished until the user typed something. */
   function armStallTimeout() {
     var st = window.__wvMessages.getStreamingTimeout();
     if (st) clearTimeout(st);
-    window.__wvMessages.setStreamingTimeout(setTimeout(function() {
-      if (window.__wvMessages.isStreaming()) {
-        window.__wvMessages.setStreaming(false);
-        setStreamingState(false, __i18n.readyTimedOut);
-      }
-    }, 300000));
+    // Arming is itself the end of any question still out: a turn that just
+    // spoke, or one just adopted, starts its five minutes of silence over.
+    stallProbeOutstanding = false;
+    window.__wvMessages.setStreamingTimeout(setTimeout(onStallDeadline, STALL_SILENCE_MS));
+  }
+
+  /** The deadline came due. With nothing said for the whole of it, the view
+   *  asks the engine whether the turn is still running — and gives the composer
+   *  back only if that question goes unanswered.
+   *
+   *  A turn's silence is not evidence that it ended, and treating it as an
+   *  ending is what told a user a running turn had finished: Send where Stop
+   *  had been, the steer button gone, while the engine kept working. Only the
+   *  engine can say, and only the host can ask it — so the view holds the turn
+   *  it has and asks. The answer arrives through the ordinary messages: a turn
+   *  still running comes back as turnStarted (which re-arms, question and all),
+   *  and one that finished comes back as the rebuild a finished turn produces.
+   *  Neither arriving means the host could not reach the engine, which says
+   *  nothing about the turn either — that is the case the grace deadline
+   *  bounds, and it is the only one where the view decides for itself. */
+  function onStallDeadline() {
+    if (!window.__wvMessages || !window.__wvMessages.isStreaming()) return;
+    if (stallProbeOutstanding) {
+      stallProbeOutstanding = false;
+      window.__wvMessages.setStreaming(false);
+      window.__wvMessages.setStreamingTimeout(null);
+      setStreamingState(false, __i18n.readyTimedOut);
+      return;
+    }
+    stallProbeOutstanding = true;
+    // Armed in the probe's own name rather than through armStallTimeout(),
+    // which would clear the flag that says a question is out.
+    window.__wvMessages.setStreamingTimeout(setTimeout(onStallDeadline, STALL_PROBE_GRACE_MS));
+    vscode.postMessage({ type: 'probeActiveTurn' });
+  }
+
+  /** The messages that are a running turn saying something about itself: a
+   *  delta of prose or thinking, a tool card and its progress, a file-change
+   *  card, an approval or a question the turn is waiting on. Each one is proof
+   *  the engine is still there, so each one restarts the stall deadline.
+   *
+   *  Deliberately not included: every other message the host posts. The
+   *  periodic task and thread refreshes arrive on the host's own timer while
+   *  it *believes* a turn is running, so counting them would renew the
+   *  deadline for a turn the engine has stopped reporting — exactly the state
+   *  the deadline exists to end. */
+  var TURN_ACTIVITY_MESSAGES = {
+    updateMessage: true,
+    updateThinking: true,
+    addTextBlock: true,
+    addThinkingBlock: true,
+    addToolCall: true,
+    updateToolCall: true,
+    fileChangeDetected: true,
+    approvalRequired: true,
+    approvalResolved: true,
+    userInputRequired: true,
+    userInputResolved: true
+  };
+
+  /** Renew the deadline for a message envelope, when the message is a running
+   *  turn's own activity. True when it was.
+   *
+   *  Only renews a turn that is actually armed: an unarmed view has nothing to
+   *  hold, and arming one from a delta would offer Stop/steer for a turn this
+   *  client is not holding — including a straggling delta for a turn that has
+   *  already completed, which arrives after its messageComplete. */
+  function renewStallTimeoutFor(msg) {
+    if (!msg || !TURN_ACTIVITY_MESSAGES[msg.type]) return false;
+    if (!window.__wvMessages || !window.__wvMessages.isStreaming()) return false;
+    armStallTimeout();
+    return true;
   }
 
   function showThinkingActivity(messageId, label) {
@@ -539,6 +629,10 @@ ${PROVIDER_PICKER_JS}
   // ── Main message handler ──
   window.addEventListener('message', function(event) {
     var msg = event.data;
+    // One choke point for the stall deadline: every message the turn's own
+    // activity is reported in arrives here, so renewing before the switch is
+    // what keeps the deadline a bound on silence rather than on turn length.
+    renewStallTimeoutFor(msg);
     switch (msg.type) {
       case 'ready':
         window.__wvSidebar.closeTaskDetail();

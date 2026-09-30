@@ -1,5 +1,13 @@
 # Change Log
 
+## Unreleased
+
+Everything here is client-side; nothing in this section needs a newer engine than 0.8.2 did.
+
+### Bug Fixes
+
+- **A long turn no longer makes the panel look finished** — While the agent was doing something that takes a while — a build, a test run, a command that runs for minutes — the send button went back to a plain **Send** and the **Guide this turn** button left with it, so a conversation the agent was still answering read as ended; typing into the box brought the guide button back, which is how this was noticed. The panel was holding the turn against a five-minute clock rather than against the turn itself, so every turn that outlived five minutes gave up on its own. It goes by silence now instead of duration — a turn that keeps reporting stays marked as running however long it takes — and when a turn really has said nothing for five minutes the panel no longer decides for itself: it asks the engine whether that turn is still running, and keeps it when the answer is yes. The composer is handed back only when the engine says the turn is over, or when the engine cannot be reached to say anything at all.
+
 ## 0.8.2
 
 Client-side only; verified against engine **v0.10.0**.

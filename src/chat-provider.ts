@@ -563,6 +563,12 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       case "interrupt":
         await this.handleInterrupt();
         break;
+      case "probeActiveTurn":
+        // The view is holding a turn that has said nothing for its whole stall
+        // deadline and is asking the engine whether it is still running. See
+        // handleProbeActiveTurn.
+        await this.handleProbeActiveTurn();
+        break;
       case "compact":
         await this.handleCompact();
         break;
@@ -5179,20 +5185,38 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
    *
    *  Returns undefined when the thread has no running turn and when the read
    *  itself failed: a read that answers nothing leaves callers on the state
-   *  they already had rather than reporting a second failure. */
+   *  they already had rather than reporting a second failure. Callers that have
+   *  to tell those two apart use `readEngineTurn()`.
+   */
   private async activeTurnFromEngine(): Promise<TurnRecord | undefined> {
+    return (await this.readEngineTurn()).turn;
+  }
+
+  /** What the engine says about this thread's turn, and whether it said
+   *  anything at all.
+   *
+   *  `answered` is the half a watchdog needs: a read that failed and a turn
+   *  that finished are opposite facts to a composer deciding whether to let go
+   *  — one leaves the turn held, the other releases it — while a caller that
+   *  only wants a turn to name (Stop, the refused-send recovery) is content to
+   *  treat both as "nothing to name". Reaching the engine at all is what makes
+   *  the difference, and only the engine's own answer may release a turn.
+   */
+  private async readEngineTurn(): Promise<{ answered: boolean; turn?: TurnRecord }> {
     const thread = this.currentThread;
-    if (!thread) return undefined;
+    // No conversation on screen is an answer in itself: there is no turn this
+    // view could be holding.
+    if (!thread) return { answered: true };
     try {
       const detail = await this.api.getThreadDetail(thread.id);
       const lastTurn = detail.turns[detail.turns.length - 1];
       if (lastTurn && (lastTurn.status === "in_progress" || lastTurn.status === "queued")) {
-        return lastTurn;
+        return { answered: true, turn: lastTurn };
       }
+      return { answered: true };
     } catch {
-      // best-effort read
+      return { answered: false };
     }
-    return undefined;
   }
 
   /** Resume observing a turn the engine is already running on this thread:
@@ -5254,6 +5278,66 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     this.adoptActiveTurn(turn);
     this.postMessage({ type: "info", message: t().sendRefusedActiveTurn });
     return true;
+  }
+
+  /** Answer the view's question about a turn it has heard nothing about for its
+   *  whole stall deadline: is this turn still running?
+   *
+   *  Only the engine can answer, and the answer is what decides the composer.
+   *  The view cannot tell a long silent step from a turn that is over — its own
+   *  silence is the only thing it has — and reading that silence as an ending
+   *  is what told a user a running turn had finished: the send button back to
+   *  Send, the steer button gone, while the engine kept working.
+   *
+   *  - Still running: adopted, which re-arms the view's deadline and puts the
+   *    composer back on Stop/steer for the turn the engine is really holding.
+   *  - Finished: the completion was lost with the stream it never arrived on,
+   *    so the conversation is rebuilt from the engine — the answer that stream
+   *    never delivered is on the thread, and the rebuild is also what releases
+   *    the composer, through the same reset a finished turn performs.
+   *  - Not answered: nothing is posted. The view keeps holding the turn it has
+   *    and gives the composer back on its own a moment later. A read that
+   *    failed says nothing about the turn, and the one thing this must not do
+   *    is report a running turn as finished — which is the bug it exists for. */
+  private async handleProbeActiveTurn(): Promise<void> {
+    // What this client was holding when the view asked. The read below is a
+    // round trip — up to the client's own socket timeout — and the user can act
+    // inside it: Stop, a new prompt and a thread switch all change what is held.
+    // An answer about a turn nobody is holding any more must not be acted on,
+    // because adopting it is how the composer would go back to Stop/steer for a
+    // turn the user has already stopped.
+    const askedThreadId = this.currentThread?.id;
+    const askedTurnId = this.currentTurnId;
+
+    const answer = await this.readEngineTurn();
+
+    if (this.currentThread?.id !== askedThreadId) return;
+    // A turn id that was known and has since moved on (or gone) means the turn
+    // the view holds is not the one the question was about. An id this client
+    // never had — a turn another client started — has nothing to compare
+    // against, so the engine's answer stays the best one there is.
+    if (askedTurnId !== null && this.currentTurnId !== askedTurnId) return;
+
+    if (answer.turn) {
+      this.adoptActiveTurn(answer.turn);
+      return;
+    }
+    if (!answer.answered) return;
+
+    // The engine holds no turn for this thread: the one this view is holding is
+    // over. Everything the turn left behind goes with it — the id Stop would
+    // interrupt and Steer would guide, the mode it ran in, the items still
+    // routed by id, the refresh this client keeps running for a live turn, and
+    // the prompts it was waiting on, which would otherwise keep the rail's
+    // attention badge and the background watch alive on a thread with nothing
+    // in flight. The rebuild re-seeds whatever the engine still really holds.
+    this.currentTurnId = null;
+    this.activeTurnMode = null;
+    this.activeItems.clear();
+    this.pendingApprovals.clear();
+    this.pendingUserInputs.clear();
+    this.stopPeriodicTaskRefresh();
+    await this.loadHistory(this.currentThread?.id);
   }
 
   // confirmSwitchWhenActive was removed: switching no longer interrupts a

@@ -338,13 +338,23 @@ function createRuntimeHarness() {
   };
 
   let timerId = 0;
+  // A virtual clock. The stall deadline is five minutes of silence, so a test
+  // that has to see it fire — or see it *not* fire — needs to move time and
+  // run whatever came due. Ids stay truthy, the way the messages module's own
+  // `getStreamingTimeout()` tells an armed deadline from a cleared one.
+  let now = 0;
+  const pendingTimers = new Map<number, { at: number; fn: () => void }>();
   const context = vm.createContext({
     window: windowObj,
     document: documentObj,
-    // Ids are truthy so `getStreamingTimeout()` can tell an armed deadline
-    // apart from the cleared one, the way the messages module does.
-    setTimeout: () => (timerId += 1),
-    clearTimeout: () => {},
+    setTimeout: (fn: () => void, delay?: number) => {
+      timerId += 1;
+      pendingTimers.set(timerId, { at: now + (typeof delay === "number" ? delay : 0), fn });
+      return timerId;
+    },
+    clearTimeout: (id: unknown) => {
+      if (typeof id === "number") pendingTimers.delete(id);
+    },
     console,
   });
 
@@ -367,6 +377,19 @@ function createRuntimeHarness() {
       return windowObj[name];
     },
     getElement: getEl,
+    /** Move the virtual clock forward and run every deadline that came due,
+     *  oldest first, so the stall deadline can be watched firing (or not). */
+    advance(ms: number) {
+      now += ms;
+      const due = [...pendingTimers.entries()]
+        .filter(([, timer]) => timer.at <= now)
+        .sort((a, b) => a[1].at - b[1].at);
+      for (const [id, timer] of due) {
+        pendingTimers.delete(id);
+        timer.fn();
+      }
+    },
+    pendingTimers: () => pendingTimers.size,
     postMessages,
     sendStopCalls,
     hostOperationCalls,
@@ -858,6 +881,127 @@ describe("webview-js-event-handler runtime", () => {
     expect(harness.isStreaming()).toBe(true);
     expect(harness.sendStopCalls).toEqual([true]);
     expect(harness.streamingTimers[harness.streamingTimers.length - 1]).toBeTruthy();
+  });
+
+  it("keeps a long turn's steering state while the turn is still talking", () => {
+    const harness = createRuntimeHarness();
+
+    harness.dispatchMessage({ type: "turnStarted", turnId: "turn-long" });
+    expect(harness.isStreaming()).toBe(true);
+
+    // Half an hour of a turn that keeps reporting — a delta every thirty
+    // seconds, the shape of a long build or a long-running command. The
+    // deadline is a bound on silence, so it never comes due: the composer
+    // stays on Stop/steer for the whole turn. With the deadline armed once and
+    // never renewed, it fired at five minutes and the view went back to Send
+    // (steer button gone) with the turn still running — the conversation read
+    // as finished until the user typed into it.
+    for (let i = 0; i < 60; i++) {
+      harness.dispatchMessage({ type: "updateThinking", messageId: "a1", thinking: "working" });
+      harness.advance(30000);
+    }
+
+    expect(harness.isStreaming()).toBe(true);
+    expect(harness.sendStopCalls[harness.sendStopCalls.length - 1]).toBe(true);
+    expect(harness.getElement("status-text").textContent).not.toBe("Ready timed out");
+  });
+
+  it("asks the engine about a turn that has gone quiet, and holds it while it waits", () => {
+    const harness = createRuntimeHarness();
+
+    harness.dispatchMessage({ type: "turnStarted", turnId: "turn-quiet" });
+    harness.dispatchMessage({ type: "updateThinking", messageId: "a1", thinking: "working" });
+
+    // Four minutes and 59.999 seconds after the last word from the engine: the
+    // turn is still armed, because silence is what the deadline measures.
+    harness.advance(299999);
+    expect(harness.isStreaming()).toBe(true);
+    expect(harness.postMessages.filter((m) => m.type === "probeActiveTurn")).toHaveLength(0);
+
+    harness.advance(2);
+
+    // The deadline came due, and the view does not decide by itself: it asks
+    // the engine, through the host, and holds the turn it has meanwhile. A
+    // turn's silence is not evidence that it ended.
+    expect(harness.postMessages.filter((m) => m.type === "probeActiveTurn")).toHaveLength(1);
+    expect(harness.isStreaming()).toBe(true);
+    expect(harness.sendStopCalls[harness.sendStopCalls.length - 1]).toBe(true);
+  });
+
+  it("keeps the turn the engine says is still running", () => {
+    const harness = createRuntimeHarness();
+
+    harness.dispatchMessage({ type: "turnStarted", turnId: "turn-quiet" });
+    harness.advance(300001);
+
+    // The host's answer to the probe, for a turn the engine still holds:
+    // `adoptActiveTurn` posts turnStarted. The view re-arms on it, question and
+    // all, so the turn is held for another five minutes of silence — and a
+    // delta that arrives in the meantime renews it as usual.
+    harness.dispatchMessage({ type: "turnStarted", turnId: "turn-quiet" });
+    harness.advance(299999);
+    expect(harness.isStreaming()).toBe(true);
+    expect(harness.postMessages.filter((m) => m.type === "probeActiveTurn")).toHaveLength(1);
+
+    harness.advance(2);
+    expect(harness.postMessages.filter((m) => m.type === "probeActiveTurn")).toHaveLength(2);
+    expect(harness.isStreaming()).toBe(true);
+  });
+
+  it("releases the turn the engine says is over", () => {
+    const harness = createRuntimeHarness();
+
+    harness.dispatchMessage({ type: "turnStarted", turnId: "turn-quiet" });
+    harness.advance(300001);
+    expect(harness.isStreaming()).toBe(true);
+
+    // The host's answer for a turn the engine no longer holds: the conversation
+    // rebuilt from the engine, which is also what hands the composer back — the
+    // same reset a finished turn performs.
+    harness.dispatchMessage({
+      type: "loadHistory",
+      messages: [
+        { id: "u1", role: "user", content: "hi", status: "complete" },
+        { id: "a1", role: "assistant", content: "done", status: "complete" },
+      ],
+    });
+
+    expect(harness.isStreaming()).toBe(false);
+    expect(harness.sendStopCalls[harness.sendStopCalls.length - 1]).toBe(false);
+  });
+
+  it("gives the composer back when the answer never comes", () => {
+    const harness = createRuntimeHarness();
+
+    harness.dispatchMessage({ type: "turnStarted", turnId: "turn-unreachable" });
+    harness.advance(300001);
+    expect(harness.postMessages.filter((m) => m.type === "probeActiveTurn")).toHaveLength(1);
+    expect(harness.isStreaming()).toBe(true);
+
+    // A host that cannot reach the engine answers nothing, and saying nothing
+    // must not hold the composer forever: the grace deadline is where the view
+    // decides for itself, with the same give-up status it has always used.
+    harness.advance(45001);
+    expect(harness.isStreaming()).toBe(false);
+    expect(harness.sendStopCalls[harness.sendStopCalls.length - 1]).toBe(false);
+    expect(harness.getElement("status-text").textContent).toBe("Ready timed out");
+  });
+
+  it("does not let the host's own polling pass for the turn's activity", () => {
+    const harness = createRuntimeHarness();
+
+    harness.dispatchMessage({ type: "turnStarted", turnId: "turn-silent" });
+
+    // The periodic task and thread refreshes arrive on the host's timer while
+    // it believes a turn is running, and the host's belief is not the turn
+    // saying anything: they must not renew the deadline, or the question would
+    // never be asked.
+    for (let i = 0; i < 10; i++) {
+      harness.dispatchMessage({ type: "taskList", tasks: [] });
+      harness.advance(60000);
+    }
+
+    expect(harness.postMessages.filter((m) => m.type === "probeActiveTurn").length).toBeGreaterThan(0);
   });
 
   it("leaves a rebuilt conversation that finished not streaming", () => {
