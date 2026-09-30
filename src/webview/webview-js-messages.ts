@@ -546,6 +546,22 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
     // model answer was produced. It is drawn with the same markup the live
     // 'info' message uses, so a reloaded transcript shows the same line the
     // user saw live (a compaction result, for instance).
+    //
+    // A system message carrying status 'error' is the exception, and it is the
+    // runtime's own record of why a turn failed (a provider refusal, a dead
+    // network). The live view draws that text as an error banner, so the
+    // reloaded row is the same element with the same markup — otherwise the
+    // reason a conversation stopped would survive only until it was reopened.
+    if (msg.role === 'system' && msg.status === 'error') {
+      var errorEl = document.createElement('div');
+      errorEl.className = 'error-banner';
+      errorEl.id = 'msg-' + msg.id;
+      errorEl.innerHTML = '<span class="msg-label error">' + __wvEscapeHtml(__i18n.error) + '</span><span>' + __wvEscapeHtml(msg.content) + '</span>';
+      messagesEl.appendChild(errorEl);
+      smartScrollToBottom();
+      return;
+    }
+
     if (msg.role === 'system') {
       var noteEl = document.createElement('div');
       noteEl.className = 'system-message';

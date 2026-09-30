@@ -6,6 +6,8 @@ Client-side only; verified against engine **v0.10.0**.
 
 ### Bug Fixes
 
+- **A turn that failed now says why, instead of just stopping** — When the model service refused a request — the quota was spent, the key was rejected, the network was down — the answer's bubble simply ended and the transcript said nothing more, so a conversation that had been cut off looked exactly like a model with nothing to say. The engine records the reason on the turn and as its own error record, and the panel now reports it: live, as an error line under the answer, and after reopening the conversation, as the same line in the same place. A turn you stopped yourself still ends quietly.
+
 - **The input box remembers what you sent, even after a restart** — Pressing ↑ to bring back an earlier prompt only worked within one session: restart the window (or reload the panel) and the list was empty, so a prompt you had spent time writing had to be retyped from memory. What you send is now kept per workspace on disk and handed back when the panel comes up, so ↑/↓ walk the same entries as before. Each workspace keeps its own list, it holds the same 200 entries as before, and slash commands are kept too.
 
 - **The chime only rings when something has finished** — It could also be heard while nothing had: the cue was looked up relative to the directory the host process happened to run in, so running this extension's own tests played it, several times per run, on whoever ran them. The cue now comes only from the extension's own bundled file, by absolute path, and only if that file is really there — any other path is silence.

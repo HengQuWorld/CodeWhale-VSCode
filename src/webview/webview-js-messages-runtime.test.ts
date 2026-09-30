@@ -522,6 +522,29 @@ describe("addMessage system notes", () => {
     const note = messagesEl.children[messagesEl.children.length - 1];
     expect(note.innerHTML).not.toContain("details");
   });
+
+  it("draws a failed turn's reason as the error banner the live view used", () => {
+    // The runtime records why a turn failed as an `error` item, and
+    // `loadHistory` rebuilds that record as a system message carrying status
+    // 'error'. It is not a note: the live view reported the same text as an
+    // error banner when the turn ended, and a reload that softened it into a
+    // muted line would lose the report the reload exists to keep.
+    const { messages, messagesEl } = createHarness();
+
+    messages.addMessage({
+      id: "error-item_1",
+      role: "system",
+      content: "HTTP 429 from upstream: quota exhausted",
+      status: "error",
+      timestamp: 1,
+    });
+
+    const banner = messagesEl.children[messagesEl.children.length - 1];
+    expect(banner.className).toBe("error-banner");
+    expect(banner.innerHTML).toContain('class="msg-label error"');
+    expect(banner.innerHTML).toContain("HTTP 429 from upstream: quota exhausted");
+    expect(banner.className.startsWith("message ")).toBe(false);
+  });
 });
 
 describe("branch from a turn", () => {

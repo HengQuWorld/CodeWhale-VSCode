@@ -1035,6 +1035,11 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         // no question/answer pair (see the two fallbacks below).
         let isCompactionTurn = false;
         let compactionText: string | null = null;
+        // Whether this turn already reads as failed in the rebuilt transcript.
+        // The engine records why a turn failed as its own `error` item; once
+        // that row exists, the placeholder below must not invent an answer out
+        // of the user's own question and print it underneath the reason.
+        let emittedErrorNote = false;
         const turnStartIdx = this.messages.length;
 
         // Turn-level: a tool in flight when the steer landed has its result
@@ -1289,6 +1294,29 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
               blocks.push({ type: "tool_call", toolCallIdx: tcIdx2 });
               break;
             }
+            case "error": {
+              // Why this turn failed, in the runtime's own words — a provider
+              // refusal (quota exhausted, a rejected key), a dead network, a
+              // turn that produced nothing at all. The live view banners the
+              // same text when turn.completed arrives; without a case here a
+              // reload dropped the record and the conversation just stopped.
+              // It ends the segment it belongs to, so a partial answer stays
+              // its own bubble and the reason reads under it, where the live
+              // banner sat.
+              flushAssistantSegment();
+              const reason = (item.detail || item.summary || "").trim();
+              if (reason) {
+                emittedErrorNote = true;
+                this.messages.push({
+                  id: `error-${item.id}`,
+                  role: "system",
+                  content: reason,
+                  status: "error",
+                  timestamp: new Date(item.ended_at || item.started_at || turn.created_at).getTime(),
+                });
+              }
+              break;
+            }
           }
         }
 
@@ -1342,7 +1370,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
                 : {}),
             });
           }
-        } else if (!this.messages.slice(turnStartIdx).some((m) => m.role === "assistant")) {
+        } else if (!emittedErrorNote && !this.messages.slice(turnStartIdx).some((m) => m.role === "assistant")) {
           // Preserve the legacy behavior for turns with no assistant output
           // at all: emit the fallback bubble (input summary preview) rather
           // than rendering nothing for the turn.
@@ -6437,6 +6465,17 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
             );
             this.postMessage(payload);
           }
+        }
+        // A turn that failed has a reason, and the transcript used to keep it
+        // to itself: the answer's bubble stopped on "error" with nothing to
+        // read, so a provider refusal — quota exhausted, a dead network — was
+        // indistinguishable from a model with nothing to say. The runtime
+        // records the reason on the turn (and as an `error` item, which is what
+        // a reload reads: see loadHistory), so the live half goes out as the
+        // same banner every other failure this client reports already uses.
+        if (turnStatus === "failed" && !isCompactionTurn) {
+          const reason = (pl.turn?.error || "").trim();
+          this.postMessage({ type: "error", message: reason || t().turnFailed });
         }
         // Auto-save session after each completed turn (mirrors TUI's
         // build_session_snapshot → SessionSnapshot). Same thread always

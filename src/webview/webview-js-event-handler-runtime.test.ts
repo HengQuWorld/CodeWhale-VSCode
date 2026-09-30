@@ -1606,3 +1606,46 @@ describe("webview-js-event-handler runtime: compaction activity", () => {
     expect(harness.compactionSummaryCalls).toEqual([]);
   });
 });
+
+describe("webview-js-event-handler runtime: a turn's failure", () => {
+  it("draws the host's error as a banner and hands the composer back", () => {
+    // The host posts this message when a turn ends failed — a provider
+    // refusal, a dead network. It is the other half of that report: the host
+    // has to post it and the webview has to draw it, and only a run of this
+    // script after the message shows the second.
+    const harness = createRuntimeHarness();
+    harness.dispatchMessage({
+      type: "addMessage",
+      message: { id: "a1", role: "assistant", content: "", status: "streaming" },
+    });
+    expect(harness.isStreaming()).toBe(true);
+
+    harness.dispatchMessage({
+      type: "error",
+      message: "You've reached your usage limit for this billing cycle",
+    });
+
+    const messages = harness.getElement("messages");
+    const banner = messages.children[messages.children.length - 1];
+    expect(banner.className).toBe("error-banner");
+    expect(banner.innerHTML).toContain("You've reached your usage limit for this billing cycle");
+    // The turn is over: the composer cannot be left offering Stop for a turn
+    // this message just ended, or the next prompt would steer instead of send.
+    expect(harness.isStreaming()).toBe(false);
+    expect(harness.streamingTimers).toContain(null);
+  });
+
+  it("leaves a running turn running when the error is not the turn's", () => {
+    // A goal error says so on its own: the turn it did not come from may still
+    // be running, and clearing the flag would report it as finished.
+    const harness = createRuntimeHarness();
+    harness.dispatchMessage({
+      type: "addMessage",
+      message: { id: "a1", role: "assistant", content: "", status: "streaming" },
+    });
+
+    harness.dispatchMessage({ type: "error", message: "Goal save failed", keepStreaming: true });
+
+    expect(harness.isStreaming()).toBe(true);
+  });
+});
