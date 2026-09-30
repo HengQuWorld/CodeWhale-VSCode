@@ -48,7 +48,7 @@ body:
     attributes:
       label: Extension version
       description: Shown in the Extensions panel, or in the VSIX filename.
-      placeholder: "0.8.1"
+      placeholder: "0.8.2"
     validations:
       required: true
   - type: input
