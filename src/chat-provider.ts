@@ -20,6 +20,8 @@ import type {
   CreateFleetRunRequest,
   ThreadSummary,
   ThreadGoal,
+  WorkspaceSnapshotRef,
+  CallChangesResponse,
 } from "./types";
 import { formatError, getErrorMessage } from "./utils/error-handler";
 import { providerEntryRouteKey, providerRouteKey } from "./utils/provider-route";
@@ -74,6 +76,7 @@ import {
   extractFilePath,
   extractToolNameFromSummary,
   buildApprovalSummary,
+  toolCallIdFromMetadata,
   detectFileChange,
 } from "./utils/tool-utils";
 
@@ -288,7 +291,28 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     threadUsage: false,
     threadFileRevert: false,
     threadForkAtTurn: false,
+    callChanges: false,
   };
+
+  /** One shell call whose own file changes the engine reported.
+   *
+   *  Keyed by the engine's call id (`metadata.tool_use_id` / the live
+   *  `tool.id`), which is also the id on the call's `tool:` and `post-tool:`
+   *  restore points — the only identity under which a shell command's writes
+   *  are attributable at all, since a shell call produces no
+   *  `metadata.mutation` for them. The thread and turn ids are remembered here
+   *  rather than read from `currentThread` when the answer arrives, so a
+   *  request cannot be sent for the wrong thread after the user moves on. */
+  private shellCallRefs = new Map<string, { threadId: string | null; turnId: string | null }>();
+  /** Paths a call's `post-tool` receipt recorded, by call id. Filled from the
+   *  live `turn.workspace_snapshot` events and from a thread's
+   *  `workspace_snapshots` on rebuild, which is what makes a card's first paint
+   *  possible before — or without — the newer call-change route. */
+  private shellCallPaths = new Map<string, string[]>();
+  /** Calls whose full change records have been fetched, and calls with such a
+   *  fetch in flight. Together they make the enrichment one request per call. */
+  private shellCallsEnriched = new Set<string>();
+  private shellCallsInFlight = new Set<string>();
   // Guard to prevent concurrent autoSaveSession calls.  When multiple
   // turn.completed events fire in quick succession (e.g. SSE reconnection
   // replaying buffered events) and currentSessionId is null, each call
@@ -1118,15 +1142,6 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
           .filter((item): item is TurnItemRecord => !!item);
 
         for (const item of turnItems) {
-          // A shell command this turn ran. The engine classifies its own shell
-          // tool as a command execution, which the reloaded transcript does not
-          // draw as a tool row at all — but the turn still ran one, and the
-          // Changes panel has to know, because its list cannot include what
-          // that command wrote. Name-based tools (`bash` and friends) come
-          // through the tool-call case below.
-          if (item.kind === "command_execution") {
-            this.noteShellCommandInChangeTurn(turn.id);
-          }
           switch (item.kind) {
             case "context_compaction": {
               // Nothing was asked and no model answer was produced. Replaying
@@ -1194,7 +1209,14 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
               thinking += th;
               break;
             }
-            case "tool_call": {
+            // A command execution is the engine's own shell tool, classified
+            // as a command rather than as a tool call. It is drawn as the same
+            // row the live view already draws for it, and for a reason beyond
+            // symmetry: a command's file-change cards hang off that row, so a
+            // reloaded transcript that omitted the row would show changes
+            // belonging to nothing.
+            case "tool_call":
+            case "command_execution": {
               currentTextBlock = undefined;
               currentThinkingBlock = undefined;
               const metadata = (item.metadata as Record<string, unknown>) || {};
@@ -1250,11 +1272,20 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
                 output: toolOutput,
                 status: item.status === "completed" ? "complete" : "error",
                 itemId: typeof metadata.tool_use_id === "string" ? metadata.tool_use_id : item.id,
+                callId: toolCallIdFromMetadata(metadata),
               };
               // A turn that ran a shell command may have changed files through
-              // it, and this panel only lists what the file tools changed.
+              // it. Those writes are not in any `metadata.mutation` — they are
+              // the difference between the restore points the engine recorded
+              // around this call — so the call is noted here and its changes
+              // are read back once this turn's segments have been flushed.
               if (isShellTool(tc.name)) {
                 this.noteShellCommandInChangeTurn(turn.id);
+                this.noteShellCall(tc, {
+                  callId: tc.callId,
+                  threadId: id,
+                  turnId: turn.id,
+                });
               }
               if (tc.itemId) {
                 toolCallById.set(tc.itemId, tc);
@@ -1342,6 +1373,11 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         }
 
         flushAssistantSegment();
+
+        // What this turn's commands changed, from the restore points the engine
+        // recorded around each of them. Read after the turn's segments are
+        // flushed: the cards these records hang off only exist then.
+        this.applyTurnCallSnapshots(turn.workspace_snapshots, id);
 
         // Stamp the turn's usage onto its final assistant bubble so the
         // reloaded view shows the same ↑/↓ token chip as the live view
@@ -3994,11 +4030,12 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
 
   /** Record that a turn ran a shell command.
    *
-   *  The Changes panel is fed by the engine's file-change items, which only the
-   *  file tools produce: a file written by a shell command is a command
-   *  execution, so a turn whose edits all came from a script would otherwise
-   *  read as a turn that changed nothing. Counting them lets the panel say so
-   *  instead.
+   *  A command's own file changes are read from the workspace restore points
+   *  the engine recorded around that call (see `noteShellCall` and
+   *  `noteCallSnapshot`), so this count is not how the panel learns about them.
+   *  It is what keeps a turn visible when none of them could be listed — the
+   *  case where the group would otherwise be a header over nothing — and the
+   *  panel draws it only then.
    *
    *  `turnId` names the engine turn the command belonged to when the caller
    *  knows it, and the group being filled is the fallback. Naming the turn
@@ -4016,6 +4053,266 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     turn.shellCommands = (turn.shellCommands ?? 0) + 1;
   }
 
+  // ── A command's own file changes ──
+  //
+  // A file tool reports its own edit as `metadata.mutation`, which is what
+  // `detectFileChange` reads. A shell command produces no mutation at all: the
+  // engine classifies the call as a command execution, and its writes are
+  // recorded only as the difference between the workspace restore points the
+  // engine takes around it (`tool:<call_id>` and `post-tool:<call_id>`). That
+  // difference is a time window, not an attributed edit, and it can name any
+  // number of paths — so it cannot ride on `FileChangeInfo` the way a tool's
+  // single edit does. It is read here, in two passes: the received
+  // `changed_paths` draw the card immediately, and the engine's call-change
+  // route replaces them with the change kind, line counts and patch when the
+  // runtime is new enough to have it.
+
+  /** Note that a tool call ran a command, so its own file changes can be read
+   *  from the restore points that bracket it. */
+  private noteShellCall(
+    tc: ToolCallInfo,
+    ids: { callId?: string; threadId?: string | null; turnId?: string | null }
+  ): void {
+    if (!ids.callId || !isShellTool(tc.name)) return;
+    tc.callId = ids.callId;
+    const known = this.shellCallRefs.get(ids.callId);
+    if (known) {
+      known.threadId = known.threadId ?? ids.threadId ?? null;
+      known.turnId = known.turnId ?? ids.turnId ?? null;
+    } else {
+      this.shellCallRefs.set(ids.callId, {
+        threadId: ids.threadId ?? null,
+        turnId: ids.turnId ?? null,
+      });
+    }
+    this.applyCallChanges(ids.callId);
+  }
+
+  /** Record what a call's `post-tool` receipt says changed in its span, then
+   *  read the full records for it. */
+  private noteCallSnapshot(
+    callId: string,
+    ids: { threadId?: string | null; turnId?: string | null },
+    changedPaths: string[] | undefined
+  ): void {
+    const known = this.shellCallRefs.get(callId);
+    // Only a call already known to be a command: a file tool's receipt would
+    // otherwise be read as a command's span, and the same change would be
+    // listed twice under two different identities.
+    if (!known) return;
+    known.threadId = known.threadId ?? ids.threadId ?? null;
+    known.turnId = known.turnId ?? ids.turnId ?? null;
+    if (changedPaths) this.shellCallPaths.set(callId, changedPaths);
+    this.applyCallChanges(callId);
+    void this.enrichCallChanges(callId);
+  }
+
+  /** Read every `post-tool` receipt of one rebuilt turn, after its segments
+   *  have been flushed into messages — until then the cards these rows belong
+   *  to do not exist. */
+  private applyTurnCallSnapshots(
+    snapshots: WorkspaceSnapshotRef[] | undefined,
+    threadId: string | null
+  ): void {
+    if (!snapshots || snapshots.length === 0) return;
+    for (const snapshot of snapshots) {
+      if (snapshot.kind !== "post_tool" || !snapshot.tool_call_id) continue;
+      this.noteCallSnapshot(
+        snapshot.tool_call_id,
+        { threadId },
+        snapshot.changed_paths
+      );
+    }
+  }
+
+  /** The change group (turn) a call's changes belong to, when the panel has a
+   *  group for that turn. */
+  private changeTurnIndexOf(turnId: string | null | undefined): number | undefined {
+    if (!turnId) return undefined;
+    return this.changeTurns.find((turn) => turn.turnId === turnId)?.index;
+  }
+
+  /** The tool call card a call id names, anywhere in the transcript. The
+   *  transcript is scanned rather than a card reference kept, because the
+   *  receipt and the card can arrive in either order — live, the snapshot
+   *  precedes the call's `item.completed`; on a rebuild, every item is
+   *  processed before the turn's receipts are read. */
+  private findToolCallRow(callId: string): { msg: ChatMessage; idx: number } | undefined {
+    for (const msg of this.messages) {
+      const calls = msg.toolCalls;
+      if (!calls) continue;
+      for (let idx = 0; idx < calls.length; idx++) {
+        if (calls[idx].callId === callId) return { msg, idx };
+      }
+    }
+    return undefined;
+  }
+
+  /** The record one call already made for one path, if any. Two calls that
+   *  touched the same path keep their own rows: each names its own restore
+   *  point, so each is separately reviewable and separately revertible. */
+  private findCallChange(callId: string, filePath: string): FileChangeInfo | undefined {
+    const key = normalizePath(filePath);
+    return this.turnFileChanges.find(
+      (change) => change.callId === callId && normalizePath(change.filePath) === key
+    );
+  }
+
+  /** One change a command made, before the engine has said what kind it is. */
+  private newCallChange(
+    filePath: string,
+    callId: string,
+    toolName: string | undefined
+  ): FileChangeInfo {
+    return {
+      filePath,
+      // The engine classifies this path in the call-change answer, not here;
+      // until it does, the row claims only that the path changed.
+      changeType: "modified",
+      addedLines: 0,
+      removedLines: 0,
+      callId,
+      toolName,
+      fromCommand: true,
+    };
+  }
+
+  /** Draw what is known so far about one call's changes: the paths its snapshot
+   *  receipt named, under the card for that call. */
+  private applyCallChanges(callId: string): void {
+    const paths = this.shellCallPaths.get(callId);
+    if (!paths || paths.length === 0) return;
+    const found = this.findToolCallRow(callId);
+    const toolName = found ? found.msg.toolCalls![found.idx].name : undefined;
+    const turnIndex = this.changeTurnIndexOf(this.shellCallRefs.get(callId)?.turnId);
+    const changes: FileChangeInfo[] = [];
+    for (const filePath of paths) {
+      let record = this.findCallChange(callId, filePath);
+      if (!record) {
+        record = this.newCallChange(filePath, callId, toolName);
+        this.appendFileChange(record, turnIndex);
+      }
+      changes.push(record);
+    }
+    // Two events reach this for one call — its `post-tool` receipt and its
+    // `item.completed` — and the second would re-send the whole session's
+    // change list to the panel for records that are already drawn. Skipped
+    // only here: what the engine answers later rewrites these same records in
+    // place, and that must always be drawn (`applyCapturedCallChanges` must
+    // not be guarded this way, or the diff would never reach the card).
+    const drawn = found ? found.msg.toolCalls![found.idx].fileChanges : undefined;
+    if (
+      drawn !== undefined &&
+      drawn.length === changes.length &&
+      drawn.every((change, index) => change === changes[index])
+    ) {
+      return;
+    }
+    // A transcript rebuilt without a row for this call still gets the change
+    // in the panel: the row is where a card is drawn, not what makes the
+    // change real.
+    if (found) this.publishCallChanges(found, changes);
+    else this.refreshChangesPanel();
+  }
+
+  /** Push one call's changes to its card. The card is redrawn from the whole
+   *  list every time, so the first paint's paths cannot survive under the
+   *  engine's answer as stale rows. */
+  private publishCallChanges(found: { msg: ChatMessage; idx: number }, changes: FileChangeInfo[]): void {
+    found.msg.toolCalls![found.idx].fileChanges = changes;
+    this.postMessage({
+      type: "callChangesDetected",
+      messageId: found.msg.id,
+      toolCallIdx: found.idx,
+      fileChanges: changes.map((change) => this.changeForWebview(change)),
+    });
+    this.refreshChangesPanel();
+  }
+
+  /** Ask the engine what one call changed, and replace the path-only first
+   *  paint with the answer. One request per call; a runtime that predates the
+   *  route keeps the first paint, and its absence is never an error the user
+   *  sees. */
+  private async enrichCallChanges(callId: string): Promise<void> {
+    if (!this.apiCapabilities.callChanges) return;
+    if (this.shellCallsEnriched.has(callId) || this.shellCallsInFlight.has(callId)) return;
+    const ref = this.shellCallRefs.get(callId);
+    const threadId = ref?.threadId ?? this.currentThread?.id ?? null;
+    const turnId = ref?.turnId ?? null;
+    if (!threadId || !turnId) return;
+    this.shellCallsInFlight.add(callId);
+    try {
+      const answer = await this.api.getCallChanges(threadId, turnId, callId);
+      this.shellCallsInFlight.delete(callId);
+      // Answered, whatever the answer: `unavailable` is a fact about the
+      // span, so asking again would only repeat it.
+      this.shellCallsEnriched.add(callId);
+      if (answer.state !== "captured") return;
+      this.applyCapturedCallChanges(callId, answer);
+    } catch (err) {
+      this.shellCallsInFlight.delete(callId);
+      this.debugLog(`getCallChanges(${callId}) failed: ${getErrorMessage(err)}`);
+    }
+  }
+
+  /** Replace a call's path-only records with the engine's, which carry the
+   *  change kind, the line counts and the patch for the same span. */
+  private applyCapturedCallChanges(callId: string, answer: CallChangesResponse): void {
+    const found = this.findToolCallRow(callId);
+    const tc = found ? found.msg.toolCalls![found.idx] : undefined;
+    const toolName = answer.tool_name ?? tc?.name;
+    const turnIndex = this.changeTurnIndexOf(this.shellCallRefs.get(callId)?.turnId);
+    const reported = new Set(answer.files.map((file) => normalizePath(file.path)));
+    // A path the receipt named and this span's net difference does not hold is
+    // no longer part of the answer, so its row must go with it.
+    for (const stale of [...this.turnFileChanges]) {
+      if (stale.callId !== callId || !stale.fromCommand) continue;
+      if (reported.has(normalizePath(stale.filePath))) continue;
+      this.turnFileChanges = this.turnFileChanges.filter((change) => change !== stale);
+    }
+    const changes: FileChangeInfo[] = [];
+    for (const file of answer.files) {
+      const record =
+        this.findCallChange(callId, file.path) ?? this.newCallChange(file.path, callId, toolName);
+      record.changeType =
+        file.change === "created" ? "created" : file.change === "deleted" ? "deleted" : "modified";
+      record.addedLines = file.added ?? 0;
+      record.removedLines = file.removed ?? 0;
+      record.diff = file.diff ?? undefined;
+      record.toolName = toolName;
+      // The revision the span itself left, so a revert is checked against the
+      // bytes this change produced rather than against whatever the file holds
+      // when the button is pressed. Never re-read from disk: the reviewed
+      // revision is the engine's, and re-hashing would answer a different
+      // question than the one the engine asks.
+      if (file.revision) record.expectedHash = `sha256:${file.revision}`;
+      else if (file.change === "deleted") record.expectedHash = "absent";
+      if (!this.turnFileChanges.includes(record)) this.appendFileChange(record, turnIndex);
+      changes.push(record);
+    }
+    this.reindexFileChanges();
+    if (found) this.publishCallChanges(found, changes);
+    else this.refreshChangesPanel();
+  }
+
+  /** One change, shaped the way the webview's renderer reads it. Both the
+   *  Changes panel and a tool call's cards are fed from this, so the two can
+   *  never disagree about what a record says. */
+  private changeForWebview(fc: FileChangeInfo) {
+    return {
+      filePath: fc.filePath,
+      changeType: fc.changeType,
+      addedLines: fc.addedLines,
+      removedLines: fc.removedLines,
+      diff: fc.diff,
+      changeIndex: fc.changeIndex,
+      callId: fc.callId,
+      toolName: fc.toolName,
+      fromCommand: fc.fromCommand,
+      turnIndex: fc.turnIndex,
+    };
+  }
+
   /** Drop every recorded change and every group. For a rebuild of the whole
    *  panel (a thread load, a fork) — never for a turn boundary, which keeps the
    *  session's earlier turns and opens a group instead (`beginChangeTurn`). */
@@ -4023,6 +4320,13 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     this.turnFileChanges = [];
     this.changeTurns = [];
     this.currentChangeTurn = 0;
+    // Call identities belong to the thread that was on screen: another
+    // thread's cards are not in this transcript, and a stale id would attach
+    // it to whatever call happens to carry the same one.
+    this.shellCallRefs.clear();
+    this.shellCallPaths.clear();
+    this.shellCallsEnriched.clear();
+    this.shellCallsInFlight.clear();
   }
 
   /**
@@ -4124,22 +4428,12 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     this.postMessage({
       type: "changesState",
       // A turn that ran shell commands is listed even with no change records:
-      // the panel's own note about what it cannot see is the only thing it has
-      // to report for such a turn, and dropping the group would hide it.
+      // the panel's own note about the commands it ran is the only thing it
+      // has to report for such a turn, and dropping the group would hide it.
       turns: this.changeTurns.filter(
         (turn) => populated.has(turn.index) || (turn.shellCommands ?? 0) > 0
       ),
-      changes: this.turnFileChanges.map(fc => ({
-        filePath: fc.filePath,
-        changeType: fc.changeType,
-        addedLines: fc.addedLines,
-        removedLines: fc.removedLines,
-        diff: fc.diff,
-        changeIndex: fc.changeIndex,
-        callId: fc.callId,
-        toolName: fc.toolName,
-        turnIndex: fc.turnIndex,
-      })),
+      changes: this.turnFileChanges.map((fc) => this.changeForWebview(fc)),
     });
   }
 
@@ -4199,6 +4493,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         threadUsage: false,
         threadFileRevert: false,
         threadForkAtTurn: false,
+        callChanges: false,
       };
     }
     this.postApiCapabilities();
@@ -6399,6 +6694,24 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
 
     try {
     switch (event.event) {
+      case "turn.workspace_snapshot": {
+        // The engine took a workspace restore point for the running turn. A
+        // `post_tool` receipt closes one call's span and names the paths that
+        // changed in it — the only record a shell command's own writes leave
+        // behind. Receipts for calls this client does not know to be commands
+        // are ignored downstream (`noteCallSnapshot`), so a file tool's
+        // receipt is never read as a command's span.
+        const pl = event.payload as Partial<WorkspaceSnapshotRef>;
+        if (pl.kind === "post_tool" && pl.tool_call_id) {
+          this.noteCallSnapshot(
+            pl.tool_call_id,
+            { threadId: this.currentThread?.id, turnId: event.turn_id },
+            pl.changed_paths
+          );
+        }
+        break;
+      }
+
       case "turn.lifecycle": {
         const pl = event.payload as { status?: string };
         if (pl.status === "completed") break;
@@ -6961,6 +7274,9 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
             input: pl.tool?.input || {},
             status: "running",
             itemId,
+            // The engine's own id for this call, which is also the id on the
+            // `tool:`/`post-tool:` restore points recorded around it.
+            callId: pl.tool?.id,
           };
           lastMsg.toolCalls = lastMsg.toolCalls || [];
           lastMsg.blocks = lastMsg.blocks || [];
@@ -6986,12 +7302,20 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
             blockIdx,
             toolCall: tc,
           });
-          // A shell command this turn ran: the Changes panel lists file-tool
-          // changes only, so the turn is marked and the panel says why its list
-          // may be incomplete. The engine's own shell tool arrives as a command
-          // execution; a name-based one (`bash` and friends) as a tool call.
+          // A shell command this turn ran. Its own file writes never arrive as
+          // a `file_change` item — the engine classifies the call as a command
+          // execution — so they are read from the restore points that bracket
+          // it instead; the count is kept for a turn whose changes the engine
+          // could not bound at all.
           if (kind === "command_execution" || isShellTool(tc.name)) {
             this.noteShellCommandInChangeTurn(event.turn_id);
+            if (tc.callId) {
+              this.noteShellCall(tc, {
+                callId: tc.callId,
+                threadId: this.currentThread?.id,
+                turnId: event.turn_id,
+              });
+            }
             this.refreshChangesPanel();
           }
         }
@@ -7109,6 +7433,23 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
               });
             }
             this.refreshWorkPanel();
+          }
+          // A command's own writes never arrive as a mutation, so the card is
+          // filled from the restore points that bracket the call. The call is
+          // complete by now, and the engine takes its closing receipt before
+          // reporting that, so a snapshot this client missed can still be
+          // answered for from the store.
+          const completedCallId =
+            tc?.callId ?? toolCallIdFromMetadata(pl.item?.metadata as Record<string, unknown>);
+          if (tc) {
+            this.noteShellCall(tc, {
+              callId: completedCallId,
+              threadId: this.currentThread?.id,
+              turnId: event.turn_id,
+            });
+          }
+          if (completedCallId && this.shellCallRefs.has(completedCallId)) {
+            void this.enrichCallChanges(completedCallId);
           }
           if (pl.item?.metadata?.task_updates) {
             const checklist = (pl.item.metadata.task_updates as Record<string, unknown>).checklist;

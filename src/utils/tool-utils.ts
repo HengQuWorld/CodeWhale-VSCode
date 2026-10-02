@@ -105,7 +105,13 @@ export interface FileChangeSignal {
  * `tool_call_id` for the same purpose. An item without either is a recording
  * that predates the identity, so it cannot name a snapshot.
  */
-function toolCallIdFromMetadata(
+/** The engine's own id for a tool call, from the item metadata that carries it.
+ *
+ *  Not only a file-change concern: it is the identity the engine labels the
+ *  call's `tool:<call_id>` and `post-tool:<call_id>` workspace restore points
+ *  with, so anything asking about one call's own workspace span matches on it.
+ */
+export function toolCallIdFromMetadata(
   metadata: Record<string, unknown> | null | undefined
 ): string | undefined {
   if (!metadata) return undefined;

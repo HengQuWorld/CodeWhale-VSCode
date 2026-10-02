@@ -193,6 +193,7 @@ describe("types.ts - Interface structural conformance", () => {
       threadUsage: true,
       threadFileRevert: true,
       threadForkAtTurn: true,
+      callChanges: true,
     };
     expect(caps.saveSession).toBe(true);
     expect(caps.threadPatchUndo).toBe(false);

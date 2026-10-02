@@ -303,6 +303,84 @@ describe("revealFileChangeCard", () => {
     expect(html).toContain('data-fc-call-id="call-7"');
   });
 
+  it("marks a change a command made, so the badge cannot read as its edit", () => {
+    const { messages } = createHarness();
+    // The record is the difference between the restore points around one
+    // call, not an edit that call's tool made. The card says so, and carries
+    // the class the live redraw replaces it by.
+    const html = messages.renderFileChangeCard({
+      filePath: "out/result.json",
+      changeType: "created",
+      addedLines: 3,
+      removedLines: 0,
+      diff: "--- a\n+++ b\n",
+      changeIndex: 0,
+      callId: "call_shell",
+      toolName: "exec_shell",
+      fromCommand: true,
+    });
+
+    expect(html).toContain('class="file-change-card is-from-call"');
+    expect(html).toContain('class="fc-source"');
+    expect(html).toContain('data-fc-call-id="call_shell"');
+    // The engine's patch is what puts a Diff button on the card at all: a
+    // command's first paint carries paths and no patch, so the button only
+    // appears once the call-change route has answered.
+    expect(html).toContain('class="fc-view-diff"');
+  });
+
+  it("leaves a command's card without a Diff action until a patch exists", () => {
+    const { messages } = createHarness();
+    const html = messages.renderFileChangeCard({
+      filePath: "out/result.json",
+      changeType: "modified",
+      addedLines: 0,
+      removedLines: 0,
+      callId: "call_shell",
+      toolName: "exec_shell",
+      fromCommand: true,
+    });
+
+    // Paths only — the first paint. Nothing to open, so no button that would
+    // open an empty diff.
+    expect(html).toContain('class="file-change-card is-from-call"');
+    expect(html).not.toContain('class="fc-view-diff"');
+  });
+
+  it("draws one card per path a command changed", () => {
+    const { messages } = createHarness();
+    // A file tool reports one change, so it gets one card; a command's span
+    // can name any number of paths, and a single card could only show one.
+    const html = messages.renderToolCall("msg-1", {
+      name: "exec_shell",
+      input: { command: "python gen.py" },
+      status: "complete",
+      callId: "call_shell",
+      fileChanges: [
+        {
+          filePath: "out/result.json",
+          changeType: "created",
+          addedLines: 3,
+          removedLines: 0,
+          callId: "call_shell",
+          fromCommand: true,
+        },
+        {
+          filePath: "build/log.txt",
+          changeType: "modified",
+          addedLines: 1,
+          removedLines: 1,
+          callId: "call_shell",
+          fromCommand: true,
+        },
+      ],
+    }, 0);
+
+    expect(html.split('class="file-change-card is-from-call"')).toHaveLength(3);
+    expect(html).toContain("out/result.json");
+    expect(html).toContain("build/log.txt");
+  });
+
   it("leaves the identity empty on a recording that carries neither", () => {
     const { messages } = createHarness();
     // An older recording: no call id, no index. The card must still tag the

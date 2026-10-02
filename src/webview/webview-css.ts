@@ -1255,6 +1255,18 @@ export function getWebviewCss(): string {
       font-family: var(--vscode-editor-font-family, monospace);
       font-size: 0.85em;
     }
+    /* The provenance mark on a change that came from a command's workspace
+       span rather than from a file tool's own edit. Muted on purpose: it
+       qualifies the badge, and a reader looking for the change itself should
+       not have to read past it. */
+    .file-change-card .fc-source {
+      font-size: 0.75em;
+      opacity: 0.7;
+      border: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.35));
+      border-radius: 3px;
+      padding: 0 4px;
+      white-space: nowrap;
+    }
     .file-change-card .fc-stats .added { color: #4caf50; }
     .file-change-card .fc-stats .removed { color: #f44336; }
     .file-change-card .fc-actions {
@@ -2822,31 +2834,6 @@ export function getWebviewCss(): string {
     }
     .change-turn-group.collapsed .change-turn-items {
       display: none;
-    }
-    /* A turn's shell-command note: what this panel cannot list, said where the
-       list would otherwise look complete. Wrapped (not truncated) because it is
-       a sentence, and held to the same density as a change row so a long
-       conversation of scripted edits stays readable. */
-    .change-turn-note {
-      padding: 4px 6px;
-      color: var(--muted);
-      font-size: 0.72em;
-      line-height: 1.5;
-      opacity: 0.85;
-      border-left: 2px solid var(--border);
-    }
-    /* The panel's own scope, once above the list rather than per turn. Set
-       apart from the summary row above it by a hairline, and read as a caption
-       rather than a warning: it is the rule the panel follows, not a problem
-       with the changes on screen. */
-    .change-panel-hint {
-      margin-top: 6px;
-      padding-top: 6px;
-      border-top: 1px solid rgba(128,128,128,0.15);
-      color: var(--muted);
-      font-size: 0.72em;
-      line-height: 1.5;
-      opacity: 0.8;
     }
     .change-item {
       display: flex;

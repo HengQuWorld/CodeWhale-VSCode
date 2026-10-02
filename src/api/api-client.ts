@@ -67,6 +67,7 @@ import type {
   CreateFleetRunResponse,
   ThreadGoal,
   RevertThreadFileResponse,
+  CallChangesResponse,
 } from "../types";
 
 /**
@@ -140,6 +141,7 @@ export type {
   CreateFleetRunResponse,
   ThreadGoal,
   RevertThreadFileResponse,
+  CallChangesResponse,
 };
 
 const NOT_SYNCED: unique symbol = Symbol("NOT_SYNCED");
@@ -466,6 +468,35 @@ export class CodeWhaleApiClient {
     })) as RevertThreadFileResponse;
   }
 
+  /** What one tool call changed, from the workspace restore points the engine
+   *  recorded around it.
+   *
+   *  A shell command records no `metadata.mutation`, so its own writes reach
+   *  the UI only through these two restore points (`tool:<call_id>` and
+   *  `post-tool:<call_id>`, both on the turn record). The engine answers with
+   *  the change kind, line counts and a patch per path, read from the two
+   *  trees rather than from the work tree as it is now.
+   *
+   *  A `state` other than `captured` means the span will never resolve — the
+   *  call was never bounded, or its closing snapshot was lost — which must be
+   *  read as "unknown", never as "changed nothing". */
+  async getCallChanges(
+    threadId: string,
+    turnId: string,
+    toolCallId: string,
+    opts?: { limit?: number }
+  ): Promise<CallChangesResponse> {
+    // The call id is the model endpoint's own opaque string, not one of ours:
+    // it can carry characters that mean something in a URL path (a gateway
+    // here hands back `call_01_...|<uuid>`). Encode every segment so the id
+    // reaches the route as the engine recorded it, whatever it contains.
+    const qs = opts?.limit ? `?limit=${opts.limit}` : "";
+    return (await this.get(
+      `/v1/threads/${encodeURIComponent(threadId)}/turns/${encodeURIComponent(turnId)}` +
+        `/calls/${encodeURIComponent(toolCallId)}/changes${qs}`
+    )) as CallChangesResponse;
+  }
+
   // ── Memory (native store, mirrors TUI's /v1/memory) ──
 
   /** List native memory entries. `q` filters by full-text search;
@@ -690,6 +721,7 @@ export class CodeWhaleApiClient {
       threadUsage,
       threadFileRevert,
       threadForkAtTurn,
+      callChanges,
     ] = await Promise.all([
       this.probePath("/v1/sessions"),
       this.probePath("/v1/threads/__probe__/undo"),
@@ -709,10 +741,17 @@ export class CodeWhaleApiClient {
       // negative that would disable the button on an engine that supports it.
       this.probePath("/v1/threads/__probe__/file-revert"),
       // GET-probe for the same reason: fork-at-turn is POST-only, so GET
-      // answers 405 on the engine that has it and 404 on one that predates
+      // answers 405 on the engine that has it and 404 on one predates
       // it. A POST probe would run the handler instead and read its
       // unknown-thread 404 as "no such route".
       this.probePath("/v1/threads/__probe__/fork-at-turn"),
+      // GET-probe again: the call-change route is GET-only, so POST answers
+      // 405 where it exists. A GET probe would run the handler and read its
+      // unknown-thread 404 as "no such route".
+      this.probePath(
+        "/v1/threads/__probe__/turns/__probe__/calls/__probe__/changes",
+        "POST"
+      ),
     ]);
 
     return {
@@ -726,6 +765,7 @@ export class CodeWhaleApiClient {
       threadUsage,
       threadFileRevert,
       threadForkAtTurn,
+      callChanges,
     };
   }
 

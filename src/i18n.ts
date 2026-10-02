@@ -266,14 +266,10 @@ interface Translations {
   fileChanges: string;
   changesCount: string;
   filesCount: string;
-  /** Shown inside a turn's group when that turn ran shell commands: the count
-   *  is the whole statement, because the panel's own header carries the reason
-   *  (`changePanelHint`). `{n}` is how many commands the turn ran. */
-  changeTurnShellNote: string;
-  /** The Changes panel's own scope, said once above the list: its rows come
-   *  from the file tools' change records, so a file a shell command wrote is
-   *  not among them. */
-  changePanelHint: string;
+  /** Marks a change card whose record is a command's workspace span rather
+   *  than a file tool's own edit: the difference between the restore points
+   *  around that call, which is a net change of a time window. */
+  changeFromCommand: string;
   /** Group header for one turn's changes in the Changes panel: "Turn 3". The
    *  number is the turn's ordinal in the session, matching the conversation. */
   changeTurnLabel: string;
@@ -668,8 +664,7 @@ const en: Translations = {
   fileChanges: "Changes",
   changesCount: "{n} change(s)",
   filesCount: "{n} file(s)",
-  changeTurnShellNote: "{n} shell command(s) ran in this turn.",
-  changePanelHint: "Lists only the changes made by the file tools (edit / write / patch). File changes made by shell commands are not shown here.",
+  changeFromCommand: "from the command's workspace span",
   changeTurnLabel: "Turn {n}",
   locateChange: "Locate",
   locateChangeTooltip: "Jump to the tool call card that made this change",
@@ -1055,8 +1050,7 @@ const zhCn: Translations = {
   fileChanges: "文件变更",
   changesCount: "{n} 处变更",
   filesCount: "{n} 个文件",
-  changeTurnShellNote: "本轮执行了 {n} 条 shell 命令。",
-  changePanelHint: "只列文件工具（编辑 / 写入 / 打补丁）产生的改动，shell命令如果造成文件改动不会出现在这里。",
+  changeFromCommand: "来自命令的工作区快照",
   changeTurnLabel: "第 {n} 轮",
   locateChange: "定位",
   locateChangeTooltip: "跳转到产生此变更的工具调用卡片",
@@ -1498,8 +1492,7 @@ export function webviewTranslations(tr: Translations) {
     fileChanges: tr.fileChanges,
     changesCount: tr.changesCount,
     filesCount: tr.filesCount,
-    changeTurnShellNote: tr.changeTurnShellNote,
-    changePanelHint: tr.changePanelHint,
+    changeFromCommand: tr.changeFromCommand,
     changeTurnLabel: tr.changeTurnLabel,
     locateChange: tr.locateChange,
     locateChangeTooltip: tr.locateChangeTooltip,

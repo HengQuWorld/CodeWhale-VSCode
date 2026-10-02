@@ -1157,6 +1157,33 @@ ${PROVIDER_PICKER_JS}
         break;
       }
 
+      case 'callChangesDetected': {
+        // The file changes a *command* this call ran produced, one record per
+        // path. The whole set is redrawn every time — the first paint is the
+        // paths the workspace snapshots named, the second is what the engine
+        // answered for the span, and the second must not sit under the first.
+        var callTcEl = document.getElementById('tc-' + msg.messageId + '-' + msg.toolCallIdx);
+        var callChanges = msg.fileChanges;
+        if (callTcEl && Array.isArray(callChanges)) {
+          var callOutput = callTcEl.querySelector('.tool-output');
+          if (callOutput) callOutput.remove();
+          var prior = callTcEl.querySelectorAll('.file-change-card.is-from-call');
+          for (var pi = 0; pi < prior.length; pi++) prior[pi].remove();
+          var callApprovalBar = callTcEl.querySelector('.approval-bar');
+          for (var ci = 0; ci < callChanges.length; ci++) {
+            var callCard = document.createElement('div');
+            callCard.innerHTML = window.__wvMessages.renderFileChangeCard(callChanges[ci]);
+            var callCardEl = callCard.firstElementChild;
+            if (!callCardEl) continue;
+            callCardEl.classList.add('is-from-call');
+            if (callApprovalBar) callTcEl.insertBefore(callCardEl, callApprovalBar);
+            else callTcEl.appendChild(callCardEl);
+          }
+          window.__wvMessages.smartScrollToBottom();
+        }
+        break;
+      }
+
       case 'approvalRequired': {
         var summaryText = __wvEscapeHtml(msg.summary || __i18n.approvalRequired);
         // The card keeps a read-only line naming the request. The allow/deny

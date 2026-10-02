@@ -87,6 +87,44 @@ export interface TurnRecord {
    *  because the thread's own `mode` may have been switched while the turn was
    *  running; runtimes older than this field omit it. */
   mode?: string | null;
+  /** Workspace restore points the engine reported while this turn ran, in the
+   *  order it reported them.
+   *
+   *  With `record_restore_points` (every Runtime thread) the engine brackets
+   *  each call that may write — a file tool, a shell command, a program, a
+   *  write-capable MCP tool — with a `tool:<call_id>` receipt before it and a
+   *  `post_tool:<call_id>` receipt after it, and takes `pre_turn`/`post_turn`
+   *  around the turn itself. `post_tool.changed_paths` is what that one call
+   *  changed, which is how a command's writes are attributable at all: a
+   *  shell call records no `metadata.mutation` for them. Absent on turns
+   *  recorded before receipts existed, on turns imported from a saved session,
+   *  and on turns that ran with snapshots off. */
+  workspace_snapshots?: WorkspaceSnapshotRef[];
+}
+
+/** One workspace restore point the engine took on behalf of a turn. */
+export interface WorkspaceSnapshotRef {
+  kind: "pre_turn" | "tool" | "post_tool" | "post_turn";
+  /** Commit id when it was taken. A prune rebuilds the side repo and rewrites
+   *  commit ids; `tree_id` still resolves the snapshot then. */
+  snapshot_id: string;
+  /** Root tree of the snapshot — the durable identity. */
+  tree_id: string;
+  /** The tag the snapshot was taken under: the thread's own id for turns a
+   *  Runtime thread ran itself. */
+  session_id: string;
+  /** The call that runs from this snapshot to the next one of the turn. It is
+   *  the same id `TurnItemRecord.metadata.tool_use_id` carries, so a receipt
+   *  and its tool row can be matched without guessing. */
+  tool_call_id?: string;
+  /** For a `tool` receipt of a file tool: the paths the call declared it
+   *  writes. Absent for a tool whose writes are not declared (a shell command,
+   *  a program), which may change any path. */
+  write_paths?: string[];
+  /** Workspace-relative paths whose content changed since the turn's previous
+   *  receipt — what happened in the span this receipt closes. Absent on
+   *  `pre_turn`, and when it could not be computed. */
+  changed_paths?: string[];
 }
 
 export interface TurnItemRecord {
@@ -486,6 +524,58 @@ export interface RuntimeApiCapabilities {
    *  turn, and a UI that offered "branch from this turn" through that one
    *  would cut somewhere else while reporting success. */
   threadForkAtTurn: boolean;
+  /** `GET /v1/threads/{id}/turns/{turn_id}/calls/{tool_call_id}/changes`
+   *  exists (TUI ≥ the version that made a call's own workspace span
+   *  readable). When false the Changes panel and the command cards still list
+   *  the paths a call changed — those come from the turn's own snapshot
+   *  receipts, which the thread detail already carries — but without the
+   *  change kind, the line counts, or a patch. */
+  callChanges: boolean;
+}
+
+/** One path a single tool call changed, as the call-change route reports it. */
+export interface CallChangeFile {
+  /** Workspace-relative, `/`-separated, as git names it. */
+  path: string;
+  change: "created" | "updated" | "deleted";
+  /** Lines added and removed; `null` for a binary file. */
+  added: number | null;
+  removed: number | null;
+  /** Byte size and SHA-256 hex of the revision this span left, so a client can
+   *  send `expected_hash` to `file-revert`. Both `null` when the path was
+   *  deleted here, or is too large to read. */
+  size: number | null;
+  revision: string | null;
+  /** The restore point `POST /v1/threads/{id}/file-revert` accepts for this
+   *  path: the call's `tool:` receipt. */
+  restore_snapshot_id: string | null;
+  /** Patch between the span's two restore points; `null` when there is
+   *  nothing to render (a binary path, a mode-only change, no patch). */
+  diff: string | null;
+  diff_truncated: boolean;
+}
+
+/**
+ * What one tool call changed, from the workspace restore points the engine
+ * recorded around it.
+ *
+ * A shell command's writes are recorded by the engine as the difference
+ * between those two restore points, so they are attributable to the call —
+ * but as a *time window*, not by cause: anything else that wrote the same
+ * workspace meanwhile is in it too, and paths the snapshots exclude are
+ * invisible. `state: "unavailable"` says the span will never resolve (the
+ * call was never bounded, or its closing snapshot was lost), which is not the
+ * same answer as an empty `files` list.
+ */
+export interface CallChangesResponse {
+  thread_id: string;
+  turn_id: string;
+  tool_call_id: string;
+  tool_name: string | null;
+  state: "captured" | "unavailable";
+  reason: string | null;
+  files: CallChangeFile[];
+  truncated: boolean;
 }
 
 /**

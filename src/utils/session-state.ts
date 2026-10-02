@@ -24,7 +24,23 @@ export interface ToolCallInfo {
   approvalId?: string;
   approvalSummary?: string;
   itemId?: string;
+  /** The engine's own id for this call: `metadata.tool_use_id` in a rebuilt
+   *  transcript, the `tool.id` of a live `item.started` envelope. It is the
+   *  identity the engine labels the call's `tool:<call_id>` and
+   *  `post-tool:<call_id>` workspace restore points with, so it is what a
+   *  question about *this call's own* file changes has to be asked with. */
+  callId?: string;
   fileChange?: FileChangeInfo;
+  /** Every change a command this call ran made in its workspace span, one
+   *  record per path.
+   *
+   *  A file tool reports one change — its own edit — so `fileChange` holds it.
+   *  A shell command's writes are not a tool edit at all: the engine records
+   *  them as the difference between the restore points bracketing the call,
+   *  which can name any number of paths, and there is no `metadata.mutation`
+   *  to hang a single record on. They live here instead, and the card draws one
+   *  file-change card per entry. */
+  fileChanges?: FileChangeInfo[];
 }
 
 /**
@@ -60,6 +76,16 @@ export interface FileChangeInfo {
    *  earlier session fall back to the current bytes at click time. */
   expectedHash?: string;
   toolName?: string;
+  /** True when this record describes what a *command* the turn ran changed,
+   *  rather than a file tool's own write.
+   *
+   *  It comes from the workspace restore points bracketing that one call, so
+   *  it is the net difference of a time window: anything else that wrote the
+   *  same workspace meanwhile is in it too, and snapshots see nothing under
+   *  the paths they exclude (`.gitignore` entries, `node_modules/`, binary and
+   *  media extensions). The card and the panel row say so rather than letting
+   *  the change pass as an attributed edit. */
+  fromCommand?: boolean;
   /** The change group (turn) this record belongs to, as a 1-based ordinal
    *  within the session's change list. The panel shows every turn's changes
    *  grouped by this number, so a record must know which turn produced it —
@@ -88,11 +114,14 @@ export interface ChangeTurnInfo {
   timestamp?: number;
   /** How many shell commands this turn ran.
    *
-   *  The Changes panel lists what the *file* tools changed; a file written by a
-   *  shell command is recorded by the engine as a command execution, and the
-   *  panel is fed by file-change items only. A turn that ran one is therefore
-   *  marked, and the panel says so — otherwise a turn whose edits all came from
-   *  a script reads as a turn that changed nothing. */
+   *  Kept as the stand-in for rows a turn does not have: the panel lists a
+   *  command's own changes like any other record (they come from the workspace
+   *  restore points around that call), so this count is drawn **only** when a
+   *  turn ran commands and none of their changes could be listed — a span the
+   *  engine could not bound, a snapshot that has since been pruned, or a write
+   *  to a path the snapshots exclude. Without it the group would be a header
+   *  over nothing, and a command whose writes are invisible would read as a
+   *  turn that changed nothing. */
   shellCommands?: number;
 }
 

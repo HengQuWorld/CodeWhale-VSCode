@@ -305,6 +305,18 @@ describe("webview-js-event-handler.ts", () => {
     expect(script).toContain("type: 'setPosture'");
   });
 
+  it("redraws a command's own file-change cards from the call's whole list", () => {
+    // Source-level, because the DOM stand-in these tests run in does not parse
+    // innerHTML and so cannot see a card being appended. What it pins is the
+    // contract the two halves have to agree on: the message the host posts,
+    // and the fact that the previous paint is removed rather than left under
+    // the new one.
+    const script = getEventHandlerScript(makeTr());
+    expect(script).toContain("case 'callChangesDetected'");
+    expect(script).toContain("msg.fileChanges");
+    expect(script).toContain("'.file-change-card.is-from-call'");
+  });
+
   it("renders friendly TUI mode and posture labels while keeping canonical values", () => {
     const script = getEventHandlerScript(makeTr());
     // Injected display maps mirror AppMode::display_name() and

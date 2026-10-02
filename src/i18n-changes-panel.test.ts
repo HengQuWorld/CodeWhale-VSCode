@@ -23,22 +23,18 @@ function forLanguage(language: string): Record<string, string> {
   return webviewTranslations(t()) as unknown as Record<string, string>;
 }
 
-describe("Changes panel shell wording", () => {
-  it("states one turn's shell count, and nothing more", () => {
-    // The panel's rule is said once for the whole panel (`changePanelHint`),
-    // so a turn's note is the count: the explanation was repeated in every
-    // group when it lived here.
-    expect(forLanguage("zh-cn").changeTurnShellNote).toBe("本轮执行了 {n} 条 shell 命令。");
-    expect(forLanguage("en").changeTurnShellNote).toBe("{n} shell command(s) ran in this turn.");
-  });
-
-  it("says what the panel lists, once, in the panel hint", () => {
-    expect(forLanguage("zh-cn").changePanelHint).toBe(
-      "只列文件工具（编辑 / 写入 / 打补丁）产生的改动，shell命令如果造成文件改动不会出现在这里。",
-    );
-    expect(forLanguage("en").changePanelHint).toBe(
-      "Lists only the changes made by the file tools (edit / write / patch). File changes made by shell commands are not shown here.",
-    );
+describe("Changes panel wording", () => {
+  it("carries none, for a panel that lists every provenance", () => {
+    // The panel used to explain itself: which changes it lists, and later what
+    // a command's rows are. Every clause of that described a limit the panel
+    // outgrew once a command's own writes became rows, so the strings are gone
+    // rather than merely unreferenced — a dead translation is an invitation to
+    // bring the notice back.
+    for (const language of ["en", "zh-cn"]) {
+      const published = forLanguage(language) as unknown as Record<string, unknown>;
+      expect(published.changePanelHint, language).toBeUndefined();
+      expect(published.changeTurnShellNote, language).toBeUndefined();
+    }
   });
 
   it("publishes every key the webview's translation type declares", () => {

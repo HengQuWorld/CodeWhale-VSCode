@@ -417,6 +417,13 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
     html += renderToolInput(tc);
     if (tc.fileChange) {
       html += renderFileChangeCard(tc.fileChange);
+    } else if (tc.fileChanges && tc.fileChanges.length > 0) {
+      // A command's writes are one record per path, so the card is drawn once
+      // per record: a single card could only name one of them. Like a file
+      // tool's card, these stand in for the call's raw output.
+      for (var fci = 0; fci < tc.fileChanges.length; fci++) {
+        html += renderFileChangeCard(tc.fileChanges[fci]);
+      }
     } else if (tc.output) {
       html += '<div class="tool-output" tabindex="0">' + __wvEscapeHtml(tc.output) + '</div>';
     }
@@ -446,10 +453,17 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
     // position within its file's history. Neither is guaranteed: recordings
     // that predate the call id carry only the path.
     var fcIndex = fc.changeIndex !== undefined && fc.changeIndex !== null ? String(fc.changeIndex) : '';
-    var html = '<div class="file-change-card" data-fc-path="' + __wvEscapeHtml(fc.filePath) + '" data-fc-index="' + fcIndex + '" data-fc-call-id="' + __wvEscapeHtml(fc.callId || '') + '">';
+    var html = '<div class="file-change-card' + (fc.fromCommand ? ' is-from-call' : '') + '" data-fc-path="' + __wvEscapeHtml(fc.filePath) + '" data-fc-index="' + fcIndex + '" data-fc-call-id="' + __wvEscapeHtml(fc.callId || '') + '">';
     html += '<div class="fc-header">';
     html += '<span class="fc-path" title="' + __wvEscapeHtml(fc.filePath) + '">\\uD83D\\uDCDD ' + __wvEscapeHtml(displayPath) + '</span>';
     html += '<span class="fc-badge ' + fc.changeType + '">' + __wvEscapeHtml(changeTypeLabel) + '</span>';
+    // A command's change is the net difference of a time window, not an edit
+    // this tool made, and the reader is owed that distinction on the card
+    // itself: the badge would otherwise read as "this command wrote exactly
+    // this".
+    if (fc.fromCommand) {
+      html += '<span class="fc-source">' + __wvEscapeHtml(__i18n.changeFromCommand) + '</span>';
+    }
     if (fc.addedLines > 0 || fc.removedLines > 0) {
       html += '<span class="fc-stats">';
       if (fc.addedLines > 0) html += '<span class="added">+' + fc.addedLines + '</span> ';

@@ -1076,3 +1076,146 @@ describe("CodeWhaleApiClient - fork from a turn", () => {
     expect(result.original_user_text).toBe("try this instead");
   });
 });
+
+describe("CodeWhaleApiClient - one call's changes", () => {
+  type RawResponse = { statusCode: number; data: string };
+
+  /** Stub the raw HTTP layer so the test asserts the wire contract the engine
+   *  sees — method, path and body — instead of the transport. */
+  function clientStubbingRaw(
+    respond: (method: string, path: string, body: unknown) => RawResponse
+  ) {
+    const client = new CodeWhaleApiClient("http://localhost:54321");
+    const calls: { method: string; path: string; body: unknown }[] = [];
+    (client as any).requestRaw = vi.fn(
+      async (method: string, path: string, body: unknown) => {
+        calls.push({ method, path, body });
+        return respond(method, path, body);
+      }
+    );
+    return { client, calls };
+  }
+
+  it("probes the call-change route with POST and reports it unavailable on 404", async () => {
+    // The route is GET-only, so a POST is the probe that cannot be confused
+    // with the handler's own answers: 405 where it exists, 404 where it does
+    // not.
+    const { client, calls } = clientStubbingRaw(() => ({ statusCode: 404, data: "{}" }));
+
+    const caps = await client.probeRuntimeCapabilities();
+
+    expect(caps.callChanges).toBe(false);
+    expect(calls).toContainEqual({
+      method: "POST",
+      path: "/v1/threads/__probe__/turns/__probe__/calls/__probe__/changes",
+      body: {},
+    });
+  });
+
+  it("treats a 405 on the POST probe as the endpoint being available", async () => {
+    const { client } = clientStubbingRaw((_method, path) =>
+      path === "/v1/threads/__probe__/turns/__probe__/calls/__probe__/changes"
+        ? { statusCode: 405, data: "{}" }
+        : { statusCode: 404, data: "{}" }
+    );
+
+    const caps = await client.probeRuntimeCapabilities();
+
+    expect(caps.callChanges).toBe(true);
+  });
+
+  it("reads one call's span from the thread- and turn-scoped route", async () => {
+    const { client, calls } = clientStubbingRaw(() => ({
+      statusCode: 200,
+      data: JSON.stringify({
+        thread_id: "thread-1",
+        turn_id: "turn-1",
+        tool_call_id: "call_shell",
+        tool_name: "exec_shell",
+        state: "captured",
+        reason: null,
+        truncated: false,
+        files: [
+          {
+            path: "out/result.json",
+            change: "created",
+            added: 3,
+            removed: 0,
+            size: 12,
+            revision: "ab".repeat(32),
+            restore_snapshot_id: "3f2a",
+            diff: "@@ -0,0 +1,3 @@\n+{}\n",
+            diff_truncated: false,
+          },
+        ],
+      }),
+    }));
+
+    const answer = await client.getCallChanges("thread-1", "turn-1", "call_shell");
+
+    expect(calls).toEqual([
+      {
+        method: "GET",
+        path: "/v1/threads/thread-1/turns/turn-1/calls/call_shell/changes",
+        body: undefined,
+      },
+    ]);
+    expect(answer.state).toBe("captured");
+    expect(answer.files[0].path).toBe("out/result.json");
+    expect(answer.files[0].change).toBe("created");
+  });
+
+  it("encodes a provider-shaped call id instead of splicing it into the path", async () => {
+    // The id is the model endpoint's own opaque string. One gateway here hands
+    // back `call_01_...|<uuid>`; a raw `|` happens to survive, but a `/` or a
+    // `?` would split the path and the engine would answer "no such call" for
+    // a call it plainly recorded.
+    const { client, calls } = clientStubbingRaw(() => ({
+      statusCode: 200,
+      data: JSON.stringify({
+        thread_id: "thread-1",
+        turn_id: "turn-1",
+        tool_call_id: "call_01_x|y/z?w",
+        tool_name: "bash",
+        state: "captured",
+        reason: null,
+        truncated: false,
+        files: [],
+      }),
+    }));
+
+    await client.getCallChanges("thread-1", "turn-1", "call_01_x|y/z?w");
+
+    expect(calls[0].path).toBe(
+      "/v1/threads/thread-1/turns/turn-1/calls/" +
+        encodeURIComponent("call_01_x|y/z?w") +
+        "/changes"
+    );
+  });
+
+  it("passes a file limit through when one is asked for", async () => {
+    const { client, calls } = clientStubbingRaw(() => ({
+      statusCode: 200,
+      data: JSON.stringify({
+        thread_id: "thread-1",
+        turn_id: "turn-1",
+        tool_call_id: "call_shell",
+        tool_name: null,
+        state: "unavailable",
+        reason: "call_not_bounded",
+        truncated: false,
+        files: [],
+      }),
+    }));
+
+    const answer = await client.getCallChanges("thread-1", "turn-1", "call_shell", { limit: 5 });
+
+    expect(calls[0].path).toBe(
+      "/v1/threads/thread-1/turns/turn-1/calls/call_shell/changes?limit=5"
+    );
+    // An unresolved span is a fact, not an empty change list: the client must
+    // be able to tell them apart, so both fields survive the round trip.
+    expect(answer.state).toBe("unavailable");
+    expect(answer.reason).toBe("call_not_bounded");
+  });
+});

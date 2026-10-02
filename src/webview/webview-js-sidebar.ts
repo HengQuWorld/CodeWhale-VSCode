@@ -1798,14 +1798,7 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
     var countLabel = __i18n.changesCount.replace('{n}', String(changesState.length)) +
       ' \\u00B7 ' + __i18n.filesCount.replace('{n}', String(fileCount));
     header.innerHTML = '<div class="work-section-title"><span class="work-section-title-icon">\\uD83D\\uDCC1</span>' + __wvEscapeHtml(__i18n.fileChanges) + ' <span class="work-section-subtitle">(' + __wvEscapeHtml(countLabel) + ')</span></div><div class="change-summary-row">' + summaryParts.join(' ') + '</div>';
-    // What this panel is, said once for the whole list rather than in every
-    // turn's note: its rows are the file tools' change records, so a file a
-    // shell command wrote is not among them. Only said when the session ran a
-    // shell command — otherwise the sentence would explain an absence that
-    // never happened. The per-turn notes below say which turns those were.
-    if (shellCommandTotal > 0) {
-      header.innerHTML += '<div class="change-panel-hint">' + __wvEscapeHtml(__i18n.changePanelHint) + '</div>';
-    }
+    // The header is the counts and nothing else.
     container.appendChild(header);
 
     // Change list
@@ -1852,14 +1845,6 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
         items.className = 'change-turn-items';
         var rows = '';
         for (var ci = 0; ci < own.length; ci++) rows += changeRowHtml(own[ci]);
-        if (shellCount > 0) {
-          // What the panel cannot list, in the terms of this one turn: how many
-          // commands it ran. Why that matters is the panel's own hint, said
-          // once above the list rather than here, once per turn.
-          rows += '<div class="change-turn-note">' +
-            __wvEscapeHtml(__i18n.changeTurnShellNote.replace('{n}', String(shellCount))) +
-            '</div>';
-        }
         items.innerHTML = rows;
         group.appendChild(turnHeader);
         group.appendChild(items);
