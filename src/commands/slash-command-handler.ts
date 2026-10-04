@@ -73,6 +73,13 @@ export interface SlashCommandContext {
     route: string;
     foreign?: string;
   };
+  /** Ask the panel before an open conversation's model is switched.
+   *
+   *  A provider caches each model's prefix separately, so changing the model
+   *  mid-conversation is a spend of the same kind as moving the conversation
+   *  to another route: the next message is re-sent whole. Answers true when
+   *  the user agreed; the caller writes nothing before it does. */
+  confirmModelSwitch(from: string, to: string): Promise<boolean>;
   /** The route a conversation created now would run on: the picker's active
    *  provider plus the model remembered for it. A command that creates a
    *  conversation (`/task add`) sends all three together — sending the model
@@ -312,6 +319,14 @@ async function handleModel(ctx: SlashCommandContext, args: string): Promise<void
         message: `Cannot use ${model}: it belongs to ${fit.foreign}, not to this conversation's route (${fit.route}).`,
       });
       return;
+    }
+    // Switching a conversation's model spends the prefix the provider has
+    // cached for it — each model's cache is its own — so the user is asked
+    // before anything is written at all. A no leaves both the conversation and
+    // what new conversations of this route start from exactly as they were.
+    if (ctx.currentThread && model !== ctx.currentThread.model) {
+      const agreed = await ctx.confirmModelSwitch(ctx.currentThread.model, model);
+      if (!agreed) return;
     }
     // Remembered for the route on screen, not in the single global
     // `defaultModel`: one global value is shared by every provider, which is

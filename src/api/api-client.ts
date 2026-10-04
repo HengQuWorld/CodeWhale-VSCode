@@ -307,6 +307,15 @@ export class CodeWhaleApiClient {
     return resp;
   }
 
+  /**
+   * Patch a thread. The route pair (`model_provider` + `model_provider_id`,
+   * the same pair `POST /v1/threads` and the provider picker use) moves an
+   * existing conversation onto another provider: the runtime preflights the
+   * target route, saves it on the thread record, keeps the history, and the
+   * next turn runs there. A runtime older than that field refuses the request
+   * (`At least one thread field is required`) rather than accepting it and
+   * changing nothing — see `ChatProvider.moveConversationOntoRoute`.
+   */
   async updateThread(threadId: string, updates: {
     archived?: boolean;
     allow_shell?: boolean;
@@ -315,6 +324,8 @@ export class CodeWhaleApiClient {
     mode?: string;
     permission_posture?: string;
     model?: string;
+    model_provider?: string;
+    model_provider_id?: string;
     title?: string;
     workspace?: string;
   }): Promise<ThreadRecord> {

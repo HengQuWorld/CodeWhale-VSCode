@@ -107,6 +107,20 @@ interface Translations {
   /** Chip suffix while the open conversation runs on a route other than the
    *  one the picker selected (that choice applies to new conversations). */
   threadRouteMarker: string;
+  /** Confirmation shown before an open conversation is moved onto the route the
+   *  picker just selected, and its price. `{from}`/`{to}` name the routes and
+   *  `{model}` the model the target route starts from. */
+  routeMoveTitle: string;
+  routeMoveBody: string;
+  routeMoveConfirm: string;
+  routeMoveCancel: string;
+  /** The same confirmation for switching an open conversation's model within one
+   *  route: `{from}` names the route, `{fromModel}`/`{model}` the models.
+   *  A provider caches each model's prefix separately, so the price is the
+   *  same. */
+  modelChangeTitle: string;
+  modelChangeBody: string;
+  modelChangeConfirm: string;
   planApproveButton: string;
   planApproveButtonHint: string;
   planApproveProceed: string;
@@ -532,6 +546,13 @@ const en: Translations = {
   scopeDefaultTitle: "New conversations start here; this one keeps its own setting.",
   providerNeedsLogin: "needs login", providerNoKey: "no key configured",
   threadRouteMarker: "this conversation",
+  routeMoveTitle: "Move this conversation?",
+  routeMoveBody: "It runs on {from}. Moving it to {to} (model {model}) keeps the history, but {from} has this conversation cached as a prefix: the next message goes to {to} in full, so it costs more and takes longer to start.",
+  routeMoveConfirm: "Move this conversation",
+  routeMoveCancel: "Keep it here",
+  modelChangeTitle: "Switch this conversation's model?",
+  modelChangeBody: "It runs on {from}. Switching from {fromModel} to {model} keeps the history, but a cached prefix belongs to one model: the next message is sent whole, so it costs more and takes longer to start.",
+  modelChangeConfirm: "Switch the model",
   planApproveButton: "Switch to Act & execute", planApproveProceed: "Plan approved. Mode is now Act — proceed with the plan above.",
   planApproveButtonHint: "Switch to Act & execute. Anything you type in the box below first goes with this approval and takes precedence over the plan.",
   planApproveWithPrompt: "Plan approved. Mode is now Act. The instruction below takes precedence over the plan above:",
@@ -918,6 +939,13 @@ const zhCn: Translations = {
   scopeDefaultTitle: "新会话以此启动；当前会话保持自己的设置。",
   providerNeedsLogin: "需登录", providerNoKey: "未配置密钥",
   threadRouteMarker: "当前会话",
+  routeMoveTitle: "把这个会话迁过去？",
+  routeMoveBody: "它现在跑在 {from}。迁到 {to}（模型 {model}）会保留全部历史，但 {from} 已把这段对话缓存为前缀：下一条消息会全量发给 {to}，因此更贵、起步也更慢。",
+  routeMoveConfirm: "迁移这个会话",
+  routeMoveCancel: "保持不动",
+  modelChangeTitle: "给当前会话换模型？",
+  modelChangeBody: "它现在跑在 {from}。从 {fromModel} 换到 {model} 会保留全部历史，但缓存的前缀属于某一个模型：下一条消息会全量发送，因此更贵、起步也更慢。",
+  modelChangeConfirm: "换模型",
   planApproveButton: "切换到 Act 并执行", planApproveProceed: "计划已确认，模式已切换为 Act。请按上面的计划开始执行。",
   planApproveButtonHint: "切换到 Act 并执行。先在下面输入框写下的内容会随本次批准一起发送，并优先于上面的计划。",
   planApproveWithPrompt: "计划已确认，模式已切换为 Act。以下指示优先于上面的计划：",
@@ -1393,6 +1421,13 @@ export function webviewTranslations(tr: Translations) {
     providerNeedsLogin: tr.providerNeedsLogin,
     providerNoKey: tr.providerNoKey,
     threadRouteMarker: tr.threadRouteMarker,
+    routeMoveTitle: tr.routeMoveTitle,
+    routeMoveBody: tr.routeMoveBody,
+    routeMoveConfirm: tr.routeMoveConfirm,
+    routeMoveCancel: tr.routeMoveCancel,
+    modelChangeTitle: tr.modelChangeTitle,
+    modelChangeBody: tr.modelChangeBody,
+    modelChangeConfirm: tr.modelChangeConfirm,
     planApproveButton: tr.planApproveButton,
     planApproveButtonHint: tr.planApproveButtonHint,
     welcomeTitle: tr.welcomeTitle,

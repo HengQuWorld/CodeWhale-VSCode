@@ -1665,6 +1665,200 @@ describe("webview-js-event-handler runtime", () => {
     });
     expect(harness.getElement("current-provider").textContent).toBe("bigmodel-cn (custom)");
   });
+
+  it("asks about moving the conversation in the panel, naming what it costs", () => {
+    const harness = createRuntimeHarness();
+    harness.dispatchMessage({
+      type: "providersUpdated",
+      current: "custom",
+      currentProviderId: "bigmodel-cn",
+      viewProvider: "custom",
+      viewProviderId: "bigmodel-cn",
+      providers: [
+        {
+          id: "deepseek",
+          model_provider_id: "deepseek",
+          display_name: "DeepSeek",
+          default_model: "deepseek-flash",
+          has_model_catalog: true,
+          credentialState: "configured",
+        },
+        {
+          id: "custom",
+          model_provider_id: "bigmodel-cn",
+          display_name: "bigmodel-cn (custom)",
+          default_model: "glm-5.3",
+          has_model_catalog: true,
+          credentialState: "configured",
+        },
+      ],
+    });
+
+    harness.dispatchMessage({
+      type: "routeMovePrompt",
+      provider: "deepseek",
+      providerId: "deepseek",
+      from: "custom",
+      fromProviderId: "bigmodel-cn",
+      model: "deepseek-flash",
+    });
+
+    expect(harness.getElement("route-move-overlay").classList.contains("open")).toBe(true);
+    const body = harness.getElement("route-move-body").textContent;
+    // Both routes by the names the picker uses, and the model it lands on.
+    expect(body).toContain("bigmodel-cn (custom)");
+    expect(body).toContain("DeepSeek");
+    expect(body).toContain("deepseek-flash");
+    // The price is the sentence that has to be there, not a hint of one.
+    expect(body).toContain("cached as a prefix");
+    expect(body).toContain("in full");
+    // Every token is filled, the repeat of the route at the end of the
+    // sentence included: `replace` takes only the first, which is how "{from}"
+    // and "{to}" ended up bare on screen.
+    expect(body).not.toContain("{");
+    expect(body.match(/bigmodel-cn \(custom\)/g)).toHaveLength(2);
+    // Nothing is answered until the user does.
+    expect(harness.postMessages.filter((m) => m.type === "routeMoveAnswer")).toEqual([]);
+  });
+
+  it("answers the route question from either button, and closes behind it", () => {
+    const harness = createRuntimeHarness();
+    harness.dispatchMessage({
+      type: "routeMovePrompt",
+      provider: "deepseek",
+      providerId: "deepseek",
+      from: "custom",
+      fromProviderId: "bigmodel-cn",
+      model: "deepseek-flash",
+    });
+
+    harness.getElement("route-move-confirm").dispatch("click", {});
+    expect(harness.postMessages).toContainEqual({ type: "routeMoveAnswer", accept: true });
+    expect(harness.getElement("route-move-overlay").classList.contains("open")).toBe(false);
+
+    // A question that has been answered is not answered again by the next
+    // click — the dialog is gone, and so is what it was asking.
+    const answered = harness.postMessages.length;
+    harness.getElement("route-move-confirm").dispatch("click", {});
+    expect(harness.postMessages.length).toBe(answered);
+
+    harness.dispatchMessage({
+      type: "routeMovePrompt",
+      provider: "deepseek",
+      providerId: "deepseek",
+      from: "custom",
+      fromProviderId: "bigmodel-cn",
+      model: "deepseek-flash",
+    });
+    harness.getElement("route-move-cancel").dispatch("click", {});
+    expect(harness.postMessages).toContainEqual({ type: "routeMoveAnswer", accept: false });
+  });
+
+  it("asks the same question, with its own words, for a model switch", () => {
+    const harness = createRuntimeHarness();
+    harness.dispatchMessage({
+      type: "providersUpdated",
+      current: "custom",
+      currentProviderId: "bigmodel-cn",
+      viewProvider: "custom",
+      viewProviderId: "bigmodel-cn",
+      providers: [
+        {
+          id: "custom",
+          model_provider_id: "bigmodel-cn",
+          display_name: "bigmodel-cn (custom)",
+          default_model: "glm-5.3",
+          has_model_catalog: true,
+          credentialState: "configured",
+        },
+      ],
+    });
+
+    harness.dispatchMessage({
+      type: "routeMovePrompt",
+      kind: "model",
+      provider: "custom",
+      providerId: "bigmodel-cn",
+      fromModel: "glm-5.3",
+      model: "glm-5.4",
+    });
+
+    expect(harness.getElement("route-move-overlay").classList.contains("open")).toBe(true);
+    // The question is about the model, and says so on the button that acts.
+    expect(harness.getElement("route-move-title").textContent).toBe(
+      "Switch this conversation's model?"
+    );
+    expect(harness.getElement("route-move-confirm").textContent).toBe("Switch the model");
+    const body = harness.getElement("route-move-body").textContent;
+    // Both models and the route by the name the picker uses — and no token is
+    // left unfilled, {fromModel} included.
+    expect(body).toContain("glm-5.3");
+    expect(body).toContain("glm-5.4");
+    expect(body).toContain("bigmodel-cn (custom)");
+    expect(body).not.toContain("{");
+    expect(body).toContain("belongs to one model");
+
+    harness.getElement("route-move-confirm").dispatch("click", {});
+    expect(harness.postMessages).toContainEqual({ type: "routeMoveAnswer", accept: true });
+  });
+
+  it("re-uses one dialog for both questions, so the second wears the second words", () => {
+    const harness = createRuntimeHarness();
+    harness.dispatchMessage({
+      type: "routeMovePrompt",
+      provider: "deepseek",
+      providerId: "deepseek",
+      from: "custom",
+      fromProviderId: "bigmodel-cn",
+      model: "deepseek-flash",
+    });
+    harness.getElement("route-move-cancel").dispatch("click", {});
+
+    harness.dispatchMessage({
+      type: "routeMovePrompt",
+      kind: "model",
+      provider: "custom",
+      providerId: "bigmodel-cn",
+      fromModel: "glm-5.3",
+      model: "glm-5.4",
+    });
+
+    // No stale route text, no stale button label.
+    expect(harness.getElement("route-move-title").textContent).toBe(
+      "Switch this conversation's model?"
+    );
+    expect(harness.getElement("route-move-body").textContent).not.toContain("Moving it to");
+  });
+
+  it("treats Esc, and a click on the dimmed area, as no", () => {
+    const harness = createRuntimeHarness();
+    const prompt = {
+      type: "routeMovePrompt",
+      provider: "deepseek",
+      providerId: "deepseek",
+      from: "custom",
+      fromProviderId: "bigmodel-cn",
+      model: "deepseek-flash",
+    };
+
+    harness.dispatchMessage(prompt);
+    const overlay = harness.getElement("route-move-overlay");
+    overlay.dispatch("click", { target: overlay });
+    expect(harness.postMessages).toContainEqual({ type: "routeMoveAnswer", accept: false });
+
+    // Esc is the same answer, and the dialog owns it while it is up.
+    harness.dispatchMessage(prompt);
+    const keydown = harness.documentListeners.get("keydown");
+    expect(keydown).toBeTruthy();
+    let prevented = false;
+    keydown!({ key: "Escape", preventDefault: () => { prevented = true; } });
+    expect(prevented).toBe(true);
+    expect(harness.getElement("route-move-overlay").classList.contains("open")).toBe(false);
+    expect(harness.postMessages.filter((m) => m.type === "routeMoveAnswer")).toEqual([
+      { type: "routeMoveAnswer", accept: false },
+      { type: "routeMoveAnswer", accept: false },
+    ]);
+  });
 });
 
 describe("Changes panel state routing", () => {

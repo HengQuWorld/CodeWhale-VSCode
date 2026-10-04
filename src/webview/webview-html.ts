@@ -151,6 +151,17 @@ export interface WebviewTranslations {
   /** Chip suffix while an open conversation runs on another route than the
    *  picker's active one; the picker's choice applies to new conversations. */
   threadRouteMarker: string;
+  /** Confirmation asked inside the panel, before an open conversation is moved
+   *  onto the route the picker just selected, and the price of that move. */
+  routeMoveTitle: string;
+  routeMoveBody: string;
+  routeMoveConfirm: string;
+  routeMoveCancel: string;
+  /** The same question for switching an open conversation's model within one
+   *  route: a provider caches each model's prefix separately. */
+  modelChangeTitle: string;
+  modelChangeBody: string;
+  modelChangeConfirm: string;
   planApproveButton: string;
   planApproveButtonHint: string;
   welcomeTitle: string;
@@ -482,6 +493,16 @@ ${css}
   <div id="fleet-detail-overlay" class="task-detail-overlay"></div>
   <div id="fleet-create-overlay" class="task-detail-overlay"></div>
   <div id="task-create-overlay" class="task-detail-overlay"></div>
+  <div id="route-move-overlay" class="route-move-overlay">
+    <div class="route-move-panel" role="dialog" aria-modal="true">
+      <div class="route-move-title" id="route-move-title">${tr.routeMoveTitle}</div>
+      <div class="route-move-body" id="route-move-body"></div>
+      <div class="route-move-actions">
+        <button class="route-move-btn" id="route-move-cancel" type="button">${tr.routeMoveCancel}</button>
+        <button class="route-move-btn primary" id="route-move-confirm" type="button">${tr.routeMoveConfirm}</button>
+      </div>
+    </div>
+  </div>
   <div id="layout">
     <div id="threads-panel">
       <div class="sidebar-section" id="sidebar-threads" data-active-tab="sessions">

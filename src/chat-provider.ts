@@ -574,6 +574,12 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
           msg.providerId as string | undefined
         );
         break;
+      case "routeMoveAnswer":
+        // The panel's answer to whatever it was asked — a route move or a model
+        // switch. Asking writes nothing; the answer is what lets a write
+        // happen, and the caller that asked is the one woken.
+        this.handlePanelAnswer(!!msg.accept);
+        break;
       case "requestProviderModels":
         await this.handleRequestProviderModels(
           msg.provider as string,
@@ -638,6 +644,11 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         break;
       case "webviewReady":
         try {
+          // A question from the webview that just went away can never be
+          // answered: settle it as a no rather than leaving whoever asked it
+          // waiting on a dialog that no longer exists. (Nothing is written
+          // before an answer, so a no is what the caller already handles.)
+          this.settlePendingPanelQuestion();
           // A reloaded webview has lost both its preview cache and its copy
           // of the attachment list, while the host still holds the records
           // and would send them with the next turn. Re-announce the
@@ -4555,10 +4566,11 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       // The route whatever is on screen will actually run on, which is not the
       // runtime's active route once the picker has moved: a conversation keeps
       // the provider it was created on (runtime_threads.rs::
-      // provider_identity_for_thread), no endpoint re-routes one, and a saved
-      // session that is only being viewed already knows the route its resume
-      // will use. The webview reads its chip and its model list from this, so
-      // neither can describe a route the next message will not use.
+      // provider_identity_for_thread reads the thread's saved route) until the
+      // user agrees to move it (ChatProvider.moveConversationOntoRoute), and a
+      // saved session that is only being viewed already knows the route its
+      // resume will use. The webview reads its chip and its model list from
+      // this, so neither can describe a route the next message will not use.
       viewProvider: view?.provider || "",
       viewProviderId: view?.providerId || "",
       viewModel: this.getCurrentModel(),
@@ -4586,6 +4598,16 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
    * `modelProviderId` carries the exact configured route when the picker
    * selected a user-defined `[providers.<name>]` entry: those share the
    * generic `custom` id, so the pair is what names one route.
+   *
+   * With a conversation open, the click means that conversation, not the
+   * runtime default: the chip and the model list already describe the route
+   * the open conversation runs on, and a route the user is looking at is the
+   * one they are switching. Moving it is the one action here that spends
+   * something switching back cannot restore — the prefix the old provider has
+   * cached of this conversation — so it is put to the user inside the panel
+   * first (`routeMovePrompt`), and nothing at all is written until it is
+   * answered. Only with no conversation open does the click go straight to the
+   * runtime default, which is what the picker means there.
    */
   private async handleSwitchProvider(
     providerId: string,
@@ -4597,6 +4619,129 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       this.postMessage({ type: "error", message: "Empty provider id" });
       return;
     }
+    const exactRoute = modelProviderId?.trim() || undefined;
+
+    // With a conversation open, the picker means that conversation: the chip
+    // already reads the conversation's route rather than the picker's, so what
+    // is on screen is what the user is switching. That move spends the
+    // provider's cached prefix of this conversation — the reason the engine
+    // pins a thread to a route at all — so it is asked about first, and a no
+    // leaves the conversation, the runtime default and the chip exactly as
+    // they were.
+    const openThread = this.currentThread;
+    const conversation = this.threadRouteOf(openThread);
+    const conversationKey = providerRouteKey(conversation?.provider, conversation?.providerId);
+    const targetKey = providerRouteKey(trimmed, exactRoute);
+    if (openThread && conversationKey && targetKey && conversationKey !== targetKey) {
+      // Read the catalog before naming the route's model to the user: the
+      // model the move will land on is the route's own, and asking the runtime
+      // for it is a read — the question must not be a switch in disguise.
+      await this.refreshProviders();
+      const targetModel = model?.trim() || this.getModelForRoute(trimmed, exactRoute);
+      const agreed = await this.askPanel({
+        kind: "route",
+        provider: trimmed,
+        providerId: exactRoute || "",
+        from: conversation?.provider || "",
+        fromProviderId: conversation?.providerId || "",
+        model: targetModel,
+      });
+      if (!agreed) return;
+      const moved = await this.moveConversationOntoRoute({
+        provider: trimmed,
+        providerId: exactRoute,
+        key: targetKey,
+        model: targetModel,
+        from: conversationKey,
+      });
+      if (!moved) return;
+      // The runtime default follows the conversation, or the picker would name
+      // a route the next new conversation does not start on. Quiet, because
+      // the move has already said what happened.
+      await this.applyProviderSwitch(trimmed, undefined, exactRoute, { announce: false });
+      return;
+    }
+
+    await this.applyProviderSwitch(trimmed, model, modelProviderId);
+  }
+
+  /** The question the panel has on screen, and the conversation it was asked
+   *  about. Only one is ever up — the dialog is modal — and an answer settles
+   *  it. Asking writes nothing, so a no (or an answer about a conversation that
+   *  is no longer open) is simply "do nothing". */
+  private pendingPanelConfirm: {
+    resolve: (accept: boolean) => void;
+    threadId: string;
+  } | null = null;
+
+  /** Put a question to the panel and resolve with the answer.
+   *
+   *  The question is pinned to the conversation that was open when it was
+   *  asked: the dialog is modal, but the conversation under it can still be
+   *  replaced (a new thread, a rail switch) before the answer arrives, and an
+   *  answer about one conversation must not move another. A second question
+   *  settles the first as a no rather than leaving its caller waiting — at that
+   *  point neither has written anything, which is why a no is safe. */
+  private askPanel(question: Record<string, unknown>): Promise<boolean> {
+    const previous = this.pendingPanelConfirm;
+    const threadId = this.currentThread?.id || "";
+    const answered = new Promise<boolean>((resolve) => {
+      this.pendingPanelConfirm = { resolve, threadId };
+    });
+    if (previous) previous.resolve(false);
+    this.postMessage({ type: "routeMovePrompt", ...question });
+    return answered;
+  }
+
+  /** The panel's answer to whatever it was asked. */
+  private handlePanelAnswer(accept: boolean): void {
+    const pending = this.pendingPanelConfirm;
+    this.pendingPanelConfirm = null;
+    if (!pending) return;
+    pending.resolve(!!accept && this.currentThread?.id === pending.threadId);
+  }
+
+  /** Settle an open question as a no, for the cases where no answer can arrive:
+   *  the webview reloaded, or the panel was closed. The caller that asked
+   *  resumes — and does nothing, which is what a no means here. */
+  private settlePendingPanelQuestion(): void {
+    const pending = this.pendingPanelConfirm;
+    this.pendingPanelConfirm = null;
+    if (pending) pending.resolve(false);
+  }
+
+  /** Ask before an open conversation's model is switched.
+   *
+   *  A provider caches each model's prefix separately, so switching models
+   *  mid-conversation is the same kind of spend as moving the conversation to
+   *  another route: the next message is re-sent whole. `/model` — the model
+   *  dropdown and the typed command both — goes through
+   *  `SlashCommandContext`, which is this object, so the question lives here
+   *  with the dialog. Answers true when the user agreed. */
+  public async confirmModelSwitch(from: string, to: string): Promise<boolean> {
+    const route = this.viewRoute();
+    return this.askPanel({
+      kind: "model",
+      provider: route?.provider || "",
+      providerId: route?.providerId || "",
+      fromModel: from,
+      model: to,
+    });
+  }
+
+  /** Switch the runtime's active route — what new conversations start on —
+   *  optionally overriding its model. The GUI's counterpart of the TUI's
+   *  `/provider`: `POST /v1/providers/{id}/switch` persists the pair, reloads
+   *  config, syncs the loaded engines, and answers with the model that actually
+   *  resolves for the route. That answer is what the chip shows. */
+  private async applyProviderSwitch(
+    providerId: string,
+    model?: string,
+    modelProviderId?: string,
+    opts: { announce?: boolean } = {}
+  ): Promise<void> {
+    const trimmed = providerId.trim();
+    if (!trimmed) return;
     const exactRoute = modelProviderId?.trim() || undefined;
     try {
       // Single backend call: persists provider (+ model only when given),
@@ -4627,34 +4772,98 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         provider: resp.provider || trimmed,
         providerId: this.currentProviderId || undefined,
       });
-      this.postMessage({
-        type: "info",
-        message: resp.message ||
-          `Provider switched to ${resp.provider || trimmed} (model: ${resolvedModel}).`,
-      });
-
-      // A conversation keeps the provider it was created on — a deliberate
-      // engine decision, for prefix-cache economics — and no endpoint can move
-      // one: `PATCH /v1/threads` and `POST .../turns` carry no provider. So a
-      // message sent here still goes to the old provider. The picker keeps
-      // describing the conversation, and the one action that does move it is
-      // offered rather than left to be discovered.
-      const conversation = this.threadRouteOf(this.currentThread);
-      const conversationKey = providerRouteKey(conversation?.provider, conversation?.providerId);
-      const activeKey = providerRouteKey(this.currentProvider, this.currentProviderId);
-      if (conversationKey && activeKey && conversationKey !== activeKey) {
-        const action = "New conversation";
-        const choice = await vscode.window.showWarningMessage(
-          `Switched to ${activeKey} (model: ${resolvedModel}). This conversation keeps running on ${conversationKey}, so its next message still goes there — the switch applies to new conversations.`,
-          action
-        );
-        if (choice === action) await this.handleNewThread();
+      if (opts.announce !== false) {
+        this.postMessage({
+          type: "info",
+          message: resp.message ||
+            `Provider switched to ${resp.provider || trimmed} (model: ${resolvedModel}).`,
+        });
       }
     } catch (err) {
       this.postMessage({
         type: "error",
         message: `Failed to switch provider: ${getErrorMessage(err)}`,
       });
+    }
+  }
+
+  /** Move the open conversation onto the route the user agreed to in the
+   *  panel's question. Answers whether it moved: the caller that asked the
+   *  question moves the runtime default only after it did.
+   *
+   *  The route pair is written first and the model second, deliberately. An
+   *  engine older than the route on a thread refuses the first patch
+   *  (`At least one thread field is required`) instead of accepting the whole
+   *  thing and quietly changing only the model — which would leave a thread on
+   *  the old route holding another route's model id, the pair a provider
+   *  answers `400 模型不存在` for. So the second write only happens once the
+   *  first one is confirmed by reading the route back off the record the engine
+   *  returned: a 200 is not evidence, the record is.
+   *
+   *  What the move cannot preserve is the provider's prompt cache for this
+   *  conversation; that is the cost the user was asked about. */
+  private async moveConversationOntoRoute(target: {
+    provider?: string | null;
+    providerId?: string | null;
+    key: string;
+    model?: string;
+    from: string;
+  }): Promise<boolean> {
+    const thread = this.currentThread;
+    if (!thread || !target.key) return false;
+    try {
+      const moved = await this.api.updateThread(thread.id, {
+        model_provider: target.provider || undefined,
+        model_provider_id: target.providerId || undefined,
+      });
+      const landed = providerRouteKey(moved?.model_provider, moved?.model_provider_id);
+      if (landed !== target.key) {
+        this.postMessage({
+          type: "error",
+          message:
+            `This conversation was not moved: the engine did not report ${target.key} back. ` +
+            `Its next message still goes to ${target.from}, and nothing else was changed. ` +
+            `Update the CodeWhale engine to switch routes mid-conversation.`,
+        });
+        return false;
+      }
+      // The thread takes the target route's own model, which is the value the
+      // switch would resolve — so this second write is usually a no-op and is
+      // skipped. It is not skipped when the two disagree (a model named for
+      // the route, an explicit pick), because then the chip and the thread
+      // would name different models. `auto` is the engine's own choice and is
+      // left alone.
+      const model = target.model?.trim();
+      const movedModel = moved.model?.trim();
+      const updated =
+        model && movedModel && movedModel !== model && movedModel.toLowerCase() !== "auto"
+          ? await this.api.updateThread(thread.id, { model })
+          : moved;
+      // `thread` is the record this ran against; `this.currentThread` may have
+      // been replaced while the writes were in flight (a switch, a new thread),
+      // and merging onto the wrong one would graft this route onto it.
+      if (this.currentThread !== thread) return true;
+      this.currentThread = mergeThreadRecord(thread, updated, {
+        model_provider: moved.model_provider,
+        model_provider_id: moved.model_provider_id,
+      });
+      // The picker and the conversation are the same route now, so the chip
+      // drops the "· this conversation" marker and names the route the next
+      // message really uses.
+      this.postProviders();
+      this.postMessage({
+        type: "info",
+        message:
+          `This conversation now runs on ${target.key} (model: ${this.currentThread.model}). ` +
+          `The history is kept; ${target.from}'s cache for it is not.`,
+      });
+      return true;
+    } catch (err) {
+      this.postMessage({
+        type: "error",
+        message: formatError(`Failed to move this conversation to ${target.key}`, err),
+      });
+      return false;
     }
   }
 
@@ -4909,12 +5118,14 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
    *  message resumes it into a thread on that route), then the picker's active
    *  route.
    *
-   *  A conversation keeps the provider it was created on (`runtime_threads.rs::
-   *  provider_identity_for_thread` resolves the thread's persisted route, and
-   *  neither `PATCH /v1/threads` nor `POST .../turns` carries a provider), so
-   *  once the picker has moved on, these are two different answers. Everything
-   *  that describes "what will happen when I send" — the provider chip, the
-   *  model chip, the model list — has to read this one. */
+   *  A conversation runs on the provider it was created on
+   *  (`runtime_threads.rs::provider_identity_for_thread` resolves the thread's
+   *  persisted route; the picker's `POST /v1/providers/{id}/switch` only moves
+   *  the runtime default), so once the picker has moved on these are two
+   *  different answers — until the user agrees to move the conversation, which
+   *  writes its route (`PATCH /v1/threads/{id}`) and collapses the two into
+   *  one. Everything that describes "what will happen when I send" — the
+   *  provider chip, the model chip, the model list — has to read this one. */
   private viewRoute(): { provider: string; providerId?: string } | null {
     const thread = this.threadRouteOf(this.currentThread);
     if (thread) return thread;
@@ -7802,6 +8013,9 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
   }
 
   private cleanup(): void {
+    // The panel is going away, and so is anything it was asked: a question
+    // with no panel to answer it stays unanswered rather than pending.
+    this.settlePendingPanelQuestion();
     this.abortEventStream();
     this.stopPeriodicTaskRefresh();
     this.stopActiveTaskDetailRefresh();

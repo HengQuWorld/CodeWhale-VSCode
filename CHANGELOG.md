@@ -2,7 +2,11 @@
 
 ## Unreleased
 
-Everything here is client-side; nothing in this section needs a newer engine than 0.8.2 did.
+Everything here is client-side except where an entry says otherwise.
+
+### New Features
+
+- **The provider you switch to can now take the conversation with it** — Switching provider used to move only what the *next* conversation would start on: the one on screen stayed where it was created, and the only way to change that was to start a new conversation, giving up the history you were in the middle of. The runtime can move a conversation onto another route now, and with a conversation open the picker means that conversation — the chip already described its route rather than the picker's, and the choice now lands there too. It asks first, inside the panel: the move keeps the history but gives up the prefix that provider has cached of this conversation, so the next message goes to the new route whole — more expensive, and slower to start. Declining changes nothing at all, neither the conversation nor what new ones start on. With no conversation open, the picker still means what new conversations start on, which is all it can mean there. The same question guards `/model` on an open conversation — a provider caches each model's prefix separately, so switching the model re-sends the conversation just as changing the route does — and it is skipped when there is nothing to spend: no conversation open, or the model it already runs on. On an engine without the route, nothing is moved and the panel says so, rather than reporting a switch that did not happen. The engine half is `a05a1c734` (`feat(runtime): switch a thread's provider, or override it for one turn`) in Codewhale `main`: no tagged engine release in this checkout carries it yet, while the panel's own dev build does.
 
 ### Bug Fixes
 

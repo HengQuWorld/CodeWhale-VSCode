@@ -2920,6 +2920,59 @@ export function getWebviewCss(): string {
 
     /* ── Task Detail Overlay ── */
 
+    /* Moving an open conversation onto another provider spends something a
+       second switch cannot put back — the prefix that provider had cached of
+       the conversation — so it is asked here, in the panel the user is looking
+       at, rather than in a host dialog over it. Hidden until it is asked. */
+    .route-move-overlay {
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0,0,0,0.42);
+      backdrop-filter: blur(4px);
+      z-index: 1100;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+      box-sizing: border-box;
+    }
+    .route-move-overlay.open { display: flex; }
+    .route-move-panel {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      width: 100%;
+      max-width: 460px;
+      padding: 14px 16px;
+      font-size: 0.85em;
+      box-shadow: 0 16px 48px rgba(0, 0, 0, 0.35);
+      box-sizing: border-box;
+    }
+    .route-move-title { font-weight: 600; margin-bottom: 8px; }
+    .route-move-body { color: var(--muted); line-height: 1.55; }
+    .route-move-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      margin-top: 14px;
+    }
+    .route-move-btn {
+      padding: 4px 10px;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      background: transparent;
+      color: var(--fg);
+      cursor: pointer;
+      font-size: 0.95em;
+      transition: border-color 0.12s ease, background 0.12s ease;
+    }
+    .route-move-btn:hover { border-color: var(--muted); }
+    .route-move-btn.primary {
+      background: var(--vscode-button-background, #0e639c);
+      color: var(--vscode-button-foreground, #fff);
+      border-color: transparent;
+    }
+
     .task-detail-overlay {
       position: fixed;
       top: 0; left: 0; right: 0; bottom: 0;

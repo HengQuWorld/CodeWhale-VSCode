@@ -254,6 +254,7 @@ function createContext(overrides: Partial<SlashCommandContext> = {}): SlashComma
     getCurrentModel: vi.fn(() => "deepseek-v4-pro"),
     rememberModelForRoute: vi.fn(async () => undefined),
     modelFitsViewRoute: vi.fn(() => ({ ok: true, route: "deepseek" })),
+    confirmModelSwitch: vi.fn(async () => true),
     routeForNewConversation: vi.fn(() => ({ model: "deepseek-v4-pro" })),
     getProvidersCache: vi.fn(() => null),
     getCurrentProvider: vi.fn(() => null),
@@ -692,6 +693,66 @@ describe("SlashCommandHandler - Dispatcher Pattern", () => {
         (c: any) => c[0].type === "info" && c[0].message.includes("Current model")
       );
       expect(infoMsg).toBeDefined();
+    });
+
+    it("asks before switching the open conversation's model, and writes nothing on a no", async () => {
+      // A provider caches each model's prefix separately, so a mid-conversation
+      // model switch spends the same thing a route move does: the next message
+      // is re-sent whole. A no leaves the conversation and the route's
+      // remembered model exactly as they were.
+      const currentThread = {
+        id: "thread-1",
+        mode: "agent",
+        model: "deepseek-v4-pro",
+      } as any;
+      const updateThread = vi.fn(async () => ({
+        ...currentThread,
+        model: "deepseek-v4-flash",
+      }));
+      const confirmModelSwitch = vi.fn(async () => false);
+      const postMessage = vi.fn();
+      const ctx = createContext({
+        api: { ...createContext().api, updateThread } as any,
+        currentThread,
+        confirmModelSwitch,
+        postMessage,
+      });
+      const handler = new SlashCommandHandler(ctx);
+
+      await handler.handle("/model", "deepseek-v4-flash");
+
+      expect(confirmModelSwitch).toHaveBeenCalledWith("deepseek-v4-pro", "deepseek-v4-flash");
+      expect(updateThread).not.toHaveBeenCalled();
+      expect(ctx.rememberModelForRoute).not.toHaveBeenCalled();
+      expect(currentThread.model).toBe("deepseek-v4-pro");
+    });
+
+    it("does not ask when the conversation already runs on that model", async () => {
+      const currentThread = {
+        id: "thread-1",
+        mode: "agent",
+        model: "deepseek-v4-pro",
+      } as any;
+      const ctx = createContext({ currentThread, confirmModelSwitch: vi.fn(async () => true) });
+      const handler = new SlashCommandHandler(ctx);
+
+      await handler.handle("/model", "deepseek-v4-pro");
+
+      // Nothing to spend: it is the model the conversation is on.
+      expect(ctx.confirmModelSwitch).not.toHaveBeenCalled();
+    });
+
+    it("does not ask with no conversation open, where there is no cache to lose", async () => {
+      const ctx = createContext({
+        currentThread: null,
+        confirmModelSwitch: vi.fn(async () => true),
+      });
+      const handler = new SlashCommandHandler(ctx);
+
+      await handler.handle("/model", "deepseek-v4-flash");
+
+      expect(ctx.confirmModelSwitch).not.toHaveBeenCalled();
+      expect(ctx.rememberModelForRoute).toHaveBeenCalledWith("deepseek-v4-flash");
     });
   });
 

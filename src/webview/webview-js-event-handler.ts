@@ -446,6 +446,99 @@ ${PROVIDER_PICKER_JS}
     return null;
   }
 
+  // ── Asking before something spends this conversation's cached prefix ──
+  //
+  // Two actions do: moving the conversation onto another route, and switching
+  // its model within the route. Both ask here, in one dialog, and the host
+  // writes nothing until it is answered.
+
+  /** The question on screen, while the dialog is open. */
+  var routeMovePrompt = null;
+
+  /** The name a route is shown by, from the catalog the picker already holds. */
+  function routeMoveLabel(provider, providerId) {
+    var entry = providerEntryFor(provider, providerId);
+    if (entry) return __cwProviderLabel(entry, lastProviders, __cwProviderText);
+    return providerId || provider || '';
+  }
+
+  /** Fill the {tokens} of a translated sentence.
+   *
+   *  Split/join rather than a plain string replace: these sentences name a
+   *  route at both ends ({from} ... {from}), and replacing a plain string
+   *  pattern takes only the first occurrence — which left the tail of the
+   *  warning reading literally "{from}" and "{to}". Split/join also cannot
+   *  eat {fromModel} while filling {from}, which taking them in the other order
+   *  would. */
+  function fillTemplate(template, values) {
+    var text = String(template);
+    for (var key in values) {
+      if (!Object.prototype.hasOwnProperty.call(values, key)) continue;
+      text = text.split('{' + key + '}').join(String(values[key]));
+    }
+    return text;
+  }
+
+  function closeRouteMoveDialog() {
+    routeMovePrompt = null;
+    var overlay = document.getElementById('route-move-overlay');
+    if (overlay) overlay.classList.remove('open');
+  }
+
+  function openRouteMoveDialog(prompt) {
+    var overlay = document.getElementById('route-move-overlay');
+    var body = document.getElementById('route-move-body');
+    if (!overlay || !body) return;
+    routeMovePrompt = prompt;
+    var titleEl = document.getElementById('route-move-title');
+    var confirmBtn = document.getElementById('route-move-confirm');
+    var model = prompt.model || '';
+    if (prompt.kind === 'model') {
+      // Same question, same cost: the prefix a provider cached belongs to one
+      // model, so the next message is sent whole there too.
+      if (titleEl) titleEl.textContent = __i18n.modelChangeTitle;
+      if (confirmBtn) confirmBtn.textContent = __i18n.modelChangeConfirm;
+      body.textContent = fillTemplate(__i18n.modelChangeBody, {
+        from: routeMoveLabel(prompt.provider, prompt.providerId),
+        fromModel: prompt.fromModel || '',
+        model: model,
+      });
+    } else {
+      if (titleEl) titleEl.textContent = __i18n.routeMoveTitle;
+      if (confirmBtn) confirmBtn.textContent = __i18n.routeMoveConfirm;
+      body.textContent = fillTemplate(__i18n.routeMoveBody, {
+        from: routeMoveLabel(prompt.from, prompt.fromProviderId),
+        to: routeMoveLabel(prompt.provider, prompt.providerId),
+        model: model,
+      });
+    }
+    overlay.classList.add('open');
+  }
+
+  /** Answer the open question — true to go ahead, false for no. Nothing is
+   *  posted when there is no question, so a stray click cannot answer one that
+   *  has already been settled. */
+  function answerRouteMove(accept) {
+    var prompt = routeMovePrompt;
+    closeRouteMoveDialog();
+    if (!prompt) return;
+    vscode.postMessage({ type: 'routeMoveAnswer', accept: !!accept });
+  }
+
+  (function wireRouteMoveDialog() {
+    var overlay = document.getElementById('route-move-overlay');
+    var confirmBtn = document.getElementById('route-move-confirm');
+    var cancelBtn = document.getElementById('route-move-cancel');
+    if (confirmBtn) confirmBtn.addEventListener('click', function() { answerRouteMove(true); });
+    if (cancelBtn) cancelBtn.addEventListener('click', function() { answerRouteMove(false); });
+    // Clicking the dimmed area answers no, the way the other overlays close.
+    if (overlay) {
+      overlay.addEventListener('click', function(e) {
+        if (e && e.target === overlay) answerRouteMove(false);
+      });
+    }
+  })();
+
   function renderProviderDropdown(providers, currentId, currentExactId, viewProvider, viewProviderId) {
     if (!dropdownProviderEl) return;
     lastProviders = providers;
@@ -611,6 +704,13 @@ ${PROVIDER_PICKER_JS}
 
   // ── Keyboard shortcuts for global navigation ──
   document.addEventListener('keydown', function(e) {
+    // Esc answers the route question the same way its ✕ does. It is checked
+    // before the shortcuts below so a dialog on screen owns the keyboard.
+    if (e.key === 'Escape' && routeMovePrompt) {
+      e.preventDefault();
+      answerRouteMove(false);
+      return;
+    }
     // Ctrl+Up / Ctrl+Down: jump between user messages
     if ((e.ctrlKey || e.metaKey) && e.key === 'ArrowUp') {
       e.preventDefault();
@@ -673,6 +773,22 @@ ${PROVIDER_PICKER_JS}
         // so caching is enough: highlightCurrent re-marks every time one opens.
         scopedDefaults.mode = msg.mode || '';
         scopedDefaults.posture = msg.posture || '';
+        break;
+
+      case 'routeMovePrompt':
+        // The host is asking before it writes: either moving the open
+        // conversation onto another route, or switching its model. Both spend
+        // the provider's cached prefix of this conversation, so both are asked
+        // here, inside the panel, and nothing is written until this answers.
+        openRouteMoveDialog({
+          kind: msg.kind || 'route',
+          provider: msg.provider || '',
+          providerId: msg.providerId || '',
+          from: msg.from || '',
+          fromProviderId: msg.fromProviderId || '',
+          fromModel: msg.fromModel || '',
+          model: msg.model || '',
+        });
         break;
 
       case 'providersUpdated':

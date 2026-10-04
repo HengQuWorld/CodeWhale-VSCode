@@ -97,6 +97,15 @@ function makeTr(): WebviewTranslations {
     providerNeedsLogin: "needs login",
     providerNoKey: "no key configured",
     threadRouteMarker: "this conversation",
+    routeMoveTitle: "Move this conversation?",
+    routeMoveBody:
+      "It runs on {from}. Moving it to {to} (model {model}) keeps the history, but {from} has this conversation cached as a prefix: the next message goes to {to} in full, so it costs more and takes longer to start.",
+    routeMoveConfirm: "Move this conversation",
+    routeMoveCancel: "Keep it here",
+    modelChangeTitle: "Switch this conversation's model?",
+    modelChangeBody:
+      "It runs on {from}. Switching from {fromModel} to {model} keeps the history, but a cached prefix belongs to one model: the next message is sent whole, so it costs more and takes longer to start.",
+    modelChangeConfirm: "Switch the model",
     planApproveButton: "Switch to Act & execute",
     planApproveButtonHint:
       "Switch to Act & execute. Anything you type in the box below first goes with this approval and takes precedence over the plan.",

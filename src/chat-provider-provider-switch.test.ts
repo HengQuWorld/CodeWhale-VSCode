@@ -497,7 +497,7 @@ describe("ChatProvider provider switch", () => {
 
   it("answers the model list for the open conversation's route, not the picker's", async () => {
     // Once the picker moves on, a conversation keeps the provider it was
-    // created on (no endpoint re-routes a thread). Offering the picker's models
+    // created on until the user agrees to move it. Offering the picker's models
     // is how `deepseek-flash` was chosen for a thread pinned to the Zhipu
     // route, and the provider answered `400 模型不存在` for it.
     const api = {
@@ -539,14 +539,10 @@ describe("ChatProvider provider switch", () => {
     );
   });
 
-  it("tells the user a switch does not move the open conversation, and offers a new one", async () => {
-    // A conversation keeps the provider it was created on — a deliberate
-    // engine decision (prefix-cache economics): neither `PATCH /v1/threads`
-    // nor `POST .../turns` carries a provider, and `resume-thread` says so in
-    // as many words. The client must therefore not pretend the switch reached
-    // this conversation, and must not try to re-route it: it says where the
-    // next message goes and offers the one action that changes that.
-    const api = {
+  /** The API a picker switch to DeepSeek needs: a switch that resolves to
+   *  `deepseek-flash`, and the catalog that route is published as. */
+  function switchApi() {
+    return {
       bindEngine: vi.fn(),
       ensureReady: vi.fn(async () => undefined),
       switchProvider: vi.fn(async () => ({
@@ -575,7 +571,11 @@ describe("ChatProvider provider switch", () => {
       })),
       updateThread: vi.fn(),
     };
+  }
 
+  /** A conversation open on the Zhipu route, with the picker about to move to
+   *  DeepSeek — the two routes the whole disagreement is about. */
+  function conversationOnZhipu(api: ReturnType<typeof switchApi>) {
     const provider = new ChatProvider({} as any, {} as any, api as any);
     provider.postMessage = vi.fn();
     provider.currentThread = {
@@ -589,21 +589,308 @@ describe("ChatProvider provider switch", () => {
       model_provider: "custom",
       model_provider_id: "bigmodel-cn",
     } as any;
-    const newThread = vi.fn(async () => undefined);
-    (provider as any).handleNewThread = newThread;
+    return provider;
+  }
 
-    vscodeState.showWarningMessage.mockResolvedValueOnce("New conversation");
-    await (provider as any).handleSwitchProvider("deepseek", undefined, "deepseek");
-
-    expect(vscodeState.showWarningMessage).toHaveBeenCalledWith(
-      expect.stringContaining("keeps running on bigmodel-cn"),
-      "New conversation"
+  /** Wait until the panel question is on screen before answering it. The host
+   *  reads the provider catalog first — a read, so the question can name the
+   *  model the move lands on — and an answer that arrives before it is
+   *  listening is an answer to nothing. */
+  async function promptShown(provider: ChatProvider) {
+    await vi.waitFor(() =>
+      expect(provider.postMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ type: "routeMovePrompt" })
+      )
     );
-    expect(newThread).toHaveBeenCalled();
-    // The conversation is not touched: its route is the engine's to keep.
+  }
+
+  it("asks in the panel before moving the open conversation, and writes nothing yet", async () => {
+    // The runtime can move a conversation onto another route
+    // (`PATCH /v1/threads/{id}` with the route pair, which
+    // `update_thread_switches_provider_and_keeps_the_loaded_engine` asserts end
+    // to end): the history stays, the next turn runs there. What the move cannot
+    // keep is the provider's prompt cache for this conversation — the reason the
+    // engine pins a thread to a route at all — so it is asked about before
+    // anything is written, inside the panel rather than in a host dialog.
+    const api = switchApi();
+    const provider = conversationOnZhipu(api);
+
+    // The switch itself waits on the answer: nothing it would write has
+    // happened yet when the question is on screen.
+    const switching = (provider as any).handleSwitchProvider("deepseek", undefined, "deepseek");
+    await promptShown(provider);
+
+    expect(provider.postMessage).toHaveBeenCalledWith({
+      type: "routeMovePrompt",
+      kind: "route",
+      provider: "deepseek",
+      providerId: "deepseek",
+      from: "custom",
+      fromProviderId: "bigmodel-cn",
+      // The model the move lands on: the target route's own, read from the
+      // catalog — the question must not be a switch in disguise.
+      model: "deepseek-flash",
+    });
+    // A no has to leave everything as it was, so nothing is written on the way
+    // to the question: not the thread, and not the runtime default.
     expect(api.updateThread).not.toHaveBeenCalled();
+    expect(api.switchProvider).not.toHaveBeenCalled();
+    expect(vscodeState.showWarningMessage).not.toHaveBeenCalled();
+
+    (provider as any).handlePanelAnswer(false);
+    await switching;
+
+    // And a no leaves it that way.
+    expect(api.updateThread).not.toHaveBeenCalled();
+    expect(api.switchProvider).not.toHaveBeenCalled();
     expect(provider.currentThread?.model_provider_id).toBe("bigmodel-cn");
     expect(provider.currentThread?.model).toBe("glm-5.3");
+  });
+
+  it("moves the conversation, and the default with it, when the panel says yes", async () => {
+    const api = switchApi();
+    api.updateThread = vi.fn(async () => ({
+      id: "thread-1",
+      model: "deepseek-flash",
+      model_provider: "deepseek",
+      model_provider_id: "deepseek",
+    }));
+
+    const provider = conversationOnZhipu(api);
+    const switching = (provider as any).handleSwitchProvider("deepseek", undefined, "deepseek");
+    expect(api.updateThread).not.toHaveBeenCalled();
+    await promptShown(provider);
+    (provider as any).handlePanelAnswer(true);
+    await switching;
+
+    // The route pair goes first and alone: an engine that cannot move a thread
+    // refuses the request instead of half-applying it (the old-engine case
+    // below). The thread already resolved the model the question named, so
+    // there is no second write.
+    expect(api.updateThread).toHaveBeenCalledTimes(1);
+    expect(api.updateThread).toHaveBeenCalledWith("thread-1", {
+      model_provider: "deepseek",
+      model_provider_id: "deepseek",
+    });
+    // The picker follows the conversation, or the next new one would start on
+    // the route the user just left.
+    expect(api.switchProvider).toHaveBeenCalledWith("deepseek", undefined, "deepseek");
+    expect(provider.currentThread?.model_provider).toBe("deepseek");
+    expect(provider.currentThread?.model_provider_id).toBe("deepseek");
+    expect(provider.currentThread?.model).toBe("deepseek-flash");
+    // One message, about the conversation, naming what the move cost it.
+    expect(provider.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "info",
+        message: expect.stringContaining("cache for it is not"),
+      })
+    );
+    // The picker and the conversation are the same route now, so the chip
+    // stops saying "· this conversation".
+    expect(provider.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "providersUpdated",
+        viewProvider: "deepseek",
+        viewProviderId: "deepseek",
+      })
+    );
+  });
+
+  it("pins the model the question named when the engine resolved a different one", async () => {
+    const api = switchApi();
+    api.updateThread = vi
+      .fn()
+      .mockResolvedValueOnce({
+        id: "thread-1",
+        model: "deepseek-v4-pro",
+        model_provider: "deepseek",
+        model_provider_id: "deepseek",
+      })
+      .mockResolvedValueOnce({
+        id: "thread-1",
+        model: "deepseek-flash",
+        model_provider: "deepseek",
+        model_provider_id: "deepseek",
+      });
+
+    const provider = conversationOnZhipu(api);
+    const switching = (provider as any).handleSwitchProvider("deepseek", undefined, "deepseek");
+    await promptShown(provider);
+    (provider as any).handlePanelAnswer(true);
+    await switching;
+
+    // The question said deepseek-flash; a conversation left on
+    // deepseek-v4-pro would name a model the next turn does not use.
+    expect(api.updateThread.mock.calls[1]).toEqual(["thread-1", { model: "deepseek-flash" }]);
+    expect(provider.currentThread?.model).toBe("deepseek-flash");
+  });
+
+  it("leaves the conversation and the runtime default alone when the panel says no", async () => {
+    const api = switchApi();
+    api.updateThread = vi.fn();
+
+    const provider = conversationOnZhipu(api);
+    const switching = (provider as any).handleSwitchProvider("deepseek", undefined, "deepseek");
+    await promptShown(provider);
+    (provider as any).handlePanelAnswer(false);
+    await switching;
+
+    expect(api.updateThread).not.toHaveBeenCalled();
+    expect(api.switchProvider).not.toHaveBeenCalled();
+    expect(provider.currentThread?.model_provider_id).toBe("bigmodel-cn");
+    expect(provider.currentThread?.model).toBe("glm-5.3");
+  });
+
+  it("drops an answer about a conversation that is no longer the open one", async () => {
+    // The question is modal, but the conversation under it can still be
+    // replaced (a new thread, a rail switch) before the answer arrives, and the
+    // answer is about the conversation it was asked about.
+    const api = switchApi();
+    api.updateThread = vi.fn();
+
+    const provider = conversationOnZhipu(api);
+    const switching = (provider as any).handleSwitchProvider("deepseek", undefined, "deepseek");
+    await promptShown(provider);
+    provider.currentThread = {
+      id: "thread-2",
+      model: "glm-5.3",
+      model_provider: "custom",
+      model_provider_id: "bigmodel-cn",
+    } as any;
+    (provider as any).handlePanelAnswer(true);
+    await switching;
+
+    expect(api.updateThread).not.toHaveBeenCalled();
+    expect(api.switchProvider).not.toHaveBeenCalled();
+    expect(provider.currentThread?.id).toBe("thread-2");
+  });
+
+  it("settles an unanswered question as a no when the panel goes away", async () => {
+    // The dialog cannot outlive the webview that drew it. A reload leaves the
+    // question unanswerable, and the caller that asked it must not wait on a
+    // dialog that no longer exists — nothing was written before the answer, so
+    // a no is exactly what is left to do.
+    const api = switchApi();
+    const provider = conversationOnZhipu(api);
+
+    const switching = (provider as any).handleSwitchProvider("deepseek", undefined, "deepseek");
+    await promptShown(provider);
+
+    await (provider as any).handleWebviewMessage({ type: "webviewReady" });
+    await switching;
+
+    expect(api.updateThread).not.toHaveBeenCalled();
+    expect(api.switchProvider).not.toHaveBeenCalled();
+    expect(provider.currentThread?.model_provider_id).toBe("bigmodel-cn");
+  });
+
+  it("switches the runtime default directly when no conversation is open", async () => {
+    // With nothing on screen the picker is about new conversations, which is
+    // the whole of the action: there is no cached prefix to spend, so there is
+    // nothing to ask.
+    const api = switchApi();
+    const provider = new ChatProvider({} as any, {} as any, api as any);
+    provider.postMessage = vi.fn();
+
+    await (provider as any).handleSwitchProvider("deepseek", undefined, "deepseek");
+
+    expect(api.switchProvider).toHaveBeenCalledWith("deepseek", undefined, "deepseek");
+    expect(provider.postMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: "routeMovePrompt" })
+    );
+  });
+
+  it("does not ask when the open conversation is already on the route picked", async () => {
+    const api = switchApi();
+    const provider = conversationOnZhipu(api);
+    provider.currentThread = {
+      id: "thread-1",
+      model: "deepseek-flash",
+      model_provider: "deepseek",
+      model_provider_id: "deepseek",
+    } as any;
+
+    await (provider as any).handleSwitchProvider("deepseek", undefined, "deepseek");
+
+    expect(provider.postMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: "routeMovePrompt" })
+    );
+    expect(api.switchProvider).toHaveBeenCalled();
+  });
+
+  it("asks through the same panel before switching an open conversation's model", async () => {
+    // `/model` writes the thread itself, so it asks the same question the
+    // picker does — a model's cached prefix does not carry over to another
+    // model, and the answer is what lets the write happen.
+    const api = switchApi();
+    const provider = conversationOnZhipu(api);
+
+    const answer = (provider as any).confirmModelSwitch("glm-5.3", "glm-5.4");
+
+    expect(provider.postMessage).toHaveBeenCalledWith({
+      type: "routeMovePrompt",
+      kind: "model",
+      provider: "custom",
+      providerId: "bigmodel-cn",
+      fromModel: "glm-5.3",
+      model: "glm-5.4",
+    });
+    (provider as any).handlePanelAnswer(true);
+    await expect(answer).resolves.toBe(true);
+  });
+
+  it("answers a model question with no once the conversation has changed", async () => {
+    const api = switchApi();
+    const provider = conversationOnZhipu(api);
+    const answer = (provider as any).confirmModelSwitch("glm-5.3", "glm-5.4");
+
+    provider.currentThread = {
+      id: "thread-2",
+      model: "glm-5.3",
+      model_provider: "custom",
+      model_provider_id: "bigmodel-cn",
+    } as any;
+    (provider as any).handlePanelAnswer(true);
+
+    await expect(answer).resolves.toBe(false);
+  });
+
+  it("settles a superseded question as a no rather than leaving it waiting", async () => {
+    const api = switchApi();
+    const provider = conversationOnZhipu(api);
+
+    const first = (provider as any).confirmModelSwitch("glm-5.3", "glm-5.4");
+    const second = (provider as any).confirmModelSwitch("glm-5.3", "glm-5.5");
+
+    await expect(first).resolves.toBe(false);
+    (provider as any).handlePanelAnswer(true);
+    await expect(second).resolves.toBe(true);
+  });
+
+  it("says the conversation was not moved — and that nothing else changed — when the engine cannot move one", async () => {
+    // An engine older than the route on a thread refuses the pair, but one that
+    // accepts it and answers with a record carrying no route at all has not
+    // moved anything — and a 200 is not evidence that it did. The client reads
+    // the route back off the record it got instead of assuming, and then leaves
+    // the runtime default alone too.
+    const api = switchApi();
+    api.updateThread = vi.fn(async () => ({ id: "thread-1", model: "glm-5.3" }));
+
+    const provider = conversationOnZhipu(api);
+    const switching = (provider as any).handleSwitchProvider("deepseek", undefined, "deepseek");
+    await promptShown(provider);
+    (provider as any).handlePanelAnswer(true);
+    await switching;
+
+    expect(api.updateThread).toHaveBeenCalledTimes(1);
+    expect(api.switchProvider).not.toHaveBeenCalled();
+    expect(provider.currentThread?.model_provider_id).toBe("bigmodel-cn");
+    expect(provider.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "error",
+        message: expect.stringContaining("was not moved"),
+      })
+    );
   });
 
   it("refuses a model that belongs to another route, and passes one the route simply does not list", async () => {
