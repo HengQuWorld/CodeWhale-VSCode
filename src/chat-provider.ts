@@ -24,7 +24,11 @@ import type {
   CallChangesResponse,
 } from "./types";
 import { formatError, getErrorMessage } from "./utils/error-handler";
-import { providerEntryRouteKey, providerRouteKey } from "./utils/provider-route";
+import {
+  providerEntryRouteKey,
+  providerRouteKey,
+  providerRouteSelectable,
+} from "./utils/provider-route";
 import { getWebviewHtml } from "./webview/webview-html";
 import { renderMarkdown } from "./utils/markdown";
 import { finalizeAssistantMessage } from "./utils/event-helpers";
@@ -271,6 +275,14 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
   /** Cached provider list from `GET /v1/providers`. Refreshed on init and
    * after the active provider changes so the webview picker stays in sync. */
   private providersCache: ProviderEntry[] | null = null;
+  /** The last model catalog `GET /v1/providers/{id}/models` answered for a
+   *  route, keyed the way a route is (\`model_provider_id || id\`). Kept so
+   *  `/model` can tell, synchronously and before it writes anything, whether
+   *  the route on screen is *known* to serve the id it was handed. A stale
+   *  entry only ever allows — it is never the reason a model is refused — so
+   *  a route whose catalog changed underneath keeps passing ids through to the
+   *  provider, which is the same answer the engine would give. */
+  private routeModelCatalogs = new Map<string, readonly string[]>();
   /** Active provider id (mirrors `GuiConfigResponse.provider`). Used to
    * render the picker's selected value without waiting for a config refresh. */
   private currentProvider: string | null = null;
@@ -4901,6 +4913,13 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       // exact id for built-in providers too, so echoing only what the caller
       // passed would make every answer for a built-in provider look stale.
       const answeredRoute = info?.model_provider_id ?? targetExact ?? "";
+      // Kept for `modelFitsViewRoute`: the route's own catalog is the one
+      // answer that can say an id is *not* foreign to it, and `/model` has to
+      // decide before it writes anything — no wire call fits there.
+      this.routeModelCatalogs.set(
+        providerRouteKey(targetProvider, targetExact),
+        resp.models.map(m => m.id)
+      );
       // The model of whatever is on screen wins over the caller's suggestion:
       // the chip and the list have to describe the same conversation the route
       // does. A viewed session has no thread to read, so its saved model is
@@ -5151,7 +5170,17 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
    *  not list it (`normalize_runtime_config_model` validates the shape, not
    *  membership). Refusing everything outside the route's catalog would make
    *  the GUI stricter than the engine and reject models that work, which is a
-   *  worse failure than passing one through to a provider that says no. */
+   *  worse failure than passing one through to a provider that says no.
+   *
+   *  Two narrowings keep the rule from rejecting a model this route really
+   *  serves. `GET /v1/providers` publishes every built-in kind, unconfigured
+   *  ones included, each with its own static default — so a route the user
+   *  cannot select is not evidence (an unconfigured Concentrate's
+   *  `deepseek-v4-pro` must not veto the id on the DeepSeek route). And a
+   *  route's own catalog wins outright: bare DeepSeek ids are shared by design
+   *  between the official route and the gateways that front it, so an id this
+   *  route's last model answer listed is never foreign, whatever another
+   *  route's default happens to be. */
   public modelFitsViewRoute(model: string): {
     ok: boolean;
     route: string;
@@ -5162,15 +5191,34 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     const route = this.viewRoute();
     const routeKey = providerRouteKey(route?.provider, route?.providerId);
     if (!trimmed || !route) return { ok: true, route: routeKey };
+    // This route's own catalog settles it before any other route is consulted.
+    if (this.routeServesModel(routeKey, trimmed)) return { ok: true, route: routeKey };
     const memory = this.providerModelMemory();
     for (const entry of this.providersCache ?? []) {
       const entryKey = providerEntryRouteKey(entry);
       if (!entryKey || entryKey === routeKey) continue;
+      // Only a route the picker offers is evidence about a model id: an
+      // unconfigured kind publishes its static default too, and that default
+      // is not a claim on the id.
+      if (!providerRouteSelectable(entry)) continue;
       if (entry.default_model?.trim() === trimmed || memory[entryKey] === trimmed) {
         return { ok: false, route: routeKey, foreign: entryKey };
       }
     }
     return { ok: true, route: routeKey };
+  }
+
+  /** Whether the last model answer published for `routeKey` listed `model`.
+   *
+   *  Case-insensitive, matching how the runtime de-duplicates a catalog
+   *  (`push_unique_model`). A miss means "not known here", never "not
+   *  served": the caller keeps its narrower default rule rather than
+   *  refusing. */
+  private routeServesModel(routeKey: string, model: string): boolean {
+    const catalog = this.routeModelCatalogs.get(routeKey);
+    if (!catalog) return false;
+    const wanted = model.toLowerCase();
+    return catalog.some(id => id.trim().toLowerCase() === wanted);
   }
 
   private startPeriodicTaskRefresh(): void {

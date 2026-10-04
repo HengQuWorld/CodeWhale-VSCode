@@ -981,4 +981,125 @@ describe("ChatProvider provider switch", () => {
       foreign: "volcengine",
     });
   });
+
+  it("does not let an unconfigured route's default veto an id the view route serves", () => {
+    // `/v1/providers` publishes every built-in kind, configured or not, each
+    // with its own static default. The gateways that front DeepSeek ship bare
+    // DeepSeek ids as their defaults (Concentrate `deepseek-v4-pro`, OpenModel
+    // `deepseek-v4-flash`), so an unconfigured one used to refuse the id on the
+    // DeepSeek route that actually serves it — leaving `deepseek-flash` as the
+    // only DeepSeek model that no other kind defaults to.
+    const api = { bindEngine: vi.fn(), ensureReady: vi.fn(async () => undefined) };
+    const provider = new ChatProvider({} as any, {} as any, api as any);
+    (provider as any).providersCache = [
+      {
+        id: "deepseek",
+        model_provider_id: "deepseek",
+        display_name: "DeepSeek",
+        default_model: "deepseek-flash",
+        has_model_catalog: true,
+        credentialState: "configured",
+      },
+      {
+        id: "concentrate",
+        model_provider_id: null,
+        display_name: "Concentrate",
+        default_model: "deepseek-v4-pro",
+        has_model_catalog: true,
+        credentialState: "missing",
+      },
+      {
+        id: "openmodel",
+        model_provider_id: null,
+        display_name: "OpenModel",
+        default_model: "deepseek-v4-flash",
+        has_model_catalog: true,
+        credentialState: "missing",
+      },
+    ];
+    (provider as any).currentProvider = "deepseek";
+    (provider as any).currentProviderId = "deepseek";
+    (provider as any).currentThread = {
+      id: "thread-1",
+      model: "deepseek-flash",
+      model_provider: "deepseek",
+      model_provider_id: "deepseek",
+    };
+    // Remembered for an unconfigured route too: a memory slot is evidence of
+    // the same kind as a default, so it is skipped the same way.
+    vscodeState.configValues.set("modelByProvider", { concentrate: "deepseek-v4-pro" });
+
+    expect(provider.modelFitsViewRoute("deepseek-v4-pro")).toMatchObject({
+      ok: true,
+      route: "deepseek",
+    });
+    expect(provider.modelFitsViewRoute("deepseek-v4-flash")).toMatchObject({
+      ok: true,
+      route: "deepseek",
+    });
+  });
+
+  it("lets the view route's own catalog settle an id another configured route also defaults to", async () => {
+    // A configured route stays evidence, so the narrow default rule holds until
+    // this route's own catalog has answered. Once it has, an id it lists is not
+    // foreign — bare DeepSeek ids are shared by design between the official
+    // route and the gateways that front it.
+    const api = {
+      bindEngine: vi.fn(),
+      ensureReady: vi.fn(async () => undefined),
+      listProviderModels: vi.fn(async (id: string) => ({
+        provider: id,
+        models: [{ id: "deepseek-flash" }, { id: "deepseek-v4-pro" }, { id: "deepseek-v4-flash" }],
+      })),
+    };
+    const provider = new ChatProvider({} as any, {} as any, api as any);
+    provider.postMessage = vi.fn();
+    (provider as any).providersCache = [
+      {
+        id: "deepseek",
+        model_provider_id: "deepseek",
+        display_name: "DeepSeek",
+        default_model: "deepseek-flash",
+        has_model_catalog: true,
+        credentialState: "configured",
+      },
+      {
+        id: "concentrate",
+        model_provider_id: null,
+        display_name: "Concentrate",
+        default_model: "deepseek-v4-pro",
+        has_model_catalog: true,
+        credentialState: "configured",
+      },
+    ];
+    (provider as any).currentProvider = "deepseek";
+    (provider as any).currentProviderId = "deepseek";
+    (provider as any).currentThread = {
+      id: "thread-1",
+      model: "deepseek-flash",
+      model_provider: "deepseek",
+      model_provider_id: "deepseek",
+    };
+
+    // Unknown catalog: the other configured route's default still refuses, the
+    // way it always did.
+    expect(provider.modelFitsViewRoute("deepseek-v4-pro")).toMatchObject({
+      ok: false,
+      route: "deepseek",
+      foreign: "concentrate",
+    });
+
+    await (provider as any).handleRequestProviderModels("deepseek", undefined, "deepseek");
+
+    expect(api.listProviderModels).toHaveBeenCalledWith("deepseek", "deepseek");
+    expect(provider.modelFitsViewRoute("deepseek-v4-pro")).toMatchObject({
+      ok: true,
+      route: "deepseek",
+    });
+    // The catalog match is case-insensitive, like the runtime's own de-dup.
+    expect(provider.modelFitsViewRoute("DeepSeek-V4-Pro")).toMatchObject({
+      ok: true,
+      route: "deepseek",
+    });
+  });
 });

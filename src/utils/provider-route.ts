@@ -86,6 +86,22 @@ export function providerRouteVisible(
   return state !== "missing" && state !== "legacy";
 }
 
+/** Whether one route is a choice the picker actually offers — the filter above
+ *  for a route that is not the active one, which is every route a *foreign*
+ *  answer can name.
+ *
+ *  `GET /v1/providers` publishes every built-in provider kind whether or not
+ *  the user configured it, each carrying its own static default model. That
+ *  default is not a claim on the id: an unconfigured gateway's
+ *  `deepseek-v4-pro` must not veto the same id on the DeepSeek route that
+ *  serves it and the user is actually running. Only a route the user can
+ *  select is evidence about who a model id belongs to. */
+export function providerRouteSelectable(
+  entry: Pick<ProviderEntry, "credentialState">
+): boolean {
+  return providerRouteVisible(entry, false);
+}
+
 /**
  * The same two rules, as JavaScript for the injected webview/panel scripts.
  *

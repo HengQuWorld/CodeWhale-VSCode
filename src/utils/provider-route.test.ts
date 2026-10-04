@@ -4,6 +4,7 @@ import {
   providerEntryLabel,
   providerEntryRouteKey,
   providerRouteKey,
+  providerRouteSelectable,
   providerRouteVisible,
 } from "./provider-route";
 
@@ -108,6 +109,19 @@ describe("provider visibility", () => {
 
   it("shows a route whose readiness the runtime did not report", () => {
     expect(providerRouteVisible({ credentialState: undefined }, false)).toBe(true);
+  });
+});
+
+describe("provider selectability", () => {
+  it("counts only a route the picker offers, never the active one by default", () => {
+    // The same filter the picker applies, asked for the routes a *foreign*
+    // answer can name. `GET /v1/providers` publishes every built-in kind, so
+    // an unconfigured route's static default must not be read as evidence.
+    expect(providerRouteSelectable(deepseek)).toBe(true);
+    expect(providerRouteSelectable(deepseekAnthropic)).toBe(false);
+    expect(providerRouteSelectable({ credentialState: "legacy" })).toBe(false);
+    expect(providerRouteSelectable({ credentialState: "login_required" })).toBe(true);
+    expect(providerRouteSelectable({ credentialState: undefined })).toBe(true);
   });
 });
 
