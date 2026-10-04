@@ -1,6 +1,6 @@
 # CodeWhale for VS Code — a lightweight GUI frontend for the CodeWhale agent
 
-[![Version](https://img.shields.io/badge/version-0.8.2-blue)](https://github.com/HengQuWorld/CodeWhale-VSCode)
+[![Version](https://img.shields.io/badge/version-0.8.3-blue)](https://github.com/HengQuWorld/CodeWhale-VSCode)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![CI](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/ci.yml/badge.svg)](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/ci.yml)
 [![Release](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/release.yml/badge.svg)](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/release.yml)
@@ -18,7 +18,7 @@ The split is deliberate: **the agent stays in the engine, the ergonomics stay in
 
 | | |
 |---|---|
-| VSIX size (0.8.2) | ~350 KB |
+| VSIX size (0.8.3) | ~370 KB |
 | Runtime npm dependencies | **none** — webpack inlines the extension's own TypeScript (and `marked` for rendering) |
 | Bundled engine or model | **none** — `codewhale` is a separate native binary |
 | Duplicated agent logic | **none** — the GUI is an adapter over the engine's local runtime API |
@@ -28,10 +28,12 @@ The frontend is a webview. `ChatProvider` runs in the extension host, speaks HTT
 
 Because nothing about the agent is copied into the extension, the engine can ship new capabilities and fixes without a frontend release.
 
-### Engine compatibility for 0.8.2
+### Engine compatibility for 0.8.3
 
-0.8.2 is verified against engine **v0.10.0**, and everything it ships is client-side — it all lights up on v0.10.0 the moment you install it. The behaviours below, carried from earlier releases, still need engine work newer than v0.10.0, and no published engine carries any of it:
+0.8.3 is verified against engine **v0.10.0**: everything it ships is client-side and lights up on v0.10.0 the moment you install it — except the first two behaviours below, introduced by 0.8.3 itself, which need engine work newer than v0.10.0. The rest is carried from earlier releases, and no published engine carries any of it:
 
+- **Moving an open conversation to another provider** — needs [a05a1c734](https://github.com/Hmbown/Codewhale/commit/a05a1c73493975941e8f24ce01f81fc26353447b), in Codewhale `main` and not yet in any tagged engine release. On v0.10.0 nothing is moved and the panel says so, rather than reporting a switch that did not happen.
+- **A command's row in the Changes panel** — needs [Codewhale#6817](https://github.com/Hmbown/Codewhale/pull/6817), open and unmerged. On v0.10.0 the paths a command changed appear as rows, but without the change kind, the line counts, the diff and the revert that make a command's row an ordinary row.
 - **Branch a conversation from any of its answers** — needs [Codewhale#6580](https://github.com/Hmbown/Codewhale/pull/6580), merged 2026-09-26 and not yet released. On v0.10.0 the Branch row is not offered at all, rather than degrading to a fork of the last turn.
 - **A branch's first message, when the turn it was cut from lost a tool call** — needs [Codewhale#6664](https://github.com/Hmbown/Codewhale/pull/6664), merged 2026-09-28 and not yet released. A fork of a conversation holding a failed or interrupted tool call could fail its first message until an engine carries the fix.
 - **The thread rails stay quick on a large store** — needs [Codewhale#6646](https://github.com/Hmbown/Codewhale/pull/6646), merged 2026-09-29 and not yet released. On v0.10.0 a store holding many threads makes listing and opening them slow engine-side (measured 1.3s warm / 6.7s cold on a 140-thread store); the fix bounds the engine's reads to what the client asked for, and nothing in the client is blocked on it.

@@ -1,6 +1,6 @@
 # CodeWhale for VS Code —— CodeWhale 代理的轻量图形前端
 
-[![Version](https://img.shields.io/badge/version-0.8.2-blue)](https://github.com/HengQuWorld/CodeWhale-VSCode)
+[![Version](https://img.shields.io/badge/version-0.8.3-blue)](https://github.com/HengQuWorld/CodeWhale-VSCode)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![CI](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/ci.yml/badge.svg)](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/ci.yml)
 [![Release](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/release.yml/badge.svg)](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/release.yml)
@@ -18,7 +18,7 @@ CodeWhale for VS Code 是 [CodeWhale](https://github.com/Hmbown/CodeWhale) 的**
 
 | | |
 |---|---|
-| VSIX 体积（0.8.2） | 约 350 KB |
+| VSIX 体积（0.8.3） | 约 370 KB |
 | 运行时 npm 依赖 | **零** —— 扩展自身的 TypeScript（以及用于渲染的 `marked`）都被 webpack 内联 |
 | 打包的引擎或模型 | **无** —— `codewhale` 是独立的原生二进制 |
 | 重复实现的代理逻辑 | **无** —— GUI 只是引擎本地 runtime API 之上的适配层 |
@@ -28,10 +28,12 @@ CodeWhale for VS Code 是 [CodeWhale](https://github.com/Hmbown/CodeWhale) 的**
 
 正因为代理的任何一部分都没有被复制进扩展，引擎可以独立发布新能力和修复，而不需要前端跟着发版。
 
-### 0.8.2 的引擎兼容性
+### 0.8.3 的引擎兼容性
 
-0.8.2 针对引擎 **v0.10.0** 验证，本版交付的每一项改动都在客户端侧 —— 装上即在 v0.10.0 上生效，无需去追引擎升级。以下由早期版本交付的行为仍需要比 v0.10.0 更新的引擎修复，目前没有任何已发布引擎包含：
+0.8.3 针对引擎 **v0.10.0** 验证：本版交付的每一项改动都在客户端侧、装上即在 v0.10.0 上生效 —— 只有下面前两条是 0.8.3 自己引入的行为，需要比 v0.10.0 更新的引擎工作。其余条目由早期版本结转，目前没有任何已发布引擎包含其中任何一项：
 
+- **把打开的会话移到另一个 provider** —— 需要 [a05a1c734](https://github.com/Hmbown/Codewhale/commit/a05a1c73493975941e8f24ce01f81fc26353447b)，已在 Codewhale `main`、尚未进入任何引擎 tag。在 v0.10.0 上什么都不会被移动，面板也会如实说明，而不是报告一个没有发生的切换。
+- **Changes 面板中命令的行** —— 需要 [Codewhale#6817](https://github.com/Hmbown/Codewhale/pull/6817)，尚未合并。在 v0.10.0 上命令改动的路径会作为行出现，但缺少让命令行成为普通行的改动类型、行数、差异与回滚。
 - **从任意一条回答分叉会话** —— 需要 [Codewhale#6580](https://github.com/Hmbown/Codewhale/pull/6580)，已于 2026-09-26 合并、尚未发布。在 v0.10.0 上不显示 Branch 行，而不是退化成对最后一轮的分叉。
 - **分叉出的会话在源轮次丢失工具调用时的首条消息** —— 需要 [Codewhale#6664](https://github.com/Hmbown/Codewhale/pull/6664)，已于 2026-09-28 合并、尚未发布。在引擎携带该修复之前，从一个包含失败或被中断的工具调用的会话分叉出的分支，第一条消息可能失败。
 - **线程栏在大 store 上保持流畅** —— 需要 [Codewhale#6646](https://github.com/Hmbown/Codewhale/pull/6646)，已于 2026-09-29 合并、尚未发布。在 v0.10.0 上，线程数量多的 store 会让列线程与打开线程在引擎侧变慢（在 140 线程的 store 上实测冷 6.7 秒 / 热 1.3 秒）；该修复把引擎的读取范围限制在客户端实际请求的内容，客户端没有任何部分被它阻塞。
@@ -116,12 +118,12 @@ npx @vscode/vsce package --no-dependencies
 然后安装生成的 `.vsix`（`Extensions: Install from VSIX...`），或在终端执行：
 
 ```bash
-code --install-extension ./brotherwhale-vscode-0.8.2.vsix --force
+code --install-extension ./brotherwhale-vscode-0.8.3.vsix --force
 ```
 
 > **Trae CN 用户：** 如果 `code` 不在 `PATH` 中，使用自带的 CLI：
 > ```bash
-> "/Applications/Trae CN.app/Contents/Resources/app/bin/code" --install-extension ./brotherwhale-vscode-0.8.2.vsix --force
+> "/Applications/Trae CN.app/Contents/Resources/app/bin/code" --install-extension ./brotherwhale-vscode-0.8.3.vsix --force
 > ```
 
 ### 3. 打开它
@@ -286,7 +288,7 @@ codewhale serve（引擎 —— 单独安装与升级）
 
 **安装 VSIX**
 ```bash
-code --install-extension /path/to/brotherwhale-vscode-0.8.2.vsix --force
+code --install-extension /path/to/brotherwhale-vscode-0.8.3.vsix --force
 ```
 
 ## 隐私与数据
