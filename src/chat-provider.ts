@@ -61,6 +61,13 @@ import { extractCompactionSummary } from "./utils/compaction-summary";
 import { playCompletionSound } from "./utils/completion-sound";
 import { MAX_EAGER_HASH_BYTES, sha256OfFile } from "./utils/file-hash";
 import { t, webviewTranslations, currentLocale } from "./i18n";
+import {
+  buildSkillActivationInstruction,
+  composeSkillTurnPrompt,
+  isUserInvocableSkill,
+  parseSkillScope,
+  skillReceiptMessage,
+} from "./utils/skill-activation";
 import { ConfigPanel } from "./config-panel";
 import {
   SessionStateStore,
@@ -304,7 +311,18 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     threadFileRevert: false,
     threadForkAtTurn: false,
     callChanges: false,
+    skillLifecycle: false,
+    skillDetail: false,
   };
+
+  /** The skill armed for the next outgoing message, if any. Set by `/skill
+   *  <name>` (and the Skills panel's Activate action) and consumed — once —
+   *  by `handleSendMessage`, which composes it into that message's prompt.
+   *  Holding it here rather than in the webview keeps the composition on the
+   *  host, where the send path already is: a webview reload must not silently
+   *  disarm a skill, and a message sent by any other route (a task kickoff, a
+   *  restored draft) must not miss it. */
+  private armedSkill: { name: string; instruction: string } | null = null;
 
   /** One shell call whose own file changes the engine reported.
    *
@@ -690,6 +708,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
           this.refreshAgentRuns();
           void this.refreshFleetRuns();
           void this.refreshGoal();
+          void this.refreshSkillList();
         }
         break;
       case "retryThreadList":
@@ -781,6 +800,33 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       case "refreshTaskList":
         await this.refreshTaskList();
         break;
+      case "refreshSkillList":
+        await this.refreshSkillList();
+        break;
+      case "toggleSkill":
+        await this.setSkillEnabled(msg.name as string, msg.enabled as boolean);
+        break;
+      case "activateSkill":
+        await this.activateSkill(msg.name as string, msg.task as string | undefined);
+        break;
+      case "installSkill":
+        await this.installSkill(msg.source as string, msg.scope as string | undefined);
+        break;
+      case "updateSkill":
+        await this.mutateSkill("update", msg.name as string);
+        break;
+      case "uninstallSkill":
+        await this.mutateSkill("uninstall", msg.name as string);
+        break;
+      case "trustSkill":
+        await this.mutateSkill("trust", msg.name as string);
+        break;
+      case "auditSkill":
+        await this.auditSkill(msg.name as string);
+        break;
+      case "clearArmedSkill":
+        this.clearArmedSkill();
+        break;
       case "refreshFleetRuns":
         await this.refreshFleetRuns();
         break;
@@ -847,6 +893,11 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     this.refreshAgentRuns();
     void this.refreshFleetRuns();
     void this.refreshGoal();
+    // The Skills panel and the `/skill <name>` completion both read this
+    // inventory; the armed-skill chip reads the host's own armed state, which
+    // outlives a webview reload.
+    void this.refreshSkillList();
+    this.postArmedSkill();
 
     if (this.currentThread?.id) {
       await this.loadHistory(this.currentThread.id);
@@ -2502,6 +2553,17 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       }
     }
 
+    // An armed skill rides the *next* message only, and it rides the wire
+    // rather than the transcript: the bubble shows what the user typed, the
+    // engine receives the skill instructions plus the request — the same
+    // split TUI's `/skill <name>` makes (the instruction is composed into the
+    // queued message, the transcript shows an "Activated skill" system line).
+    const armedSkill = this.armedSkill;
+    const wireText = armedSkill
+      ? composeSkillTurnPrompt(armedSkill.instruction, fullText)
+      : fullText;
+    if (armedSkill) this.clearArmedSkill();
+
     try {
       await this.api.ensureReady();
 
@@ -2634,7 +2696,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       // while awaiting approval" when the turn is interrupted.  The explicit
       // posture is what keeps a non-full-access posture (e.g. Auto-Review) from
       // being re-derived to Ask by the auto_approve compatibility input.
-      const result = await this.api.startTurn(this.currentThread.id, fullText, {
+      const result = await this.api.startTurn(this.currentThread.id, wireText, {
         mode,
         model,
         reasoning_effort: reasoningEffort,
@@ -3044,6 +3106,226 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
   }
 
   /** Refresh the task list shown in the sidebar, scoped to the current workspace */
+  /** Arm a skill for the next outgoing message. The instruction is composed
+   *  into that message's prompt by `handleSendMessage`, exactly as TUI's
+   *  `/skill <name>` does. Re-arming replaces any previous skill. */
+  public armSkill(skill: { name: string; description: string; instruction: string }): void {
+    this.armedSkill = { name: skill.name, instruction: skill.instruction };
+    this.postMessage({
+      type: "skillArmed",
+      name: skill.name,
+      description: skill.description,
+    });
+  }
+
+  /** Drop the armed skill without sending anything (the chip's ✕). */
+  public clearArmedSkill(): void {
+    if (!this.armedSkill) return;
+    this.armedSkill = null;
+    this.postMessage({ type: "skillArmed", name: null });
+  }
+
+  /** Re-announce the armed skill, so a webview reload or a second window
+   *  shows the chip the host still holds. */
+  public postArmedSkill(): void {
+    this.postMessage({
+      type: "skillArmed",
+      name: this.armedSkill?.name ?? null,
+    });
+  }
+
+  /** Send a user message through the normal send pipeline. Used by `/skill
+   *  <name> <task>`, where activation and submission are one user action. */
+  public async sendMessage(text: string): Promise<void> {
+    await this.handleSendMessage(text);
+  }
+
+  /** Push the current skill inventory to the webview's Skills panel. */
+  public async refreshSkillList(): Promise<void> {
+    try {
+      const result = await this.api.listSkills();
+      this.postMessage({
+        type: "skillList",
+        skills: result.skills ?? [],
+        directory: result.directory ?? "",
+        directories: result.directories ?? [],
+        warnings: result.warnings ?? [],
+      });
+    } catch (err) {
+      // The panel keeps whatever it had; a failed refresh is not a reason to
+      // blank a list the user was reading.
+      this.debugLog(`refreshSkillList failed: ${getErrorMessage(err)}`);
+    }
+  }
+
+  /** Turn a skill on or off. The engine persists this per identity, so the
+   *  listing is re-read after the write rather than guessed at. */
+  public async setSkillEnabled(name: string, enabled: boolean): Promise<void> {
+    try {
+      const result = await this.api.setSkillEnabled(name, enabled);
+      this.postMessage({
+        type: "info",
+        message: enabled
+          ? `Skill '${result.name}' enabled. It will auto-trigger when the task matches.`
+          : `Skill '${result.name}' disabled.`,
+      });
+      await this.refreshSkillList();
+    } catch (err) {
+      const message = getErrorMessage(err);
+      this.postMessage({
+        type: "error",
+        message: message.includes("not found")
+          ? `Skill '${name}' not found. Run /skills to list available skills.`
+          : formatError("Failed to toggle skill", err),
+      });
+    }
+  }
+
+  /** Activate a skill for the next message. With `task`, that message is sent
+   *  immediately — TUI's `/skill <name> <task>`. The body comes from the
+   *  engine, so activation needs the `skill_detail` capability; without it
+   *  the request is refused with the reason instead of a bare 404. */
+  public async activateSkill(name: string, task?: string): Promise<void> {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    if (!this.apiCapabilities.skillDetail) {
+      this.postMessage({
+        type: "error",
+        message:
+          "This engine cannot hand back a skill's body, so the GUI cannot activate it. " +
+          "Update the CodeWhale engine, or run the skill from the TUI.",
+      });
+      return;
+    }
+    try {
+      const detail = await this.api.getSkillDetail(trimmed);
+      if (!isUserInvocableSkill(detail.invocation)) {
+        this.postMessage({
+          type: "error",
+          message: `Skill '${detail.name}' does not allow user invocation (invocation: ${detail.invocation}).`,
+        });
+        return;
+      }
+      const instruction = buildSkillActivationInstruction({
+        name: detail.name,
+        body: detail.body,
+      });
+      this.armSkill({
+        name: detail.name,
+        description: detail.description,
+        instruction,
+      });
+      // TUI writes an "Activated skill: X" system line into the transcript; the
+      // chat-area info card is the GUI's equivalent, and it names the once-only
+      // scope so the arming cannot be mistaken for a permanent setting.
+      this.postMessage({
+        type: "info",
+        message: `Skill '${detail.name}' activated for your next message.`,
+      });
+      if (task && task.trim()) {
+        await this.sendMessage(task.trim());
+      }
+    } catch (err) {
+      const message = getErrorMessage(err);
+      this.postMessage({
+        type: "error",
+        message: message.includes("not found")
+          ? `Skill '${trimmed}' not found. Run /skills to list available skills.`
+          : formatError("Failed to activate skill", err),
+      });
+    }
+  }
+
+  /** Install a skill from a remote spec through the engine's mutation
+   *  controller. The engine owns the network policy, path-traversal guard and
+   *  atomic write; the GUI only reports the receipt. */
+  public async installSkill(source: string, scope?: string): Promise<void> {
+    const target = parseSkillScope(scope);
+    if (target === null) {
+      this.postMessage({ type: "error", message: `Invalid scope: ${scope}` });
+      return;
+    }
+    if (!source.trim()) {
+      this.postMessage({ type: "error", message: "Usage: /skill install <github:owner/repo|url|registry-name>" });
+      return;
+    }
+    try {
+      const receipt = await this.api.installSkill(source.trim(), target);
+      this.postMessage({ type: "info", message: skillReceiptMessage(receipt) });
+      await this.refreshSkillList();
+    } catch (err) {
+      this.postMessage({ type: "error", message: formatError("Install failed", err) });
+    }
+  }
+
+  public async mutateSkill(
+    kind: "update" | "uninstall" | "trust",
+    name: string,
+    scope?: string
+  ): Promise<void> {
+    if (!name.trim()) {
+      this.postMessage({ type: "error", message: `Usage: /skill ${kind} <name>` });
+      return;
+    }
+    const target = parseSkillScope(scope);
+    if (target === null) {
+      this.postMessage({ type: "error", message: `Invalid scope: ${scope}` });
+      return;
+    }
+    const label = kind === "update" ? "Update" : kind === "uninstall" ? "Uninstall" : "Trust";
+    try {
+      const receipt =
+        kind === "update"
+          ? await this.api.updateSkill(name.trim(), { scope: target })
+          : kind === "uninstall"
+            ? await this.api.uninstallSkill(name.trim(), { scope: target })
+            : await this.api.trustSkill(name.trim(), { scope: target });
+      this.postMessage({ type: "info", message: skillReceiptMessage(receipt) });
+      await this.refreshSkillList();
+    } catch (err) {
+      this.postMessage({ type: "error", message: formatError(`${label} failed`, err) });
+    }
+  }
+
+  /** Read-only integrity/trust/provenance receipt for one skill, rendered as
+   *  the same field lines the TUI manager's detail pane shows. */
+  public async auditSkill(name: string, scope?: string): Promise<void> {
+    const target = parseSkillScope(scope);
+    if (target === null) {
+      this.postMessage({ type: "error", message: `Invalid scope: ${scope}` });
+      return;
+    }
+    try {
+      const audit = await this.api.auditSkill(name.trim(), { scope: target });
+      if (!audit.skills || audit.skills.length === 0) {
+        this.postMessage({ type: "error", message: `Skill '${name}' not found in any audited root.` });
+        return;
+      }
+      const lines: string[] = [];
+      if (audit.ambiguous) {
+        lines.push(
+          `Multiple copies of '${name}' exist; pass --project or --global to pick one.`
+        );
+      }
+      for (const entry of audit.skills) {
+        lines.push(`Skill '${entry.name}' (${entry.source_kind}, ${entry.scope})`);
+        lines.push(`  path:       ${entry.safe_display_path}`);
+        lines.push(`  digest:     ${entry.digest.state}${entry.digest.value ? ` — ${entry.digest.value}` : ""}`);
+        lines.push(`  trust:      ${entry.trust}`);
+        lines.push(`  integrity:  ${entry.integrity}`);
+        if (entry.available_actions.length > 0) {
+          lines.push(`  actions:    ${entry.available_actions.join(", ")}`);
+        }
+        for (const warning of entry.warnings) {
+          lines.push(`  warning:    ${warning}`);
+        }
+      }
+      this.postMessage({ type: "info", message: lines.join("\n") });
+    } catch (err) {
+      this.postMessage({ type: "error", message: formatError("Audit failed", err) });
+    }
+  }
+
   public async refreshTaskList(): Promise<void> {
     try {
       const refreshToken = ++this.taskListRefreshToken;
@@ -4467,6 +4749,8 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     revertFileChange: boolean;
     turnSteer: boolean;
     forkFromTurn: boolean;
+    skillLifecycle: boolean;
+    skillDetail: boolean;
   } {
     return {
       saveSession: this.apiCapabilities.saveSession,
@@ -4483,6 +4767,12 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       // engines fork only the last turn, so a button that promised "continue
       // from here" would cut at the wrong turn and still answer success.
       forkFromTurn: this.apiCapabilities.threadForkAtTurn,
+      // Install/update/remove/trust/audit need the engine's skill-lifecycle
+      // family; activation additionally needs the detail route that hands
+      // back the SKILL.md body. Each gates its own controls, so an engine
+      // that lists skills but cannot activate one still gets a useful panel.
+      skillLifecycle: this.apiCapabilities.skillLifecycle,
+      skillDetail: this.apiCapabilities.skillDetail,
     };
   }
 
@@ -4517,6 +4807,8 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         threadFileRevert: false,
         threadForkAtTurn: false,
         callChanges: false,
+        skillLifecycle: false,
+        skillDetail: false,
       };
     }
     this.postApiCapabilities();

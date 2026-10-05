@@ -284,6 +284,7 @@ function createHarness(options?: { storage?: Record<string, string> | null }) {
       fleet: getEl("sidebar-fleet"),
       tasks: getEl("sidebar-tasks"),
       agents: getEl("sidebar-agents"),
+      skills: getEl("sidebar-skills"),
     },
     /** The header each of those sections is folded by, as the document's own
      *  ids address it. */
@@ -1665,7 +1666,7 @@ describe("Changes panel keeps every row visible", () => {
 });
 
 describe("Activity section visibility", () => {
-  const ALL = ["work", "changes", "fleet", "tasks", "agents"] as const;
+  const ALL = ["work", "changes", "fleet", "tasks", "agents", "skills"] as const;
 
   it("shows every section until the reader hides one", () => {
     const { sections, activityEmpty } = createHarness();

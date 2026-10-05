@@ -194,6 +194,8 @@ describe("types.ts - Interface structural conformance", () => {
       threadFileRevert: true,
       threadForkAtTurn: true,
       callChanges: true,
+      skillLifecycle: true,
+      skillDetail: true,
     };
     expect(caps.saveSession).toBe(true);
     expect(caps.threadPatchUndo).toBe(false);

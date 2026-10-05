@@ -184,7 +184,7 @@ Switch from the status bar or with `/mode` (shortcuts `1`/`2`/`3`) and `/auto`. 
 - **Background goals** — tick *Run on a background thread* when setting a goal and it moves to its own thread, inheriting the model, mode and permission posture of the one you are on; the Work panel lists those goals below the current one, with **Open Thread**. **Resume** re-arms a goal left parked by a Runtime restart (the engine has no startup sweep for them).
 - **Memory** — `/memory` reads and writes the engine's native memory store through the runtime API.
 - **Notes** — `/note` for quick per-workspace notes.
-- **Skills** — `/skills` and `/skill` to list and toggle them.
+- **Skills** — the Activity tab's **Skills** panel lists your skills and the shipped ones, switches each on or off, installs one from GitHub (`github:owner/repo`, a URL, or a registry name), and offers update / remove / trust / audit for the skills you own. `/skill <name>` arms a skill for your next message — its instructions go with that one message, while the message you see stays the one you typed — `/skill <name> <task>` sends the task immediately, `/skill <name> on|off` toggles it, and `/skills <name>` (or typing `/skill `) shows a skill's detail and completes its name. Install/update/remove/trust/audit and activation need an engine that answers the skill routes; on an older one the panel dims those controls and says why, and listing/toggling keep working.
 - **MCP** — `/mcp` opens MCP-related settings in VS Code.
 - **Snapshots** — `/restore` lists snapshots and can revert workspace files to one.
 
@@ -196,7 +196,7 @@ Switch from the status bar or with `/mode` (shortcuts `1`/`2`/`3`) and `/auto`. 
 - **Config panel** — the gear in the settings bar (or `/config`) reads and writes engine runtime config, including sandbox mode, strict tool mode, memory, search provider and prompt suggestion.
 
 ### Built for the editor
-- Activity-bar container whose sidebar holds the **Sessions**, **Threads** and **Activity** tabs, the last grouping the Work, Changes, Fleet, Tasks and Agents panels. The threads panel sits beside the chat and takes its width from it rather than covering it, and closes with its ✕ button or `Esc`.
+- Activity-bar container whose sidebar holds the **Sessions**, **Threads** and **Activity** tabs, the last grouping the Work, Changes, Fleet, Tasks, Agents and Skills panels. The threads panel sits beside the chat and takes its width from it rather than covering it, and closes with its ✕ button or `Esc`.
 - Status bar for engine state, mode, posture, provider, model and reasoning effort.
 - Resizable sidebar and input area; follows your VS Code theme.
 - **English and Simplified Chinese** UI, following VS Code's display language.

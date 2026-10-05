@@ -226,6 +226,65 @@ function createContext(overrides: Partial<SlashCommandContext> = {}): SlashComma
         entry: { id: 3, scope: "global", workspace_id: null, summary: "new note", stale: false, line_start: 3, line_end: 3, status: "active" },
       })),
       clearMemory: vi.fn(async () => ({ cleared: true })),
+      listSkills: vi.fn(async () => ({
+        directory: "/home/user/.codewhale/skills",
+        directories: ["/home/user/.codewhale/skills"],
+        warnings: [],
+        skills: [],
+      })),
+      setSkillEnabled: vi.fn(async (name: string, enabled: boolean) => ({ name, enabled })),
+      getSkillDetail: vi.fn(async (name: string) => ({
+        name,
+        description: "A test skill",
+        path: `/home/user/.codewhale/skills/${name}/SKILL.md`,
+        enabled: true,
+        is_bundled: false,
+        source: "native",
+        invocation: "model+user",
+        aliases: [],
+        body: "Do the thing.",
+      })),
+      installSkill: vi.fn(async (source: string, scope?: string) => ({
+        name: source,
+        outcome: "installed",
+        scope: scope || "global",
+        safe_target_path: "/home/user/.codewhale/skills/x",
+      })),
+      updateSkill: vi.fn(async (name: string, opts?: { scope?: string }) => ({
+        name,
+        outcome: "updated",
+        scope: opts?.scope || "global",
+        safe_target_path: "/home/user/.codewhale/skills/x",
+      })),
+      uninstallSkill: vi.fn(async (name: string, opts?: { scope?: string }) => ({
+        name,
+        outcome: "removed",
+        scope: opts?.scope || "global",
+        safe_target_path: "/home/user/.codewhale/skills/x",
+      })),
+      trustSkill: vi.fn(async (name: string, opts?: { scope?: string }) => ({
+        name,
+        outcome: "trusted",
+        scope: opts?.scope || "global",
+        safe_target_path: "/home/user/.codewhale/skills/x",
+        trust_note: "advisory",
+      })),
+      auditSkill: vi.fn(async (name: string) => ({
+        ambiguous: false,
+        skills: [
+          {
+            name,
+            safe_display_path: "/home/user/.codewhale/skills/x",
+            source_kind: "codewhale_managed",
+            scope: "global",
+            digest: { state: "known", value: "sha256:abc" },
+            trust: "untrusted",
+            integrity: "ok",
+            available_actions: ["trust"],
+            warnings: [],
+          },
+        ],
+      })),
       listSnapshots: vi.fn(async () => []),
       restoreSnapshot: vi.fn(async () => ({ restored: "snap" })),
       getThreadGoal: vi.fn(async () => null),
@@ -272,6 +331,13 @@ function createContext(overrides: Partial<SlashCommandContext> = {}): SlashComma
     handleUndoLastTurn: vi.fn(async () => undefined),
     handleRetryLastTurn: vi.fn(async () => undefined),
     handleAttachFile: vi.fn(async () => undefined),
+    installSkill: vi.fn(async () => undefined),
+    mutateSkill: vi.fn(async () => undefined),
+    auditSkill: vi.fn(async () => undefined),
+    setSkillEnabled: vi.fn(async () => undefined),
+    activateSkill: vi.fn(async () => undefined),
+    clearArmedSkill: vi.fn(),
+    refreshSkillList: vi.fn(async () => undefined),
     ...overrides,
   };
 }
@@ -2088,6 +2154,197 @@ describe("SlashCommandHandler - Dispatcher Pattern", () => {
       await handler.handle("/restore", "list 50");
 
       expect(ctx.api.listSnapshots).toHaveBeenCalledWith({ limit: 50 });
+    });
+  });
+  // ── /skills and /skill ──
+
+  describe("/skills", () => {
+    const SKILLS = [
+      {
+        name: "pdf",
+        description: "Read and write PDFs",
+        path: "/home/user/.codewhale/skills/pdf/SKILL.md",
+        enabled: true,
+        is_bundled: false,
+        source: "native",
+        invocation: "model+user",
+        aliases: ["pdf-tool"],
+        bundled_tier: null,
+      },
+      {
+        name: "review",
+        description: "Review code",
+        path: "/bundle/review/SKILL.md",
+        enabled: true,
+        is_bundled: true,
+        source: "native",
+        invocation: "model+user",
+        aliases: [],
+        bundled_tier: "core",
+      },
+      {
+        name: "pdf-merge",
+        description: "Merge PDFs",
+        path: "/bundle/pdf-merge/SKILL.md",
+        enabled: false,
+        is_bundled: true,
+        source: "native",
+        invocation: "explicit-only",
+        aliases: [],
+        bundled_tier: "tools",
+      },
+    ];
+
+    function skillContext() {
+      return createContext({
+        api: {
+          ...createContext().api,
+          listSkills: vi.fn(async () => ({
+            directory: "/home/user/.codewhale/skills",
+            directories: ["/home/user/.codewhale/skills"],
+            warnings: [],
+            skills: SKILLS,
+          })),
+        } as any,
+      });
+    }
+
+    it("lists the inventory with its tiers and the real /skill hints", async () => {
+      const ctx = skillContext();
+      await new SlashCommandHandler(ctx).handle("/skills", "");
+
+      const message = vi.mocked(ctx.postMessage).mock.calls
+        .map((c) => (c[0] as { message?: string }).message || "")
+        .join("\n");
+      expect(message).toContain("Available skills (3)");
+      expect(message).toContain("/pdf");
+      expect(message).toContain("/review");
+      // The old hint pointed at `/skills <name>` for details, which the handler
+      // ignored; the new one names the commands that actually exist.
+      expect(message).toContain("/skill <name> activates a skill");
+      expect(message).not.toContain("run /skills <name> for details");
+    });
+
+    it("renders one skill's detail for an exact name", async () => {
+      const ctx = skillContext();
+      await new SlashCommandHandler(ctx).handle("/skills", "pdf");
+
+      const message = vi.mocked(ctx.postMessage).mock.calls
+        .map((c) => (c[0] as { message?: string }).message || "")
+        .join("\n");
+      expect(message).toContain("/pdf");
+      expect(message).toContain("Read and write PDFs");
+      expect(message).toContain("Invocation: model+user");
+      expect(message).toContain("Aliases: pdf-tool");
+      expect(message).toContain("Path: /home/user/.codewhale/skills/pdf/SKILL.md");
+    });
+
+    it("filters by name prefix when no exact name matches", async () => {
+      const ctx = skillContext();
+      await new SlashCommandHandler(ctx).handle("/skills", "pdf");
+
+      // `pdf` is exact, so this documents the prefix path with a partial that
+      // is not a full name.
+      const prefixCtx = skillContext();
+      await new SlashCommandHandler(prefixCtx).handle("/skills", "pd");
+      const prefixMessage = vi.mocked(prefixCtx.postMessage).mock.calls
+        .map((c) => (c[0] as { message?: string }).message || "")
+        .join("\n");
+      expect(prefixMessage).toContain("Skills matching 'pd' (2 of 3)");
+      expect(ctx).toBeDefined();
+    });
+
+    it("says nothing matched instead of showing an empty list", async () => {
+      const ctx = skillContext();
+      await new SlashCommandHandler(ctx).handle("/skills", "nope");
+
+      expect(ctx.postMessage).toHaveBeenCalledWith({
+        type: "error",
+        message: expect.stringContaining("No skill matches 'nope'"),
+      });
+    });
+  });
+
+  describe("/skill", () => {
+    it("activates a skill for the next message", async () => {
+      const ctx = createContext();
+      await new SlashCommandHandler(ctx).handle("/skill", "pdf");
+
+      expect(ctx.activateSkill).toHaveBeenCalledWith("pdf", undefined);
+    });
+
+    it("passes a trailing task through to the activation send", async () => {
+      const ctx = createContext();
+      await new SlashCommandHandler(ctx).handle("/skill", "pdf extract the tables");
+
+      expect(ctx.activateSkill).toHaveBeenCalledWith("pdf", "extract the tables");
+    });
+
+    it("resolves /skill new to the shipped skill-creator workflow", async () => {
+      const ctx = createContext();
+      await new SlashCommandHandler(ctx).handle("/skill", "new");
+
+      expect(ctx.activateSkill).toHaveBeenCalledWith("skill-creator", undefined);
+    });
+
+    it("keeps the on/off toggle the GUI has always had", async () => {
+      const ctx = createContext();
+      await new SlashCommandHandler(ctx).handle("/skill", "pdf off");
+
+      expect(ctx.setSkillEnabled).toHaveBeenCalledWith("pdf", false);
+      expect(ctx.activateSkill).not.toHaveBeenCalled();
+    });
+
+    it("dispatches install ahead of activation, with a scope flag", async () => {
+      const ctx = createContext();
+      await new SlashCommandHandler(ctx).handle("/skill", "install --project github:owner/repo");
+
+      expect(ctx.installSkill).toHaveBeenCalledWith("github:owner/repo", "project");
+      expect(ctx.activateSkill).not.toHaveBeenCalled();
+    });
+
+    it("routes update, uninstall and trust with their explicit scope", async () => {
+      for (const verb of ["update", "uninstall", "trust"]) {
+        const ctx = createContext();
+        await new SlashCommandHandler(ctx).handle("/skill", `${verb} --global pdf`);
+        expect(ctx.mutateSkill).toHaveBeenCalledWith(verb, "pdf", "global");
+      }
+    });
+
+    it("routes audit to the audit surface", async () => {
+      const ctx = createContext();
+      await new SlashCommandHandler(ctx).handle("/skill", "audit pdf");
+
+      expect(ctx.auditSkill).toHaveBeenCalledWith("pdf", undefined);
+    });
+
+    it("refuses an unknown scope instead of guessing a root", async () => {
+      const ctx = createContext();
+      await new SlashCommandHandler(ctx).handle("/skill", "install --workspace github:owner/repo");
+
+      expect(ctx.installSkill).not.toHaveBeenCalled();
+      expect(ctx.postMessage).toHaveBeenCalledWith({
+        type: "error",
+        message: expect.stringContaining("Unknown flag '--workspace'"),
+      });
+    });
+
+    it("disarms an activated skill", async () => {
+      const ctx = createContext();
+      await new SlashCommandHandler(ctx).handle("/skill", "cancel");
+
+      expect(ctx.clearArmedSkill).toHaveBeenCalled();
+    });
+
+    it("prints usage rather than activating on a bare /skill", async () => {
+      const ctx = createContext();
+      await new SlashCommandHandler(ctx).handle("/skill", "");
+
+      expect(ctx.activateSkill).not.toHaveBeenCalled();
+      expect(ctx.postMessage).toHaveBeenCalledWith({
+        type: "info",
+        message: expect.stringContaining("/skill <name> [task]"),
+      });
     });
   });
 });

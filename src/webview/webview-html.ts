@@ -341,6 +341,33 @@ export interface WebviewTranslations {
   forkTooltipPoint: string;
   // Agent panel
   agents: string;
+  /** Activity section title for the skill inventory. */
+  skills: string;
+  /** Skills panel toolbar: install a remote skill, and re-read the inventory. */
+  skillsInstall: string;
+  skillsInstallPlaceholder: string;
+  skillsInstallProject: string;
+  skillsInstallGlobal: string;
+  skillsRefresh: string;
+  skillsEmpty: string;
+  /** Detail-view / row action labels. */
+  skillsActivate: string;
+  skillsUpdate: string;
+  skillsUninstall: string;
+  skillsTrust: string;
+  skillsAudit: string;
+  skillsEnable: string;
+  skillsDisable: string;
+  /** Composer chip shown while a skill is armed for the next message. */
+  skillsArmed: string;
+  skillsArmedClear: string;
+  /** Shown when the engine lists skills but cannot hand back bodies. */
+  skillsNoActivation: string;
+  /** Shown when the engine predates the skill lifecycle family. */
+  skillsNoLifecycle: string;
+  /** Inventory group headings. */
+  skillsYours: string;
+  skillsBuiltIn: string;
   noAgentRuns: string;
   agentStatusQueued: string;
   agentStatusStarting: string;
@@ -567,6 +594,13 @@ ${css}
             </div>
             <div class="sidebar-section-body" id="tab-agents"></div>
           </div>
+          <div class="sidebar-section" id="sidebar-skills">
+            <div class="sidebar-section-header" id="skills-section-toggle">
+              <span class="sidebar-section-title">🧩 ${tr.skills}</span>
+              <span class="sidebar-section-arrow">▼</span>
+            </div>
+            <div class="sidebar-section-body" id="tab-skills"></div>
+          </div>
         </div>
       </div>
     </div>
@@ -645,6 +679,11 @@ ${css}
       <div id="input-resize-handle" title="Drag to resize input area"></div>
       <div id="input-area">
         <div id="slash-menu"></div>
+        <div id="skill-armed" class="skill-armed" hidden>
+          <span class="skill-armed-glyph">🧩</span>
+          <span class="skill-armed-label" id="skill-armed-label"></span>
+          <button type="button" class="skill-armed-clear" id="skill-armed-clear" title="${tr.skillsArmedClear}" aria-label="${tr.skillsArmedClear}">✕</button>
+        </div>
         <div id="attachments-area"></div>
         <div id="input-box">
           <textarea id="input" placeholder="${tr.inputPlaceholder}" rows="1"></textarea>

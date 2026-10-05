@@ -23,7 +23,10 @@ import type {
   TaskToolCallSummary,
   TaskTimelineEntry,
   TaskRecord,
+  SkillAuditResponse,
+  SkillDetail,
   SkillEntry,
+  SkillMutationReceiptResponse,
   SkillsResponse,
   SetSkillEnabledResponse,
   SessionMetadata,
@@ -103,7 +106,10 @@ export type {
   TaskToolCallSummary,
   TaskTimelineEntry,
   TaskRecord,
+  SkillAuditResponse,
+  SkillDetail,
   SkillEntry,
+  SkillMutationReceiptResponse,
   SkillsResponse,
   SetSkillEnabledResponse,
   SessionMetadata,
@@ -623,8 +629,81 @@ export class CodeWhaleApiClient {
     return (await this.get("/v1/skills")) as SkillsResponse;
   }
 
+  /** One skill's routing metadata plus its SKILL.md body — the input to a
+   *  client-side activation. Requires the engine's `skill_detail` capability;
+   *  callers must gate on it (`apiCapabilities.skillDetail`) rather than
+   *  discovering the 404 at activation time. */
+  async getSkillDetail(name: string): Promise<SkillDetail> {
+    return (await this.get(`/v1/skills/${encodeURIComponent(name)}`)) as SkillDetail;
+  }
+
   async setSkillEnabled(name: string, enabled: boolean): Promise<SetSkillEnabledResponse> {
-    return (await this.post(`/v1/skills/${name}`, { enabled })) as SetSkillEnabledResponse;
+    return (await this.post(`/v1/skills/${encodeURIComponent(name)}`, { enabled })) as SetSkillEnabledResponse;
+  }
+
+  /** Install a remote skill (`github:owner/repo`, raw URL, or registry name)
+   *  through the engine's mutation controller. The engine applies its own
+   *  network policy: a host that needs approval answers 403 with the reason,
+   *  and a denied host answers 403 too — the message tells them apart. */
+  async installSkill(
+    source: string,
+    scope?: "project" | "global"
+  ): Promise<SkillMutationReceiptResponse> {
+    const body: Record<string, unknown> = { source };
+    if (scope) body.scope = scope;
+    return (await this.post("/v1/skills/install", body)) as SkillMutationReceiptResponse;
+  }
+
+  async updateSkill(
+    name: string,
+    opts?: { scope?: "project" | "global"; expectedDigest?: string }
+  ): Promise<SkillMutationReceiptResponse> {
+    const body: Record<string, unknown> = {};
+    if (opts?.scope) body.scope = opts.scope;
+    if (opts?.expectedDigest) body.expected_digest = opts.expectedDigest;
+    return (await this.post(
+      `/v1/skills/${encodeURIComponent(name)}/update`,
+      body
+    )) as SkillMutationReceiptResponse;
+  }
+
+  async uninstallSkill(
+    name: string,
+    opts?: { scope?: "project" | "global"; expectedDigest?: string }
+  ): Promise<SkillMutationReceiptResponse> {
+    const params = new URLSearchParams();
+    if (opts?.scope) params.set("scope", opts.scope);
+    if (opts?.expectedDigest) params.set("expected_digest", opts.expectedDigest);
+    const qs = params.toString() ? `?${params.toString()}` : "";
+    return (await this.delete(
+      `/v1/skills/${encodeURIComponent(name)}${qs}`
+    )) as SkillMutationReceiptResponse;
+  }
+
+  async trustSkill(
+    name: string,
+    opts?: { scope?: "project" | "global"; expectedDigest?: string }
+  ): Promise<SkillMutationReceiptResponse> {
+    const body: Record<string, unknown> = {};
+    if (opts?.scope) body.scope = opts.scope;
+    if (opts?.expectedDigest) body.expected_digest = opts.expectedDigest;
+    return (await this.post(
+      `/v1/skills/${encodeURIComponent(name)}/trust`,
+      body
+    )) as SkillMutationReceiptResponse;
+  }
+
+  /** Read-only integrity/trust/provenance receipt for one skill. */
+  async auditSkill(
+    name: string,
+    opts?: { scope?: "project" | "global" }
+  ): Promise<SkillAuditResponse> {
+    const params = new URLSearchParams();
+    if (opts?.scope) params.set("scope", opts.scope);
+    const qs = params.toString() ? `?${params.toString()}` : "";
+    return (await this.get(
+      `/v1/skills/${encodeURIComponent(name)}/audit${qs}`
+    )) as SkillAuditResponse;
   }
 
   // ── Sessions ──
@@ -733,6 +812,7 @@ export class CodeWhaleApiClient {
       threadFileRevert,
       threadForkAtTurn,
       callChanges,
+      skillFlags,
     ] = await Promise.all([
       this.probePath("/v1/sessions"),
       this.probePath("/v1/threads/__probe__/undo"),
@@ -763,6 +843,12 @@ export class CodeWhaleApiClient {
         "/v1/threads/__probe__/turns/__probe__/calls/__probe__/changes",
         "POST"
       ),
+      // Feature-detect the skill families from the engine's own capability
+      // flags rather than by probing: a 404 from `/v1/skills/{name}` means
+      // "no such skill", which is indistinguishable from "no such route".
+      // (The install path *is* probeable — a GET there answers 405 — but that
+      // only proves the install route, not the detail one.)
+      this.probeSkillCapabilityFlags(),
     ]);
 
     return {
@@ -777,7 +863,30 @@ export class CodeWhaleApiClient {
       threadFileRevert,
       threadForkAtTurn,
       callChanges,
+      skillLifecycle: skillFlags.skill_lifecycle,
+      skillDetail: skillFlags.skill_detail,
     };
+  }
+
+  /** Read `GET /v1/runtime/info`'s capability flags. Both default to false,
+   *  so an engine that predates the field (or a failed request) disables the
+   *  Skills panel's mutations and activation rather than promising an
+   *  operation the route will 404. */
+  private async probeSkillCapabilityFlags(): Promise<{
+    skill_lifecycle: boolean;
+    skill_detail: boolean;
+  }> {
+    try {
+      const info = (await this.get("/v1/runtime/info")) as {
+        capabilities?: Record<string, unknown>;
+      };
+      return {
+        skill_lifecycle: info.capabilities?.skill_lifecycle === true,
+        skill_detail: info.capabilities?.skill_detail === true,
+      };
+    } catch {
+      return { skill_lifecycle: false, skill_detail: false };
+    }
   }
 
   // ── Usage ──

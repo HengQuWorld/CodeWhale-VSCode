@@ -386,6 +386,26 @@ interface Translations {
   forkTooltipPoint: string;
   // Agent panel
   agents: string;
+  skills: string;
+  skillsInstall: string;
+  skillsInstallPlaceholder: string;
+  skillsInstallProject: string;
+  skillsInstallGlobal: string;
+  skillsRefresh: string;
+  skillsEmpty: string;
+  skillsActivate: string;
+  skillsUpdate: string;
+  skillsUninstall: string;
+  skillsTrust: string;
+  skillsAudit: string;
+  skillsEnable: string;
+  skillsDisable: string;
+  skillsArmed: string;
+  skillsArmedClear: string;
+  skillsNoActivation: string;
+  skillsNoLifecycle: string;
+  skillsYours: string;
+  skillsBuiltIn: string;
   noAgentRuns: string;
   agentStatusQueued: string;
   agentStatusStarting: string;
@@ -637,8 +657,8 @@ const en: Translations = {
   commandRetry: "/retry - Retry last turn",
   commandShare: "/share - Share conversation (not available: requires TUI HTTP server)",
   commandGoal: "/goal <objective> [| budget: <tokens>] | /goal clear - Set or clear session goal",
-  commandSkills: "/skills - List skills",
-  commandSkill: "/skill - Run a skill",
+  commandSkills: "/skills - List skills (/skills <name> for detail)",
+  commandSkill: "/skill - Run a skill now",
   commandMcp: "/mcp - Manage MCP servers",
   commandNetwork: "/network - Manage network rules",
   commandProvider: "/provider - Switch API provider",
@@ -779,6 +799,26 @@ const en: Translations = {
   forkTooltipPoint: "The conversation it came from had {count} messages at that point.",
   // Agent panel
   agents: "Agents",
+  skills: "Skills",
+  skillsInstall: "Install",
+  skillsInstallPlaceholder: "github:owner/repo, URL, or registry name",
+  skillsInstallProject: "Project",
+  skillsInstallGlobal: "Global",
+  skillsRefresh: "Refresh",
+  skillsEmpty: "No skills installed. Create ~/.codewhale/skills/<name>/SKILL.md, or install one from GitHub.",
+  skillsActivate: "Activate for the next message",
+  skillsUpdate: "Update",
+  skillsUninstall: "Remove",
+  skillsTrust: "Trust",
+  skillsAudit: "Audit",
+  skillsEnable: "Enable",
+  skillsDisable: "Disable",
+  skillsArmed: "Skill '{name}' is armed for your next message",
+  skillsArmedClear: "Cancel the armed skill",
+  skillsNoActivation: "This engine cannot hand back a skill's body, so activation is unavailable. Listing and toggling still work.",
+  skillsNoLifecycle: "This engine has no skill install/update/remove/trust routes; the panel can list and toggle only.",
+  skillsYours: "Your skills",
+  skillsBuiltIn: "Built-in",
   noAgentRuns: "No agent runs",
   agentStatusQueued: "Queued",
   agentStatusStarting: "Starting",
@@ -1030,8 +1070,8 @@ const zhCn: Translations = {
   commandRetry: "/retry - 重试上次对话",
   commandShare: "/share - 分享对话（不可用：需TUI HTTP服务器）",
   commandGoal: "/goal <目标> [| budget: <tokens>] | /goal clear - 设定或清除会话目标",
-  commandSkills: "/skills - 列出技能",
-  commandSkill: "/skill - 运行技能",
+  commandSkills: "/skills - 列出技能（/skills <名称> 查看详情）",
+  commandSkill: "/skill - 立即运行技能",
   commandMcp: "/mcp - 管理 MCP 服务器",
   commandNetwork: "/network - 管理网络规则",
   commandProvider: "/provider - 切换 API 提供商",
@@ -1172,6 +1212,26 @@ const zhCn: Translations = {
   forkTooltipPoint: "分叉时原会话已有 {count} 条消息。",
   // Agent panel
   agents: "子代理",
+  skills: "技能",
+  skillsInstall: "安装",
+  skillsInstallPlaceholder: "github:owner/repo、URL 或 registry 名称",
+  skillsInstallProject: "项目",
+  skillsInstallGlobal: "全局",
+  skillsRefresh: "刷新",
+  skillsEmpty: "尚未安装技能。可创建 ~/.codewhale/skills/<name>/SKILL.md，或从 GitHub 安装。",
+  skillsActivate: "为下一条消息激活",
+  skillsUpdate: "更新",
+  skillsUninstall: "移除",
+  skillsTrust: "信任",
+  skillsAudit: "审计",
+  skillsEnable: "启用",
+  skillsDisable: "禁用",
+  skillsArmed: "技能「{name}」已就绪，将应用于下一条消息",
+  skillsArmedClear: "取消已就绪的技能",
+  skillsNoActivation: "当前引擎无法返回技能正文，因此不能激活；列表与开关仍可用。",
+  skillsNoLifecycle: "当前引擎没有技能安装/更新/移除/信任接口；面板只能列表与开关。",
+  skillsYours: "你的技能",
+  skillsBuiltIn: "内置技能",
   noAgentRuns: "暂无子代理运行",
   agentStatusQueued: "排队中",
   agentStatusStarting: "启动中",
@@ -1600,6 +1660,26 @@ export function webviewTranslations(tr: Translations) {
     forkTooltipPoint: tr.forkTooltipPoint,
     // Agent panel
     agents: tr.agents,
+    skills: tr.skills,
+    skillsInstall: tr.skillsInstall,
+    skillsInstallPlaceholder: tr.skillsInstallPlaceholder,
+    skillsInstallProject: tr.skillsInstallProject,
+    skillsInstallGlobal: tr.skillsInstallGlobal,
+    skillsRefresh: tr.skillsRefresh,
+    skillsEmpty: tr.skillsEmpty,
+    skillsActivate: tr.skillsActivate,
+    skillsUpdate: tr.skillsUpdate,
+    skillsUninstall: tr.skillsUninstall,
+    skillsTrust: tr.skillsTrust,
+    skillsAudit: tr.skillsAudit,
+    skillsEnable: tr.skillsEnable,
+    skillsDisable: tr.skillsDisable,
+    skillsArmed: tr.skillsArmed,
+    skillsArmedClear: tr.skillsArmedClear,
+    skillsNoActivation: tr.skillsNoActivation,
+    skillsNoLifecycle: tr.skillsNoLifecycle,
+    skillsYours: tr.skillsYours,
+    skillsBuiltIn: tr.skillsBuiltIn,
     noAgentRuns: tr.noAgentRuns,
     agentStatusQueued: tr.agentStatusQueued,
     agentStatusStarting: tr.agentStatusStarting,

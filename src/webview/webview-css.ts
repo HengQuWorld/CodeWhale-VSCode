@@ -2387,6 +2387,118 @@ export function getWebviewCss(): string {
       background: rgba(244,67,54,0.08);
     }
 
+    /* ── Skills panel (sidebar) ── */
+
+    /* A disabled action keeps its place and its glyph: the capability it
+     * needs, not the feature, is what is missing, and the panel says so. */
+    .task-card .task-actions .task-action-btn.is-unavailable {
+      opacity: 0.4;
+      cursor: default;
+    }
+    .skill-card .task-meta {
+      white-space: normal;
+      overflow: visible;
+      text-overflow: clip;
+      line-height: 1.35;
+    }
+    .skill-toggle {
+      background: none;
+      border: none;
+      color: inherit;
+      cursor: pointer;
+      font-size: 12px;
+      padding: 0 2px;
+      opacity: 0.6;
+    }
+    .skill-toggle.on {
+      opacity: 1;
+      color: #4caf50;
+    }
+    .skill-badge {
+      font-size: 9px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      padding: 1px 4px;
+      border: 1px solid rgba(128,128,128,0.35);
+      border-radius: 3px;
+      opacity: 0.7;
+      margin-left: 4px;
+    }
+    .skill-group-title {
+      padding: 6px 10px 2px;
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      opacity: 0.55;
+    }
+    .skill-install-row {
+      display: flex;
+      gap: 4px;
+      padding: 4px 10px 6px;
+      align-items: center;
+    }
+    .skill-install-input {
+      flex: 1;
+      min-width: 0;
+      font-size: 11px;
+      padding: 3px 5px;
+      background: var(--input-bg, rgba(128,128,128,0.08));
+      color: inherit;
+      border: 1px solid rgba(128,128,128,0.25);
+      border-radius: 3px;
+    }
+    .skill-install-scope {
+      font-size: 10px;
+      padding: 3px 2px;
+      background: var(--input-bg, rgba(128,128,128,0.08));
+      color: inherit;
+      border: 1px solid rgba(128,128,128,0.25);
+      border-radius: 3px;
+    }
+    .skill-capability-note {
+      padding: 4px 10px;
+      font-size: 10px;
+      line-height: 1.4;
+      opacity: 0.6;
+      white-space: pre-wrap;
+    }
+
+    /* ── Armed-skill chip (composer) ── */
+
+    .skill-armed {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      margin: 0 0 4px;
+      padding: 3px 6px;
+      font-size: 11px;
+      border: 1px solid rgba(128,128,128,0.3);
+      border-radius: 4px;
+      background: rgba(128,128,128,0.08);
+    }
+    .skill-armed[hidden] {
+      display: none;
+    }
+    .skill-armed-label {
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .skill-armed-clear {
+      background: none;
+      border: none;
+      color: inherit;
+      cursor: pointer;
+      opacity: 0.6;
+      font-size: 11px;
+      padding: 0 2px;
+    }
+    .skill-armed-clear:hover {
+      opacity: 1;
+    }
+
     /* ── Agent Card (sidebar) ── */
 
     .agent-card {

@@ -81,6 +81,10 @@ export function getInputScript(tr: WebviewTranslations): string {
   var slashMenuOpen = false;
   var slashMenuSelected = 0;
   var slashMenuCommands = [];
+  // Skill names for '/skill <name>' completion. Filled from the host's skill
+  // inventory (the same list the Skills panel renders), so the menu offers the
+  // names this engine actually resolves rather than a guessed catalog.
+  var skillNames = [];
 
   var slashCommands = [
     { name: '/mode', desc: '${tr.commandMode}', category: 'config' },
@@ -161,6 +165,21 @@ export function getInputScript(tr: WebviewTranslations): string {
     slashMenuCommands = slashCommands.filter(function(cmd) {
       return cmd.name.toLowerCase().startsWith(query) || cmd.desc.toLowerCase().includes(query.slice(1));
     });
+
+    // '/skill <partial>' completes skill names instead of commands: once the
+    // verb is typed, the useful next token is one of the engine's own skill
+    // ids. Entries carry the whole '/skill <name>' spelling, so accepting one
+    // leaves the caret where a task argument would go.
+    var skillVerbMatch = /^\\/skill\\s+(\\S*)$/.exec(input);
+    if (skillVerbMatch) {
+      var needle = skillVerbMatch[1].toLowerCase();
+      slashMenuCommands = skillNames
+        .filter(function(name) { return name.toLowerCase().indexOf(needle) === 0; })
+        .slice(0, 20)
+        .map(function(name) {
+          return { name: '/skill ' + name, desc: __i18n.skillsActivate || 'skill' };
+        });
+    }
 
     if (slashMenuCommands.length === 0) {
       slashMenuEl.classList.remove('open');
@@ -412,6 +431,15 @@ export function getInputScript(tr: WebviewTranslations): string {
     sendMessage();
   });
   attachBtn.addEventListener('click', function() { vscode.postMessage({ type: 'attachFile' }); });
+
+  // The armed-skill chip's ✕ disarms. The host holds the armed state, so this
+  // only asks — the chip is repainted from the host's own acknowledgement.
+  var skillArmedClearBtn = document.getElementById('skill-armed-clear');
+  if (skillArmedClearBtn) {
+    skillArmedClearBtn.addEventListener('click', function() {
+      vscode.postMessage({ type: 'clearArmedSkill' });
+    });
+  }
 
   // ── Pasted / dropped images (TUI clipboard.rs parity) ──
   // The blob is base64'd here and persisted by the extension host under
@@ -748,6 +776,10 @@ export function getInputScript(tr: WebviewTranslations): string {
     updateSendStopButton: updateSendStopButton,
     setComposerText: setComposerText,
     setHostOperation: setHostOperation,
+    /** The skill inventory, for '/skill <name>' completion in the slash menu. */
+    setSkillNames: function(names) {
+      skillNames = Array.isArray(names) ? names.slice() : [];
+    },
   };
 
   applyApiCapabilities();

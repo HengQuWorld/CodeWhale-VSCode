@@ -28,7 +28,7 @@ import {
   type TuiMode,
 } from "../utils/modes";
 import { formatError, getErrorMessage } from "../utils/error-handler";
-import type { CodeWhaleApiClient, CodeWhaleEngine, ThreadRecord, TaskSummary, ProviderEntry } from "../types";
+import type { CodeWhaleApiClient, CodeWhaleEngine, ThreadRecord, TaskSummary, ProviderEntry, SkillEntry } from "../types";
 
 // ── Context interface for dependency injection ──
 
@@ -47,6 +47,20 @@ export interface SlashCommandContext {
   readonly totalOutputTokens: number;
 
   postMessage(msg: Record<string, unknown>): void;
+  /** Install a remote skill through the engine's mutation controller. */
+  installSkill(source: string, scope?: string): Promise<void>;
+  /** Update, remove, or trust a managed skill by name. */
+  mutateSkill(kind: "update" | "uninstall" | "trust", name: string, scope?: string): Promise<void>;
+  /** Read-only integrity/trust/provenance receipt for one skill. */
+  auditSkill(name: string, scope?: string): Promise<void>;
+  /** Turn a skill on or off by name. */
+  setSkillEnabled(name: string, enabled: boolean): Promise<void>;
+  /** Activate a skill for the next message; with `task`, send it immediately. */
+  activateSkill(name: string, task?: string): Promise<void>;
+  /** Disarm the skill armed for the next message. */
+  clearArmedSkill(): void;
+  /** Push the current skill inventory to the webview's Skills panel. */
+  refreshSkillList(): Promise<void>;
   /** Re-announce the startup defaults — the values the dropdown's "New
    *  threads" group is marked against.
    *
@@ -1083,96 +1097,275 @@ async function handleGoal(ctx: SlashCommandContext, args: string): Promise<void>
   }
 }
 
-async function handleSkills(ctx: SlashCommandContext, _args: string): Promise<void> {
+/** The alias TUI resolves `/skill new` to, so "start a new skill" lands on
+ *  the shipped authoring workflow instead of a name that does not exist. */
+const SKILL_CREATOR_ALIAS = "skill-creator";
+
+function skillStatusIcon(enabled: boolean | undefined): string {
+  return enabled ? "✓" : "○";
+}
+
+/** One line describing a skill in a text list or a detail block. */
+function skillLine(skill: SkillEntry): string {
+  const source =
+    skill.source && skill.source !== "native" ? ` [${skill.source}]` : "";
+  const invocation = skill.invocation ? ` (${skill.invocation})` : "";
+  return `  ${skillStatusIcon(skill.enabled)} /${skill.name}${invocation} - ${
+    skill.description || "(no description)"
+  }${source}`;
+}
+
+/** Detail block for `\/skills <name>` — the command the listing used to point
+ *  at without implementing. Carries the fields the engine reports: source
+ *  (native vs reviewed-plugin snapshot), invocation policy, aliases, tier,
+ *  and the on-disk locator (absent for plugin snapshots). */
+function renderSkillDetail(skill: SkillEntry): string {
+  const lines: string[] = [];
+  lines.push(`/${skill.name}${skill.enabled ? "" : " (disabled)"}`);
+  lines.push("─────────────────────────────");
+  lines.push(skill.description || "(no description)");
+  lines.push("");
+  if (skill.invocation) lines.push(`Invocation: ${skill.invocation}`);
+  if (skill.aliases && skill.aliases.length > 0) {
+    lines.push(`Aliases: ${skill.aliases.join(", ")}`);
+  }
+  if (skill.source) lines.push(`Source: ${skill.source}`);
+  if (skill.plugin_generation !== undefined && skill.plugin_generation !== null) {
+    lines.push(`Plugin generation: ${skill.plugin_generation}`);
+  }
+  if (skill.bundled_tier) lines.push(`Tier: ${skill.bundled_tier}`);
+  if (skill.path) lines.push(`Path: ${skill.path}`);
+  lines.push("");
+  lines.push(`Use /skill ${skill.name} to activate it for your next message.`);
+  lines.push(`Use /skill ${skill.name} on|off to enable or disable it.`);
+  return lines.join("\n");
+}
+
+async function handleSkills(ctx: SlashCommandContext, args: string): Promise<void> {
+  const arg = args.trim();
   try {
     await ctx.api.ensureReady();
     const result = await ctx.api.listSkills();
-    const skills = result.skills;
-    if (skills && skills.length > 0) {
-      const userSkills = skills.filter(s => !s.is_bundled);
-      const bundledSkills = skills.filter(s => s.is_bundled);
+    const skills = result.skills ?? [];
 
-      let output = `Available skills (${skills.length}):\n─────────────────────────────\n`;
+    const warnings = result.warnings && result.warnings.length > 0
+      ? `\nWarnings:\n${result.warnings.map(w => `  - ${w}`).join("\n")}`
+      : "";
+    const dirInfo = result.directories && result.directories.length > 1
+      ? `Skills directories:\n${result.directories.map(d => `  - ${d}`).join("\n")}`
+      : `Skills directory: ${result.directory}`;
 
-      if (userSkills.length > 0) {
-        output += `Your skills (${userSkills.length}):\n`;
-        for (const s of userSkills) {
-          const statusIcon = s.enabled ? "✓" : "○";
-          output += `  ${statusIcon} /${s.name} - ${s.description || "(no description)"}\n`;
-        }
-        if (bundledSkills.length > 0) output += "\n";
+    // `/skills <name>` used to be advertised in this command's own output and
+    // then ignored: the handler took no arguments, so the hint led back to the
+    // same list. An exact name now renders that skill's detail, and anything
+    // else is a name-prefix filter (TUI's `/skills <prefix>`).
+    if (arg) {
+      const needle = arg.toLowerCase();
+      const exact = skills.find(s => s.name.toLowerCase() === needle);
+      if (exact) {
+        ctx.postMessage({ type: "info", message: renderSkillDetail(exact) });
+        return;
       }
-
-      if (bundledSkills.length > 0) {
-        output += `Built-in skills (${bundledSkills.length}):\n`;
-        if (userSkills.length > 0) {
-          const names = bundledSkills.map(s => `/${s.name}`).join(", ");
-          output += `  ${names}\n`;
-          output += `  (run /skills <name> for details on a built-in)\n`;
-        } else {
-          for (const s of bundledSkills) {
-            const statusIcon = s.enabled ? "✓" : "○";
-            output += `  ${statusIcon} /${s.name} - ${s.description || "(no description)"}\n`;
-          }
-        }
+      const matches = skills.filter(s => s.name.toLowerCase().startsWith(needle));
+      if (matches.length === 0) {
+        ctx.postMessage({
+          type: "error",
+          message: `No skill matches '${arg}' (${skills.length} available).\nRun /skills to see them all.`,
+        });
+        return;
       }
-
-      const warnings = result.warnings && result.warnings.length > 0
-        ? `\nWarnings:\n${result.warnings.map(w => `  - ${w}`).join("\n")}\n`
-        : "";
-
-      const dirInfo = result.directories && result.directories.length > 1
-        ? `Skills directories:\n${result.directories.map(d => `  - ${d}`).join("\n")}`
-        : `Skills directory: ${result.directory}`;
-
+      const listed = matches.map(skillLine).join("\n");
       ctx.postMessage({
         type: "info",
-        message: `${output}\nUse /skill <name> [on|off] to enable/disable\n${dirInfo}${warnings}`
+        message: `Skills matching '${arg}' (${matches.length} of ${skills.length}):\n─────────────────────────────\n${listed}`,
       });
-    } else {
-      const dirInfo = result.directories && result.directories.length > 1
-        ? `Skills directories:\n${result.directories.map(d => `  - ${d}`).join("\n")}`
-        : `Skills directory: ${result.directory}`;
-      ctx.postMessage({
-        type: "info",
-        message: `No skills found.\n${dirInfo}\n\nSkills are auto-triggered when enabled and task matches.\nCreate skills in ~/.codewhale/skills/<name>/SKILL.md`
-      });
+      return;
     }
+
+    if (skills.length === 0) {
+      ctx.postMessage({
+        type: "info",
+        message: `No skills found.\n${dirInfo}${warnings}\n\nSkills are auto-triggered when enabled and the task matches.\nCreate skills in ~/.codewhale/skills/<name>/SKILL.md`,
+      });
+      return;
+    }
+
+    const userSkills = skills.filter(s => !s.is_bundled);
+    const bundledSkills = skills.filter(s => s.is_bundled);
+
+    let output = `Available skills (${skills.length}):\n─────────────────────────────\n`;
+
+    if (userSkills.length > 0) {
+      output += `Your skills (${userSkills.length}):\n`;
+      for (const s of userSkills) output += `${skillLine(s)}\n`;
+      if (bundledSkills.length > 0) output += "\n";
+    }
+
+    if (bundledSkills.length > 0) {
+      // Bundled skills are shown in full when they are the only thing on
+      // screen, and as the two curated tiers otherwise: an ambient list that
+      // buries the user's own skills under fifty shipped ones is not a list
+      // anyone reads.
+      const core = bundledSkills.filter(s => s.bundled_tier === "core");
+      const tooling = bundledSkills.filter(s => s.bundled_tier === "tools");
+      if (userSkills.length > 0) {
+        const untiered = bundledSkills.filter(s => !s.bundled_tier);
+        for (const [label, group] of [
+          ["Built-in skills (core)", core],
+          ["Built-in skills (format & tooling)", tooling],
+          ["Built-in skills", untiered],
+        ] as const) {
+          if (group.length === 0) continue;
+          output += `${label} (${group.length}):\n`;
+          output += `  ${group.map(s => `/${s.name}`).join(", ")}\n\n`;
+        }
+      } else {
+        output += `Built-in skills (${bundledSkills.length}):\n`;
+        for (const s of bundledSkills) output += `${skillLine(s)}\n`;
+      }
+    }
+
+    ctx.postMessage({
+      type: "info",
+      message:
+        `${output}\n/skill <name> activates a skill for your next message.\n` +
+        `/skill <name> on|off enables or disables it, and /skills <name> shows its detail.\n` +
+        `${dirInfo}${warnings}`,
+    });
   } catch (err) {
     ctx.postMessage({ type: "error", message: formatError("Failed to list skills", err) });
   }
 }
 
-async function handleSkill(ctx: SlashCommandContext, args: string): Promise<void> {
-  const parts = args.trim().split(/\s+/);
-  const skillName = parts[0];
-  const action = parts[1]?.toLowerCase() || "";
+/** The `/skill` verbs that write to a skills root. They take an optional
+ *  `--project` / `--global` scope; every other first token is a skill name. */
+const SKILL_MUTATION_VERBS = new Set(["install", "update", "uninstall", "trust", "audit"]);
 
-  if (!skillName) {
-    ctx.postMessage({ type: "error", message: "Usage: /skill <name> [on|off]" });
+/** Pull `--project` / `-p` and `--global` / `-g` out of a token list, wherever
+ *  they appear. `invalid` names the first `-x` token that is not one of those
+ *  flags, so a mistyped scope is refused instead of silently targeting the
+ *  wrong root. */
+function parseSkillScopeFlags(tokens: string[]): {
+  scope?: "project" | "global";
+  rest: string[];
+  invalid?: string;
+} {
+  let scope: "project" | "global" | undefined;
+  let invalid: string | undefined;
+  const rest: string[] = [];
+  for (const token of tokens) {
+    if (token === "--project" || token === "-p") scope = "project";
+    else if (token === "--global" || token === "-g") scope = "global";
+    else if (token.length > 1 && token.startsWith("-")) invalid ??= token;
+    else rest.push(token);
+  }
+  return { scope, rest, invalid };
+}
+
+async function handleSkill(ctx: SlashCommandContext, args: string): Promise<void> {
+  const raw = args.trim();
+  if (!raw) {
+    ctx.postMessage({
+      type: "info",
+      message:
+        "Usage:\n" +
+        "  /skill <name> [task]                    Activate a skill for your next message\n" +
+        "  /skill <name> on|off                    Enable or disable a skill\n" +
+        "  /skill cancel                           Disarm an activated skill\n" +
+        "  /skill new                              Start the skill-creator workflow\n" +
+        "  /skill install [--project|--global] <github:owner/repo|url|name>\n" +
+        "  /skill update [--project|--global] <name>\n" +
+        "  /skill uninstall [--project|--global] <name>\n" +
+        "  /skill trust [--project|--global] <name>\n" +
+        "  /skill audit [--project|--global] <name>",
+    });
     return;
   }
 
-  try {
-    await ctx.api.ensureReady();
+  await ctx.api.ensureReady().catch(() => undefined);
 
-    if (action === "on" || action === "enable" || action === "") {
-      const result = await ctx.api.setSkillEnabled(skillName, true);
-      ctx.postMessage({ type: "info", message: `Skill '${result.name}' enabled. It will auto-trigger when task matches.` });
-    } else if (action === "off" || action === "disable") {
-      const result = await ctx.api.setSkillEnabled(skillName, false);
-      ctx.postMessage({ type: "info", message: `Skill '${result.name}' disabled.` });
-    } else {
-      ctx.postMessage({ type: "error", message: `Unknown action: ${action}\nUsage: /skill <name> [on|off]` });
+  const tokens = raw.split(/\s+/);
+  const first = tokens[0];
+
+  // A scope flag may lead the line (`/skill --global install spec`) or follow
+  // the verb (`/skill install --global spec`). Both nest to the same request.
+  let leadingScope: "project" | "global" | undefined;
+  let verb: string;
+  let afterVerb: string[];
+  if (first.startsWith("-")) {
+    const leading = parseSkillScopeFlags(tokens);
+    if (leading.invalid) {
+      ctx.postMessage({
+        type: "error",
+        message: `Unknown flag '${leading.invalid}'. Use --project or --global.`,
+      });
+      return;
     }
-  } catch (err) {
-    const errorMsg = formatError("Failed to toggle skill", err);
-    if (getErrorMessage(err).includes("not found")) {
-      ctx.postMessage({ type: "error", message: `Skill '${skillName}' not found. Use /skills to list available skills.` });
-    } else {
-      ctx.postMessage({ type: "error", message: errorMsg });
+    leadingScope = leading.scope;
+    verb = (leading.rest[0] ?? "").toLowerCase();
+    afterVerb = leading.rest.slice(1);
+    if (!SKILL_MUTATION_VERBS.has(verb)) {
+      // Not a mutation verb after the flags: the whole line is an activation,
+      // task text and all.
+      await ctx.activateSkill(first, tokens.slice(1).join(" ").trim() || undefined);
+      return;
     }
+  } else {
+    verb = first.toLowerCase();
+    afterVerb = tokens.slice(1);
   }
+
+  const parsed = SKILL_MUTATION_VERBS.has(verb)
+    ? parseSkillScopeFlags(afterVerb)
+    : { scope: undefined, rest: afterVerb, invalid: undefined };
+  if (parsed.invalid) {
+    ctx.postMessage({
+      type: "error",
+      message: `Unknown flag '${parsed.invalid}'. Use --project or --global.`,
+    });
+    return;
+  }
+  const scope = leadingScope ?? parsed.scope;
+  const rest = parsed.rest.join(" ").trim();
+
+  switch (verb) {
+    case "install":
+      // Sub-commands dispatch before activation so a skill literally named
+      // "install" cannot shadow the verb (TUI makes the same trade).
+      await ctx.installSkill(rest, scope);
+      return;
+    case "update":
+    case "uninstall":
+    case "trust":
+      await ctx.mutateSkill(verb, rest, scope);
+      return;
+    case "audit":
+      await ctx.auditSkill(rest, scope);
+      return;
+    case "cancel":
+    case "clear":
+      ctx.clearArmedSkill();
+      ctx.postMessage({ type: "info", message: "Activated skill cleared." });
+      return;
+    default:
+      break;
+  }
+
+  const name = first;
+  // `/skill new` is the alias for the shipped authoring workflow.
+  const resolved = name.toLowerCase() === "new" ? SKILL_CREATOR_ALIAS : name;
+  const task = afterVerb.join(" ").trim();
+
+  // Backward-compatible toggle: the GUI's `/skill` has always understood
+  // `<name> on|off`. Anything else after the name is the task TUI's
+  // `/skill <name> <task>` would send.
+  const action = task.toLowerCase();
+  if (action === "on" || action === "enable" || action === "off" || action === "disable") {
+    await ctx.setSkillEnabled(resolved, action === "on" || action === "enable");
+    return;
+  }
+
+  await ctx.activateSkill(resolved, task || undefined);
 }
 
 async function handleAttach(ctx: SlashCommandContext, _args: string): Promise<void> {

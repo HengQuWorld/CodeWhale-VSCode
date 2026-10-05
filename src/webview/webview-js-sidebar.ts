@@ -11,7 +11,7 @@ import type { WebviewTranslations } from "./webview-html";
  * the sections whose fold is remembered, and the header each fold is bound to.
  * It is injected into the script below rather than written twice, and the
  * template's own ids are checked against it by `webview-html.test.ts`. */
-export const ACTIVITY_SECTION_KEYS = ['work', 'changes', 'fleet', 'tasks', 'agents'] as const;
+export const ACTIVITY_SECTION_KEYS = ['work', 'changes', 'fleet', 'tasks', 'agents', 'skills'] as const;
 
 export function getSidebarScript(_tr: WebviewTranslations): string {
   return `(function(){
@@ -1452,6 +1452,220 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
     }
   }
 
+  // ── Render Skills ──
+  // The inventory panel. It lists what the engine reports, toggles a skill's
+  // enabled state, and — when the engine advertises the skill-lifecycle and
+  // skill-detail capabilities — offers install, update, remove, trust, audit
+  // and activation. A capability that is off dims its control with the reason
+  // rather than hiding it, so the panel still says what the engine can do.
+  var skillInventory = { skills: [], directory: '', warnings: [] };
+
+  function skillCapabilities() {
+    return window.__wvApiCapabilities || {};
+  }
+
+  function skillActionButton(label, glyph, enabled, disabledReason, handler) {
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'task-action-btn';
+    btn.textContent = glyph;
+    btn.title = enabled ? label : disabledReason;
+    btn.setAttribute('aria-label', label);
+    if (!enabled) {
+      btn.classList.add('is-unavailable');
+      btn.setAttribute('aria-disabled', 'true');
+    }
+    btn.onclick = function(e) {
+      e.stopPropagation();
+      if (!enabled) return;
+      handler();
+    };
+    return btn;
+  }
+
+  function skillRow(skill) {
+    var card = document.createElement('div');
+    card.className = 'task-card skill-card';
+    var caps = skillCapabilities();
+    var invocation = skill.invocation || '';
+    var userInvocable = !invocation || invocation === 'model+user' || invocation === 'explicit-only';
+
+    var header = document.createElement('div');
+    header.className = 'task-header';
+    var toggle = document.createElement('button');
+    toggle.type = 'button';
+    toggle.className = 'skill-toggle' + (skill.enabled ? ' on' : '');
+    toggle.textContent = skill.enabled ? '\u2713' : '\u25CB';
+    toggle.title = skill.enabled ? __i18n.skillsDisable : __i18n.skillsEnable;
+    toggle.setAttribute('aria-label', toggle.title);
+    (function(name, enabled) {
+      toggle.onclick = function(e) {
+        e.stopPropagation();
+        vscode.postMessage({ type: 'toggleSkill', name: name, enabled: !enabled });
+      };
+    })(skill.name, skill.enabled);
+    header.appendChild(toggle);
+    var title = document.createElement('span');
+    title.className = 'task-title';
+    title.textContent = '/' + skill.name;
+    title.title = skill.path || skill.name;
+    header.appendChild(title);
+    if (invocation && invocation !== 'model+user') {
+      var badge = document.createElement('span');
+      badge.className = 'skill-badge';
+      badge.textContent = invocation;
+      badge.title = invocation;
+      header.appendChild(badge);
+    }
+    if (skill.source && skill.source !== 'native') {
+      var sourceBadge = document.createElement('span');
+      sourceBadge.className = 'skill-badge';
+      sourceBadge.textContent = 'plugin';
+      sourceBadge.title = skill.source;
+      header.appendChild(sourceBadge);
+    }
+    card.appendChild(header);
+
+    var meta = document.createElement('div');
+    meta.className = 'task-meta';
+    meta.textContent = skill.description || '';
+    card.appendChild(meta);
+
+    var actions = document.createElement('div');
+    actions.className = 'task-actions';
+    // Activate: client-side composition, so it needs the detail route.
+    actions.appendChild(skillActionButton(
+      __i18n.skillsActivate, '\u25B8',
+      !!caps.skillDetail && userInvocable,
+      !caps.skillDetail ? __i18n.skillsNoActivation : (invocation || 'disabled'),
+      function() { vscode.postMessage({ type: 'activateSkill', name: skill.name }); }
+    ));
+    actions.appendChild(skillActionButton(
+      __i18n.skillsAudit, '\u2139', !!caps.skillLifecycle, __i18n.skillsNoLifecycle,
+      function() { vscode.postMessage({ type: 'auditSkill', name: skill.name }); }
+    ));
+    if (!skill.is_bundled) {
+      actions.appendChild(skillActionButton(
+        __i18n.skillsUpdate, '\u21BB', !!caps.skillLifecycle, __i18n.skillsNoLifecycle,
+        function() { vscode.postMessage({ type: 'updateSkill', name: skill.name }); }
+      ));
+      actions.appendChild(skillActionButton(
+        __i18n.skillsTrust, '\u2714', !!caps.skillLifecycle, __i18n.skillsNoLifecycle,
+        function() { vscode.postMessage({ type: 'trustSkill', name: skill.name }); }
+      ));
+      actions.appendChild(skillActionButton(
+        __i18n.skillsUninstall, '\u2715', !!caps.skillLifecycle, __i18n.skillsNoLifecycle,
+        function() { vscode.postMessage({ type: 'uninstallSkill', name: skill.name }); }
+      ));
+    }
+    card.appendChild(actions);
+    return card;
+  }
+
+  function renderSkills(inventory) {
+    var container = document.getElementById('tab-skills');
+    if (!container) return;
+    if (inventory) {
+      skillInventory = {
+        skills: inventory.skills || [],
+        directory: inventory.directory || '',
+        warnings: inventory.warnings || [],
+      };
+    }
+    var skills = skillInventory.skills;
+    var caps = skillCapabilities();
+    container.innerHTML = '';
+
+    var controls = document.createElement('div');
+    controls.className = 'task-toolbar';
+    var refreshBtn = document.createElement('button');
+    refreshBtn.className = 'task-icon-btn';
+    refreshBtn.type = 'button';
+    refreshBtn.title = __i18n.skillsRefresh;
+    refreshBtn.setAttribute('aria-label', __i18n.skillsRefresh);
+    refreshBtn.textContent = '\u21BB';
+    refreshBtn.onclick = function() { vscode.postMessage({ type: 'refreshSkillList' }); };
+    controls.appendChild(refreshBtn);
+    container.appendChild(controls);
+
+    if (caps.skillLifecycle) {
+      var installRow = document.createElement('div');
+      installRow.className = 'skill-install-row';
+      var input = document.createElement('input');
+      input.type = 'text';
+      input.className = 'skill-install-input';
+      input.placeholder = __i18n.skillsInstallPlaceholder;
+      input.setAttribute('aria-label', __i18n.skillsInstall);
+      var select = document.createElement('select');
+      select.className = 'skill-install-scope';
+      select.setAttribute('aria-label', __i18n.skillsInstall);
+      [['global', __i18n.skillsInstallGlobal], ['project', __i18n.skillsInstallProject]].forEach(function(opt) {
+        var o = document.createElement('option');
+        o.value = opt[0];
+        o.textContent = opt[1];
+        select.appendChild(o);
+      });
+      var installBtn = document.createElement('button');
+      installBtn.type = 'button';
+      installBtn.className = 'task-action-btn';
+      installBtn.textContent = __i18n.skillsInstall;
+      installBtn.onclick = function() {
+        var source = input.value.trim();
+        if (!source) return;
+        vscode.postMessage({ type: 'installSkill', source: source, scope: select.value });
+        input.value = '';
+      };
+      input.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') { e.preventDefault(); installBtn.click(); }
+      });
+      installRow.appendChild(input);
+      installRow.appendChild(select);
+      installRow.appendChild(installBtn);
+      container.appendChild(installRow);
+    } else {
+      var note = document.createElement('div');
+      note.className = 'skill-capability-note';
+      note.textContent = __i18n.skillsNoLifecycle;
+      container.appendChild(note);
+    }
+
+    if (skills.length === 0) {
+      var empty = document.createElement('div');
+      empty.className = 'work-empty';
+      empty.innerHTML = '<div class="work-empty-icon">\uD83E\uDDE9</div><div class="work-empty-text">' + __wvEscapeHtml(__i18n.skillsEmpty) + '</div>';
+      container.appendChild(empty);
+      return;
+    }
+
+    var userSkills = skills.filter(function(s) { return !s.is_bundled; });
+    var bundledSkills = skills.filter(function(s) { return s.is_bundled; });
+
+    function group(title, rows) {
+      if (rows.length === 0) return;
+      var head = document.createElement('div');
+      head.className = 'skill-group-title';
+      head.textContent = title + ' (' + rows.length + ')';
+      container.appendChild(head);
+      rows.forEach(function(s) { container.appendChild(skillRow(s)); });
+    }
+
+    group(__i18n.skillsYours || 'Your skills', userSkills);
+    group(__i18n.skillsBuiltIn || 'Built-in', bundledSkills);
+
+    if (skillInventory.warnings && skillInventory.warnings.length > 0) {
+      var warn = document.createElement('div');
+      warn.className = 'skill-capability-note';
+      warn.textContent = skillInventory.warnings.join('\\n');
+      container.appendChild(warn);
+    }
+    if (!caps.skillDetail) {
+      var actNote = document.createElement('div');
+      actNote.className = 'skill-capability-note';
+      actNote.textContent = __i18n.skillsNoActivation;
+      container.appendChild(actNote);
+    }
+  }
+
   // ── Render Agent Runs ──
   function renderAgents(runs) {
     var container = document.getElementById('tab-agents');
@@ -2602,6 +2816,7 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
     removeThreadAttentionInput: removeThreadAttentionInput,
     renderTasks: renderTasks,
     renderAgents: renderAgents,
+    renderSkills: renderSkills,
     renderWork: renderWork,
     renderChanges: renderChanges,
     switchSidebarTab: switchSidebarTab,

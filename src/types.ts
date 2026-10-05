@@ -405,9 +405,31 @@ export interface TaskRecord {
 export interface SkillEntry {
   name: string;
   description: string;
-  path: string;
+  /** Native `SKILL.md` locator. Plugin skills run from a content-bound
+   *  in-memory snapshot and deliberately carry no mutable path here. */
+  path: string | null;
   enabled: boolean;
   is_bundled: boolean;
+  /** `native` or `reviewed-plugin-snapshot:<plugin>`. Absent on engines
+   *  older than the runtime that added routing metadata. */
+  source?: string;
+  plugin_id?: string | null;
+  plugin_generation?: number | null;
+  plugin_content_hash?: string | null;
+  /** `model+user` | `explicit-only` | `model-only` | `disabled`. Only the
+   *  first two are user-invocable; `disabled` and `model-only` refuse
+   *  explicit activation. */
+  invocation?: string;
+  /** Alternate lookup names for the same body (never separate entries). */
+  aliases?: string[];
+  /** `core` | `tools` for bundled skills, `null` for custom ones. */
+  bundled_tier?: string | null;
+}
+
+/** `GET /v1/skills/{name}` — one skill's routing metadata plus its body, the
+ *  input to a client-side activation. */
+export interface SkillDetail extends SkillEntry {
+  body: string;
 }
 
 export interface SkillsResponse {
@@ -420,6 +442,40 @@ export interface SkillsResponse {
 export interface SetSkillEnabledResponse {
   name: string;
   enabled: boolean;
+}
+
+export interface SkillMutationReceiptResponse {
+  name: string;
+  /** `installed` | `updated` | `no_change` | `removed` | `trusted` |
+   *  `imported` | `already_present`. */
+  outcome: string;
+  scope: string;
+  safe_target_path: string;
+  trust_note?: string | null;
+}
+
+export interface SkillAuditDigest {
+  state: string;
+  value?: string | null;
+}
+
+export interface SkillAuditEntry {
+  name: string;
+  safe_display_path: string;
+  source_kind: string;
+  scope: string;
+  digest: SkillAuditDigest;
+  trust: string;
+  integrity: string;
+  available_actions: string[];
+  warnings: string[];
+}
+
+export interface SkillAuditResponse {
+  /** `true` when the same name exists in more than one owned root; re-request
+   *  with an explicit scope to disambiguate. */
+  ambiguous: boolean;
+  skills: SkillAuditEntry[];
 }
 
 export interface SessionMetadata {
@@ -531,6 +587,19 @@ export interface RuntimeApiCapabilities {
    *  receipts, which the thread detail already carries — but without the
    *  change kind, the line counts, or a patch. */
   callChanges: boolean;
+  /** `POST /v1/skills/install`, `POST /v1/skills/{name}/update`,
+   *  `DELETE /v1/skills/{name}`, `POST /v1/skills/{name}/trust` and
+   *  `GET /v1/skills/{name}/audit` exist (advertised as
+   *  `capabilities.skill_lifecycle` on `GET /v1/runtime/info`). When false the
+   *  Skills panel keeps install/update/remove/trust and the audit detail
+   *  disabled rather than promising an operation the engine will 404. */
+  skillLifecycle: boolean;
+  /** `GET /v1/skills/{name}` returns a skill's body plus routing metadata
+   *  (`capabilities.skill_detail`). This is what lets the GUI activate a
+   *  skill: the body is composed into the next turn's prompt exactly as
+   *  TUI's `/skill <name>` does. When false the GUI can list and toggle
+   *  skills but offers no activation. */
+  skillDetail: boolean;
 }
 
 /** One path a single tool call changed, as the call-change route reports it. */

@@ -950,6 +950,38 @@ ${PROVIDER_PICKER_JS}
         window.__wvSidebar.renderTasks(msg.tasks || []);
         break;
 
+      case 'skillList':
+        window.__wvSidebar.renderSkills({
+          skills: msg.skills || [],
+          directory: msg.directory || '',
+          warnings: msg.warnings || []
+        });
+        if (window.__wvInput && window.__wvInput.setSkillNames) {
+          window.__wvInput.setSkillNames(
+            (msg.skills || []).map(function(s) { return s.name; })
+          );
+        }
+        break;
+
+      case 'skillArmed': {
+        // The host owns the armed skill; this only paints the composer chip.
+        // A null name is the disarm (sent back after the arming was consumed
+        // by a send, and by the chip's own ✕).
+        var armedEl = document.getElementById('skill-armed');
+        var armedLabel = document.getElementById('skill-armed-label');
+        if (armedEl && armedLabel) {
+          if (msg.name) {
+            armedLabel.textContent = (__i18n.skillsArmed || "Skill '{name}' armed")
+              .replace('{name}', msg.name);
+            armedEl.hidden = false;
+          } else {
+            armedLabel.textContent = '';
+            armedEl.hidden = true;
+          }
+        }
+        break;
+      }
+
       case 'agentRunList':
         window.__wvSidebar.setAgentRuns(msg.runs || []);
         window.__wvSidebar.renderAgents(msg.runs || []);
