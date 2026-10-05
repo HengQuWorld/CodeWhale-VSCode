@@ -225,7 +225,15 @@ export function getWebviewCss(): string {
     #tab-activity > .sidebar-section.collapsed {
       grid-template-rows: auto 0fr;
       flex-grow: 0;
-      min-height: 0;
+      /* The floor is the header, not zero. A collapsed section's own content is
+         now just that header, so 'auto' resolves to exactly the space it needs
+         — while a zero floor let the shared-height flex column squeeze the
+         section to a few pixels and its header spill over the next one's.
+         Measured in a 500x501 Activity tab with every other section folded:
+         five headers 14-16px tall inside 31px boxes, all five pairs
+         overlapping. Adding a sixth section is what pushed the column over its
+         threshold, but any tab short enough to squeeze a header shows it. */
+      min-height: auto;
     }
     #tab-activity > .sidebar-section > .sidebar-section-body {
       min-height: 0;

@@ -18,6 +18,8 @@ Everything below is client-side and lights up on engine **v0.10.0** the moment y
 
 - **The skills list stopped pointing at a command that did nothing** — Listing skills told you to run `/skills <name>` for the detail of a built-in, but the command took no arguments and answered with the same list again, so the one hint on screen led back to where you already were. `/skills <name>` now shows that skill's own detail — what it is, whether it is on, how it can be invoked, any aliases, and where it lives — and `/skills <prefix>` narrows the list.
 
+- **Folded Activity sections no longer draw their titles on top of each other** — Fold Work, Changes, Fleet, Tasks and Agents away and open the **Skills** list, and those five headers were squeezed into a few pixels each — their titles stacked over one another into an unreadable smear. A folded section's floor was zero, so the shared column could shrink it below its own header; the floor is the header now, and when even the headers no longer fit the tab scrolls, which is what it already said it would do.
+
 - **Every DeepSeek model is selectable on the DeepSeek route again** — Picking `deepseek-v4-pro` (or `deepseek-v4-flash`, or `deepseek-reasoner`) answered “it belongs to concentrate”, leaving `deepseek-flash` as the only DeepSeek model the list would take. The panel treated *any* other provider's default model of the same name as proof the id belonged elsewhere, and the gateways that front DeepSeek ship the very same bare ids as their defaults — Concentrate's is `deepseek-v4-pro` — so the official route's own catalog was blocked by routes you had never configured. A route you cannot select no longer counts, and a model the route you are on is known to serve is never called foreign.
 
 ### Upstream TUI PRs

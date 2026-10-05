@@ -336,4 +336,23 @@ describe("long transcripts", () => {
       /#messages > \.message,\s*#messages > \.system-message \{[\s\S]*?content-visibility: auto;[\s\S]*?contain-intrinsic-size: auto 220px;/,
     );
   });
+
+  it("keeps a folded Activity section at least as tall as its header", () => {
+    const css = getWebviewCss();
+
+    // The Activity tab is a column of sections sharing its height. A folded
+    // section's floor used to be zero, so when the sections together needed
+    // more room than the tab had, the flex column squeezed the folded ones to
+    // a few pixels and their headers spilled over the next section's — the
+    // headers drew on top of each other. Measured in headless Chrome against
+    // this sheet (500x501 tab, every other section folded, a sixth section
+    // present): five headers 14-16px tall inside 31px boxes, all five pairs
+    // overlapping. The floor is the header itself now; the tab scrolls when
+    // even the headers do not fit, which is the documented behaviour.
+    const folded = /#tab-activity > \.sidebar-section\.collapsed \{([\s\S]*?)\}/
+      .exec(css);
+    expect(folded, "the folded-section rule must exist").toBeTruthy();
+    expect(folded![1]).toContain("min-height: auto");
+    expect(folded![1]).not.toMatch(/min-height:\s*0\s*;/);
+  });
 });
