@@ -186,6 +186,26 @@ interface Translations {
   engineRestarted: string;
   engineRestartFailed: string;
   engineNotRunning: string;
+  /**
+   * The default-on usage-counting disclosure, shown once per installation.
+   *
+   * Wording rules, and they are load-bearing: every field it names is one the
+   * payload actually carries, the red lines are stated as "not collected"
+   * rather than as "anonymized" — sampling and hashing are not the same
+   * promise — and it does not claim a switch this extension does not own.
+   * `docs/TELEMETRY.md` in the CodeWhale repository is the source of truth for
+   * what is collected; `utils/telemetry-settings` is the whole of what this
+   * extension says about it.
+   */
+  telemetryNotice: string;
+  /** Action that opens the published field-by-field schema. */
+  telemetryNoticeLearnMore: string;
+  /** Action that writes the setting off, so the engine stops reporting. */
+  telemetryNoticeDisable: string;
+  /** Confirmation after the notice's disable action was taken. */
+  telemetryDisabled: string;
+  /** Appended when the engine is already running, so the change is not live. */
+  telemetryTakesEffectOnRestart: string;
   approvalRequired: string;
   allow: string;
   deny: string;
@@ -620,6 +640,11 @@ const en: Translations = {
   engineRestarted: "CodeWhale engine restarted",
   engineRestartFailed: "Failed to restart engine",
   engineNotRunning: "CodeWhale engine is not running",
+  telemetryNotice: "CodeWhale counts anonymous usage through the local engine: which version you run, your OS and CPU family, how long a session lasted, and totals of turns, tool calls and approvals. It never collects your conversations, code, prompts, files, repo or branch names, or credentials. You are identified only by a random ID stored on this machine, replaced every 90 days, and shared with your terminal sessions rather than a second one. Usage reporting is on by default.",
+  telemetryNoticeLearnMore: "What is collected",
+  telemetryNoticeDisable: "Turn off",
+  telemetryDisabled: "Usage reporting is off for the engine this window starts.",
+  telemetryTakesEffectOnRestart: "The running engine keeps reporting until it is restarted — run “CodeWhale: Restart Engine” to apply it now.",
   approvalRequired: "Approval required", allow: "Allow", deny: "Deny",
   thinkingToggle: "▶ Thinking", thinkingOpen: "▼ Thinking", thinkingClose: "▶ Thinking",
   threadsCountPattern: "{n} threads",
@@ -1033,6 +1058,11 @@ const zhCn: Translations = {
   engineRestarted: "CodeWhale 引擎已重启",
   engineRestartFailed: "重启引擎失败",
   engineNotRunning: "CodeWhale 引擎未运行",
+  telemetryNotice: "CodeWhale 通过本地引擎统计匿名用量：你运行的版本、操作系统与 CPU 架构、会话时长，以及回合数、工具调用与审批次数的总计。它绝不会收集你的对话、代码、提示词、文件、仓库或分支名、以及任何凭据。你只会被一个保存在本机、每 90 天更换一次的随机 ID 标识，且与你的终端会话共用同一个 ID，而不是另起一个。用量统计默认开启。",
+  telemetryNoticeLearnMore: "查看收集内容",
+  telemetryNoticeDisable: "关闭",
+  telemetryDisabled: "本窗口启动的引擎已停止上报用量。",
+  telemetryTakesEffectOnRestart: "正在运行的引擎会继续上报，直到重启为止 —— 执行「CodeWhale: Restart Engine」可立即生效。",
   approvalRequired: "需要审批", allow: "允许", deny: "拒绝",
   thinkingToggle: "▶ 思考过程", thinkingOpen: "▼ 思考过程", thinkingClose: "▶ 思考过程",
   threadsCountPattern: "{n} 个会话",

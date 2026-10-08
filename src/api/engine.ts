@@ -8,6 +8,7 @@ import * as os from "os";
 import * as path from "path";
 import { createHash, randomBytes } from "crypto";
 
+import { telemetryEnabled, telemetryEnv } from "../utils/telemetry-settings";
 const HEALTH_TIMEOUT_MS = 3000;
 const STARTUP_TIMEOUT_MS = 10000;
 const HEALTH_RETRY_INTERVAL_MS = 300;
@@ -159,6 +160,13 @@ export class CodeWhaleEngine {
       CODEWHALE_RUNTIME_TOKEN: token,
       [pathKey]: [...existingPath.split(pathSep), ...extraPaths.filter(p => !existingPath.split(pathSep).includes(p))].join(pathSep),
     };
+    // Usage reporting belongs to the engine, so the extension says only two
+    // things about it: which client the server is serving, and whether the
+    // user wants it at all. Everything else — the payload, the buffer, the
+    // identity, the endpoint — is the engine's, resolved from the same
+    // CodeWhale home the user's terminal sessions use. See
+    // `utils/telemetry-settings`.
+    Object.assign(env, telemetryEnv(telemetryEnabled()));
     delete env[isWindows ? "PATH" : "Path"];
     // This workspace's own store, named under both spellings so an older Runtime
     // isolates instead of silently sharing a store another window already owns.
