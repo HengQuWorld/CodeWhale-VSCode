@@ -2,6 +2,19 @@
  * Webview CSS styles extracted from webview-html.ts for maintainability.
  * All styles are returned as a single string to be injected into the webview HTML.
  */
+
+/** How the sidebar panel and the conversation divide the row.
+ *
+ * One fact written three ways — the panel's own floor and ceiling, the grip's
+ * width, and the column the conversation must not lose — so the sheet below
+ * and the drag in `webview-html.ts` cannot disagree about any of them, and the
+ * ratio between them is visible in one place rather than inferred from two
+ * magic numbers that happen to add up. */
+export const SIDEBAR_PANEL_MIN_WIDTH = 120;
+export const SIDEBAR_PANEL_MAX_WIDTH = 600;
+export const SIDEBAR_MIN_CHAT_WIDTH = 200;
+export const SIDEBAR_HANDLE_WIDTH = 4;
+
 export function getWebviewCss(): string {
   return `
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -63,8 +76,19 @@ export function getWebviewCss(): string {
 
     #threads-panel {
       width: 220px;
-      min-width: 160px;
-      max-width: 600px;
+      /* What the panel may take is bounded by the room, not only by its own
+         ceiling: a width restored from a wider window (this store is shared by
+         every workspace, so a new project inherits it) used to be honoured to
+         the pixel, and where it exceeded the view it squeezed the conversation
+         to nothing — the panel and the grip were the whole row and the chat
+         could not be seen at all. A percentage resolves against #layout and a
+         max-width is re-resolved on every layout change, so a view narrowed
+         afterwards (the sidebar edge, or the window) pushes the panel back
+         instead of hiding the conversation, with no script watching for it.
+         Below the point where both floors fit, min-width wins and the two
+         share what there is — a view that narrow cannot show a split. */
+      min-width: ${SIDEBAR_PANEL_MIN_WIDTH}px;
+      max-width: min(${SIDEBAR_PANEL_MAX_WIDTH}px, calc(100% - ${SIDEBAR_MIN_CHAT_WIDTH + SIDEBAR_HANDLE_WIDTH}px));
       border-right: 1px solid var(--border);
       overflow-y: auto;
       overflow-x: hidden;
@@ -78,7 +102,7 @@ export function getWebviewCss(): string {
 
     #sidebar-resize-handle {
       display: none;
-      width: 4px;
+      width: ${SIDEBAR_HANDLE_WIDTH}px;
       cursor: col-resize;
       flex-shrink: 0;
       background: transparent;
@@ -1849,6 +1873,12 @@ export function getWebviewCss(): string {
       padding: 4px 8px;
       border-top: 1px solid var(--border);
       display: flex;
+      /* The row of controls is wider than a narrow conversation: in one line it
+         asked for ~480px, so a chat squeezed by the panel simply lost the
+         controls past the edge — mode, permission and the agent chip were laid
+         out beyond the viewport, unclickable. Wrapping keeps every one of them
+         reachable; the settings bar above already does the same. */
+      flex-wrap: wrap;
       gap: 4px;
       align-items: center;
     }

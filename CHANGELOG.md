@@ -1,5 +1,13 @@
 # Change Log
 
+## Unreleased
+
+Everything here is client-side except where an entry says otherwise.
+
+### Bug Fixes
+
+- **A sidebar the width of another window no longer pushes the conversation out of sight** — The panel's width is remembered, and that record is shared by every project, so a panel you sized in a wide window came back in a narrower one at its full width: it took the whole row, left the conversation zero pixels wide, and put the drag handle on the far edge. The panel is bounded by the room it is in now — it keeps the width you chose while there is space for it, is pushed back as the view narrows (the sidebar edge or the window, immediately, without reopening it), and always leaves the conversation a column of its own. With the panel open on a modest view the toolbar's controls past the edge — mode, permission, the agent chip — used to be laid out beyond the viewport, unseen and unclickable, and the row wraps instead of clipping there now; the width a drag was stopped at is also what gets remembered, rather than the wider one the drag kept asking for.
+
 ## 0.8.3
 
 Everything below is client-side and lights up on engine **v0.10.0** the moment you install it — except where an entry names its engine half: moving an open conversation to another provider needs a Codewhale build newer than any tagged engine release, and a command's row in the Changes panel keeps only its paths until an engine carries the new call-change route. Both are listed with their status under **Upstream TUI PRs** at the end of this section.

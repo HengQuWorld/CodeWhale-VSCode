@@ -1,5 +1,9 @@
 import * as vscode from "vscode";
-import { getWebviewCss } from "./webview-css";
+import {
+  getWebviewCss,
+  SIDEBAR_PANEL_MAX_WIDTH,
+  SIDEBAR_PANEL_MIN_WIDTH,
+} from "./webview-css";
 import { getUtilitiesScript } from "./webview-js-utilities";
 import { getDebugScript } from "./webview-js-debug";
 import { getTooltipScript } from "./webview-js-tooltip";
@@ -774,12 +778,16 @@ ${css}
       var panel = document.getElementById('threads-panel');
       if (!handle || !panel) return;
 
-      // Restore saved width from previous session
+      // Restore saved width from previous session. What is restored is the
+      // width that was *chosen*, not the one that fitted at the time: the sheet
+      // clamps what is drawn to the room there is now, so a preference saved in
+      // a wider window opens narrower here and comes back whole when the view
+      // does — instead of being forgotten the first time the sidebar is narrow.
       try {
         var savedWidth = localStorage.getItem('codewhale:sidebarWidth');
         if (savedWidth) {
           var w = parseInt(savedWidth, 10);
-          if (w >= 120 && w <= 600) {
+          if (w >= ${SIDEBAR_PANEL_MIN_WIDTH} && w <= ${SIDEBAR_PANEL_MAX_WIDTH}) {
             panel.style.width = w + 'px';
           }
         }
@@ -811,8 +819,8 @@ ${css}
           rafId = null;
           if (startX === undefined) return;
           var newWidth = startWidth + (lastClientX - startX);
-          if (newWidth < 120) newWidth = 120;
-          if (newWidth > 600) newWidth = 600;
+          if (newWidth < ${SIDEBAR_PANEL_MIN_WIDTH}) newWidth = ${SIDEBAR_PANEL_MIN_WIDTH};
+          if (newWidth > ${SIDEBAR_PANEL_MAX_WIDTH}) newWidth = ${SIDEBAR_PANEL_MAX_WIDTH};
           panel.style.width = newWidth + 'px';
         });
       }
@@ -827,10 +835,23 @@ ${css}
         window.removeEventListener('mouseleave', onMouseUp);
         window.removeEventListener('blur', onMouseUp);
         if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
-        // Save width for next session
+        // Save width for next session — the width on screen, which is not
+        // always the one the drag asked for: past the point where the
+        // conversation would lose its own column the sheet stops the panel, so
+        // the drag keeps counting while the panel stays put. Adopting the drawn
+        // width here is what keeps the style, the store and the screen from
+        // disagreeing — otherwise the next window would reopen the panel wider
+        // than the user left it, at a width the store no longer records.
+        //
+        // A width of zero is the one answer that is not a width: the panel was
+        // closed mid-drag (Esc), so nothing was drawn to adopt and recording a
+        // zero would throw the reader's choice away in favour of the default.
         try {
-          var finalWidth = panel.getBoundingClientRect().width;
-          localStorage.setItem('codewhale:sidebarWidth', String(Math.round(finalWidth)));
+          var finalWidth = Math.round(panel.getBoundingClientRect().width);
+          if (finalWidth > 0) {
+            panel.style.width = finalWidth + 'px';
+            localStorage.setItem('codewhale:sidebarWidth', String(finalWidth));
+          }
         } catch(e) { /* ignore localStorage errors */ }
         startX = undefined;
         startWidth = undefined;

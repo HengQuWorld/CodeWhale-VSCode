@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { getWebviewCss } from "./webview-css";
+import {
+  getWebviewCss,
+  SIDEBAR_HANDLE_WIDTH,
+  SIDEBAR_MIN_CHAT_WIDTH,
+  SIDEBAR_PANEL_MAX_WIDTH,
+  SIDEBAR_PANEL_MIN_WIDTH,
+} from "./webview-css";
 
 describe("webview-css.ts", () => {
   it("returns a non-empty string", () => {
@@ -105,6 +111,52 @@ describe("webview-css.ts", () => {
     expect(handleRule).toContain("display: none;");
     expect(css).toContain("#threads-panel.open + #sidebar-resize-handle {");
     expect(css).toContain("display: block;");
+  });
+
+  it("bounds the panel by the room, so an open panel cannot hide the conversation", () => {
+    const css = getWebviewCss();
+    const panelRule = css.slice(
+      css.indexOf("#threads-panel {"),
+      css.indexOf("}", css.indexOf("#threads-panel {")),
+    );
+    const handleRule = css.slice(
+      css.indexOf("#sidebar-resize-handle {"),
+      css.indexOf("}", css.indexOf("#sidebar-resize-handle {")),
+    );
+
+    // The width the panel asks for is a request, not a claim on the row: it is
+    // bounded by its own ceiling *and* by the column the conversation must keep.
+    // The store that width comes from is shared by every workspace, so a panel
+    // sized in a wide window is restored in a new, narrower project — and with
+    // only the ceiling in place it took the whole row there: the conversation
+    // was drawn zero pixels wide, with the grip on the far edge.
+    expect(panelRule).toContain(`min-width: ${SIDEBAR_PANEL_MIN_WIDTH}px;`);
+    expect(panelRule).toContain(
+      `max-width: min(${SIDEBAR_PANEL_MAX_WIDTH}px, calc(100% - ${
+        SIDEBAR_MIN_CHAT_WIDTH + SIDEBAR_HANDLE_WIDTH
+      }px));`,
+    );
+    // The grip is part of that sum, so it is read from the same place: two
+    // literals that happen to add up would drift the first time one changed.
+    expect(handleRule).toContain(`width: ${SIDEBAR_HANDLE_WIDTH}px;`);
+    // The fixed ceiling on its own is what this replaced, so it is not kept
+    // beside the bound that now supersedes it.
+    expect(panelRule).not.toContain(`max-width: ${SIDEBAR_PANEL_MAX_WIDTH}px;`);
+  });
+
+  it("lets the toolbar wrap instead of laying its controls out of the view", () => {
+    const css = getWebviewCss();
+    const toolbarRule = css.slice(
+      css.indexOf("#toolbar {"),
+      css.indexOf("}", css.indexOf("#toolbar {")),
+    );
+
+    // The row asks for ~480px in one line (measured in a browser against this
+    // sheet), so with the panel open on a modest view the controls past the edge
+    // — mode, permission, the agent chip — were laid out beyond the viewport,
+    // where they can be neither seen nor clicked. The settings bar has wrapped
+    // all along; this row does the same now.
+    expect(toolbarRule).toContain("flex-wrap: wrap;");
   });
 
   it("contains message styling", () => {

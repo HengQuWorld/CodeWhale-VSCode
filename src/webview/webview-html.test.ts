@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { getWebviewHtml, WebviewTranslations } from "./webview-html";
 import { ACTIVITY_SECTION_KEYS } from "./webview-js-sidebar";
+import { SIDEBAR_PANEL_MAX_WIDTH, SIDEBAR_PANEL_MIN_WIDTH } from "./webview-css";
 
 // Mock vscode since webview-html.ts imports it
 vi.mock("vscode", () => ({
@@ -629,6 +630,32 @@ describe("webview-html.ts assembler", () => {
     expect(html).toContain("localStorage.getItem('codewhale:sidebarWidth')");
     expect(html).toContain("localStorage.setItem('codewhale:sidebarWidth'");
     expect(html).toContain("panel.style.width = newWidth + 'px';");
+  });
+
+  it("clamps the width it restores and drags to the sheet's own bounds", () => {
+    const html = getWebviewHtml(makeMockWebview(), makeMockExtensionUri(), makeTr());
+
+    // One set of numbers for the panel's floor and ceiling, shared with the
+    // stylesheet that bounds the panel by the room (see webview-css.ts): the
+    // script decides what may be written, the sheet what may be drawn, and both
+    // have to agree on where that is.
+    expect(html).toContain(`w >= ${SIDEBAR_PANEL_MIN_WIDTH} && w <= ${SIDEBAR_PANEL_MAX_WIDTH}`);
+    expect(html).toContain(`if (newWidth < ${SIDEBAR_PANEL_MIN_WIDTH}) newWidth = ${SIDEBAR_PANEL_MIN_WIDTH};`);
+    expect(html).toContain(`if (newWidth > ${SIDEBAR_PANEL_MAX_WIDTH}) newWidth = ${SIDEBAR_PANEL_MAX_WIDTH};`);
+  });
+
+  it("adopts the width on screen when a drag ends", () => {
+    const html = getWebviewHtml(makeMockWebview(), makeMockExtensionUri(), makeTr());
+
+    // The drag counts from where the grip started, so past the point where the
+    // sheet stops the panel it asks for widths that are never drawn. Saving that
+    // request would reopen the panel — in a window with the room for it — wider
+    // than the width the user left behind, which is the width the store now
+    // contradicts. The drawn width is the one adopted into the style and the
+    // store, so what is remembered is what was there.
+    expect(html).toContain("var finalWidth = Math.round(panel.getBoundingClientRect().width);");
+    expect(html).toContain("panel.style.width = finalWidth + 'px';");
+    expect(html).toContain("localStorage.setItem('codewhale:sidebarWidth', String(finalWidth));");
   });
 
   it("contains utilities module output", () => {

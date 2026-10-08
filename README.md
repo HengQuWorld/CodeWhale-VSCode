@@ -196,7 +196,7 @@ Switch from the status bar or with `/mode` (shortcuts `1`/`2`/`3`) and `/auto`. 
 - **Config panel** — the gear in the settings bar (or `/config`) reads and writes engine runtime config, including sandbox mode, strict tool mode, memory, search provider and prompt suggestion.
 
 ### Built for the editor
-- Activity-bar container whose sidebar holds the **Sessions**, **Threads** and **Activity** tabs, the last grouping the Work, Changes, Fleet, Tasks, Agents and Skills panels. The threads panel sits beside the chat and takes its width from it rather than covering it, and closes with its ✕ button or `Esc`.
+- Activity-bar container whose sidebar holds the **Sessions**, **Threads** and **Activity** tabs, the last grouping the Work, Changes, Fleet, Tasks, Agents and Skills panels. The threads panel sits beside the chat and takes its width from it rather than covering it, up to what that view can spare — the conversation keeps a column of its own however narrow the sidebar is — and closes with its ✕ button or `Esc`.
 - Status bar for engine state, mode, posture, provider, model and reasoning effort.
 - Resizable sidebar and input area; follows your VS Code theme.
 - **English and Simplified Chinese** UI, following VS Code's display language.

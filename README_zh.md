@@ -196,7 +196,7 @@ code --install-extension ./brotherwhale-vscode-0.8.3.vsix --force
 - **配置面板** —— 设置栏的齿轮（或 `/config`）可读写引擎的 runtime 配置，包括 sandbox 模式、strict tool 模式、memory、search provider 与 prompt suggestion。
 
 ### 为编辑器而做
-- 活动栏容器，侧边栏包含 **Sessions**、**Threads**、**Activity** 三个标签页，最后者汇集 Work、Changes、Fleet、Tasks 与 Agents 面板。线程面板与对话并排显示，占用对话区的宽度而不是盖住它，可用 ✕ 按钮或 `Esc` 收起。
+- 活动栏容器，侧边栏包含 **Sessions**、**Threads**、**Activity** 三个标签页，最后者汇集 Work、Changes、Fleet、Tasks 与 Agents 面板。线程面板与对话并排显示，占用对话区的宽度而不是盖住它，且最多占用当前视图能匀出的宽度——侧边栏再窄，对话区也保留自己的一列；可用 ✕ 按钮或 `Esc` 收起。
 - 状态栏显示引擎状态、模式、权限、提供商、模型与思考深度。
 - 侧边栏与输入区可拖拽调整；自动跟随 VS Code 主题。
 - **英文与简体中文**界面，跟随 VS Code 的显示语言。
