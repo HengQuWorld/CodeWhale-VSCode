@@ -1,11 +1,11 @@
 # CodeWhale for VS Code —— CodeWhale 代理的轻量图形前端
 
-[![Version](https://img.shields.io/badge/version-0.8.3-blue)](https://github.com/HengQuWorld/CodeWhale-VSCode)
+[![Version](https://img.shields.io/badge/version-0.8.4-blue)](https://github.com/HengQuWorld/CodeWhale-VSCode)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![CI](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/ci.yml/badge.svg)](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/ci.yml)
 [![Release](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/release.yml/badge.svg)](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/release.yml)
 [![VS Code](https://img.shields.io/badge/VS%20Code-1.85+-informational)](https://code.visualstudio.com/)
-[![VSIX](https://img.shields.io/badge/VSIX-~350%20KB-brightgreen)](https://github.com/HengQuWorld/CodeWhale-VSCode/releases)
+[![VSIX](https://img.shields.io/badge/VSIX-~390%20KB-brightgreen)](https://github.com/HengQuWorld/CodeWhale-VSCode/releases)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
 CodeWhale for VS Code 是 [CodeWhale](https://github.com/Hmbown/CodeWhale) 的**图形化前端**。CodeWhale 是一个开源且持续活跃开发的编程代理，本扩展把它装进 VS Code 原生侧边栏：读取工作区、修改文件、执行命令、搜索网络、派发子代理，全程不必离开编辑器。
@@ -18,7 +18,7 @@ CodeWhale for VS Code 是 [CodeWhale](https://github.com/Hmbown/CodeWhale) 的**
 
 | | |
 |---|---|
-| VSIX 体积（0.8.3） | 约 370 KB |
+| VSIX 体积（0.8.4） | 约 390 KB |
 | 运行时 npm 依赖 | **零** —— 扩展自身的 TypeScript（以及用于渲染的 `marked`）都被 webpack 内联 |
 | 打包的引擎或模型 | **无** —— `codewhale` 是独立的原生二进制 |
 | 重复实现的代理逻辑 | **无** —— GUI 只是引擎本地 runtime API 之上的适配层 |
@@ -28,18 +28,17 @@ CodeWhale for VS Code 是 [CodeWhale](https://github.com/Hmbown/CodeWhale) 的**
 
 正因为代理的任何一部分都没有被复制进扩展，引擎可以独立发布新能力和修复，而不需要前端跟着发版。
 
-### 0.8.3 的引擎兼容性
+### 0.8.4 的引擎兼容性
 
-0.8.3 针对引擎 **v0.10.0** 验证：本版交付的每一项改动都在客户端侧、装上即在 v0.10.0 上生效 —— 只有下面前两条是 0.8.3 自己引入的行为，需要比 v0.10.0 更新的引擎工作。其余条目由早期版本结转，目前没有任何已发布引擎包含其中任何一项：
+0.8.4 针对引擎 **v0.10.1** 验证：本版交付的每一项改动都在客户端侧、或依托 v0.10.1 已携带的路由 —— 早期版本一直在等的那些也在其中。Branch 行、Changes 面板中命令自己的变更行、把打开的会话移到另一个 provider、undo 的文件回滚与按文件 Revert、选择器里的用户自定义 provider、fork 保留会话文档、线程栏的流畅，都在引擎读到 v0.10.1 的那一刻全部点亮。
 
-- **把打开的会话移到另一个 provider** —— 需要 [a05a1c734](https://github.com/Hmbown/Codewhale/commit/a05a1c73493975941e8f24ce01f81fc26353447b)，已在 Codewhale `main`、尚未进入任何引擎 tag。在 v0.10.0 上什么都不会被移动，面板也会如实说明，而不是报告一个没有发生的切换。
-- **Changes 面板中命令的行** —— 需要 [Codewhale#6817](https://github.com/Hmbown/Codewhale/pull/6817)，尚未合并。在 v0.10.0 上命令改动的路径会作为行出现，但缺少让命令行成为普通行的改动类型、行数、差异与回滚。
-- **从任意一条回答分叉会话** —— 需要 [Codewhale#6580](https://github.com/Hmbown/Codewhale/pull/6580)，已于 2026-09-26 合并、尚未发布。在 v0.10.0 上不显示 Branch 行，而不是退化成对最后一轮的分叉。
-- **分叉出的会话在源轮次丢失工具调用时的首条消息** —— 需要 [Codewhale#6664](https://github.com/Hmbown/Codewhale/pull/6664)，已于 2026-09-28 合并、尚未发布。在引擎携带该修复之前，从一个包含失败或被中断的工具调用的会话分叉出的分支，第一条消息可能失败。
-- **线程栏在大 store 上保持流畅** —— 需要 [Codewhale#6646](https://github.com/Hmbown/Codewhale/pull/6646)，已于 2026-09-29 合并、尚未发布。在 v0.10.0 上，线程数量多的 store 会让列线程与打开线程在引擎侧变慢（在 140 线程的 store 上实测冷 6.7 秒 / 热 1.3 秒）；该修复把引擎的读取范围限制在客户端实际请求的内容，客户端没有任何部分被它阻塞。
-- **Undo 与 Changes 面板的按文件 Revert** —— 需要 [Codewhale#6483](https://github.com/Hmbown/Codewhale/pull/6483)，已于 2026-09-25 合并、尚未发布。在 v0.10.0 上，两者都会把已改动的文件留在磁盘上，Revert 还会对一个确实存在的快照返回 `409`；客户端这一半自 0.7.5 起就已就位。
-- **选择器中的用户自定义 provider** —— 需要 [Codewhale#6404](https://github.com/Hmbown/Codewhale/pull/6404)，已于 2026-09-23 合并、尚未发布。在 v0.10.0 上，你在 TUI 中配置的 `[providers.<name>]` 路由依然不会出现在 provider 列表里。
-- **fork 保留自己的会话文档** —— 需要 [Codewhale#6406](https://github.com/Hmbown/Codewhale/pull/6406)，已于 2026-09-23 合并、尚未发布。在 v0.10.0 上，fork 首次保存时仍会新建一份自己的会话文档，而不是沿用原本绑定的那一份。
+以下两项仍需要比任何已发布引擎 tag 更新的 Codewhale 构建：
+
+- **会话上报自己属于哪个客户端** —— 需要 [5166473](https://github.com/codewhale-hq/Codewhale/commit/5166473369fbe548cd5b518ed1e697ce9d4b706a)，已在 Codewhale `main`、尚未进入任何引擎 tag。在引擎携带它之前，本扩展启动的会话会被计为匿名的 `serve`，而不是标明所属客户端；`brotherwhale.telemetry` 关闭开关本身在任何引擎上都有效。
+
+- **本扩展的第二个窗口，或与另一个 CodeWhale 客户端并用** —— 引擎 v0.10.1 引入的 runtime ownership 模型限制每台机器只能有一个驱动客户端：第二个运行本扩展的 VS Code 窗口、或本扩展与 TUI 等其他 CodeWhale 客户端同机并用，会被直接拒绝而不是启动自己的引擎。修复——每个 runtime store 独立的 control endpoint、每个工作区唯一的驱动者，让 web、desktop、TUI 与本扩展并行工作——见 [Codewhale#6924](https://github.com/codewhale-hq/Codewhale/pull/6924)，仍开放未合并；在引擎携带它之前，请一次只开一个窗口、一台机器只跑一个 CodeWhale 客户端。
+
+在引擎 **v0.10.0** 上，其余各项与 0.8.3 时期完全一致：不显示 Branch 行（从一个丢失工具调用的会话分叉出的分支，第一条消息可能失败）、命令的变更行只到路径为止、打开的会话不会被移动、undo 把改动留在磁盘上且 Revert 对存在的快照回答 `409`、`[providers.<name>]` 路由不出现在选择器里、fork 新建自己的会话文档、大型线程 store 在引擎侧缓慢。本版新增的 Skills 面板在 v0.10.0 上会把激活与详情带着原因变暗，列出、开关以及安装 / 更新 / 移除 / 信任 / 审计操作不受影响。
 
 用 `codewhale update` 保持引擎最新，用 `codewhale --version` 确认版本。
 
@@ -118,12 +117,12 @@ npx @vscode/vsce package --no-dependencies
 然后安装生成的 `.vsix`（`Extensions: Install from VSIX...`），或在终端执行：
 
 ```bash
-code --install-extension ./brotherwhale-vscode-0.8.3.vsix --force
+code --install-extension ./brotherwhale-vscode-0.8.4.vsix --force
 ```
 
 > **Trae CN 用户：** 如果 `code` 不在 `PATH` 中，使用自带的 CLI：
 > ```bash
-> "/Applications/Trae CN.app/Contents/Resources/app/bin/code" --install-extension ./brotherwhale-vscode-0.8.3.vsix --force
+> "/Applications/Trae CN.app/Contents/Resources/app/bin/code" --install-extension ./brotherwhale-vscode-0.8.4.vsix --force
 > ```
 
 ### 3. 打开它
@@ -289,7 +288,7 @@ codewhale serve（引擎 —— 单独安装与升级）
 
 **安装 VSIX**
 ```bash
-code --install-extension /path/to/brotherwhale-vscode-0.8.3.vsix --force
+code --install-extension /path/to/brotherwhale-vscode-0.8.4.vsix --force
 ```
 
 ## 隐私与数据
@@ -298,7 +297,7 @@ code --install-extension /path/to/brotherwhale-vscode-0.8.3.vsix --force
 
 ### 用量统计
 
-用量统计在扩展启动的**引擎**里实现 —— 与 CodeWhale CLI / TUI 用的是同一套代码。前端只提供 `brotherwhale.telemetry` 这一个开关，以及会话上报所用的客户端名；具体收集什么、如何标识、发送到哪里都由引擎实现决定，契约见 [`docs/TELEMETRY.md`](https://github.com/Hmbown/Codewhale/blob/main/docs/TELEMETRY.md)。
+用量统计在扩展启动的**引擎**里实现 —— 与 CodeWhale CLI / TUI 用的是同一套代码。前端只提供 `brotherwhale.telemetry` 这一个开关，以及会话上报所用的客户端名；具体收集什么、如何标识、发送到哪里都由引擎实现决定，契约见 [`docs/TELEMETRY.md`](https://github.com/codewhale-hq/Codewhale/blob/main/docs/TELEMETRY.md)。
 
 把它设为 `false` 即可关闭上报。该设置默认开启，且为 application 作用域（只能写入用户设置），仓库自带的 `.vscode/settings.json` 无法为你重新打开上报。引擎在启动时读取它，因此修改会在**下次引擎启动**时生效 —— 执行「CodeWhale: Restart Engine」可立即生效。
 
