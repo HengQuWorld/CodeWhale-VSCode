@@ -16,7 +16,8 @@ when you are unsure whether something counts as a vulnerability.
 - **This repository** — the VS Code extension: webview UI, engine process
   management, local IPC. The extension talks to the engine on `127.0.0.1`
   only, generates a per-process Runtime token that stays out of command
-  arguments, settings and logs, and contains no telemetry or analytics.
+  arguments, settings and logs, and collects nothing itself. Usage counting
+  happens in the engine it starts; `brotherwhale.telemetry` turns that off.
 - **The agent engine** (`codewhale` CLI — model traffic, tools, sandboxing,
   prompts) is a separate project. Report engine vulnerabilities to
   [Hmbown/CodeWhale](https://github.com/Hmbown/CodeWhale/security), not here.

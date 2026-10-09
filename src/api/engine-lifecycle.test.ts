@@ -5,11 +5,15 @@ import * as path from "path";
 import * as http from "http";
 import { ChildProcess } from "child_process";
 
-const state = vi.hoisted(() => ({ fixture: "", storage: "", workspace: "", trusted: true, mode: "normal", launches: [] as any[], children: [] as any[], competing: [] as any[], competingRequests: 0 }));
+const state = vi.hoisted(() => ({ fixture: "", storage: "", workspace: "", trusted: true, mode: "normal", telemetry: true, launches: [] as any[], children: [] as any[], competing: [] as any[], competingRequests: 0 }));
 vi.mock("vscode", () => ({ workspace: {
   get isTrusted() { return state.trusted; },
   get workspaceFolders() { return [{ uri: { fsPath: state.workspace } }]; },
-  getConfiguration: () => ({ get: (key: string, fallback: unknown) => key === "enginePath" ? "fixture-engine" : fallback }),
+  getConfiguration: () => ({ get: (key: string, fallback: unknown) => {
+    if (key === "enginePath") return "fixture-engine";
+    if (key === "telemetry") return state.telemetry;
+    return fallback;
+  } }),
 } }));
 vi.mock("child_process", async (importOriginal) => {
   const real = await importOriginal<typeof import("child_process")>();
@@ -91,7 +95,7 @@ else {
  });
 }
 `);
-  state.trusted = true; state.mode = "normal"; state.launches = []; state.children = []; state.competing = []; state.competingRequests = 0; engines = [];
+  state.trusted = true; state.mode = "normal"; state.telemetry = true; state.launches = []; state.children = []; state.competing = []; state.competingRequests = 0; engines = [];
 });
 afterEach(async () => {
   await Promise.all(engines.map(item => item.stop()));
@@ -117,6 +121,44 @@ describe("owned Runtime lifecycle", () => {
     expect(logs.join("\n")).not.toContain(item.token!.slice(0, 32));
     expect(logs.join("\n")).not.toContain(item.token!.slice(32));
     expect(fs.readFileSync(path.join(state.storage, "engine.log"), "utf8")).not.toContain(item.token);
+  });
+
+  it("hands its child this window's telemetry intent, and nothing else about reporting", async () => {
+    // The setting is only real if it reaches the process that does the
+    // counting: the engine reads `CODEWHALE_TELEMETRY` when it starts. Reporting
+    // on is the *absence* of that variable; off is `"0"`, a run-scoped switch
+    // that leaves the shared buffer and install id alone.
+    //
+    // The child inherits this process's environment, so an exported
+    // `CODEWHALE_TELEMETRY` in the shell running these tests would decide the
+    // first assertion instead of the extension. Take it out of the picture.
+    const inherited = process.env.CODEWHALE_TELEMETRY;
+    delete process.env.CODEWHALE_TELEMETRY;
+    try {
+      const { item } = engine();
+      await item.ensureRunning();
+      let env = state.launches.at(-1)!.options.env;
+      expect(env.CODEWHALE_TELEMETRY_SURFACE).toBe("vscode-extension");
+      expect(env).not.toHaveProperty("CODEWHALE_TELEMETRY");
+      // Identity and destination stay the engine's: an embedder that set either
+      // would be a second collector sharing nothing with the user's terminal.
+      // Compared against what the child inherited, so an exported value in the
+      // shell running these tests is not mistaken for one this code added.
+      for (const name of [
+        "CODEWHALE_TELEMETRY_ENDPOINT",
+        "CODEWHALE_HOME",
+        "CODEWHALE_INSTALL_ID",
+      ]) {
+        expect(env[name]).toBe(process.env[name]);
+      }
+
+      state.telemetry = false;
+      await item.restart();
+      env = state.launches.at(-1)!.options.env;
+      expect(env.CODEWHALE_TELEMETRY).toBe("0");
+    } finally {
+      if (inherited !== undefined) process.env.CODEWHALE_TELEMETRY = inherited;
+    }
   });
 
   it("waits for its child to report the bound address before sending any request", async () => {

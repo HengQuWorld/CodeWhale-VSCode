@@ -16,24 +16,16 @@
 import { describe, expect, it, vi } from "vitest";
 
 const getConfiguration = vi.fn();
-const update = vi.fn(async () => undefined);
 
 vi.mock("vscode", () => ({
   workspace: {
     getConfiguration: (...args: unknown[]) => getConfiguration(...args),
-    workspaceFolders: undefined,
   },
-  ConfigurationTarget: { Global: "global" },
-  commands: { executeCommand: vi.fn() },
-  window: { showInformationMessage: vi.fn(), showErrorMessage: vi.fn() },
-  env: { language: "en" },
-  Uri: { file: (fsPath: string) => ({ fsPath }), parse: (v: string) => ({ toString: () => v }) },
 }));
 
 import {
   EMBEDDED_SURFACE,
   TELEMETRY_SETTING,
-  disableTelemetry,
   telemetryEnabled,
   telemetryEnv,
 } from "./telemetry-settings";
@@ -41,11 +33,13 @@ import * as fs from "fs";
 import * as path from "path";
 
 /**
- * Every surface name the engine's published whitelist accepts.
+ * The surface names the engine's published whitelist accepts, as this
+ * repository understands them.
  *
  * Restated here rather than imported: this repository does not depend on the
- * engine's source, and the point of the assertion is that the two agree. If the
- * engine's list moves, this test is where the drift surfaces.
+ * engine's source. So this list pins *our* expectation, not the contract — it
+ * catches a surface this project invents, not one the engine later drops. The
+ * engine's own list remains the authority.
  */
 const ENGINE_SURFACES = [
   "tui",
@@ -108,20 +102,12 @@ describe("the setting", () => {
     expect(telemetryEnabled()).toBe(true);
   });
 
-  it("disabling writes the global setting the settings editor writes", async () => {
-    update.mockClear();
-    getConfiguration.mockReturnValue({ get: () => true, update });
-    await disableTelemetry();
-    expect(update).toHaveBeenCalledWith("telemetry", false, "global");
-  });
-
   it("is declared application-scoped, so a workspace cannot override it", () => {
     // The privacy half of this. A repository shipping `.vscode/settings.json`
     // must not be able to turn reporting back on for someone who turned it off,
     // which is what a `window` or `resource` scope would allow. `application`
     // means user settings only — the same scope VS Code gives its own telemetry
-    // level — and it is also why `ConfigurationTarget.Global` above is the only
-    // target that can hold this value.
+    // level.
     const pkg = JSON.parse(
       fs.readFileSync(path.resolve(process.cwd(), "package.json"), "utf8")
     ) as {

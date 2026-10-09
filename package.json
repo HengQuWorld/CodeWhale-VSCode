@@ -172,7 +172,7 @@
         "brotherwhale.telemetry": {
           "type": "boolean",
           "default": true,
-          "description": "%config.telemetry.description%",
+          "markdownDescription": "%config.telemetry.description%",
           "scope": "application"
         }
       }

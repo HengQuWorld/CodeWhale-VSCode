@@ -18,5 +18,5 @@
   "config.backgroundThreadNotifications.description": "后台线程需要你审批或输入时弹出 VS Code 通知（每次等待只提醒一次；Threads 侧栏徽章始终实时显示）。",
   "config.completionSound.description": "一轮对话跑完时发出提示音，正在看的会话与后台线程都包括。失败或中断的轮次不发声；同一时刻完成的轮次只响一次。",
   "config.modelByProvider.description": "每条 provider 路线新建会话时使用的模型，按路线的 id（有精确 id 时为 `model_provider_id`）记录。`/model` 与 provider 选择器都写入这里，因此在某条路线上换模型不会再改变其他路线的新会话。`brotherwhale.defaultModel` 仅作为该表中没有记录的路线时的回退值。",
-  "config.telemetry.description": "通过扩展启动的本地引擎统计匿名用量：你运行的版本、操作系统与 CPU 架构、会话时长，以及回合数、工具调用与审批次数的总计。绝不收集对话、代码、提示词、文件、仓库或分支名、凭据，也不发送逐回合或逐工具的时间线。你只会被一个保存在本机、每 90 天更换一次的随机 ID 标识，且与你的终端会话共用该 ID。默认开启。修改后在下次引擎启动时生效。"
+  "config.telemetry.description": "通过本扩展启动的本地引擎统计匿名用量。具体收集什么、如何收集、发送到哪里由引擎实现决定 —— 见 [CodeWhale 遥测文档](https://github.com/Hmbown/Codewhale/blob/main/docs/TELEMETRY.md)。默认开启；设为 `false` 可关闭上报。下次引擎启动时生效。"
 }

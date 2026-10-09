@@ -242,6 +242,7 @@ Search for `brotherwhale` in VS Code settings (`Cmd/Ctrl+,`).
 | `brotherwhale.costCurrency` | `"auto"` | `auto` follows the UI language (Chinese → CNY, otherwise USD), or force `usd` / `cny`. Falls back to USD when no native CNY price exists |
 | `brotherwhale.backgroundThreadNotifications` | `true` | Show a VS Code notification when a background thread needs your approval or input (once per attention episode; the rail badge and its count stay live either way) |
 | `brotherwhale.completionSound` | `true` | Play a chime when a turn finishes — in the conversation you are reading or in a background thread. Failed and interrupted turns stay silent, and turns finishing at the same moment are heard once |
+| `brotherwhale.telemetry` | `true` | Let the engine this window starts count anonymous usage. Application-scoped; what is collected is the engine's concern (see [Usage reporting](#usage-reporting)) |
 
 ## How it works
 
@@ -295,29 +296,9 @@ The extension talks to a **locally running** engine on `127.0.0.1`. Conversation
 
 ### Usage reporting
 
-Usage counting happens in the **engine**, not in the extension. The extension holds no payload, no buffer, no endpoint, and no identity of its own; it tells the engine which client its sessions belong to (`vscode-extension`) and whether you want reporting at all. Everything else follows the published contract the CodeWhale CLI and TUI already implement — `docs/TELEMETRY.md` in the CodeWhale repository, schema v3.
+Usage counting lives in the **engine** the extension starts — the same code the CodeWhale CLI and TUI use. This frontend owns one switch, `brotherwhale.telemetry`, and the client name its sessions report as; what is collected, how it is identified, and where it is sent are the engine's implementation, documented in [`docs/TELEMETRY.md`](https://github.com/Hmbown/Codewhale/blob/main/docs/TELEMETRY.md).
 
-What is counted:
-
-- which version you run, your OS and CPU family;
-- how long a session lasted, and its exit class;
-- totals of turns, tool calls and approvals.
-
-What is **never** collected: your conversations, code, prompts, files, repo or branch names, workspace paths, model ids, provider table names, MCP server names, approval text, error bodies, and credentials. There is no per-turn or per-tool timeline, and no timestamps on individual events. Every field is an integer, a boolean, or a closed-enum value — there is no free-form string in the payload. You are identified only by a random ID stored on this machine and replaced every 90 days, which is never derived from your hostname, username, or machine ID.
-
-That ID is shared with your terminal sessions, because it belongs to the CodeWhale installation rather than to any one client. An installation that used the extension and the CLI is one install, not two.
-
-Batches are IP-stripped at ingest: no IP is stored, logged, or joined to that ID.
-
-**To turn it off**, set `brotherwhale.telemetry` to `false`, or choose **Turn off** in the one-time notice. The extension then starts the engine with reporting off. Because the engine reads this when it starts, a change applies from the next engine start — **CodeWhale: Restart Engine** applies it immediately.
-
-The setting is **application-scoped**: user settings only. A repository that ships `.vscode/settings.json` cannot turn reporting back on for you, which is the same scope VS Code gives its own telemetry setting.
-
-Two things this setting deliberately does not do:
-
-- It does not erase what is already queued on this machine. That buffer, and the switch that clears it, belong to the shared CodeWhale home — not to one window. To stop and clear reporting for **every** client on the machine, run `codewhale config set telemetry false`.
-- It does not change your terminal sessions' behaviour. The extension speaks only for the engine it starts.
-To send nothing anywhere but keep a local record — useful for reading your own payloads — set an empty `telemetry_endpoint` in the engine's config. Batches are then written to `dryrun.jsonl` under the CodeWhale home and no request is made.
+Set it to `false` to turn reporting off. It is on by default and application-scoped (user settings only), so a workspace cannot turn it back on for you. The engine reads it at startup, so a change applies from the next engine start — **CodeWhale: Restart Engine** applies it immediately.
 
 ## Development
 

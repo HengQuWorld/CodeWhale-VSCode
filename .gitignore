@@ -39,3 +39,7 @@ Thumbs.db
 
 # LLVM coverage artifacts (never ship)
 *.profraw
+
+# Agent / IDE local state
+.codewhale/
+.trae/

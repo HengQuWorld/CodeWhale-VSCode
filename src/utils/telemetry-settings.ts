@@ -57,26 +57,6 @@ export function telemetryEnabled(): boolean {
 }
 
 /**
- * Turn reporting off, durably.
- *
- * Writes the same user-level setting the settings editor writes, so the two
- * entry points cannot disagree. The setting is `application`-scoped in
- * `package.json`, so this is the only target that can hold it: a workspace
- * cannot override it, which matters because a repository shipping
- * `.vscode/settings.json` must not be able to silently re-enable reporting for
- * someone who turned it off.
- *
- * It deliberately does **not** reach into the engine's own config file. That
- * file governs every client on the machine, including the user's terminal
- * sessions, and this extension speaks only for the engine it starts.
- */
-export async function disableTelemetry(): Promise<void> {
-  await vscode.workspace
-    .getConfiguration(NAMESPACE)
-    .update(TELEMETRY_SETTING, false, vscode.ConfigurationTarget.Global);
-}
-
-/**
  * The telemetry environment the extension hands the engine it starts.
  *
  * This function is the whole of the extension's telemetry surface area, and it

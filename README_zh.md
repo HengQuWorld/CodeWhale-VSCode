@@ -242,6 +242,7 @@ code --install-extension ./brotherwhale-vscode-0.8.3.vsix --force
 | `brotherwhale.costCurrency` | `"auto"` | `auto` 跟随界面语言（中文 → CNY，否则 USD），也可强制 `usd` / `cny`。没有原生 CNY 价格时回退到 USD |
 | `brotherwhale.backgroundThreadNotifications` | `true` | 后台线程需要你审批或输入时弹出 VS Code 通知（每次等待只提醒一次；Threads 侧栏徽章与计数始终实时） |
 | `brotherwhale.completionSound` | `true` | 一轮对话跑完时发出提示音 —— 正在看的会话与后台线程都包括。失败或中断的轮次不发声；同一时刻完成的轮次只响一次 |
+| `brotherwhale.telemetry` | `true` | 让本窗口启动的引擎统计匿名用量。application 作用域；具体收集内容由引擎负责（见[用量统计](#用量统计)） |
 
 ## 工作原理
 
@@ -297,30 +298,9 @@ code --install-extension /path/to/brotherwhale-vscode-0.8.3.vsix --force
 
 ### 用量统计
 
-用量统计发生在**引擎**里，不在扩展里。扩展不持有任何载荷、缓冲、端点或自己的身份标识；它只告诉引擎这些会话属于哪个客户端（`vscode-extension`），以及你是否想上报。其余全部遵循 CodeWhale CLI / TUI 已经在实现的公开契约（CodeWhale 仓库的 `docs/TELEMETRY.md`，schema v3）。
+用量统计在扩展启动的**引擎**里实现 —— 与 CodeWhale CLI / TUI 用的是同一套代码。前端只提供 `brotherwhale.telemetry` 这一个开关，以及会话上报所用的客户端名；具体收集什么、如何标识、发送到哪里都由引擎实现决定，契约见 [`docs/TELEMETRY.md`](https://github.com/Hmbown/Codewhale/blob/main/docs/TELEMETRY.md)。
 
-统计的内容：
-
-- 你运行的版本、操作系统与 CPU 架构；
-- 会话时长与结束方式；
-- 回合数、工具调用与审批次数的总计。
-
-**绝不**收集：对话、代码、提示词、文件、仓库或分支名、工作区路径、模型 id、provider 表名、MCP 服务器名、审批文本、错误正文、以及任何凭据。没有逐回合或逐工具的时间线，单个事件也不带时间戳。每个字段都是整数、布尔值或闭集枚举值——载荷中没有任何自由文本字符串。你只会被一个保存在本机、每 90 天更换一次的随机 ID 标识，该 ID 绝不从主机名、用户名或机器码派生。
-
-该 ID 与你的终端会话**共用**，因为它属于 CodeWhale 这一个安装，而不属于某个客户端。同时用过扩展与命令行的安装，算一个安装，不是两个。
-
-批次在接收端会剥离 IP：不存储、不记录，也不与上述 ID 关联。
-
-**关闭方法**：把 `brotherwhale.telemetry` 设为 `false`，或在首次提示中选择「关闭」。此后扩展会以关闭状态启动引擎。由于引擎在启动时读取该设置，修改会在**下次引擎启动**时生效 —— 执行「CodeWhale: Restart Engine」可立即生效。
-
-该设置为 **application 作用域**：只能写入用户设置。仓库自带的 `.vscode/settings.json` 无法为你重新打开上报 —— 这与 VS Code 给自身遥测设置的其实是同一个作用域。
-
-这个设置**刻意不做**两件事：
-
-- 它不会清除本机已经排队的内容。那份缓冲、以及清除它的开关，属于共享的 CodeWhale 主目录，而不是某一个窗口。若要停止并清空**本机所有客户端**的上报，请执行 `codewhale config set telemetry false`。
-- 它不会改变你终端会话的行为。扩展只代表它自己启动的那个引擎。
-
-若希望完全不发送任何数据、但保留本地记录（便于查看自己的载荷），把引擎配置里的 `telemetry_endpoint` 设为空字符串。批次会写入 CodeWhale 主目录下的 `dryrun.jsonl`，不发起任何请求。
+把它设为 `false` 即可关闭上报。该设置默认开启，且为 application 作用域（只能写入用户设置），仓库自带的 `.vscode/settings.json` 无法为你重新打开上报。引擎在启动时读取它，因此修改会在**下次引擎启动**时生效 —— 执行「CodeWhale: Restart Engine」可立即生效。
 
 ## 开发指南
 
