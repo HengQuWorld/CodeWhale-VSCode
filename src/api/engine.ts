@@ -18,42 +18,216 @@ function homeDir(): string {
   return os.homedir();
 }
 
-function resolveEnginePath(configuredPath: string): string {
-  if (configuredPath !== "codewhale") {
-    return configuredPath;
-  }
+// The engine's own name, and the only configured value that triggers a search:
+// anything else is a path the user chose.
+//
+// The search exists because `codewhale` is not enough to launch it. On PATH it
+// is a real executable image on Unix, but on Windows it is usually an
+// npm-family shim — a generated `codewhale.cmd` next to the prefix — which
+// CreateProcess cannot start, so a PATH hit there can still be unlaunchable:
+// the user's shell resolves it by extension and this process cannot. A window's
+// PATH can also predate the install, because VS Code inherits the environment
+// it was started with. So the known real layouts are probed first, PATH after
+// them, and PATH's shims last.
+export const ENGINE_BINARY_NAME = "codewhale";
 
+export interface EngineLookup {
+  platform?: NodeJS.Platform;
+  env?: NodeJS.ProcessEnv;
+  home?: string;
+  exists?: (candidate: string) => boolean;
+  readdir?: (dir: string) => string[];
+}
+
+export interface EngineResolution {
+  path: string;
+  /** Every location probed, in order, so a failure can name them. */
+  searched: string[];
+}
+
+function fileExists(candidate: string): boolean {
+  try { return fs.existsSync(candidate); } catch { return false; }
+}
+
+function directoryEntries(dir: string): string[] {
+  try { return fs.readdirSync(dir); } catch { return []; }
+}
+
+/** The executable inside an npm-family global prefix. */
+function prefixBinary(prefix: string, windows: boolean): string {
+  return windows
+    ? path.join(prefix, "node_modules", "codewhale", "bin", "downloads", "codewhale.exe")
+    : path.join(prefix, "lib", "node_modules", "codewhale", "bin", "downloads", "codewhale");
+}
+
+/** The install locations this extension has always probed, in their original
+ * order, and then newer probes appended after them.
+ *
+ * Both halves matter. Resolution is first-hit-wins, so an install a macOS or
+ * Linux user already had must keep resolving to the same binary — reordering
+ * these would silently switch which engine runs. The appended probes only get
+ * consulted when none of the originals exists, which is exactly the stale-PATH
+ * case (a window started before the install) they exist for. */
+function posixCandidates(env: NodeJS.ProcessEnv, home: string): string[] {
+  const candidates = [
+    path.join(home, ".cargo", "bin", "codewhale"),
+    path.join(home, ".cargo", "bin", "codewhale-tui"),
+    "/opt/homebrew/lib/node_modules/codewhale/bin/downloads/codewhale",
+    "/usr/local/lib/node_modules/codewhale/bin/downloads/codewhale",
+    path.join(home, ".npm-global", "lib", "node_modules", "codewhale", "bin", "downloads", "codewhale"),
+    path.join(home, ".local", "share", "codewhale", "bin", "downloads", "codewhale"),
+    "/home/linuxbrew/.linuxbrew/lib/node_modules/codewhale/bin/downloads/codewhale",
+  ];
+  // Appended: an explicit npm prefix is the one location npm itself names,
+  // then the directories a manager installs a real executable into.
+  const prefix = env.npm_config_prefix;
+  if (prefix) candidates.push(prefixBinary(prefix, false), path.join(prefix, "bin", "codewhale"));
+  candidates.push(
+    "/opt/homebrew/bin/codewhale",
+    "/usr/local/bin/codewhale",
+    path.join(home, ".local", "bin", "codewhale"),
+    path.join(home, ".bun", "bin", "codewhale"),
+  );
+  return candidates;
+}
+
+function windowsCandidates(env: NodeJS.ProcessEnv, home: string, readdir: (dir: string) => string[]): string[] {
+  const appData = env.APPDATA || path.join(home, "AppData", "Roaming");
+  const localAppData = env.LOCALAPPDATA || path.join(home, "AppData", "Local");
+  const programFiles = env.ProgramFiles || env.PROGRAMFILES || "C:\\Program Files";
   const candidates: string[] = [];
 
-  if (isWindows) {
-    const appData = process.env.APPDATA || path.join(homeDir(), "AppData", "Roaming");
-    const localAppData = process.env.LOCALAPPDATA || path.join(homeDir(), "AppData", "Local");
-    candidates.push(
-      path.join(appData, "npm", "node_modules", "codewhale", "bin", "downloads", "codewhale.exe"),
-      path.join(appData, "npm", "node_modules", "codewhale", "bin", "downloads", "codewhale.cmd"),
-      path.join(localAppData, "Yarn", "Data", "global", "node_modules", "codewhale", "bin", "downloads", "codewhale.exe"),
-      path.join(homeDir(), "AppData", "Roaming", "nvm", "v" + process.version.slice(1), "node_modules", "codewhale", "bin", "downloads", "codewhale.exe"),
-    );
-  } else {
-    candidates.push(
-      path.join(homeDir(), ".cargo", "bin", "codewhale"),
-      path.join(homeDir(), ".cargo", "bin", "codewhale-tui"),
-      "/opt/homebrew/lib/node_modules/codewhale/bin/downloads/codewhale",
-      "/usr/local/lib/node_modules/codewhale/bin/downloads/codewhale",
-      path.join(homeDir(), ".npm-global/lib/node_modules/codewhale/bin/downloads/codewhale"),
-      path.join(homeDir(), ".local/share/codewhale/bin/downloads/codewhale"),
-      "/home/linuxbrew/.linuxbrew/lib/node_modules/codewhale/bin/downloads/codewhale",
-    );
+  // npm-family global prefixes, in the order npm itself would report them.
+  if (env.npm_config_prefix) {
+    candidates.push(path.join(env.npm_config_prefix, "codewhale.exe"), prefixBinary(env.npm_config_prefix, true));
+  }
+  candidates.push(prefixBinary(path.join(appData, "npm"), true));
+  candidates.push(prefixBinary(path.join(localAppData, "pnpm"), true));
+  candidates.push(prefixBinary(path.join(localAppData, "Yarn", "Data", "global"), true));
+
+  // nvm-windows keeps each Node version's global packages in its own version
+  // directory, reached through %NVM_SYMLINK%. The version this extension host
+  // was built against says nothing about which one the user installed with, so
+  // the directories are listed instead of guessed from process.version.
+  const nvmHome = env.NVM_HOME || path.join(appData, "nvm");
+  const nvmSymlink = env.NVM_SYMLINK || path.join(programFiles, "nodejs");
+  candidates.push(prefixBinary(nvmSymlink, true), prefixBinary(nvmHome, true));
+  for (const entry of readdir(nvmHome)) {
+    if (/^v?\d/.test(entry)) candidates.push(prefixBinary(path.join(nvmHome, entry), true));
   }
 
-  for (const candidate of candidates) {
-    try {
-      if (fs.existsSync(candidate)) {
-        return candidate;
-      }
-    } catch { /* skip */ }
+  // Installers and managers that place a real executable on the user PATH.
+  candidates.push(
+    path.join(localAppData, "Programs", "CodeWhale", "bin", "codewhale.exe"),
+    path.join(localAppData, "Microsoft", "WinGet", "Links", "codewhale.exe"),
+    path.join(localAppData, "Volta", "bin", "codewhale.exe"),
+    path.join(home, ".bun", "bin", "codewhale.exe"),
+    path.join(home, "scoop", "shims", "codewhale.exe"),
+  );
+  return candidates;
+}
+
+function pathDirectories(env: NodeJS.ProcessEnv, windows: boolean): string[] {
+  const raw = env.PATH || env.Path || env.path || "";
+  return raw.split(windows ? ";" : ":").map(entry => entry.trim().replace(/^"(.*)"$/, "$1")).filter(Boolean);
+}
+
+/** The executable an npm-family shim runs: a shim sits either in the global
+ * prefix itself or in its `node_modules/.bin`, and both name the package
+ * directory the same way. */
+function shimTarget(shimPath: string): string {
+  const dir = path.dirname(shimPath);
+  const packageRoot = /[\\/]\.bin$/.test(dir)
+    ? path.dirname(dir)
+    : path.join(dir, "node_modules");
+  return path.join(packageRoot, "codewhale", "bin", "downloads", "codewhale.exe");
+}
+
+/** Resolve the configured engine path. A configured value other than the bare
+ * default is used verbatim — the user said exactly what to run. */
+export function resolveEngine(configuredPath: string, lookup: EngineLookup = {}): EngineResolution {
+  const platform = lookup.platform ?? process.platform;
+  const windows = platform === "win32";
+  const env = lookup.env ?? process.env;
+  const home = lookup.home ?? os.homedir();
+  const exists = lookup.exists ?? fileExists;
+  const readdir = lookup.readdir ?? directoryEntries;
+  const searched: string[] = [];
+
+  if (configuredPath !== ENGINE_BINARY_NAME) return { path: configuredPath, searched };
+
+  const binary = windows ? "codewhale.exe" : "codewhale";
+  const directories = pathDirectories(env, windows);
+  const known = windows
+    ? windowsCandidates(env, home, readdir)
+    : posixCandidates(env, home);
+  const shims = directories.flatMap(dir =>
+    windows ? [path.join(dir, "codewhale.cmd"), path.join(dir, "codewhale.bat")] : []);
+
+  // A PATH directory is only probed on Windows. There, Node cannot start a
+  // `.cmd` shim and CreateProcess appends only `.exe`, so a real install on a
+  // directory PATH happens to hold would be missed. On POSIX the bare name is
+  // returned instead and the kernel's own search resolves it — with the
+  // executable-bit check this existence probe does not make, and which a hand
+  // written scan would only get wrong.
+  const pathEntries = windows ? directories.map(dir => path.join(dir, binary)) : [];
+
+  // 1. Executable images: the install layouts, then PATH.
+  for (const candidate of [...known, ...pathEntries]) {
+    if (searched.includes(candidate)) continue;
+    searched.push(candidate);
+    if (exists(candidate)) return { path: candidate, searched };
   }
-  return isWindows ? "codewhale.exe" : "codewhale";
+
+  // 2. The package a PATH shim wraps — still a real executable image.
+  for (const shim of shims) {
+    const target = shimTarget(shim);
+    if (searched.includes(target)) continue;
+    searched.push(target);
+    if (exists(target)) return { path: target, searched };
+  }
+
+  // 3. The shim itself, launched through the command interpreter.
+  for (const shim of shims) {
+    searched.push(shim);
+    if (exists(shim)) return { path: shim, searched };
+  }
+
+  return { path: binary, searched };
+}
+
+/** A `.cmd`/`.bat` shim is not an executable image: Windows will not start one
+ * without an interpreter, so it is handed to the command processor as a single
+ * pre-quoted command line. Every argument here is a local path or a fixed flag,
+ * and the engine path has already been probed as a real file, so quoting is
+ * complete: the whole line is wrapped once more for `cmd /s`. */
+export interface EngineLaunch {
+  command: string;
+  args: string[];
+  verbatim: boolean;
+}
+
+export function engineLaunch(enginePath: string, args: string[], lookup: EngineLookup = {}): EngineLaunch {
+  const platform = lookup.platform ?? process.platform;
+  const env = lookup.env ?? process.env;
+  if (platform === "win32" && /\.(cmd|bat)$/i.test(enginePath)) {
+    return {
+      command: env.ComSpec || env.COMSPEC || "cmd.exe",
+      args: ["/d", "/s", "/c", `""${enginePath}" ${args.map(arg => `"${arg}"`).join(" ")}"`],
+      verbatim: true,
+    };
+  }
+  return { command: enginePath, args, verbatim: false };
+}
+
+/** A spawn failure the user can act on: name the setting and the recovery. The
+ * full probed list stays in the output channel rather than in a toast. */
+function engineLaunchError(error: Error, enginePath: string, searched: string[]): Error {
+  if ((error as NodeJS.ErrnoException).code !== "ENOENT") return error;
+  const probed = searched.length ? ` ${searched.length} locations were probed; see the CodeWhale output channel for the list.` : "";
+  return new Error(
+    `CodeWhale engine not found at "${enginePath}".${probed} Install CodeWhale, restart VS Code so it sees the new PATH, or set "brotherwhale.enginePath" to the full path (run \`where codewhale\` in a terminal).`
+  );
 }
 
 // Older Runtimes reject --port 0. Select a candidate here, then require the
@@ -93,7 +267,6 @@ export class CodeWhaleEngine {
   private _workspaceKey = "";
   private generation = 0;
   private disposed = false;
-
   constructor(
     private outputChannel: vscode.OutputChannel,
     private context: vscode.ExtensionContext
@@ -145,7 +318,7 @@ export class CodeWhaleEngine {
     fs.mkdirSync(tasksDir, { recursive: true });
     fs.mkdirSync(runtimeDir, { recursive: true });
     const config = vscode.workspace.getConfiguration("brotherwhale");
-    const enginePath = resolveEnginePath(config.get<string>("enginePath", "codewhale"));
+    const { path: enginePath, searched } = resolveEngine(config.get<string>("enginePath", "codewhale"));
     const args = workspace ? ["--workspace", workspace] : [];
     args.push("serve", "--http", "--host", this._host, "--port", String(requestedPort));
     const extraPaths = isWindows
@@ -176,9 +349,24 @@ export class CodeWhaleEngine {
     delete env.DEEPSEEK_RUNTIME_TOKEN;
     this.log(`Starting: ${enginePath} ${args.join(" ")}`);
     this.log(`With CODEWHALE_RUNTIME_DIR=${runtimeDir}`);
+    // A bare name here means every known install location was probed and none
+    // held one: the child is about to depend on PATH alone, so record what was
+    // tried before the spawn line, not after a failure.
+    if (!path.isAbsolute(enginePath)) {
+      this.log(searched.length
+        ? `No CodeWhale install in ${searched.length} known locations; relying on PATH for "${enginePath}"`
+        : `Relying on PATH for "${enginePath}"`);
+      if (searched.length) this.log(`Probed: ${searched.join(", ")}`);
+    }
     let child: ChildProcess;
+    const launch = engineLaunch(enginePath, args);
     try {
-      child = spawn(enginePath, args, { stdio: ["ignore", "pipe", "pipe"], env, windowsHide: true });
+      child = spawn(launch.command, launch.args, {
+        stdio: ["ignore", "pipe", "pipe"],
+        env,
+        windowsHide: true,
+        ...(launch.verbatim ? { windowsVerbatimArguments: true } : {}),
+      });
     } catch (error) {
       this._token = null;
       throw error;
@@ -221,7 +409,11 @@ export class CodeWhaleEngine {
       this.log(`Engine exited (code=${code}, signal=${signal})`);
       clear();
     });
-    child.once("error", (error) => { outputLines?.close(); errorLines?.close(); spawnError = error; clear(); });
+    child.once("error", (error) => {
+      outputLines?.close(); errorLines?.close();
+      spawnError = engineLaunchError(error, enginePath, searched);
+      clear();
+    });
     try {
       const deadline = Date.now() + STARTUP_TIMEOUT_MS;
       while (true) {
