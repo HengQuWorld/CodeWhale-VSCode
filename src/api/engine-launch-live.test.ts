@@ -1,14 +1,15 @@
 /**
  * Live check: the extension's own resolve → launch → readiness → auth path
- * against a real installed `codewhale` binary.
+ * against a real installed `codewhale` binary, plus the premise the stale-owner
+ * fix rests on — that a process killed outright leaves its owner record behind.
  *
  * Not part of the default suite — it spawns the engine and needs one on PATH.
  * Run with:
  *   CODEWHALE_LIVE_ENGINE=1 npx vitest run src/api/engine-launch-live.test.ts
  *
- * It exists because the resolved path, the `cmd` wrapper for a `.cmd` shim, and
- * the listener announcement are exactly what a mocked spawn cannot exercise:
- * they are machine- and platform-specific.
+ * It exists because the resolved path, the `cmd` wrapper for a `.cmd` shim, the
+ * listener announcement, and the owner record's location are exactly what a
+ * mocked spawn cannot exercise: they are machine- and platform-specific.
  */
 import { describe, expect, it, vi } from "vitest";
 import { spawn, ChildProcess } from "child_process";
@@ -43,6 +44,7 @@ function probe(port: number, token?: string): Promise<number | null> {
 
 interface Started {
   root: string;
+  engineHome: string;
   token: string;
   child: ChildProcess;
   port: number;
@@ -100,7 +102,13 @@ async function startEngine(): Promise<Started> {
     throw error;
   });
 
-  return { root, token, child, port };
+  return { root, engineHome, token, child, port };
+}
+
+function ownerRecords(engineHome: string): string[] {
+  const runDir = path.join(engineHome, "run");
+  if (!fs.existsSync(runDir)) return [];
+  return fs.readdirSync(runDir).filter(name => name.endsWith(".owner.json"));
 }
 
 async function settled(child: ChildProcess): Promise<void> {
@@ -110,13 +118,40 @@ async function settled(child: ChildProcess): Promise<void> {
 
 live("launching a real engine", () => {
   it("resolves a real binary, starts it, and is answered only under its token", async () => {
-    const { root, token, child, port } = await startEngine();
+    const started = await startEngine();
+    const { root, engineHome, token, child, port } = started;
     try {
       expect(await probe(port)).toBe(401);
       expect(await probe(port, token)).toBe(200);
+
+      // The stale-owner fix depends on two facts about a real engine: its owner
+      // record sits in `<home>/run/`, and it names the process holding the
+      // store. Check both against the binary rather than the source reading
+      // alone. (Windows names the file `daemon.owner.json`; the directory and
+      // the `pid` field are the same.)
+      const records = ownerRecords(engineHome);
+      expect(records.length).toBeGreaterThan(0);
+      const receipt = JSON.parse(fs.readFileSync(path.join(engineHome, "run", records[0]), "utf8"));
+      expect(receipt.pid).toBe(child.pid);
     } finally {
       child.kill("SIGTERM");
       await settled(child);
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  }, 90000);
+
+  it("leaves its owner record behind when it is killed outright", async () => {
+    // This is why a window reload strands the next start: the engine retires the
+    // record as it exits, and a forced kill never gets to.
+    const { root, engineHome, child } = await startEngine();
+    try {
+      expect(ownerRecords(engineHome).length).toBeGreaterThan(0);
+
+      child.kill("SIGKILL");
+      await settled(child);
+
+      expect(ownerRecords(engineHome).length).toBeGreaterThan(0);
+    } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }
   }, 90000);

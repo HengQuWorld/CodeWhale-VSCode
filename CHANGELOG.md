@@ -6,6 +6,8 @@
 
 - **The extension can start CodeWhale on Windows again** — It looked for the engine in a handful of fixed places and then ran the bare name `codewhale.exe`. On Windows that name is usually a `.cmd` shim, which Windows will not start without a command interpreter, and a window opened before you installed CodeWhale keeps the PATH it started with — so startup failed with `spawn codewhale.exe ENOENT` while `codewhale` worked fine in a terminal. It now looks where CodeWhale actually installs on Windows, falls back to your PATH, and runs a shim the way the terminal would. macOS and Linux are unchanged: the same installs still resolve to the same binary.
 
+- **Reloading the window no longer leaves CodeWhale unable to start** — Reloading kills the engine outright, and the record it used to hold its store survives that; the engine then refused to start over it (`opening selected Windows owner; refusing fallback`) until the file was deleted by hand. The extension now clears a record whose process is provably gone — and only such a one: a record naming a running CodeWhale, yours or another window's, is left alone.
+
 ## 0.8.4
 
 Everything here is client-side except where an entry says otherwise — the engine halves, and which engine release carries them, are listed under **Upstream TUI PRs** at the end of this section.
