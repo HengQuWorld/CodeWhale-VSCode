@@ -6,6 +6,9 @@
 [![Release](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/release.yml/badge.svg)](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/release.yml)
 [![VS Code](https://img.shields.io/badge/VS%20Code-1.85+-informational)](https://code.visualstudio.com/)
 [![VSIX](https://img.shields.io/badge/VSIX-~390%20KB-brightgreen)](https://github.com/HengQuWorld/CodeWhale-VSCode/releases)
+[![macOS](https://img.shields.io/badge/macOS-supported-brightgreen)](#requirements)
+[![Windows](https://img.shields.io/badge/Windows-supported-brightgreen)](#requirements)
+[![Linux](https://img.shields.io/badge/Linux-supported-brightgreen)](#requirements)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
 CodeWhale for VS Code is the **graphical frontend** for [CodeWhale](https://github.com/Hmbown/CodeWhale) — an open-source, actively developed coding agent. It brings the agent into a native VS Code sidebar, so you get the full engine (reading your workspace, editing files, running commands, searching the web, delegating to sub-agents) without leaving the editor.
@@ -77,6 +80,7 @@ Keep the engine current with `codewhale update`; `codewhale --version` is the ch
 | **VS Code 1.85+** | Or a compatible IDE — Trae CN is supported |
 | **CodeWhale engine** | The `codewhale` CLI. **Not bundled** — install it separately (below) |
 | **Node.js** | Only for building the extension from source, or installing the engine via npm |
+| **Operating system** | macOS, Windows or Linux |
 
 ### 1. Install the engine
 

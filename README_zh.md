@@ -6,6 +6,9 @@
 [![Release](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/release.yml/badge.svg)](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/release.yml)
 [![VS Code](https://img.shields.io/badge/VS%20Code-1.85+-informational)](https://code.visualstudio.com/)
 [![VSIX](https://img.shields.io/badge/VSIX-~390%20KB-brightgreen)](https://github.com/HengQuWorld/CodeWhale-VSCode/releases)
+[![macOS](https://img.shields.io/badge/macOS-supported-brightgreen)](#系统要求)
+[![Windows](https://img.shields.io/badge/Windows-supported-brightgreen)](#系统要求)
+[![Linux](https://img.shields.io/badge/Linux-supported-brightgreen)](#系统要求)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
 CodeWhale for VS Code 是 [CodeWhale](https://github.com/Hmbown/CodeWhale) 的**图形化前端**。CodeWhale 是一个开源且持续活跃开发的编程代理，本扩展把它装进 VS Code 原生侧边栏：读取工作区、修改文件、执行命令、搜索网络、派发子代理，全程不必离开编辑器。
@@ -77,6 +80,7 @@ CodeWhale for VS Code 是 [CodeWhale](https://github.com/Hmbown/CodeWhale) 的**
 | **VS Code 1.85+** | 或兼容的 IDE —— 支持 Trae CN |
 | **CodeWhale 引擎** | 即 `codewhale` CLI。**未随扩展打包**，需单独安装（见下） |
 | **Node.js** | 仅在从源码构建扩展、或通过 npm 安装引擎时需要 |
+| **操作系统** | macOS、Windows 或 Linux |
 
 ### 1. 安装引擎
 
