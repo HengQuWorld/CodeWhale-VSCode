@@ -43,8 +43,10 @@ vi.mock("fs", async (importOriginal) => {
 import { readFileSync, statSync, writeFileSync } from "fs";
 import * as os from "os";
 import * as path from "path";
-import { window } from "vscode";
+import { commands, window } from "vscode";
 import { ChatProvider } from "./chat-provider";
+
+const executeCommand = vi.mocked(commands.executeCommand);
 
 const PNG_HEADER = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 const JPEG_HEADER = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]);
@@ -426,6 +428,17 @@ describe("dropped file blobs (Finder / Explorer drops)", () => {
     expect(vi.mocked(writeFileSync)).not.toHaveBeenCalled();
     expect(errorMessages(postMessage)[0]).toContain("50 MB");
   });
+
+  it("answers a drop the webview could not read", async () => {
+    // Chromium can hand the webview a File whose bytes it refuses to serve;
+    // the read fails asynchronously, so this message is the only answer the
+    // user can get. Silence there reads as "the drop did nothing".
+    const { provider, postMessage } = createProvider();
+
+    await (provider as any).handleWebviewMessage({ type: "dropUnreadable", name: "report.pdf" });
+
+    expect(errorMessages(postMessage)[0]).toContain("could not be read");
+  });
 });
 
 describe("image-kind path attachment validation (TUI /attach parity)", () => {
@@ -568,6 +581,82 @@ describe("attach-file button (dialog path)", () => {
 
     expect(lastAttachments(postMessage).attachments).toHaveLength(1);
     expect(lastAttachments(postMessage).attachments[0]).toMatchObject({ path: "/tmp/ok.md" });
+  });
+});
+
+describe("Explorer context-menu attach (brotherwhale.attachToChat)", () => {
+  beforeEach(() => {
+    vi.mocked(statSync).mockReset();
+    vi.mocked(statSync).mockReturnValue({ isFile: () => true, size: 16 } as any);
+    executeCommand.mockReset();
+    executeCommand.mockResolvedValue(undefined as any);
+  });
+
+  it("reveals the chat and attaches the file the command was given", async () => {
+    const { provider, postMessage } = createProvider();
+
+    await (provider as any).handleExplorerAttach([{ fsPath: "/w/src/app.ts" }]);
+
+    expect(vi.mocked(executeCommand).mock.calls).toEqual([
+      ["workbench.view.extension.brotherwhale"],
+      ["brotherwhale.chat.focus"],
+    ]);
+    expect(lastAttachments(postMessage).attachments).toEqual([
+      expect.objectContaining({ kind: "file", path: "/w/src/app.ts" }),
+    ]);
+  });
+
+  it("reveals the chat before it publishes, so the chips land somewhere visible", async () => {
+    const { provider, postMessage } = createProvider();
+    const order: string[] = [];
+    vi.mocked(executeCommand).mockImplementation(async (command: string) => {
+      order.push("reveal:" + command);
+      return undefined;
+    });
+    postMessage.mockImplementation((msg: any) => {
+      if (msg.type === "attachmentsChanged") order.push("attachmentsChanged");
+    });
+
+    await (provider as any).handleExplorerAttach([{ fsPath: "/w/a.ts" }]);
+
+    expect(order[0]).toBe("reveal:workbench.view.extension.brotherwhale");
+    expect(order).toContain("attachmentsChanged");
+    expect(order.indexOf("attachmentsChanged")).toBeGreaterThan(0);
+  });
+
+  it("attaches a multi-selection once per path", async () => {
+    const { provider, postMessage } = createProvider();
+
+    await (provider as any).handleExplorerAttach([
+      { fsPath: "/w/a.ts" },
+      { fsPath: "/w/b.ts" },
+      { fsPath: "/w/a.ts" },
+    ]);
+
+    expect(lastAttachments(postMessage).attachments.map((a: any) => a.path)).toEqual([
+      "/w/a.ts",
+      "/w/b.ts",
+    ]);
+  });
+
+  it("does nothing at all when the command arrives with nothing", async () => {
+    const { provider, postMessage } = createProvider();
+
+    await (provider as any).handleExplorerAttach(undefined);
+    await (provider as any).handleExplorerAttach([undefined]);
+    await (provider as any).handleExplorerAttach([{ fsPath: "" }]);
+
+    expect(vi.mocked(executeCommand)).not.toHaveBeenCalled();
+    expect(postMessage).not.toHaveBeenCalled();
+  });
+
+  it("still attaches when the reveal itself fails", async () => {
+    const { provider, postMessage } = createProvider();
+    vi.mocked(executeCommand).mockRejectedValue(new Error("no such command"));
+
+    await (provider as any).handleExplorerAttach([{ fsPath: "/w/a.ts" }]);
+
+    expect(lastAttachments(postMessage).attachments).toHaveLength(1);
   });
 });
 

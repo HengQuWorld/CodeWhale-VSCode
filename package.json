@@ -76,6 +76,10 @@
       {
         "command": "brotherwhale.restartEngine",
         "title": "%commands.restartEngine.title%"
+      },
+      {
+        "command": "brotherwhale.attachToChat",
+        "title": "%commands.attachToChat.title%"
       }
     ],
     "menus": {
@@ -84,6 +88,19 @@
           "command": "brotherwhale.openConfig",
           "when": "view == brotherwhale.chat",
           "group": "navigation"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "brotherwhale.attachToChat",
+          "when": "!explorerResourceIsFolder && (resourceScheme == file || resourceScheme == vscode-remote)",
+          "group": "5_chat@2"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "brotherwhale.attachToChat",
+          "when": "false"
         }
       ]
     },

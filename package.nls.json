@@ -8,6 +8,7 @@
   "commands.compactContext.title": "CodeWhale: Compact Context",
   "commands.restartEngine.title": "CodeWhale: Restart Engine",
   "commands.openConfig.title": "CodeWhale: Open Config Panel",
+  "commands.attachToChat.title": "CodeWhale: Attach to Conversation",
   "config.enginePath.description": "Path to the codewhale binary",
   "config.defaultModel.description": "Fallback model for new threads: used only for a provider route that has no entry in `brotherwhale.modelByProvider` and no model in its own runtime catalog.",
   "config.defaultMode.description": "Default mode for new threads: agent (Act), plan, or operate",

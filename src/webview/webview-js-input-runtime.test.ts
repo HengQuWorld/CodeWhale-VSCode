@@ -135,8 +135,15 @@ function createHarness() {
   class FakeFileReader {
     public result: string | null = null;
     public onload: (() => void) | null = null;
+    public onerror: (() => void) | null = null;
+    /** Set by a test that wants the read to fail instead of resolving. */
+    public static failReads = false;
     readAsDataURL(file: any): void {
       readAsDataUrlCalls.push(file);
+      if (FakeFileReader.failReads) {
+        if (this.onerror) this.onerror();
+        return;
+      }
       this.result = `data:${file.type};base64,PROBE`;
       if (this.onload) this.onload();
     }
@@ -175,6 +182,7 @@ function createHarness() {
     postMessages,
     fire,
     receive,
+    FileReader: FakeFileReader,
     input: getEl("input"),
     attachmentsArea: getEl("attachments-area"),
     getElement: getEl,
@@ -310,6 +318,20 @@ describe("webview-js-input runtime: drop routing", () => {
     expect(h.postMessages).toEqual([]);
     expect(ev.__calls).toEqual([]);
   });
+
+  it("reports a dropped blob it cannot read instead of doing nothing", () => {
+    const h = createHarness();
+    h.FileReader.failReads = true;
+    try {
+      h.fire("drop", dropOf(dataTransferOf({
+        types: ["Files"],
+        files: [makeFile("report.pdf", "application/pdf", 100)],
+      })));
+    } finally {
+      h.FileReader.failReads = false;
+    }
+    expect(h.postMessages).toEqual([{ type: "dropUnreadable", name: "report.pdf" }]);
+  });
 });
 
 describe("webview-js-input runtime: a text drag stays text", () => {
@@ -371,6 +393,20 @@ describe("webview-js-input runtime: a text drag stays text", () => {
       data: { "text/plain": "~/.env" },
     })));
     expect(h2.postMessages).toEqual([{ type: "attachPaths", uris: ["~/.env"] }]);
+  });
+
+  it("does not read a row label as a path on its own", () => {
+    // The label an in-window drag carries is workspace-relative and is not a
+    // path protocol: taken alone it stays text, and the attach comes from the
+    // structured type beside it, never from this guess.
+    const h = createHarness();
+    const ev = dropOf(dataTransferOf({
+      types: ["text/plain"],
+      data: { "text/plain": "src/webview/webview-html.ts" },
+    }));
+    h.fire("drop", ev);
+    expect(h.postMessages).toEqual([]);
+    expect(ev.__calls).toEqual([]);
   });
 });
 

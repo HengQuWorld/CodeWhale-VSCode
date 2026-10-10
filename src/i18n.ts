@@ -276,6 +276,8 @@ interface Translations {
   imagePasteInvalid: string;
   imagePasteTooLarge: string;
   fileDropTooLarge: string;
+  /** A dropped/pasted blob whose bytes the webview could not read at all. */
+  fileDropUnreadable: string;
   changes: string;
   noFileChanges: string;
   fileChanges: string;
@@ -700,6 +702,7 @@ const en: Translations = {
   imagePasteInvalid: "The image content could not be read",
   imagePasteTooLarge: "Image exceeds the 5 MB per-image limit; downscale or crop it first",
   fileDropTooLarge: "Dropped file exceeds the 50 MB limit; use the attach button for larger files",
+  fileDropUnreadable: "The dropped file's contents could not be read; use the attach button instead",
   changes: "Changes",
   noFileChanges: "No file changes in this session",
   fileChanges: "Changes",
@@ -1112,6 +1115,7 @@ const zhCn: Translations = {
   imagePasteInvalid: "无法读取图片内容",
   imagePasteTooLarge: "图片超过单张 5 MB 上限，请先缩小或裁剪",
   fileDropTooLarge: "拖拽文件超过 50 MB 上限，更大的文件请使用附件按钮添加",
+  fileDropUnreadable: "无法读取拖入文件的内容，请改用附件按钮添加",
   changes: "变更",
   noFileChanges: "本次会话无文件变更",
   fileChanges: "文件变更",

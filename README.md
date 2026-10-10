@@ -139,7 +139,7 @@ Click the **CodeWhale icon** in the activity bar. The extension starts the engin
 - **Streaming turns** with a collapsible thinking panel, tool-call cards that show the actual arguments (e.g. the shell command as a `$ ...` block), and per-turn `↑/↓` token chips.
 - **Mid-turn steering** — while a turn is running, pressing Enter sends guidance into that turn instead of starting a new one (mirrors the engine's steering input); the steered message is marked with a steer badge.
 - **One send/stop button** that reflects the real turn state, plus **Undo** and **Retry** for the last turn.
-- **Attachments** — `/attach` opens a native file picker for images, PDFs, and other files.
+- **Attachments** — `/attach`, the 📎 button, or **CodeWhale: Attach to Conversation** on a file in the Explorer's context menu; images can be pasted with `Ctrl/Cmd+V`, and a file dragged in from Finder or another window attaches the same way. (A drag that starts inside VS Code — from the Explorer tree or an editor tab — never reaches the chat webview: VS Code keeps it for its own editor-group drop target. Use the context-menu entry for those.)
 - **Message navigation rail** — dots along the right edge jump to each user message; `Ctrl/Cmd+Up` / `Ctrl/Cmd+Down` step between them.
 
 ### Modes and permission posture

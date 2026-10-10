@@ -2,7 +2,13 @@
 
 ## Unreleased
 
+### New Features
+
+- **A file picked in the Explorer can be attached to the conversation** — Right-click a file in the Explorer and choose **CodeWhale: Attach to Conversation**: the chat comes into view and the file lands in the composer as an attachment, exactly as if it had been dropped there (images still get their thumbnail and their up-front validation, everything else rides the same `@path` mention). It is a command rather than a drop because VS Code never hands an in-window drag to a webview: for a drag that began in its own DOM — an Explorer row, an editor tab — pointer events are held off the webview element for the whole drag (that is what makes a file dropped *over* a webview open in an editor group), so the chat sees no `dragover`, no `drop`, and not even the drag-over highlight. Measured, not assumed: with the drop listeners installed and logging to the console, a Shift-held drag from the tree produced no event in the webview and no message in the extension host, while the same file dragged in from Finder attached normally. Only a drag that starts outside this window reaches the composer, and nothing about that has changed.
+
 ### Bug Fixes
+
+- **A dropped file the webview cannot read says so** — Chromium can hand the webview a `File` whose bytes it will not serve — the drag's source is gone, or the OS declines the read — and that failure arrives asynchronously, on a promise the drop handler cannot see. It was reported as nothing at all, which is indistinguishable from the drop never arriving: the composer stayed empty and said nothing. It posts an error now, named *The dropped file's contents could not be read*.
 
 - **A ticked “always allow” survives the rail redrawing under it** — Ticking the remember box on a rail card and then taking a moment before clicking **Allow** could lose the tick: the rail is rebuilt on every thread-list publish, each rebuild makes a fresh box, and the choice lived only in the DOM. It is the sweep's own repaint that made this likely, since a waiting thread now redraws the rail about every 30 seconds. The tick is kept with the card and put back on each rebuild.
 

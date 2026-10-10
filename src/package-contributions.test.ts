@@ -68,6 +68,51 @@ describe("package.json settings entry contributions", () => {
   });
 });
 
+describe("package.json Explorer context-menu contribution", () => {
+  const ATTACH_COMMAND = "brotherwhale.attachToChat";
+
+  it("contributes the attach command with a localised title", () => {
+    const command = pkg.contributes.commands.find(
+      (c) => c.command === ATTACH_COMMAND
+    );
+
+    expect(command?.title).toBe("%commands.attachToChat.title%");
+  });
+
+  it("puts it on the file context menu, beside VS Code's own chat entries", () => {
+    // `5_chat` is the group the built-in "Add File to Chat" uses; it is
+    // ordered @2 so this sits right after it rather than racing it.
+    const entry = pkg.contributes.menus["explorer/context"].find(
+      (m) => m.command === ATTACH_COMMAND
+    );
+
+    expect(entry?.group).toBe("5_chat@2");
+    expect(entry?.when).toBe(
+      "!explorerResourceIsFolder && (resourceScheme == file || resourceScheme == vscode-remote)"
+    );
+  });
+
+  it("keeps it out of the command palette, where it would have no file", () => {
+    // The palette invokes a command with no arguments, and this one attaches
+    // nothing without a URI — an entry there would be a control that does
+    // nothing when used.
+    const entry = pkg.contributes.menus["commandPalette"].find(
+      (m) => m.command === ATTACH_COMMAND
+    );
+
+    expect(entry?.when).toBe("false");
+  });
+
+  it("names the command in both nls files", () => {
+    for (const file of ["package.nls.json", "package.nls.zh-cn.json"]) {
+      const nls = JSON.parse(
+        fs.readFileSync(path.resolve(process.cwd(), file), "utf8")
+      ) as Record<string, string>;
+      expect(nls["commands.attachToChat.title"], file).toBeTruthy();
+    }
+  });
+});
+
 describe("webview stays free of the settings button", () => {
   it("has no #btn-config markup, handler, or styles left behind", () => {
     const files = [

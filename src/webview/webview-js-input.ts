@@ -448,11 +448,21 @@ export function getInputScript(tr: WebviewTranslations): string {
   // Only mimes the engine accepts; the host re-validates bytes and size.
   var IMAGE_MIME_RE = /^image\\/(png|jpeg|gif|webp)$/;
 
+  /** A blob the webview cannot read has to say so. Chromium hands a promise
+   *  here it may refuse to fulfil — the file came from a drag whose source is
+   *  gone, or a drop the OS will not serve to this process — and reading it
+   *  fails asynchronously, where the drop handler's try/catch cannot see it.
+   *  Doing nothing is indistinguishable from the drop never arriving. */
+  function reportUnreadableFile(file) {
+    vscode.postMessage({ type: 'dropUnreadable', name: (file && file.name) || '' });
+  }
+
   function sendImageFile(file) {
     var reader = new FileReader();
     reader.onload = function() {
       vscode.postMessage({ type: 'attachImage', mime: file.type, dataUrl: reader.result, name: file.name });
     };
+    reader.onerror = function() { reportUnreadableFile(file); };
     reader.readAsDataURL(file);
   }
 
@@ -472,6 +482,7 @@ export function getInputScript(tr: WebviewTranslations): string {
     reader.onload = function() {
       vscode.postMessage({ type: 'attachFileBlob', dataUrl: reader.result, name: file.name });
     };
+    reader.onerror = function() { reportUnreadableFile(file); };
     reader.readAsDataURL(file);
   }
 
@@ -494,6 +505,16 @@ export function getInputScript(tr: WebviewTranslations): string {
   // just the input. dragover must preventDefault unconditionally or
   // Chromium refuses to fire drop at all — the gate only decides whether
   // the drag is "file-ish" (for the copy cursor and the highlight).
+  //
+  // Only a drag that started *outside* this VS Code window ever gets here.
+  // For one that started inside it — an Explorer row, an editor tab — VS Code
+  // holds pointer events off on the webview element for the whole drag (that
+  // is what makes a file dropped over a webview open in an editor group) and
+  // the WebviewViewPane's own view-reordering dnd consumes the events on the
+  // container before the iframe sees them. Nothing in here observes such a
+  // drag at all: no dragover, no drop, no highlight. Attaching a file the user
+  // picked in the Explorer is what the brotherwhale.attachToChat context-menu
+  // command is for instead.
   function dragHasPayload(e) {
     if (!e.dataTransfer || !e.dataTransfer.types) return false;
     var types = e.dataTransfer.types;

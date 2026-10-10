@@ -47,6 +47,21 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     })
   );
 
+  // The Explorer's context menu. A drag out of the tree never reaches the chat
+  // webview — VS Code holds pointer events off it for the whole of a drag that
+  // began inside the window — so the selection is handed over as a command
+  // instead. The clicked resource and the selection both arrive; the host
+  // de-duplicates them.
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      "brotherwhale.attachToChat",
+      (uri?: vscode.Uri, uris?: vscode.Uri[]) => {
+        const selection = Array.isArray(uris) && uris.length > 0 ? uris : [uri];
+        return chatProvider.handleExplorerAttach(selection);
+      }
+    )
+  );
+
   // The two startup defaults this panel's dropdowns write can also be changed
   // from the VS Code settings editor, another window, or the config panel.
   // Those changes arrive here and nowhere else, so the chips and the "New

@@ -8,6 +8,7 @@
   "commands.compactContext.title": "CodeWhale: 压缩上下文",
   "commands.restartEngine.title": "CodeWhale: 重启引擎",
   "commands.openConfig.title": "CodeWhale: 打开配置面板",
+  "commands.attachToChat.title": "CodeWhale: 附加到对话",
   "config.enginePath.description": "codewhale 可执行文件路径",
   "config.defaultModel.description": "新会话的回退模型：仅当某条 provider 路线在 `brotherwhale.modelByProvider` 中没有记录、且其运行时目录里也没有模型时才使用。",
   "config.defaultMode.description": "新会话的默认模式：agent（Act）、plan 或 operate",

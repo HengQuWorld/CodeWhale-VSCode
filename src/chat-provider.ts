@@ -746,6 +746,12 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       case "dropTooLarge":
         this.postMessage({ type: "error", message: t().fileDropTooLarge });
         break;
+      case "dropUnreadable":
+        // The webview got a File it could not read — Chromium refused the
+        // promise behind it. Answering here is the point: the read fails
+        // asynchronously, so the drop itself cannot report anything.
+        this.postMessage({ type: "error", message: t().fileDropUnreadable });
+        break;
       case "undoLastTurn":
         await this.handleUndoLastTurn();
         break;
@@ -2237,6 +2243,54 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         type: "error",
         message: formatError("Failed to attach file", err),
       });
+    }
+  }
+
+  /**
+   * Attach files the user picked outside the composer — today the Explorer's
+   * context menu (`brotherwhale.attachToChat`).
+   *
+   * This exists because VS Code's own drag never reaches the chat webview: for
+   * a drag that started inside the window, pointer events are held off the
+   * webview element for its whole duration (that is what makes a file dropped
+   * over a webview open in an editor group) and the view pane's own
+   * reordering dnd consumes them on the container. Nothing observed at the
+   * Explorer row can arrive in the webview, so the file has to come in by
+   * command instead.
+   *
+   * The chat is revealed first, because the point of the action is seeing what
+   * got attached; the attach itself is the same per-path flow a drop or the
+   * 📎 dialog uses, so validation, the chip list and the `@path` mention stay
+   * one implementation.
+   */
+  public async handleExplorerAttach(
+    uris: ReadonlyArray<vscode.Uri | undefined> | undefined
+  ): Promise<void> {
+    const paths: string[] = [];
+    for (const uri of uris ?? []) {
+      const fsPath = uri && typeof uri.fsPath === "string" ? uri.fsPath : "";
+      // A multi-selection arrives as the clicked resource *and* the whole
+      // selection depending on the menu, so the same path can be named twice.
+      if (!fsPath || paths.indexOf(fsPath) >= 0) continue;
+      paths.push(fsPath);
+    }
+    if (paths.length === 0) return;
+
+    await this.revealChatView();
+    this.handleAttachPaths(paths);
+  }
+
+  /** Bring the chat into view, so anything the host attaches on the user's
+   *  behalf is visible where the next send will pick it up. The container
+   *  command is the documented way in and the view's own focus command only
+   *  exists once the view has been registered — neither is worth losing the
+   *  attachment over, so a failure here is not propagated. */
+  private async revealChatView(): Promise<void> {
+    try {
+      await vscode.commands.executeCommand("workbench.view.extension.brotherwhale");
+      await vscode.commands.executeCommand(`${ChatProvider.viewType}.focus`);
+    } catch {
+      /* the attach still has to happen */
     }
   }
 
