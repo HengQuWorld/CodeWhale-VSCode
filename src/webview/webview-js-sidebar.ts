@@ -1087,6 +1087,11 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
       threadId: msg.threadId || '',
       approvals: (msg.approvals || []).slice(),
       inputs: (msg.inputs || []).slice(),
+      // Ticked "remember" boxes, by approval id. The rail is rebuilt out of
+      // every thread list — including the discovery sweep's repaint while a
+      // thread waits — and a rebuild replaces the whole card. Without this the
+      // tick would be lost between ticking it and clicking Allow.
+      remember: {},
     };
     renderThreadAttention(true);
   }
@@ -1143,14 +1148,24 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
         '<div class="thread-attention-text"><strong>' + __wvEscapeHtml(approval.tool_name || 'tool') + '</strong> ' +
         __wvEscapeHtml(approval.description || approval.intent_summary || '') + '</div>';
       // The same remember box the approval float and the task detail panel
-      // offer: allowing with it flips this thread to Full Access, so a card the
-      // user is not even looking at stops asking once per tool call.
+      // offer: allowing with it records a session grant for this tool and its
+      // argument class in this conversation. The runtime does not promote the
+      // thread, so a later call the grant does not cover still asks.
       var rememberLabel = document.createElement('label');
       rememberLabel.className = 'approval-remember';
       var rememberBox = document.createElement('input');
       rememberBox.type = 'checkbox';
       rememberBox.className = 'remember-check';
       rememberBox.setAttribute('data-approval-id', approval.id || '');
+      // Restore what the user already ticked: this card is rebuilt on every
+      // rail publish, and a rebuild must not silently drop the choice.
+      rememberBox.checked = !!(expandedAttention.remember && expandedAttention.remember[approval.id || '']);
+      (function(approvalId, box) {
+        box.addEventListener('change', function() {
+          if (!expandedAttention) return;
+          expandedAttention.remember[approvalId] = !!box.checked;
+        });
+      })(approval.id || '', rememberBox);
       rememberLabel.appendChild(rememberBox);
       rememberLabel.appendChild(document.createTextNode(' ' + __i18n.approvalRemember));
 
@@ -2192,9 +2207,10 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
           html += '<div><strong>' + __wvEscapeHtml(approval.tool_name || 'tool') + '</strong></div>';
           html += '<div class="detail-subtle">' + __wvEscapeHtml(approval.description || approval.intent_summary || '') + '</div>';
           // The same remember box the approval float offers. Allowing with it
-          // flips the whole thread to Full Access (the runtime's
-          // remember_thread_auto_approve), which is what makes a background
-          // task workable without answering every tool call by hand.
+          // records a session grant for this tool and its argument class in
+          // this conversation — the runtime does not promote the thread, so a
+          // later call the grant does not cover still asks, here and everywhere
+          // else.
           html += '<label class="approval-remember"><input type="checkbox" class="remember-check" data-approval-id="' + approvalIdAttr + '" /> ' + __wvEscapeHtml(__i18n.approvalRemember) + '</label>';
           html += '<div class="detail-actions">';
           html += '<button class="detail-action-btn detail-approval-action" data-approval-id="' + approvalIdAttr + '" data-decision="allow">' + __wvEscapeHtml(__i18n.allow) + '</button>';

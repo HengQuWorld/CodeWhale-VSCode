@@ -159,11 +159,6 @@
           "default": "auto",
           "description": "%config.costCurrency.description%"
         },
-        "brotherwhale.backgroundThreadNotifications": {
-          "type": "boolean",
-          "default": true,
-          "description": "%config.backgroundThreadNotifications.description%"
-        },
         "brotherwhale.completionSound": {
           "type": "boolean",
           "default": true,

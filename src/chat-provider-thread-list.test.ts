@@ -260,8 +260,12 @@ describe("refreshThreadList()", () => {
     expect(messagesOf(provider, "threadListLoading").at(-1)).not.toMatchObject({ failed: true });
   });
 
-  it("does not ask for the session lookup on a quiet pass, which never paints", async () => {
+  it("does not paint or fetch sessions on a quiet pass that finds nobody waiting", async () => {
     const { provider, api } = newProvider();
+    // A thread that is merely recent: nothing is waiting on it, so the sweep
+    // has no reason to rebuild the rail (and no reason to pay for the branch
+    // lines it would only need in order to paint).
+    api.listThreadsSummary.mockResolvedValue([makeSummary("thread-a")]);
 
     await (provider as any).refreshThreadList(true);
 

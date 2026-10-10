@@ -193,9 +193,8 @@ interface AttachmentRecord {
 /**
  * Lightweight per-thread runtime cursor for a thread the view is not showing.
  * The runtime owns the turn (runtime_threads.rs owns the turn lifecycle), so
- * this only tracks what the rail badge, the attention notification, the
- * auto-save target and the "is it still busy" decision need while the user
- * works elsewhere.
+ * this only tracks what the rail badge, the auto-save target and the "is it
+ * still busy" decision need while the user works elsewhere.
  */
 interface BackgroundThreadState {
   lastEventSeq: number;
@@ -206,7 +205,6 @@ interface BackgroundThreadState {
   sessionId: string | null;
   goal: ThreadGoal | null;
   goalChecked: boolean;
-  notifiedAttention: boolean;
 }
 
 /** Socket-level failures that mean "the engine is not there right now".
@@ -377,8 +375,6 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
    *  (`POST /v1/user-input/{threadId}/{inputId}` names the thread). Unlike
    *  sessionState.pendingUserInputs this map survives view switches. */
   private backgroundUserInputs = new Map<string, UserInputState>();
-  /** Latest summary titles, for notification wording. */
-  private threadTitles = new Map<string, string>();
   /** Debounced thread-list refresh driven by watcher events. */
   private threadListRefreshTimer: ReturnType<typeof setTimeout> | null = null;
   /** True while a summary fetch is in flight, so a quiet discovery pass can
@@ -2686,16 +2682,18 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       const mode = normalizeMode(this.currentThread.mode);
       const model = this.currentThread.model;
       // Use the thread's persisted permission posture / auto_approve /
-      // trust_mode instead of the config defaults.  When the user approves with
-      // "remember", the TUI flips thread.auto_approve to true
-      // (remember_thread_auto_approve) and the GUI mirrors that in
-      // handleApprovalDecision.  Sending the config value (typically false)
-      // here would override the thread's persisted state on every new turn,
-      // causing "remember" to silently revert and re-prompting for approvals
-      // the user already granted — which then surface as "Request cancelled
-      // while awaiting approval" when the turn is interrupted.  The explicit
-      // posture is what keeps a non-full-access posture (e.g. Auto-Review) from
-      // being re-derived to Ask by the auto_approve compatibility input.
+      // trust_mode instead of the config defaults.  A thread promoted to Full
+      // Access outlives the window that promoted it, so reading the config here
+      // (typically Ask) would override the thread's persisted state on every
+      // new turn, re-prompting for approvals the user had already settled —
+      // which then surfaces as "Request cancelled while awaiting approval" when
+      // the turn is interrupted.  Sending the explicit posture is also what
+      // keeps a non-ask posture (e.g. Auto-Review) from being re-derived to Ask
+      // by the auto_approve compatibility input.
+      //
+      // Note what is *not* part of that state: an allow-and-remember decision.
+      // It records a session grant, never a posture change (see
+      // handleApprovalDecision), so this still sends the thread's own posture.
       const result = await this.api.startTurn(this.currentThread.id, wireText, {
         mode,
         model,
@@ -2946,8 +2944,9 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     const token = ++this.threadListRefreshToken;
     // The fetch below takes seconds-to-tens-of-seconds on a large store. A
     // silent wait behind an empty rail reads as "you have no threads", so the
-    // rail is told a fetch is in flight and can say so. A quiet pass stays off
-    // the rail entirely: it is a discovery sweep, not a repaint.
+    // rail is told a fetch is in flight and can say so. A quiet pass reports
+    // no such wait: it is a discovery sweep, and announcing it would put a
+    // spinner on a list it usually has no intention of repainting.
     if (!quiet) this.postMessage({ type: "threadListLoading", loading: true });
 
     this.threadListFetchInFlight = true;
@@ -2956,7 +2955,8 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     try {
       // The branch lines the rail draws come from the other fetch, which is
       // best-effort: losing it costs the lines, never the rows. A quiet pass
-      // never paints, so it never asks for them at all.
+      // defers it — it usually will not paint, and a pass that turns out to
+      // need it fetches it below, once it knows.
       [threads, sessionByThread] = await Promise.all([
         this.fetchThreadSummaries(token),
         quiet ? Promise.resolve(null) : this.fetchThreadSessions(token),
@@ -2974,6 +2974,18 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       return;
     }
 
+    // Whether this pass paints the rail.
+    //
+    // A quiet pass is a discovery sweep and does not repaint for its own sake —
+    // but a sweep that finds somebody waiting *must* paint, because it may be
+    // the only thing that can. The watch it arms for that thread starts at the
+    // live edge, so a request that was already pending when the watch opened is
+    // history the stream will never replay; staying silent here left the rail
+    // frozen with a waiting thread invisible until it was opened by hand.
+    const waitingVisible = threads.some(
+      (row) => row.id !== this.currentThread?.id && (row.pending_attention_count || 0) > 0,
+    );
+
     if (sessionByThread) {
       for (const row of threads) {
         const session = sessionByThread.get(row.id);
@@ -2981,10 +2993,9 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       }
     }
 
-    this.threadTitles.clear();
-    for (const s of threads) {
-      if (s.title) this.threadTitles.set(s.id, s.title);
-    }
+    // Reconciled on every pass, including one that will not paint: arming a
+    // watch for a thread nobody is watching is the sweep's whole job, and a
+    // running thread found here needs it as much as a waiting one does.
     try {
       this.syncBackgroundWatchers(threads);
     } catch (err) {
@@ -2992,7 +3003,29 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       // exactly what the shared silent catch used to do.
       this.debugLog(`syncBackgroundWatchers failed: ${getErrorMessage(err)}`);
     }
-    if (quiet) return;
+
+    if (quiet && !waitingVisible) return;
+
+    // Painting means the rows have to be complete: those lines are drawn from
+    // `session_id`, and publishing rows without it would strip them off the
+    // rail until the next full refresh. A quiet pass skipped that fetch because
+    // it usually will not paint, so it makes the attempt here, once it knows it
+    // will. A full pass has already made its own attempt and is left as it is.
+    //
+    // If the lookup fails, the rows are published anyway: a blank fork line is
+    // a cosmetic gap, while a waiting thread the rail refuses to show is the
+    // whole bug this pass exists to prevent.
+    if (quiet && !sessionByThread) {
+      const sessions = await this.fetchThreadSessions(token);
+      if (token !== this.threadListRefreshToken) return;
+      if (sessions) {
+        for (const row of threads) {
+          const session = sessions.get(row.id);
+          if (session) row.session_id = session;
+        }
+      }
+    }
+
     // The list is the whole story: the rail and the toolbar's Agent chip both
     // count attention off these summaries themselves (excluding the thread on
     // screen, whose cards are inline), so a second total computed here could
@@ -3765,8 +3798,10 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         await this.api.upsertThreadGoal(thread.id, trimmed, tokenBudget);
         const st = this.ensureBackgroundState(thread.id);
         st.lastEventSeq = 0;
-        // Arming the watch also fetches the new thread's goal state.
-        this.startBackgroundWatch(thread.id, ChatProvider.UNWATCHED_SINCE_SEQ);
+        // This thread did not exist a moment ago, so there is no cursor to
+        // resume from: watch it from the live edge. Arming the watch also
+        // fetches the new thread's goal state.
+        this.startBackgroundWatch(thread.id, null);
         let message = t().backgroundGoalStarted;
         // Posture decides how autonomous the loop is: under Ask, every tool
         // approval blocks the background turn and auto-denies after the
@@ -5528,10 +5563,23 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
   // events are processed here — item deltas for a non-viewed thread are
   // dropped (its transcript is rebuilt from the server on switch-back).
 
-  /** since_seq for a thread we have never watched: skip the durable replay
-   *  entirely and only receive live events. Attention counts for the badge
-   *  come from the summary refresh, so nothing is lost. */
-  private static readonly UNWATCHED_SINCE_SEQ = Number.MAX_SAFE_INTEGER;
+  /** How a watch for a thread this client has never watched is opened: no
+   *  durable replay, positioned at the thread's live edge.
+   *
+   *  That is `since_seq=0` plus `replay_limit=0`, the engine's own "send no
+   *  tail, but put the cursor at the end" primitive (`publish_tail_event_replay`
+   *  walks the journal, sets `base_seq` to the last event's seq and batches
+   *  nothing), so only what happens from now on is delivered.
+   *
+   *  What must never be used is a cursor above the thread's real sequence.
+   *  Delivery is `seq > since_seq` and the opening cursor is also the live
+   *  pump's starting cursor (`replay_live_thread_events`), so a cursor nothing
+   *  can exceed makes every event unreachable: the stream opens, keeps alive,
+   *  and is permanently silent. Attention counts still come from the summary
+   *  refresh, so skipping the backlog costs nothing — while *replaying* it
+   *  would re-run `turn.completed`'s completion cue and auto-save for turns
+   *  this client already handled. */
+  private static readonly LIVE_EDGE_REPLAY_LIMIT = 0;
 
   /** Gap between quiet discovery sweeps (see startAttentionDiscoveryPoll).
    *  Long on purpose: this is a bootstrap for attention the watchers cannot
@@ -5549,7 +5597,6 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         sessionId: null,
         goal: null,
         goalChecked: false,
-        notifiedAttention: false,
       };
       this.backgroundThreads.set(threadId, st);
     }
@@ -5559,24 +5606,39 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
   /**
    * Open the watch for one background thread.
    *
+   * `sinceSeq` is the cursor to resume from, or `null` for a thread this client
+   * has never watched — there is no cursor to resume from, and the thread's own
+   * history is not what the watch is for, so that one is positioned at the live
+   * edge (see LIVE_EDGE_REPLAY_LIMIT) and delivers only what happens next.
+   *
    * `parked` is true when the caller is parking the thread it is leaving: at
    * that moment `currentThread` still names it, so the "never watch the thread
    * the view is on" rule has to be waived for that one call. Every other
    * caller relies on the rule. */
-  private startBackgroundWatch(threadId: string, sinceSeq: number, parked = false): void {
+  private startBackgroundWatch(
+    threadId: string,
+    sinceSeq: number | null,
+    parked = false,
+  ): void {
     if (this.watchControllers.has(threadId)) return;
     if (!parked && threadId === this.currentThread?.id) return;
-    const controller = this.api.streamEvents(
-      threadId,
-      sinceSeq,
-      (event: RuntimeEvent) => this.handleBackgroundEvent(threadId, event),
-      () => {
-        // Drop the stream on error; the next summary refresh re-arms it if
-        // the thread still needs watching (fresh cursor from the summary).
-        this.stopBackgroundWatch(threadId);
-        this.scheduleThreadListRefresh();
-      },
-    );
+    // One error path for both cursors: drop the stream and let the next summary
+    // refresh re-arm it if the thread still needs watching.
+    const onEvent = (event: RuntimeEvent) => this.handleBackgroundEvent(threadId, event);
+    const onError = () => {
+      this.stopBackgroundWatch(threadId);
+      this.scheduleThreadListRefresh();
+    };
+    const controller =
+      sinceSeq === null
+        ? this.api.streamEvents(
+            threadId,
+            0,
+            onEvent,
+            onError,
+            ChatProvider.LIVE_EDGE_REPLAY_LIMIT,
+          )
+        : this.api.streamEvents(threadId, sinceSeq, onEvent, onError);
     this.watchControllers.set(threadId, controller);
     // One hook for "learn this thread's goal": goal state decides whether the
     // watch outlives the turn (an Active goal keeps continuing on its own).
@@ -5615,35 +5677,23 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       st.running = running || st.running;
       // The summary is the authority, so assign instead of ratcheting. The old
       // `Math.max` could only ever raise the count, so one lost decrement
-      // pinned the badge (and the notification latch) for the rest of the
-      // session.
-      st.attention = authoritativeAttention;
-      // Attention -> notification is decided here, off the authoritative
-      // count, and never off a raw `approval.required` event.
+      // pinned the count for the rest of the session.
       //
-      // The runtime emits `approval.required` on its auto-approve path too
-      // (runtime_threads.rs), where it registers *no* pending approval and
-      // follows the event immediately with `approval.decided` (`"auto": true`).
-      // Nothing in that path needs the user, so an event-driven notice fired
-      // once per auto-approved tool call — a background thread running shell
-      // commands under a remembered "always allow" became an endless stream of
-      // notices. The runtime's own notifier already guards on
-      // `detail.pending_approvals` (runtime_api/notification_delivery.rs);
-      // this is that same guard on the GUI side.
-      //
-      // Reading it from the summary cannot miss a *real* request: the runtime
+      // That count is what the rail's *Needs you* group and the toolbar's
+      // Agent label are drawn from (the summary rides out on `threadList`),
+      // so this assignment is the authoritative half of the attention display.
+      // Reading it from the summary cannot miss a real request: the runtime
       // registers the pending approval before it sequences the event
       // ("Register before sequencing the event" in runtime_threads.rs), so any
-      // event we have already seen is visible to a fetch issued afterwards.
-      if (authoritativeAttention > 0) {
-        this.notifyBackgroundAttention(sum.id);
-      } else {
-        st.notifiedAttention = false;
-      }
+      // event already observed is visible to a fetch issued afterwards.
+      st.attention = authoritativeAttention;
     }
     for (const id of wanted) {
       const st = this.backgroundThreads.get(id)!;
-      this.startBackgroundWatch(id, st.lastEventSeq > 0 ? st.lastEventSeq : ChatProvider.UNWATCHED_SINCE_SEQ);
+      // A thread this client has already watched resumes from the cursor that
+      // watch reached; one it has only just learned about has none, and is
+      // watched from the live edge instead.
+      this.startBackgroundWatch(id, st.lastEventSeq > 0 ? st.lastEventSeq : null);
     }
     for (const [id, controller] of this.watchControllers) {
       if (wanted.has(id)) continue;
@@ -5718,12 +5768,12 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       case "user_input.answered":
       case "user_input.canceled": {
         st.attention = Math.max(0, st.attention - 1);
-        // `notifiedAttention` is deliberately NOT cleared here. Clearing it on
-        // an event-derived zero re-armed the notice while a real approval was
-        // still unanswered: one auto-approved tool call in between would drop
-        // the latch to false, and the next summary refresh would then announce
-        // the same still-pending approval a second time. The latch is owned by
-        // the summary, which is the only place that knows the truth.
+        // The count the badge shows is the summary's, assigned in
+        // syncBackgroundWatchers; this decrement only keeps the watcher's own
+        // bookkeeping moving so a quiet thread can drop its watch. It never
+        // drives a user-visible surface on its own — an event-derived zero is
+        // not evidence that nothing is pending, which is why the summary owns
+        // the count.
         // Only the user-input events carry an id from the map we keep here;
         // approval ids belong to a different namespace and are never cached.
         if (event.event === "user_input.answered" || event.event === "user_input.canceled") {
@@ -5748,32 +5798,6 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       this.backgroundThreads.delete(threadId);
     }
   }
-
-  /** VS Code-native attention notice for a background thread. Called only from
-   *  `syncBackgroundWatchers`, and only with an authoritative nonzero pending
-   *  count, so it fires once per "attention episode" (the latch clears when
-   *  that count returns to 0). Never call this from a raw `approval.required`
-   *  event: the runtime emits those for approvals it resolves itself. */
-  private notifyBackgroundAttention(threadId: string): void {
-    const enabled = vscode.workspace
-      .getConfiguration("brotherwhale")
-      .get("backgroundThreadNotifications", true);
-    if (!enabled) return;
-    const st = this.backgroundThreads.get(threadId);
-    if (!st || st.notifiedAttention) return;
-    st.notifiedAttention = true;
-    const title = this.threadTitles.get(threadId) || threadId.slice(0, 8);
-    const open = t().backgroundAttentionOpen;
-    vscode.window
-      .showInformationMessage(
-        t().backgroundAttentionNotification.replace("{title}", title),
-        open,
-      )
-      .then((choice) => {
-        if (choice === open) void this.loadThread(threadId);
-      });
-  }
-
   /** Debounced refresh so a burst of watcher events costs one summary fetch. */
   private scheduleThreadListRefresh(delayMs = 500): void {
     if (this.threadListRefreshTimer) return;
@@ -5948,7 +5972,15 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       st.attention = Math.max(st.attention, this.pendingApprovals.size + this.pendingUserInputs.size);
       // `parked: true` — currentThread still names this thread until the
       // caller resets it, and the whole point of parking is to keep watching.
-      this.startBackgroundWatch(thread.id, this.lastEventSeq, true);
+      // A real cursor resumes from it; `0` is not a cursor but the absence of
+      // one, and passing it through would ask for the whole journal (`seq > 0`),
+      // replaying turns this client already handled — a second completion cue
+      // and a second auto-save. That is the live edge, not a replay.
+      this.startBackgroundWatch(
+        thread.id,
+        this.lastEventSeq > 0 ? this.lastEventSeq : null,
+        true,
+      );
       if (this.currentTurnId) {
         this.postMessage({ type: "status", text: t().turnContinuesInBackground });
       }
@@ -6933,35 +6965,27 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
   ): Promise<void> {
     try {
       await this.api.decideApproval(approvalId, decision, remember);
-      // When the user checks "remember" and allows, the runtime flips the
-      // thread to Full Access (see runtime_threads.rs
-      // remember_thread_auto_approve).  Mirror that locally, because the
-      // foreground `approval.required` handler below decides whether to open a
-      // dialog from *this* thread's posture (postureFromThread), never from the
-      // runtime's — a local copy still reading "ask" would open a dialog for a
-      // tool the runtime is already resolving on its own. The runtime does emit
-      // a matching `approval.decided` (`"auto": true`) on that path, so such a
-      // dialog would close again rather than hang; keeping the two views in
-      // step is what stops the flicker.
-      if (remember && decision === "allow" && this.currentThread) {
-        // The runtime persists Full Access for the thread (see
-        // runtime_threads.rs remember_thread_auto_approve); mirror both the
-        // legacy boolean and the canonical posture so the status bar agrees
-        // with the engine. Report the *thread's* mode, not the global default:
-        // a loaded session may run in a mode the startup default does not name.
-        this.currentThread = {
-          ...this.currentThread,
-          auto_approve: true,
-          permission_posture: POSTURE_WIRE.full_access,
-        };
-        this.postMessage({
-          type: "settingsUpdated",
-          mode: normalizeMode(this.currentThread.mode),
-          posture: POSTURE_WIRE.full_access,
-          model: this.currentThread.model || this.getCurrentModel(),
-          reasoningEffort: this.getCurrentReasoningEffort(),
-        });
-      }
+      // `remember` is a *session grant*, and it must not move the posture.
+      //
+      // An earlier Runtime promoted the whole thread to Full Access on
+      // `remember=true`, and this client mirrored that locally — it had to,
+      // because the engine then auto-resolved later calls and this surface
+      // would have opened a dialog for a request the engine had already
+      // answered. The Runtime no longer does that: `remember=true` records a
+      // grant scoped to the tool and its argument class, and *leaves the
+      // posture alone* (runtime_threads.rs, "session grant never changes
+      // posture"; the note there is explicit that a mid-turn posture change
+      // used to fail the very call it was approving).
+      //
+      // Mirroring the old behaviour is not merely stale, it is the hang: the
+      // engine keeps prompting in Ask, while a local copy reading Full Access
+      // drops every one of those requests on the floor before the dialog —
+      // `handleRuntimeEvent`'s `approval.required` decides from this thread's
+      // posture — so the turn stalls on an approval nothing can answer until
+      // the thread is reloaded and the record is read from the engine again.
+      // The grants are the engine's own state (approval.grant_added,
+      // `approval_grants[]` on thread detail); nothing about them belongs in
+      // this thread's posture.
       this.retireApproval(approvalId, decision === "allow" ? "running" : "error");
       this.postMessage({ type: "approvalResolved", approvalId, decision });
       await this.refreshActiveTaskDetail();
@@ -7448,7 +7472,17 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         const pl = event.payload as Record<string, unknown>;
         const request = pl.request as Record<string, unknown> | undefined;
         const approvalId = (request?.approval_id as string) || (pl.approval_id as string) || (pl.id as string);
-        const callId = (request?.call_id as string) || (pl.call_id as string) || (pl.id as string);
+        // `tool_call_id` is the key the runtime documents for this correlation,
+        // and the provider's call id is what it holds. The nested `call_id` is
+        // the older shape of the same field, so it is accepted first for a
+        // payload that still uses it. What is deliberately absent is the
+        // approval's own `id`: reading that here correlated the request with a
+        // value that is in no map, so the tool row was never found and the card
+        // landed on whichever call happened to be running.
+        const callId =
+          (request?.call_id as string) ||
+          (pl.tool_call_id as string) ||
+          (pl.call_id as string);
         const toolName = (request?.tool_name as string) || (pl.tool_name as string) || "unknown";
         const toolInput = (request || pl) as Record<string, unknown>;
         if (!approvalId) break;
@@ -7504,7 +7538,13 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         }
         this.postMessage({
           type: "approvalRequired",
-          messageId: lastMsg?.id,
+          // `tcMsg`, not `lastMsg`: `toolCallIdx` is an index into whichever
+          // message owns the row, and a mid-turn steer splits the turn into
+          // segments — so the row can live on an earlier message than the one
+          // last in the transcript. The webview keys the card by this pair
+          // (`tc-<messageId>-<toolCallIdx>`), and pairing one message's id with
+          // another message's index would point it at the wrong row.
+          messageId: tcMsg?.id ?? lastMsg?.id,
           toolCallIdx: tcIdx,
           approvalId,
           toolName: friendlyToolName(toolName),
@@ -7525,12 +7565,14 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         };
         const approvalId = pl.approval_id;
         if (!approvalId) break;
-        // Mirror the optimistic auto_approve update when the TUI reports
-        // a remember=true allow decision (covers the case where the
-        // decision was made via a different code path, e.g. TUI UI).
-        if (pl.remember && pl.decision === "allow" && this.currentThread) {
-          this.currentThread = { ...this.currentThread, auto_approve: true };
-        }
+        // `remember` is deliberately not mirrored onto this thread. It is a
+        // session grant scoped to the tool and its argument class, and the
+        // Runtime leaves the posture alone (see handleApprovalDecision).
+        // Setting the legacy `auto_approve` here was enough on its own to
+        // break that: `postureFromThread` falls back to `auto_approve` when a
+        // record carries no `permission_posture`, so a grant would have
+        // re-read as Full Access on a legacy thread and silenced every later
+        // request — the same hang by the other door.
         this.retireApproval(approvalId, pl.decision === "allow" ? "running" : "error");
         this.postMessage({
           type: "approvalResolved",

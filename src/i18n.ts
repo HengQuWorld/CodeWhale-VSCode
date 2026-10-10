@@ -52,9 +52,12 @@ interface Translations {
    *  letting the conversation stop without a word. */
   turnFailed: string;
   approvalAwaiting: string;
-  /** Checkbox label on an approval: allowing with it flips the whole thread
-   *  to Full Access (runtime_threads.rs `remember_thread_auto_approve`), so the
-   *  wording must not promise a per-tool memory. */
+  /** Checkbox label on an approval: allowing with it records a *session grant*
+   *  scoped to the tool and its argument class for this conversation, and it
+   *  deliberately does not move the thread's posture (runtime_threads.rs, the
+   *  session-grant path). The wording names that scope — promising the whole
+   *  thread, or a per-tool memory that outlives the conversation, would both
+   *  describe something the runtime does not do. */
   approvalRemember: string;
   userInputRequired: string;
   userInputAwaiting: string;
@@ -69,8 +72,6 @@ interface Translations {
   threadsLoadFailed: string;
   threadsRetry: string;
   turnContinuesInBackground: string;
-  backgroundAttentionNotification: string;
-  backgroundAttentionOpen: string;
   backgroundGoalStarted: string;
   backgroundGoalAskHint: string;
   goalBackgroundRun: string;
@@ -545,14 +546,13 @@ const en: Translations = {
   inputPlaceholder: "Ask CodeWhale...",
   initializing: "Initializing...", ready: "Ready",
   thinking: "Thinking...", streaming: "Streaming...", processing: "Processing...",
-  error: "Error", approvalAwaiting: "⏳ Awaiting approval...", approvalRemember: "Always allow this thread",
+  error: "Error", approvalAwaiting: "⏳ Awaiting approval...", approvalRemember: "Always allow calls like this in this conversation",
   turnFailed: "The turn failed without a reported reason.",
   userInputRequired: "Input required",
   userInputAwaiting: "⏳ Awaiting your input...",
   noConversations: "No conversations yet", threadAttention: "Waiting for your approval or input — click to open", threadsNeedsYou: "Needs you", threadsRunning: "Running", threadsRecent: "Recent",
   threadsLoading: "Loading threads…", threadsLoadFailed: "Couldn't load the thread list", threadsRetry: "Retry",
   turnContinuesInBackground: "Turn continues running in the background",
-  backgroundAttentionNotification: "Thread \"{title}\" is waiting for your approval or input", backgroundAttentionOpen: "Open",
   backgroundGoalStarted: "Background goal started on its own thread — it works from the objective alone and keeps running while you work elsewhere.",
   backgroundGoalAskHint: "Note: the Ask posture blocks each tool approval in the background and auto-denies after the engine timeout — consider Auto-Review or Full Access for background goals.",
   goalBackgroundRun: "Run on a background thread", goalBackgroundHint: "Starts a thread of its own: same workspace and model, but none of this conversation — the run works from the objective alone. Ask posture auto-denies approvals after a timeout.",
@@ -958,14 +958,13 @@ const zhCn: Translations = {
   inputPlaceholder: "向 CodeWhale 提问...",
   initializing: "初始化中...", ready: "就绪",
   thinking: "思考中...", streaming: "输出中...", processing: "处理中...",
-  error: "错误", approvalAwaiting: "⏳ 等待审批...", approvalRemember: "始终允许此线程",
+  error: "错误", approvalAwaiting: "⏳ 等待审批...", approvalRemember: "在本对话中始终允许此类调用",
   turnFailed: "本轮执行失败，引擎未给出原因。",
   userInputRequired: "需要输入",
   userInputAwaiting: "⏳ 等待您的输入...",
   noConversations: "暂无会话", threadAttention: "等待你的审批或输入——点击打开", threadsNeedsYou: "等你处理", threadsRunning: "运行中", threadsRecent: "最近",
   threadsLoading: "正在加载线程…", threadsLoadFailed: "线程列表加载失败", threadsRetry: "重试",
   turnContinuesInBackground: "回合将在后台继续运行",
-  backgroundAttentionNotification: "线程「{title}」正在等待你的审批或输入", backgroundAttentionOpen: "打开",
   backgroundGoalStarted: "后台目标已在独立线程启动——它只依据目标本身工作，你在别处时不受影响。",
   backgroundGoalAskHint: "注意：Ask 姿态下后台的每次工具审批都会阻塞，超时后自动拒绝——后台目标建议使用 Auto-Review 或 Full Access。",
   goalBackgroundRun: "在后台线程运行", goalBackgroundHint: "会另开一条线程：工作区和模型相同，但不带本条对话的历史，只依据目标本身工作。Ask 姿态下审批超时会自动拒绝。",

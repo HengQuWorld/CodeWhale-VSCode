@@ -1230,16 +1230,32 @@ export class CodeWhaleApiClient {
 
   // ── SSE Event Stream ──
 
+  /**
+   * Open one of the runtime's per-thread SSE streams.
+   *
+   * Delivery is `seq > since_seq`, and the cursor the stream starts from is the
+   * same one the live pump continues from — so `sinceSeq` bounds both the
+   * durable replay and every event that follows. A cursor above the thread's
+   * own last sequence therefore cannot be reached by anything and leaves a
+   * connection that opens, keeps alive, and never delivers an event.
+   *
+   * `replayLimit` is the engine's tail bound: 0 asks for no replay at all
+   * while still positioning the cursor at the thread's last event, which is how
+   * a caller says "watch from here on" without abandoning the live edge.
+   * Omitting it replays from `sinceSeq`.
+   */
   streamEvents(
     threadId: string,
     sinceSeq: number | null,
     onEvent: EventListener,
-    onError?: (err: Error) => void
+    onError?: (err: Error) => void,
+    replayLimit?: number
   ): AbortController {
     const controller = new AbortController();
     const params = new URLSearchParams();
     // always send since_seq param (0 for initial)
     params.set("since_seq", String(sinceSeq ?? 0));
+    if (replayLimit !== undefined) params.set("replay_limit", String(replayLimit));
     const qs = params.toString();
     const path = `/v1/threads/${threadId}/events?${qs}`;
     const url = new URL(path, this.baseUrl);

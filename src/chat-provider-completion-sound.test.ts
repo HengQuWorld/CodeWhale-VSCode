@@ -156,7 +156,6 @@ describe("the cue for a thread the view is not on", () => {
       currentTurnId: "turn-b",
       lastEventSeq: 0,
       attention: 0,
-      notifiedAttention: false,
       goalChecked: false,
       goal: null,
     });

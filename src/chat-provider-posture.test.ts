@@ -198,20 +198,103 @@ describe("ChatProvider permission posture", () => {
     expect(settings).toMatchObject({ mode: "agent", posture: "ask" });
   });
 
-  it("mirrors Full Access and keeps the thread mode after an allow-and-remember decision", async () => {
+  it("records an allow-and-remember without moving the thread's posture", async () => {
+    // `remember` is a session grant scoped to the tool and its argument class;
+    // it never promotes the thread. This client used to mirror the promotion an
+    // older Runtime performed, which is now backwards: the engine keeps
+    // prompting in Ask while a local copy reading Full Access drops every one
+    // of those requests before the dialog opens, and the turn stalls on an
+    // approval nothing can answer until the thread is reloaded.
     const api = makeApi();
     const provider = makeProvider(api);
-    (provider as any).currentThread = thread("plan");
+    (provider as any).currentThread = { ...thread("plan"), permission_posture: "ask" };
 
     await (provider as any).handleApprovalDecision("approval-1", "allow", true);
 
     expect(api.decideApproval).toHaveBeenCalledWith("approval-1", "allow", true);
-    expect((provider as any).currentThread.auto_approve).toBe(true);
-    expect((provider as any).currentThread.permission_posture).toBe("full_access");
-    const settings = messagesOf(provider).find((msg) => msg.type === "settingsUpdated");
-    // Regression: this used to report the global defaultMode ("agent") instead
-    // of the loaded thread's mode.
-    expect(settings).toMatchObject({ mode: "plan", posture: "full_access" });
+    // The thread's own posture, and the legacy bit postureFromThread falls back
+    // to when a record carries none — neither may move.
+    expect((provider as any).currentThread.permission_posture).toBe("ask");
+    expect((provider as any).currentThread.auto_approve).toBe(false);
+    // Nothing to announce: the status bar would otherwise claim a posture the
+    // engine never adopted.
+    expect(messagesOf(provider).some((msg) => msg.type === "settingsUpdated")).toBe(false);
+    // The answered request is still retired, so its card does not stay waiting.
+    expect(messagesOf(provider)).toContainEqual(
+      expect.objectContaining({ type: "approvalResolved", approvalId: "approval-1" }),
+    );
+  });
+
+  it("keeps asking after a grant, instead of dropping the request on the floor", async () => {
+    // The hang, end to end. The engine grants the tool that was allowed and
+    // prompts again for anything the grant does not cover — a different tool,
+    // or the same tool with a different argument class. Those requests have to
+    // reach the user; a posture mirror was what stopped them, and a reloaded
+    // thread was the only way back.
+    const api = makeApi();
+    const provider = makeProvider(api);
+    (provider as any).currentThread = { ...thread("agent"), permission_posture: "ask" };
+
+    await (provider as any).handleApprovalDecision("approval-1", "allow", true);
+
+    (provider as any).handleRuntimeEvent({
+      seq: 30,
+      event: "approval.required",
+      turn_id: "turn-1",
+      payload: {
+        id: "approval_second",
+        approval_id: "approval_second",
+        tool_call_id: "call-second",
+        tool_name: "exec_shell",
+        summary: "rm -rf build",
+      },
+    });
+
+    expect(messagesOf(provider)).toContainEqual(
+      expect.objectContaining({ type: "approvalRequired", approvalId: "approval_second" }),
+    );
+  });
+
+  it("does not read a grant as Full Access on a record with no posture field", async () => {
+    // The other door into the same hang. A legacy thread record carries no
+    // `permission_posture`, so `postureFromThread` falls back to `auto_approve`;
+    // the `approval.decided` handler used to set that bit from `remember`
+    // alone, which re-read as Full Access and silenced everything after it.
+    const api = makeApi();
+    const provider = makeProvider(api);
+    (provider as any).currentThread = {
+      id: "thread-legacy",
+      mode: "agent",
+      model: "deepseek-v4-pro",
+      trust_mode: false,
+      auto_approve: false,
+    };
+
+    (provider as any).handleRuntimeEvent({
+      seq: 40,
+      event: "approval.decided",
+      turn_id: "turn-1",
+      payload: { approval_id: "approval-1", decision: "allow", remember: true },
+    });
+
+    expect((provider as any).currentThread.auto_approve).toBe(false);
+
+    (provider as any).handleRuntimeEvent({
+      seq: 41,
+      event: "approval.required",
+      turn_id: "turn-1",
+      payload: {
+        id: "approval_next",
+        approval_id: "approval_next",
+        tool_call_id: "call-next",
+        tool_name: "write_file",
+        summary: "write src/a.ts",
+      },
+    });
+
+    expect(messagesOf(provider)).toContainEqual(
+      expect.objectContaining({ type: "approvalRequired", approvalId: "approval_next" }),
+    );
   });
 
   it("leaves the thread untouched when remember is set on a deny decision", async () => {
@@ -251,6 +334,122 @@ describe("ChatProvider permission posture", () => {
     expect(messagesOf(provider)).toContainEqual(
       expect.objectContaining({ type: "approvalRequired", approvalId: "appr-1" }),
     );
+  });
+
+  it("attaches a live approval to the tool row the engine names", () => {
+    // The runtime's `approval.required` is a flat payload whose correlator is
+    // `tool_call_id` — the provider's call id. It carries no `call_id` and no
+    // `request` wrapper (runtime_threads.rs emits this shape on every path:
+    // the Ask waiter, the auto-approve branch and the session-grant branch).
+    // Reading only `id` as the call id correlated the request with the
+    // approval's *own* id, which is in no map: the tool row was never found,
+    // so the card landed on whichever running call the fallback happened to
+    // find, and the row itself was never marked as waiting.
+    const api = makeApi();
+    const provider = makeProvider(api);
+    (provider as any).currentThread = {
+      ...thread("agent"),
+      permission_posture: "ask",
+    };
+    (provider as any).currentTurnId = "turn-1";
+    (provider as any).messages = [
+      { id: "assistant-turn-1", role: "assistant", toolCalls: [], blocks: [] },
+    ];
+
+    // Two rows, both still running, so which one the request lands on is a
+    // question only the correlator can answer: the fallback (“the first
+    // running call”) picks the wrong one.
+    for (const [seq, id, path] of [
+      [19, "call-first", "src/a.ts"],
+      [20, "call-second", "src/b.ts"],
+    ] as const) {
+      (provider as any).handleRuntimeEvent({
+        seq,
+        event: "item.started",
+        turn_id: "turn-1",
+        item_id: `item-${seq}`,
+        payload: {
+          item: { kind: "tool_call", id: `item-${seq}` },
+          tool: { id, name: "read_file", input: { path } },
+        },
+      });
+    }
+
+    (provider as any).handleRuntimeEvent({
+      seq: 21,
+      event: "approval.required",
+      turn_id: "turn-1",
+      payload: {
+        id: "approval_8050f1c132bd4fa989c74b0bd3ffb759",
+        approval_id: "approval_8050f1c132bd4fa989c74b0bd3ffb759",
+        tool_call_id: "call-second",
+        tool_name: "read_file",
+        summary: "Read `src/b.ts`",
+        description: "Read a file from the workspace.",
+        intent_summary: "Checking the file.",
+      },
+    });
+
+    const required = messagesOf(provider).find((msg) => msg.type === "approvalRequired");
+    expect(required).toBeDefined();
+    expect(required!.approvalId).toBe("approval_8050f1c132bd4fa989c74b0bd3ffb759");
+    // The second row, which is the one `tool_call_id` names — not the first
+    // running call, which is all a missing correlator can offer.
+    expect(required!.toolCallIdx).toBe(1);
+    expect((provider as any).pendingApprovals.size).toBe(1);
+  });
+
+  it("names the message that owns the tool row, not the last one in the transcript", async () => {
+    // A mid-turn steer splits a turn into segments, so the tool call an
+    // approval gates can sit on an earlier assistant message than the one last
+    // in the transcript. The webview keys the card by `tc-<messageId>-<idx>`,
+    // so pairing the last message's id with the owning message's index points
+    // at the wrong row (or none). This became reachable once the correlator
+    // started finding the row by `tool_call_id` — before that the lookup always
+    // missed and the row was taken from the last message by accident.
+    const api = makeApi();
+    const provider = makeProvider(api);
+    (provider as any).currentThread = { ...thread("agent"), permission_posture: "ask" };
+    (provider as any).currentTurnId = "turn-1";
+
+    const earlier = { id: "assistant-first", role: "assistant", toolCalls: [], blocks: [] };
+    const later = { id: "assistant-second", role: "assistant", toolCalls: [], blocks: [] };
+    (provider as any).messages = [earlier, later];
+
+    // The row is started on the earlier segment, and the active-items entry
+    // remembers which message it belongs to.
+    (provider as any).handleRuntimeEvent({
+      seq: 10,
+      event: "item.started",
+      turn_id: "turn-1",
+      item_id: "item-1",
+      payload: {
+        item: { kind: "tool_call", id: "item-1" },
+        tool: { id: "call-abc", name: "read_file", input: { path: "src/a.ts" } },
+      },
+    });
+    // Point the entry at the earlier message, which is what a steer leaves
+    // behind: the transcript has moved on, the row has not.
+    const active = (provider as any).activeItems.get("call-abc");
+    (provider as any).activeItems.set("call-abc", { ...active, msgId: "assistant-first" });
+
+    (provider as any).handleRuntimeEvent({
+      seq: 11,
+      event: "approval.required",
+      turn_id: "turn-1",
+      payload: {
+        id: "approval_1",
+        approval_id: "approval_1",
+        tool_call_id: "call-abc",
+        tool_name: "read_file",
+        summary: "Read `src/a.ts`",
+      },
+    });
+
+    const required = messagesOf(provider).find((msg) => msg.type === "approvalRequired");
+    expect(required).toBeDefined();
+    expect(required!.messageId).toBe("assistant-first");
+    expect(required!.toolCallIdx).toBe(0);
   });
 
   it("leaves the decision to the engine when the posture is not Ask", async () => {

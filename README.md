@@ -66,7 +66,7 @@ Keep the engine current with `codewhale update`; `codewhale --version` is the ch
 
 **Status and progress, visible at any moment** — The three peer tabs — Sessions, Threads and Activity — lay out what is happening right now: running threads, the live work panel, the change list, Fleet and sub-agent state, task progress. Each active thread holds one lightweight SSE stream, so status and progress stay live without a polling timer.
 
-**The moment your decision is needed, it reaches you in one click** — When a background thread stops for an approval or a question, its own card carries a pending count (grouped under *Needs you*), the toolbar's Agent label shows the total, and a VS Code notification fires. Approve or answer right in the card, without switching threads first.
+**The moment your decision is needed, it reaches you in one click** — When a background thread stops for an approval or a question, its own card carries a pending count (grouped under *Needs you*) and the toolbar's Agent label names it and shows the total. Approve or answer right in the card, without switching threads first.
 
 **Roll back at the level you need — turn or file** — Not happy with the last turn? Undo and Retry act on that turn. Badly edited file? Per-file Revert restores just that one recorded change and names the restore point taken before it, leaving the file's other changes and every other file untouched. For a wider sweep, snapshots roll the workspace files back to a point in time.
 
@@ -165,9 +165,9 @@ Switch from the status bar or with `/mode` (shortcuts `1`/`2`/`3`) and `/auto`. 
 - **Background threads keep running** — switching threads, sessions or starting a new chat no longer touches the running turn: the Runtime owns it, so a goal loop or a long turn keeps going while you work elsewhere. Switching back re-attaches the view to that turn (Stop and Steer work again); stopping one stays explicit (**Stop**).
 - **Cross-workspace resumption** — loading a session from another project rebinds it to the workspace you are in.
 - **Workspace filter** — show sessions from all workspaces or only the current one.
-- **Attention surfacing** — a thread waiting on an approval or your input carries a count on its rail card (grouped under *Needs you*), a total on the toolbar's **Agent** label, and a VS Code notification you can turn off with `brotherwhale.backgroundThreadNotifications`. Approvals and questions from another thread can be answered inline in its rail card, without switching to it.
+- **Attention surfacing** — a thread waiting on an approval or your input carries a count on its rail card (grouped under *Needs you*) and a total on the toolbar's **Agent** label, which names the longest-waiting thread. Approvals and questions from another thread can be answered inline in its rail card, without switching to it.
 - **A chime when a turn finishes** — audible from wherever you are: the cue rings for the conversation you are watching and for a parked thread finishing in the background. A failed or interrupted turn stays silent, turns finishing together are heard once, and `brotherwhale.completionSound` turns it off.
-- **Watched, not polled** — every background thread that is running or waiting on you holds one lightweight SSE stream, so badges, notifications and the auto-save stay live without a polling timer.
+- **Watched, not polled** — every background thread that is running or waiting on you holds one lightweight SSE stream, so the rail badge and the auto-save stay live without a polling timer, and a request that arrives while you are elsewhere shows up on the rail instead of waiting for a poll.
 - Three peer sidebar tabs — **Sessions** (saved conversations), **Threads** (the active ones) and **Activity** (live agent status: Work, Changes, Fleet, Tasks, Agents) — each with a hint line saying what it holds.
 
 ### Changes and diffs in the editor
@@ -243,7 +243,6 @@ Search for `brotherwhale` in VS Code settings (`Cmd/Ctrl+,`).
 | `brotherwhale.reasoningEffort` | `"auto"` | `auto`, `off`, `low`, `medium`, `high`, `max` |
 | `brotherwhale.autoApprove` | `false` | Legacy fallback for auto-approval. Prefer the **Full Access** posture, which already implies it |
 | `brotherwhale.costCurrency` | `"auto"` | `auto` follows the UI language (Chinese → CNY, otherwise USD), or force `usd` / `cny`. Falls back to USD when no native CNY price exists |
-| `brotherwhale.backgroundThreadNotifications` | `true` | Show a VS Code notification when a background thread needs your approval or input (once per attention episode; the rail badge and its count stay live either way) |
 | `brotherwhale.completionSound` | `true` | Play a chime when a turn finishes — in the conversation you are reading or in a background thread. Failed and interrupted turns stay silent, and turns finishing at the same moment are heard once |
 | `brotherwhale.telemetry` | `true` | Let the engine this window starts count anonymous usage. Application-scoped; what is collected is the engine's concern (see [Usage reporting](#usage-reporting)) |
 

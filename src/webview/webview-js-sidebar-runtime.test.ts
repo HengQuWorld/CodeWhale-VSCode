@@ -94,6 +94,7 @@ class FakeElement {
   public parentElement: FakeElement | null = null;
   public children: FakeElement[] = [];
   public type = "";
+  public checked = false;
   private html = "";
   private listeners = new Map<string, (event: unknown) => void>();
   private attributes = new Map<string, string>();
@@ -949,6 +950,38 @@ describe("inline thread attention", () => {
       approvalId: "approval-1",
       decision: "allow",
       remember: false,
+    });
+  });
+
+  it("keeps a ticked remember box across the rebuild that follows it", () => {
+    // The rail is rebuilt on every thread-list publish — and while a thread is
+    // waiting, the discovery sweep publishes one roughly every 30 seconds. A
+    // rebuild replaces the whole card, so a tick the user set before clicking
+    // Allow would otherwise be silently cleared, and the grant lost.
+    const { postMessages, rail, sidebar } = createHarness();
+    sidebar.setThreads([waitingThread("thread-a", "2026-09-17T00:00:00Z")]);
+    sidebar.renderThreads();
+    sidebar.showThreadAttention({
+      threadId: "thread-a",
+      approvals: [pendingApproval("approval-1")],
+      inputs: [],
+    });
+
+    const box = attentionCard(rail, "thread-a")!.querySelector(".remember-check")!;
+    box.checked = true;
+    box.dispatch("change");
+
+    // A thread list arrives mid-answer, as the sweep sends it.
+    sidebar.renderThreads();
+
+    const card = attentionCard(rail, "thread-a")!;
+    expect(card.querySelector(".remember-check")!.checked).toBe(true);
+    attentionButton(card, "allow").dispatch("click", { stopPropagation: () => undefined });
+    expect(postMessages).toContainEqual({
+      type: "approvalDecision",
+      approvalId: "approval-1",
+      decision: "allow",
+      remember: true,
     });
   });
 

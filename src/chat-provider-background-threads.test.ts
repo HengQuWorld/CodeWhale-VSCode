@@ -4,8 +4,8 @@
  * The runtime owns every turn and keeps it running when the view switches away
  * (runtime_threads.rs owns the turn lifecycle). The GUI parks the outgoing
  * thread, opens one lightweight SSE watch per background thread that is running
- * or waiting on the user, and keeps the rail badge, the VS Code notification,
- * the cross-thread answering path and the auto-save target live from those
+ * or waiting on the user, and keeps the rail badge, the cross-thread answering
+ * path and the auto-save target live from those
  * events. These tests pin that wiring — in particular that a park really arms a
  * watch (the thread is still `currentThread` at that moment) and that adopting a
  * thread drops the watch it had as a background one.
@@ -51,8 +51,6 @@ import type {
   ThreadRecord,
   ThreadSummary,
 } from "./types";
-
-const UNWATCHED_SINCE_SEQ = Number.MAX_SAFE_INTEGER;
 
 function makeThread(id: string, overrides: Partial<ThreadRecord> = {}): ThreadRecord {
   return {
@@ -136,6 +134,16 @@ const CAPABILITIES = {
 type StreamRecord = {
   threadId: string;
   sinceSeq: number;
+  replayLimit: number | undefined;
+  /** Push an event the engine published on this thread at `event.seq`.
+   *
+   *  The admission rule is the engine's, not a convenience: a stream delivers
+   *  `seq > since_seq`, and the opening cursor is also the live pump's cursor,
+   *  so a cursor above the thread's own sequence admits nothing — ever.
+   *  `replay_limit: 0` repositions that cursor to the thread's last event
+   *  instead of to `since_seq`, which is how a caller asks to watch from now
+   *  on. Modelling both here is what makes a watch's cursor observable: a test
+   *  that arms a silent stream cannot quietly assert against one. */
   emit: (event: RuntimeEvent) => void;
 };
 
@@ -143,10 +151,16 @@ type Harness = {
   provider: ChatProvider;
   api: Record<string, any>;
   streams: StreamRecord[];
+  /** Highest event sequence the engine has published on a thread, which is
+   *  where a `replay_limit: 0` stream starts reading. */
+  engineEdge: Map<string, number>;
 };
 
 function createProvider(): Harness {
   const streams: StreamRecord[] = [];
+  /** Where the engine's journal ends for a thread: the sequence a
+   *  `replay_limit: 0` stream is positioned at when it opens. */
+  const engineEdge = new Map<string, number>();
   const api = {
     bindEngine: vi.fn(),
     ensureReady: vi.fn(async () => undefined),
@@ -173,8 +187,26 @@ function createProvider(): Harness {
     saveCurrentSession: vi.fn(async () => ({ session_id: "session-1" })),
     submitUserInput: vi.fn(async () => undefined),
     streamEvents: vi.fn(
-      (threadId: string, sinceSeq: number, onEvent: (event: RuntimeEvent) => void) => {
-        streams.push({ threadId, sinceSeq, emit: onEvent });
+      (
+        threadId: string,
+        sinceSeq: number,
+        onEvent: (event: RuntimeEvent) => void,
+        _onError?: (err: Error) => void,
+        replayLimit?: number,
+      ) => {
+        // Resolve the opening cursor the way the engine does, then apply the
+        // delivery rule: nothing at or below it is ever delivered.
+        const liveFrom = replayLimit === 0 ? (engineEdge.get(threadId) ?? 0) : sinceSeq;
+        streams.push({
+          threadId,
+          sinceSeq,
+          replayLimit,
+          emit: (event: RuntimeEvent) => {
+            if (event.seq <= liveFrom) return;
+            engineEdge.set(threadId, event.seq);
+            onEvent(event);
+          },
+        });
         return { abort: () => undefined };
       },
     ),
@@ -184,7 +216,7 @@ function createProvider(): Harness {
   (provider as any).apiCapabilities = { ...CAPABILITIES };
   (provider as any).loadHistory = vi.fn(async () => 0);
   (provider as any).subscribeToEvents = vi.fn();
-  return { provider, api, streams };
+  return { provider, api, streams, engineEdge };
 }
 
 /** messages of one type, oldest first. */
@@ -197,6 +229,18 @@ function messagesOf(provider: ChatProvider, type: string): Array<Record<string, 
 
 function streamFor(streams: StreamRecord[], threadId: string): StreamRecord | undefined {
   return streams.find((s) => s.threadId === threadId);
+}
+
+/** The attention count the rail would show for one thread.
+ *
+ *  It is read off the newest `threadList` publish, because that is the only
+ *  thing the rail and the toolbar's Agent label are drawn from — a count the
+ *  client holds internally but never publishes is not a visible surface. */
+function attentionCountOnRail(provider: ChatProvider, threadId: string): number {
+  const lists = messagesOf(provider, "threadList");
+  const rows = (lists[lists.length - 1]?.threads as Array<Record<string, unknown>>) || [];
+  const row = rows.find((r) => r.id === threadId);
+  return Number(row?.pending_attention_count || 0);
 }
 
 const providers: ChatProvider[] = [];
@@ -287,7 +331,7 @@ describe("background thread watching", () => {
   });
 
   describe("attention discovery poll", () => {
-    it("watches a thread that started somewhere else, without repainting the rail", async () => {
+    it("watches a thread that started somewhere else, and surfaces it on the rail", async () => {
       const { provider, api, streams } = newProvider();
       vi.useFakeTimers();
       try {
@@ -308,9 +352,13 @@ describe("background thread watching", () => {
         // Nothing in this window had ever heard of this thread, so no event
         // could open a watch for it: the sweep is the only way it gets one.
         expect(streamFor(streams, "thread-elsewhere")).toBeDefined();
-        // A discovery pass is not a repaint: the rail keeps whatever the user
-        // is looking at instead of being rebuilt under the pointer.
-        expect(messagesOf(provider, "threadList")).toHaveLength(0);
+        // And the sweep is the only thing that can *surface* it. The watch it
+        // just armed starts at the live edge, so the request that prompted
+        // this pass is history that stream will never replay; a waiting thread
+        // the sweep finds has to reach the rail, or it stays invisible until
+        // someone opens it by hand. (A sweep that finds nobody waiting still
+        // leaves the rail alone — that is the next test.)
+        expect(attentionCountOnRail(provider, "thread-elsewhere")).toBe(1);
       } finally {
         (provider as any).stopAttentionDiscoveryPoll();
         vi.useRealTimers();
@@ -370,8 +418,18 @@ describe("background thread watching", () => {
       await (provider as any).refreshThreadList();
 
       expect(streams.map((s) => s.threadId).sort()).toEqual(["thread-busy", "thread-waiting"]);
-      // Never watched before → skip the durable replay entirely.
-      expect(streamFor(streams, "thread-waiting")!.sinceSeq).toBe(UNWATCHED_SINCE_SEQ);
+      // Never watched before, so there is no cursor to resume from: the watch
+      // starts at the live edge and replays nothing.
+      //
+      // Both halves matter. `replayLimit: 0` is what makes `sinceSeq: 0` mean
+      // "from now on" instead of "replay everything"; and `sinceSeq` must not
+      // be a cursor above the thread's own sequence, because delivery is
+      // `seq > since_seq` — such a stream opens, keeps alive, and never
+      // delivers an event, which is a background thread that can wait for an
+      // approval in complete silence.
+      const waiting = streamFor(streams, "thread-waiting")!;
+      expect(waiting.sinceSeq).toBe(0);
+      expect(waiting.replayLimit).toBe(0);
       const list = messagesOf(provider, "threadList");
       expect(list).toHaveLength(1);
       // The rail is handed the summaries and nothing else: the toolbar chip
@@ -395,7 +453,6 @@ describe("background thread watching", () => {
 
       expect((provider as any).watchControllers.has("thread-busy")).toBe(false);
       expect((provider as any).backgroundThreads.has("thread-busy")).toBe(false);
-      expect((provider as any).threadTitles.has("thread-busy")).toBe(true);
     });
 
     it("keeps watching a thread whose goal is still active", async () => {
@@ -417,6 +474,165 @@ describe("background thread watching", () => {
     });
   });
 
+  describe("watch cursor", () => {
+    it("hears a live approval on a thread it has never watched", async () => {
+      // The regression. This watch used to be armed at `Number.MAX_SAFE_INTEGER`
+      // as a way of saying "skip the durable replay": the cursor was rewritten
+      // from the client's reading of the engine, and the engine does not work
+      // that way. Delivery is `seq > since_seq` and the opening cursor is also
+      // the live pump's cursor, so nothing could ever exceed MAX — the stream
+      // opened, kept alive, and never delivered an event. A background thread
+      // that blocked on an approval under Ask therefore raised no notification
+      // and no rail badge, and the only way to see the request was to open the
+      // thread by hand and let loadHistory read `pending_approvals`.
+      const { provider, api, streams, engineEdge } = newProvider();
+      provider.currentThread = makeThread("thread-mine");
+      // The thread already has a journal, and its live edge sits well above
+      // the sequences these tests use: a watch that replayed from 0 would
+      // deliver 40 events nobody asked for, and one armed above the edge at
+      // MAX would deliver none of them ever.
+      engineEdge.set("thread-busy", 40);
+      api.listThreadsSummary.mockResolvedValue([
+        makeSummary("thread-busy", {
+          latest_turn_status: "inprogress",
+          pending_attention_count: 0,
+        }),
+      ]);
+      await (provider as any).refreshThreadList();
+
+      const watch = streamFor(streams, "thread-busy")!;
+      expect(watch.sinceSeq).toBe(0);
+      expect(watch.replayLimit).toBe(0);
+      // Nothing is waiting yet: that row was published before the request existed.
+      expect(attentionCountOnRail(provider, "thread-busy")).toBe(0);
+
+      // The runtime registers the request before sequencing the event, so the
+      // next summary fetch reports it — and that count is what the rail's
+      // *Needs you* group and the Agent label show.
+      api.listThreadsSummary.mockResolvedValue([
+        makeSummary("thread-busy", {
+          latest_turn_status: "inprogress",
+          pending_attention_count: 1,
+        }),
+      ]);
+
+      // The delivered event is what schedules the rail repaint. Nothing below
+      // calls refreshThreadList directly: a watch that cannot deliver an event
+      // never schedules one, so the count would sit at 0 forever — which is
+      // exactly what the MAX cursor produced, and why a waiting thread was
+      // invisible until it was opened by hand.
+      watch.emit(makeEvent(41, "approval.required", { id: "approval-1" }));
+
+      await vi.waitFor(() => expect(attentionCountOnRail(provider, "thread-busy")).toBe(1));
+    });
+
+    it("surfaces attention the discovery sweep finds, instead of swallowing it", async () => {
+      // A request that is already pending when a watch opens is invisible to
+      // that watch: it is history, and a live-edge stream replays nothing. So
+      // the sweep that arms the watch is the only thing that can tell the user
+      // — and it used to do it *quietly*, publishing nothing at all. The rail
+      // then stayed frozen until the thread was opened by hand, which is the
+      // "it only ever showed once" report.
+      const { provider, api } = newProvider();
+      provider.currentThread = makeThread("thread-mine");
+      api.listThreadsSummary.mockResolvedValue([
+        makeSummary("thread-waiting", { pending_attention_count: 1 }),
+      ]);
+
+      // The sweep, exactly as the discovery poll runs it.
+      await (provider as any).refreshThreadList(true);
+
+      expect(attentionCountOnRail(provider, "thread-waiting")).toBe(1);
+    });
+
+    it("arms a watch for a running thread the sweep finds without repainting", async () => {
+      // The sweep's first job, and the one it must not lose: a thread running
+      // somewhere else has nobody watching it, and until a watch exists nothing
+      // can hear its approval. Repainting the rail for a thread that is merely
+      // *running* is what the sweep deliberately avoids.
+      const { provider, api, streams } = newProvider();
+      provider.currentThread = makeThread("thread-mine");
+      api.listThreadsSummary.mockResolvedValue([
+        makeSummary("thread-running", { latest_turn_status: "inprogress" }),
+      ]);
+
+      await (provider as any).refreshThreadList(true);
+
+      expect(streamFor(streams, "thread-running")).toBeDefined();
+      expect(messagesOf(provider, "threadList")).toHaveLength(0);
+    });
+
+    it("keeps a quiet sweep off the rail when nobody is waiting", async () => {
+      // The other half: the sweep is still not a repaint. With nothing waiting
+      // it must not touch the rail, or every 30 seconds would redraw the list
+      // (and throw away an expanded attention card) for no reason.
+      const { provider, api } = newProvider();
+      provider.currentThread = makeThread("thread-mine");
+      api.listThreadsSummary.mockResolvedValue([
+        makeSummary("thread-idle", { latest_turn_status: "completed" }),
+      ]);
+
+      await (provider as any).refreshThreadList(true);
+
+      expect(messagesOf(provider, "threadList")).toHaveLength(0);
+    });
+
+    it("publishes complete rows when a sweep does paint the rail", async () => {
+      // A quiet pass skips the branch-line fetch. Painting rows without it
+      // would strip the rail's fork lines until the next full refresh, so the
+      // pass that decides to paint has to fetch them itself.
+      const { provider, api } = newProvider();
+      provider.currentThread = makeThread("thread-mine");
+      api.listThreadsSummary.mockResolvedValue([
+        makeSummary("thread-waiting", { pending_attention_count: 1 }),
+      ]);
+      api.listThreads.mockResolvedValue([
+        makeThread("thread-waiting", { session_id: "session-of-waiting" }),
+      ]);
+
+      await (provider as any).refreshThreadList(true);
+
+      const lists = messagesOf(provider, "threadList");
+      const rows = lists[lists.length - 1]!.threads as Array<Record<string, unknown>>;
+      expect(rows.find((r) => r.id === "thread-waiting")!.session_id).toBe(
+        "session-of-waiting",
+      );
+    });
+
+    it("keeps the parked thread's own cursor instead of jumping to the edge", async () => {
+      // The other half: parking knows exactly where the view stopped reading,
+      // so that watch resumes there rather than discarding the events emitted
+      // between the park and the stream opening.
+      const { provider, streams } = newProvider();
+      provider.currentThread = makeThread("thread-A");
+      (provider as any).lastEventSeq = 42;
+      (provider as any).currentTurnId = "turn-1";
+
+      await (provider as any).parkCurrentThread();
+
+      const parked = streamFor(streams, "thread-A")!;
+      expect(parked.sinceSeq).toBe(42);
+      expect(parked.replayLimit).toBeUndefined();
+    });
+
+    it("does not replay the whole journal when a parked thread has no cursor yet", async () => {
+      // `lastEventSeq` of 0 is not a cursor at all — it is the absence of one.
+      // Passing it through would ask the engine for `seq > 0`, the entire
+      // journal, replaying turns this client already handled: a second
+      // completion cue and a second auto-save. It means the live edge.
+      const { provider, streams } = newProvider();
+      provider.currentThread = makeThread("thread-A");
+      (provider as any).lastEventSeq = 0;
+      (provider as any).currentTurnId = "turn-1";
+
+      await (provider as any).parkCurrentThread();
+
+      const parked = streamFor(streams, "thread-A")!;
+      expect(parked.sinceSeq).toBe(0);
+      expect(parked.replayLimit).toBe(0);
+    });
+  });
+
   describe("watcher events", () => {
     const watchedId = "thread-busy";
 
@@ -433,13 +649,14 @@ describe("background thread watching", () => {
     it("stays silent for approvals the runtime resolves by itself", async () => {
       // The runtime's auto-approve path (a remembered "always allow", Full
       // Access) emits `approval.required` and then `approval.decided` with
-      // `auto: true`, registering nothing as pending in between. Ten of those
-      // used to be ten VS Code notices for a thread that never needed the user.
+      // `auto: true`, registering nothing as pending in between. Nothing in
+      // that path needs the user, so ten of those must not put ten onto the
+      // rail's *Needs you* count (or into the toolbar's Agent label, which
+      // reads the same rows).
       const { provider, api, emit } = await watch({
         pending_attention_count: 0,
         latest_turn_status: "inprogress",
       });
-      expect(vscodeMock.showInformationMessage).not.toHaveBeenCalled();
 
       for (let i = 0; i < 10; i += 1) {
         emit(makeEvent(i * 2 + 1, "approval.required", { id: `approval-auto-${i}` }));
@@ -451,7 +668,7 @@ describe("background thread watching", () => {
       ]);
       await (provider as any).refreshThreadList();
 
-      expect(vscodeMock.showInformationMessage).not.toHaveBeenCalled();
+      expect(attentionCountOnRail(provider, watchedId)).toBe(0);
     });
 
     it("refreshes the task list when a watched thread asks for the user", async () => {
@@ -476,13 +693,17 @@ describe("background thread watching", () => {
       expect(api.listTasks).toHaveBeenCalled();
     });
 
-    it("notifies once per attention episode, and again after it clears", async () => {
-      // Running thread: the watch survives an answered approval, so the next
-      // episode is observed on the same stream.
+    it("puts a background thread's attention on the rail, and takes it down again", async () => {
+      // The rail is where attention is surfaced now: the *Needs you* group on
+      // the thread card and the toolbar's Agent label are both drawn from these
+      // rows, and the count comes from the summary's authoritative pending
+      // total — never from a raw `approval.required`, which the runtime also
+      // emits for calls it resolves itself.
       const { provider, api, emit } = await watch({
         pending_attention_count: 0,
         latest_turn_status: "inprogress",
       });
+      expect(attentionCountOnRail(provider, watchedId)).toBe(0);
 
       // A real request: the runtime registers it before sequencing the event,
       // so the summary the refresh fetches reports it.
@@ -491,27 +712,16 @@ describe("background thread watching", () => {
         makeSummary(watchedId, { pending_attention_count: 1, latest_turn_status: "inprogress" }),
       ]);
       await (provider as any).refreshThreadList();
-      expect(vscodeMock.showInformationMessage).toHaveBeenCalledTimes(1);
-      expect(String(vscodeMock.showInformationMessage.mock.calls[0][0])).toContain("Thread thread-busy");
+      expect(attentionCountOnRail(provider, watchedId)).toBe(1);
 
-      // Same episode → no second toast.
-      await (provider as any).refreshThreadList();
-      expect(vscodeMock.showInformationMessage).toHaveBeenCalledTimes(1);
-
-      // Episode over, then a fresh one → notifies again.
+      // Answering it takes the count back down the same way it went up, so a
+      // thread that no longer needs anyone stops being counted as waiting.
       emit(makeEvent(2, "approval.decided", { id: "approval-1" }));
       api.listThreadsSummary.mockResolvedValue([
         makeSummary(watchedId, { pending_attention_count: 0, latest_turn_status: "inprogress" }),
       ]);
       await (provider as any).refreshThreadList();
-      expect(vscodeMock.showInformationMessage).toHaveBeenCalledTimes(1);
-
-      emit(makeEvent(3, "approval.required", { id: "approval-2" }));
-      api.listThreadsSummary.mockResolvedValue([
-        makeSummary(watchedId, { pending_attention_count: 1, latest_turn_status: "inprogress" }),
-      ]);
-      await (provider as any).refreshThreadList();
-      expect(vscodeMock.showInformationMessage).toHaveBeenCalledTimes(2);
+      expect(attentionCountOnRail(provider, watchedId)).toBe(0);
     });
 
     it("re-arms from the summary after an idle thread goes quiet", async () => {
@@ -531,25 +741,6 @@ describe("background thread watching", () => {
       await (provider as any).refreshThreadList();
       expect((provider as any).watchControllers.has("thread-busy")).toBe(true);
       expect(streams.filter((s) => s.threadId === "thread-busy")).toHaveLength(2);
-    });
-
-    it("stays silent when the notification setting is off", async () => {
-      vscodeMock.configGet.mockImplementation((key: string, fallback?: unknown) =>
-        key === "backgroundThreadNotifications" ? false : fallback,
-      );
-      const { provider, api, emit } = await watch({
-        pending_attention_count: 0,
-        latest_turn_status: "inprogress",
-      });
-
-      // A genuinely pending approval still respects the setting.
-      emit(makeEvent(1, "approval.required", { id: "approval-1" }));
-      api.listThreadsSummary.mockResolvedValue([
-        makeSummary(watchedId, { pending_attention_count: 1, latest_turn_status: "inprogress" }),
-      ]);
-      await (provider as any).refreshThreadList();
-
-      expect(vscodeMock.showInformationMessage).not.toHaveBeenCalled();
     });
 
     it("auto-saves a completed background turn in place", async () => {
@@ -669,7 +860,13 @@ describe("background thread watching", () => {
         }),
       );
       expect(api.upsertThreadGoal).toHaveBeenCalledWith("thread-goal", "ship the release", 5000);
-      expect(streamFor(streams, "thread-goal")!.sinceSeq).toBe(UNWATCHED_SINCE_SEQ);
+      // The thread was created a moment ago: no cursor to resume from, so the
+      // watch is positioned at the live edge. A background goal under Ask
+      // blocks on the first tool approval, and this watch is the only thing
+      // that can hear it.
+      const goalWatch = streamFor(streams, "thread-goal")!;
+      expect(goalWatch.sinceSeq).toBe(0);
+      expect(goalWatch.replayLimit).toBe(0);
       const info = messagesOf(provider, "info").map((m) => String(m.message));
       expect(info.some((message) => message.includes("Background goal started"))).toBe(true);
       expect(info.some((message) => message.includes("Ask posture blocks"))).toBe(false);
