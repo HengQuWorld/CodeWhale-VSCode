@@ -540,6 +540,27 @@ interface Translations {
   goalTimeUsedTooltip: string;
   goalContinuationsTooltip: string;
   goalBudgetExceeded: string;
+  // ── Workspace trust (L1 prompt + L3 banner) ──
+  /** VS Code's window trust, when the engine refused to start under it. */
+  workspaceTrustRequiredTitle: string;
+  /** Opens VS Code's own Workspace Trust editor (`workbench.trust.manage`). */
+  workspaceTrustManageAction: string;
+  /** Webview banner: the engine-scope decision project content waits on. */
+  workspaceUntrustedTitle: string;
+  workspaceUntrustedBody: string;
+  workspaceTrustAction: string;
+  workspaceTrustTerminalAction: string;
+  workspaceTrustDismiss: string;
+  /** Toast after the engine recorded the user's decision. */
+  workspaceTrustGranted: string;
+  /** Project MCP servers are connected during a session boot, not per turn. */
+  workspaceTrustMcpNote: string;
+  workspaceTrustRestartAction: string;
+  workspaceTrustFailed: string;
+  /** `{command}` is the copyable TUI command for the engine-scope trust. */
+  workspaceTrustTerminalHint: string;
+  workspaceTrustCopyAction: string;
+  workspaceTrustCopied: string;
   goalNeedsThread: string;
 }
 
@@ -957,6 +978,20 @@ const en: Translations = {
   goalContinuationsTooltip: "How many times this goal has been continued",
   goalBudgetExceeded: "over budget",
   goalNeedsThread: "No active thread for this goal — send a message to start one, then set the goal again.",
+  workspaceTrustRequiredTitle: "CodeWhale cannot start: this workspace is not trusted.",
+  workspaceTrustManageAction: "Manage Workspace Trust",
+  workspaceUntrustedTitle: "This workspace is not trusted",
+  workspaceUntrustedBody: "Project skills, commands, hooks, MCP servers and project context are skipped until you trust it. Nothing else is affected.",
+  workspaceTrustAction: "Trust this workspace",
+  workspaceTrustTerminalAction: "Do it in the terminal",
+  workspaceTrustDismiss: "Hide",
+  workspaceTrustGranted: "Workspace trusted. Project skills, commands, hooks and context load from your next turn.",
+  workspaceTrustMcpNote: "Project MCP servers load after the engine restarts.",
+  workspaceTrustRestartAction: "Restart engine",
+  workspaceTrustFailed: "Could not trust the workspace: {error}",
+  workspaceTrustTerminalHint: "To trust it from a terminal instead, run {command}, then `/trust on --save`.",
+  workspaceTrustCopyAction: "Copy command",
+  workspaceTrustCopied: "Command copied to the clipboard.",
 };
 
 const zhCn: Translations = {
@@ -1373,6 +1408,20 @@ const zhCn: Translations = {
   goalContinuationsTooltip: "该目标被续接的次数",
   goalBudgetExceeded: "已超预算",
   goalNeedsThread: "目标需要线程：先发送一条消息开始对话，再设定目标。",
+  workspaceTrustRequiredTitle: "CodeWhale 无法启动：当前工作区未受信任。",
+  workspaceTrustManageAction: "管理信任工作区",
+  workspaceUntrustedTitle: "此工作区未受信任",
+  workspaceUntrustedBody: "在信任之前，项目 skills、命令、hooks、MCP 服务器和项目上下文都会被跳过；其余功能不受影响。",
+  workspaceTrustAction: "信任此工作区",
+  workspaceTrustTerminalAction: "在终端中完成",
+  workspaceTrustDismiss: "隐藏",
+  workspaceTrustGranted: "已信任此工作区。项目 skills、命令、hooks 与项目上下文将在下一轮对话中生效。",
+  workspaceTrustMcpNote: "项目 MCP 服务器将在引擎重启后加载。",
+  workspaceTrustRestartAction: "重启引擎",
+  workspaceTrustFailed: "无法信任该工作区：{error}",
+  workspaceTrustTerminalHint: "若要在终端中完成，请运行 {command}，然后执行 `/trust on --save`。",
+  workspaceTrustCopyAction: "复制命令",
+  workspaceTrustCopied: "命令已复制到剪贴板。",
 };
 
 const translations: Record<string, Translations> = {
@@ -1823,5 +1872,11 @@ export function webviewTranslations(tr: Translations) {
     goalTimeUsedTooltip: tr.goalTimeUsedTooltip,
     goalContinuationsTooltip: tr.goalContinuationsTooltip,
     goalBudgetExceeded: tr.goalBudgetExceeded,
+    // Workspace trust banner
+    workspaceUntrustedTitle: tr.workspaceUntrustedTitle,
+    workspaceUntrustedBody: tr.workspaceUntrustedBody,
+    workspaceTrustAction: tr.workspaceTrustAction,
+    workspaceTrustTerminalAction: tr.workspaceTrustTerminalAction,
+    workspaceTrustDismiss: tr.workspaceTrustDismiss,
   };
 }

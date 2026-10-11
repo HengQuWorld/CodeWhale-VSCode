@@ -2562,6 +2562,73 @@ export function getWebviewCss(): string {
       border-radius: 4px;
       background: rgba(128,128,128,0.08);
     }
+    /* Workspace-trust banner: the one persistent, actionable surface for a
+       verdict the engine reports and the panel would otherwise never mention.
+       Deliberately not a toast — it stays until the state it describes
+       changes, and its buttons are the whole path out of that state. */
+    .workspace-trust-banner {
+      display: flex;
+      /* A header strip in a flex column: sized by its own content, never
+         squeezed by a long transcript below it. */
+      flex: none;
+      align-items: flex-start;
+      gap: 8px;
+      margin: 0;
+      padding: 8px 10px;
+      font-size: 12px;
+      line-height: 1.4;
+      color: var(--fg);
+      border-bottom: 1px solid rgba(229, 160, 0, 0.45);
+      background: rgba(229, 160, 0, 0.12);
+    }
+    .workspace-trust-banner[hidden] {
+      display: none;
+    }
+    .workspace-trust-glyph {
+      flex: none;
+      font-size: 13px;
+      line-height: 1.3;
+    }
+    .workspace-trust-text {
+      flex: 1;
+      min-width: 0;
+    }
+    .workspace-trust-title {
+      font-weight: 600;
+    }
+    .workspace-trust-body {
+      opacity: 0.85;
+    }
+    .workspace-trust-actions {
+      flex: none;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .workspace-trust-actions button {
+      font-size: 11px;
+      padding: 3px 8px;
+      border-radius: 4px;
+      border: 1px solid rgba(128,128,128,0.4);
+      background: var(--bg);
+      color: inherit;
+      cursor: pointer;
+    }
+    .workspace-trust-actions .btn-trust-workspace {
+      border-color: var(--brand-primary);
+      background: var(--brand-primary);
+      color: #fff;
+    }
+    .workspace-trust-actions .btn-trust-workspace:disabled {
+      opacity: 0.6;
+      cursor: default;
+    }
+    .workspace-trust-actions .btn-trust-dismiss {
+      border-color: transparent;
+      background: none;
+      opacity: 0.6;
+      padding: 3px 6px;
+    }
     .skill-armed[hidden] {
       display: none;
     }

@@ -6,15 +6,23 @@ import * as http from "http";
 import { ChildProcess } from "child_process";
 
 const state = vi.hoisted(() => ({ fixture: "", storage: "", workspace: "", trusted: true, mode: "normal", telemetry: true, launches: [] as any[], children: [] as any[], competing: [] as any[], competingRequests: 0 }));
-vi.mock("vscode", () => ({ workspace: {
-  get isTrusted() { return state.trusted; },
-  get workspaceFolders() { return [{ uri: { fsPath: state.workspace } }]; },
-  getConfiguration: () => ({ get: (key: string, fallback: unknown) => {
-    if (key === "enginePath") return "fixture-engine";
-    if (key === "telemetry") return state.telemetry;
-    return fallback;
-  } }),
-} }));
+vi.mock("vscode", () => ({
+  env: { language: "en" },
+  // The engine now prompts for window trust when it refuses to start in a
+  // restricted window, so the double has to answer the two APIs that prompt
+  // uses — `t()` reads `env.language`, and the action opens the trust editor.
+  window: { showWarningMessage: vi.fn(async () => undefined) },
+  commands: { executeCommand: vi.fn(async () => undefined) },
+  workspace: {
+    get isTrusted() { return state.trusted; },
+    get workspaceFolders() { return [{ uri: { fsPath: state.workspace } }]; },
+    getConfiguration: () => ({ get: (key: string, fallback: unknown) => {
+      if (key === "enginePath") return "fixture-engine";
+      if (key === "telemetry") return state.telemetry;
+      return fallback;
+    } }),
+  },
+}));
 vi.mock("child_process", async (importOriginal) => {
   const real = await importOriginal<typeof import("child_process")>();
   const network = await import("node:http");
@@ -287,5 +295,45 @@ describe("owned Runtime lifecycle", () => {
     state.trusted = false; const { item } = engine();
     await expect(item.ensureRunning()).rejects.toThrow("Trust this workspace");
     expect(state.launches).toHaveLength(0);
+  });
+
+  it("says where to fix a restricted window instead of only failing", async () => {
+    // The refusal on its own reaches nobody: the panel reports a connection
+    // failure, which names no cause. The prompt is the actionable half, so a
+    // restricted start has to raise exactly one — and one only, because a
+    // toast on every retry is a toast the user learns to dismiss.
+    const vscode = await import("vscode");
+    const prompt = vscode.window.showWarningMessage as unknown as {
+      mockClear: () => void;
+      mock: { calls: unknown[][] };
+    };
+    prompt.mockClear();
+
+    state.trusted = false; const { item } = engine();
+    await expect(item.ensureRunning()).rejects.toThrow("Trust this workspace");
+    await expect(item.ensureRunning()).rejects.toThrow("Trust this workspace");
+
+    expect(prompt.mock.calls).toHaveLength(1);
+    expect(prompt.mock.calls[0]).toEqual([
+      "CodeWhale cannot start: this workspace is not trusted.",
+      "Manage Workspace Trust",
+    ]);
+  });
+
+  it("prompts again after an explicit restart", async () => {
+    // A restart is the user asking again: a prompt that went unanswered has to
+    // be able to reappear rather than staying suppressed for the session.
+    const vscode = await import("vscode");
+    const prompt = vscode.window.showWarningMessage as unknown as {
+      mockClear: () => void;
+      mock: { calls: unknown[][] };
+    };
+    prompt.mockClear();
+
+    state.trusted = false; const { item } = engine();
+    await expect(item.ensureRunning()).rejects.toThrow("Trust this workspace");
+    await expect(item.restart()).rejects.toThrow("Trust this workspace");
+
+    expect(prompt.mock.calls).toHaveLength(2);
   });
 });

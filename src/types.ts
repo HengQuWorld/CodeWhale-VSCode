@@ -546,6 +546,20 @@ export interface WorkspaceStatusResponse {
   untracked: number;
   ahead?: number | null;
   behind?: number | null;
+  /** Whether the engine found this workspace trusted in the user's config.
+   *  `undefined` on engines older than the route that reports it — the
+   *  difference matters, because a missing field means "cannot tell", while
+   *  `false` is a verdict a banner can act on. */
+  workspace_trusted?: boolean;
+}
+
+/** `POST /v1/workspace/trust` — the engine's record of the user's decision. */
+export interface WorkspaceTrustResponse {
+  workspace: string;
+  workspace_trusted: boolean;
+  /** The user config document the engine wrote. The GUI never edits it. */
+  config_path: string;
+  message: string;
 }
 
 export interface RuntimeInfoResponse {

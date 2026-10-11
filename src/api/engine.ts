@@ -9,6 +9,7 @@ import * as path from "path";
 import { createHash, randomBytes } from "crypto";
 
 import { telemetryEnabled, telemetryEnv } from "../utils/telemetry-settings";
+import { t } from "../i18n";
 const HEALTH_TIMEOUT_MS = 3000;
 const STARTUP_TIMEOUT_MS = 10000;
 const HEALTH_RETRY_INTERVAL_MS = 300;
@@ -432,6 +433,12 @@ export class CodeWhaleEngine {
   /** True when the child is an interpreter running the engine, not the engine
    * itself — so `child.pid` names the interpreter. Windows only. */
   private interpreterLaunch = false;
+  /** One actionable prompt per untrusted stretch. VS Code refuses to let an
+   * extension start anything in a restricted window, so the refusal itself is
+   * not the news — where to fix it is, and repeating the toast on every retry
+   * would only train the user to dismiss it. Cleared by `restart()`, which is
+   * the user explicitly asking again. */
+  private untrustedNoticeShown = false;
 
   constructor(
     private outputChannel: vscode.OutputChannel,
@@ -448,9 +455,33 @@ export class CodeWhaleEngine {
     return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? "";
   }
 
+  /**
+   * Point the user at VS Code's own Workspace Trust editor.
+   *
+   * The engine cannot start in a restricted window, and the error it raises
+   * only reaches the extension log. Without this the panel just says it failed
+   * to connect, which names no cause and no fix — the user has to already know
+   * that Trust, not the model or the provider, is what is missing.
+   */
+  private notifyUntrustedWorkspace(): void {
+    if (this.untrustedNoticeShown) return;
+    this.untrustedNoticeShown = true;
+    void vscode.window
+      .showWarningMessage(t().workspaceTrustRequiredTitle, t().workspaceTrustManageAction)
+      .then((choice) => {
+        // The command opens VS Code's trust editor; granting trust there fires
+        // `onDidGrantWorkspaceTrust`, which is what starts the engine. Asking
+        // again here would race that.
+        if (choice) void vscode.commands.executeCommand("workbench.trust.manage");
+      });
+  }
+
   async ensureRunning(): Promise<void> {
     if (this.disposed) throw new Error("Engine has been disposed");
-    if (!vscode.workspace.isTrusted) throw new Error("Trust this workspace before starting CodeWhale");
+    if (!vscode.workspace.isTrusted) {
+      this.notifyUntrustedWorkspace();
+      throw new Error("Trust this workspace before starting CodeWhale");
+    }
     const workspace = this.getWorkspaceKey();
     if (this._running && this.process && this._workspaceKey === workspace) return;
     if (this._starting) {
@@ -675,6 +706,9 @@ export class CodeWhaleEngine {
     const starting = this._starting;
     const stopping = this.stop();
     const generation = this.generation;
+    // A restart is the user asking again: an earlier trust prompt that went
+    // unanswered must be able to reappear instead of staying suppressed.
+    this.untrustedNoticeShown = false;
     await stopping;
     if (starting) { try { await starting; } catch { /* cancelled start */ } }
     this.assertCurrent(generation);

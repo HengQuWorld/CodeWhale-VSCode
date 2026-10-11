@@ -400,6 +400,12 @@ export function makeTr(overrides?: Partial<WebviewTranslations>): WebviewTransla
     goalTimeUsedTooltip: "Total active time spent pursuing this goal",
     goalContinuationsTooltip: "How many times this goal has been continued",
     goalBudgetExceeded: "over budget",
+    workspaceUntrustedTitle: "This workspace is not trusted",
+    workspaceUntrustedBody:
+      "Project skills, commands, hooks, MCP servers and project context are skipped until you trust it.",
+    workspaceTrustAction: "Trust this workspace",
+    workspaceTrustTerminalAction: "Do it in the terminal",
+    workspaceTrustDismiss: "Hide",
     ...overrides,
   };
 }

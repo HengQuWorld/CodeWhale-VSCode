@@ -74,6 +74,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     })
   );
 
+  // VS Code refuses to let an extension start a child process in a restricted
+  // window, so the engine simply cannot come up until the user trusts the
+  // folder. When they do — from the prompt the engine raises, the welcome page,
+  // or the command palette — there is no reason to make them reload by hand:
+  // bring the engine up and re-bind the panel in place.
+  context.subscriptions.push(
+    vscode.workspace.onDidGrantWorkspaceTrust(() => {
+      void chatProvider.handleWorkspaceTrustGranted();
+    })
+  );
+
   context.subscriptions.push(
     vscode.commands.registerCommand("brotherwhale.compactContext", () => {
       chatProvider.handleCompactCommand();

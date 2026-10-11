@@ -36,6 +36,7 @@ import type {
   SaveThreadAsSessionRequest,
   SaveThreadAsSessionResponse,
   WorkspaceStatusResponse,
+  WorkspaceTrustResponse,
   RuntimeInfoResponse,
   RuntimeApiCapabilities,
   UsageTotals,
@@ -119,6 +120,7 @@ export type {
   SaveThreadAsSessionRequest,
   SaveThreadAsSessionResponse,
   WorkspaceStatusResponse,
+  WorkspaceTrustResponse,
   RuntimeInfoResponse,
   RuntimeApiCapabilities,
   UsageTotals,
@@ -791,6 +793,18 @@ export class CodeWhaleApiClient {
 
   async getWorkspaceStatus(): Promise<WorkspaceStatusResponse> {
     return (await this.get("/v1/workspace/status")) as WorkspaceStatusResponse;
+  }
+
+  /**
+   * Record or revoke this workspace's trust.
+   *
+   * The engine owns the decision — it writes the same user config its own
+   * `is_workspace_trusted` gate reads, through the same function behind the
+   * TUI's `/trust on --save`. The GUI asks here rather than editing that file
+   * itself, so there is exactly one writer and one source of truth.
+   */
+  async setWorkspaceTrust(trusted: boolean): Promise<WorkspaceTrustResponse> {
+    return (await this.post("/v1/workspace/trust", { trusted })) as WorkspaceTrustResponse;
   }
 
   // ── Runtime ──

@@ -398,6 +398,12 @@ function makeTr(): WebviewTranslations {
     goalTimeUsedTooltip: "Total active time spent pursuing this goal",
     goalContinuationsTooltip: "How many times this goal has been continued",
     goalBudgetExceeded: "over budget",
+    workspaceUntrustedTitle: "This workspace is not trusted",
+    workspaceUntrustedBody:
+      "Project skills, commands, hooks, MCP servers and project context are skipped until you trust it.",
+    workspaceTrustAction: "Trust this workspace",
+    workspaceTrustTerminalAction: "Do it in the terminal",
+    workspaceTrustDismiss: "Hide",
   };
 }
 
@@ -848,5 +854,22 @@ describe("webview-html.ts assembler", () => {
       expect(html).toContain(`id="sidebar-${key}"`);
       expect(html).toContain(`id="${key}-section-toggle"`);
     }
+  });
+
+  it("ships the workspace-trust banner hidden, with the ids its script binds", () => {
+    // The banner is the panel's only surface for the engine's project-workspace
+    // trust. It must arrive hidden — an empty amber bar on every load would be
+    // worse than none — and every button the event handler binds has to exist,
+    // because a missing one is a click that silently does nothing.
+    const html = getWebviewHtml(makeMockWebview(), makeMockExtensionUri(), makeTr());
+    const banner = html.slice(html.indexOf('id="workspace-trust-banner"'));
+    expect(banner).toContain('hidden');
+    expect(html).toContain('id="workspace-trust-banner"');
+    expect(html).toContain('id="workspace-trust-grant"');
+    expect(html).toContain('id="workspace-trust-terminal"');
+    expect(html).toContain('id="workspace-trust-dismiss"');
+    // The copy travels with the markup, not baked into the script.
+    expect(html).toContain("This workspace is not trusted");
+    expect(html).toContain("Trust this workspace");
   });
 });

@@ -271,6 +271,15 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
   private showAllWorkspaces: boolean = false;
   /** Fallback workspace from the TUI, used when VS Code has no folder open. */
   private tuiWorkspace: string | null = null;
+  /** The engine's verdict on this workspace (project skills, commands, hooks,
+   *  MCP servers, context). `null` means it could not be read — either the
+   *  engine is unreachable or it predates the field — and the panel shows no
+   *  banner for a verdict nobody reported. Only `false` is actionable. */
+  private workspaceTrusted: boolean | null = null;
+  /** Whether the engine answers `workspace_trusted` at all. A `false` verdict
+   *  on an engine with no write route would render a button that 404s, so the
+   *  banner is gated on the engine being able to honour it. */
+  private engineReportsWorkspaceTrust = false;
   /** Monotonic task-list refresh token used to drop stale async enrichment results. */
   private taskListRefreshToken: number = 0;
   /** Monotonic thread-list refresh token. The summary endpoint takes ~25s on a
@@ -821,6 +830,12 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       case "uninstallSkill":
         await this.mutateSkill("uninstall", msg.name as string);
         break;
+      case "trustWorkspace":
+        await this.handleTrustWorkspace();
+        break;
+      case "showWorkspaceTrustHelp":
+        await this.showWorkspaceTrustHelp();
+        break;
       case "trustSkill":
         await this.mutateSkill("trust", msg.name as string);
         break;
@@ -889,6 +904,9 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     await this.refreshRuntimeVersion();
     await this.refreshApiCapabilities();
     await this.refreshProviders();
+    // A reloaded webview lost the banner with the rest of its DOM, so the
+    // verdict has to be re-announced here, not only at init.
+    void this.refreshWorkspaceTrust();
     this.refreshSessionList();
     this.refreshThreadList();
     this.refreshTaskList();
@@ -1018,8 +1036,10 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       this.debugLog("calling api.ensureReady()...");
       await this.api.ensureReady();
       this.debugLog(`engine running on ${this.engine.baseUrl}`);
-      // Cache the TUI workspace as a fallback for when VS Code has no folder open.
-      this.api.getWorkspaceStatus().then(r => { this.tuiWorkspace = r.workspace; }).catch(() => {});
+      // One read answers two questions: which workspace the engine itself
+      // scanned (a fallback for a window with no folder open), and whether it
+      // trusts it. Nothing here reads `config.toml` — the engine owns that.
+      await this.refreshWorkspaceTrust();
       await this.refreshRuntimeVersion();
       await this.refreshApiCapabilities();
 
@@ -3226,6 +3246,128 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
    *  <name> <task>`, where activation and submission are one user action. */
   public async sendMessage(text: string): Promise<void> {
     await this.handleSendMessage(text);
+  }
+
+  // ── Workspace trust ──
+  //
+  // Two different trust decisions get conflated by name, and this panel keeps
+  // them apart:
+  //
+  //  * VS Code's window trust. Without it the engine cannot even be spawned,
+  //    so there is nothing to render — `CodeWhaleEngine` prompts for it and
+  //    `onDidGrantWorkspaceTrust` calls `handleWorkspaceTrustGranted` below.
+  //  * The engine's project-workspace trust. The window may be trusted while
+  //    the engine still skips the folder's skills, commands, hooks, MCP
+  //    servers and context. This banner is the one place that verdict is
+  //    surfaced and settled without sending the user to a config file.
+
+  /** Re-read the engine's verdict and push it to the panel. */
+  public async refreshWorkspaceTrust(): Promise<void> {
+    try {
+      const status = await this.api.getWorkspaceStatus();
+      // The engine owns this answer; the window's own folder is only a
+      // fallback for a window with none open.
+      this.tuiWorkspace = status.workspace;
+      this.engineReportsWorkspaceTrust = typeof status.workspace_trusted === "boolean";
+      this.workspaceTrusted = status.workspace_trusted ?? null;
+      this.postWorkspaceTrust();
+    } catch (err) {
+      // A verdict nobody reported renders nothing; the panel keeps whatever it
+      // had rather than inventing an untrusted state.
+      this.debugLog(`refreshWorkspaceTrust failed: ${getErrorMessage(err)}`);
+    }
+  }
+
+  private postWorkspaceTrust(): void {
+    this.postMessage({
+      type: "workspaceTrust",
+      // An engine that cannot report or record the verdict gets no banner.
+      supported: this.engineReportsWorkspaceTrust,
+      trusted: this.workspaceTrusted === true,
+      workspace: this.tuiWorkspace || this.currentWorkspaceKey() || "",
+    });
+  }
+
+  /**
+   * The user just trusted the VS Code window, which is what the engine's spawn
+   * was waiting on. Bring it up and re-bind the panel instead of leaving the
+   * user with a dead sidebar and a window reload to discover on their own.
+   */
+  public async handleWorkspaceTrustGranted(): Promise<void> {
+    // The engine could not start while the window was restricted and it can
+    // now. `initializeThread` brings it up and re-binds the panel, and it
+    // reports its own failures — so there is nothing to catch here, only the
+    // verdict to re-read once it has run.
+    await this.initializeThread();
+    await this.refreshWorkspaceTrust();
+  }
+
+  /**
+   * The banner's primary action: record the decision through the engine's own
+   * route.
+   *
+   * The GUI never touches `config.toml`. It cannot: the file is the user's,
+   * the gate that reads it lives in the engine, and a second writer would be a
+   * second source of truth for a security decision. So the click becomes one
+   * `POST /v1/workspace/trust`, and the engine applies the same
+   * `set_workspace_trust` the TUI's `/trust on --save` calls.
+   */
+  private async handleTrustWorkspace(): Promise<void> {
+    try {
+      const receipt = await this.api.setWorkspaceTrust(true);
+      this.engineReportsWorkspaceTrust = true;
+      this.workspaceTrusted = receipt.workspace_trusted;
+      this.postWorkspaceTrust();
+      if (!receipt.workspace_trusted) {
+        // The engine writes and then reads the verdict back through its own
+        // gate, so a `false` here means the record did not land where that gate
+        // looks. The banner has already come back; say so instead of
+        // congratulating the user on a decision the engine is not honouring.
+        this.postMessage({
+          type: "error",
+          message: t().workspaceTrustFailed.replace("{error}", receipt.message),
+        });
+        return;
+      }
+      // The inventory the panel is showing was built while the workspace was
+      // untrusted, so the project rows are missing from it.
+      void this.refreshSkillList();
+      const choice = await vscode.window.showInformationMessage(
+        `${t().workspaceTrustGranted}\n${t().workspaceTrustMcpNote}`,
+        t().workspaceTrustRestartAction,
+      );
+      if (choice === t().workspaceTrustRestartAction) {
+        // Restarting is the user's call, offered rather than taken: a turn may
+        // be in flight, and cutting one off to load MCP servers the user may
+        // not even use would be a worse trade than one more click.
+        await vscode.commands.executeCommand("brotherwhale.restartEngine");
+        await this.refreshWorkspaceTrust();
+        void this.refreshSkillList();
+      }
+    } catch (err) {
+      this.postMessage({
+        type: "error",
+        message: t().workspaceTrustFailed.replace("{error}", getErrorMessage(err)),
+      });
+      // Re-announce the state so the banner's button comes back: the webview
+      // disabled it on click, and a refusal must leave the user able to retry
+      // rather than staring at a dead control.
+      this.postWorkspaceTrust();
+    }
+  }
+
+  /** The banner's escape hatch: hand the user the TUI command instead. */
+  private async showWorkspaceTrustHelp(): Promise<void> {
+    const workspace = this.tuiWorkspace || this.currentWorkspaceKey() || "";
+    const command = `codewhale --workspace "${workspace}"`;
+    const choice = await vscode.window.showInformationMessage(
+      t().workspaceTrustTerminalHint.replace("{command}", command),
+      t().workspaceTrustCopyAction,
+    );
+    if (choice === t().workspaceTrustCopyAction) {
+      await vscode.env.clipboard.writeText(`${command}  # then: /trust on --save`);
+      vscode.window.setStatusBarMessage(t().workspaceTrustCopied, 4000);
+    }
   }
 
   /** Push the current skill inventory to the webview's Skills panel.

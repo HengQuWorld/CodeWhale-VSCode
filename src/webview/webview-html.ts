@@ -502,6 +502,14 @@ export interface WebviewTranslations {
   goalTimeUsedTooltip: string;
   goalContinuationsTooltip: string;
   goalBudgetExceeded: string;
+  /** Workspace-trust banner. The engine reports the verdict
+   *  (`workspace_trusted`); this banner is the one place the panel asks the
+   *  user to act on a `false` without sending them to a config file. */
+  workspaceUntrustedTitle: string;
+  workspaceUntrustedBody: string;
+  workspaceTrustAction: string;
+  workspaceTrustTerminalAction: string;
+  workspaceTrustDismiss: string;
 }
 
 export function getWebviewHtml(
@@ -617,6 +625,18 @@ ${css}
     <div id="sidebar-resize-handle" title="Drag to resize sidebar"></div>
 
     <div id="chat-area">
+      <div id="workspace-trust-banner" class="workspace-trust-banner" hidden role="status">
+        <span class="workspace-trust-glyph" aria-hidden="true">🔒</span>
+        <div class="workspace-trust-text">
+          <div class="workspace-trust-title">${tr.workspaceUntrustedTitle}</div>
+          <div class="workspace-trust-body">${tr.workspaceUntrustedBody}</div>
+        </div>
+        <div class="workspace-trust-actions">
+          <button type="button" class="btn-trust-workspace" id="workspace-trust-grant">${tr.workspaceTrustAction}</button>
+          <button type="button" class="btn-trust-terminal" id="workspace-trust-terminal">${tr.workspaceTrustTerminalAction}</button>
+          <button type="button" class="btn-trust-dismiss" id="workspace-trust-dismiss" title="${tr.workspaceTrustDismiss}" aria-label="${tr.workspaceTrustDismiss}">✕</button>
+        </div>
+      </div>
       <div id="settings-bar">
         <button id="btn-threads" title="${tr.togglePanel}">📋</button>
         <div class="setting-item">

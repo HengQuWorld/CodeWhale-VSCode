@@ -1986,4 +1986,67 @@ describe("webview-js-event-handler runtime: a turn's failure", () => {
 
     expect(harness.isStreaming()).toBe(true);
   });
+
+  // ── Workspace-trust banner ──
+  //
+  // These run the generated script, not a copy of its logic: the banner is the
+  // only surface a GUI has for the engine's project-workspace trust, so what
+  // the panel does with the host's verdict has to be observed, not assumed.
+
+  it("shows the trust banner on an untrusted verdict and files exactly one write per click", () => {
+    const harness = createRuntimeHarness();
+    harness.dispatchMessage({
+      type: "workspaceTrust",
+      supported: true,
+      trusted: false,
+      workspace: "/tmp/repo",
+    });
+
+    const banner = harness.getElement("workspace-trust-banner");
+    expect(banner.getAttribute("hidden")).toBeNull();
+
+    const grant = harness.getElement("workspace-trust-grant");
+    grant.dispatch("click", {});
+    grant.dispatch("click", {});
+    expect(
+      harness.postMessages.filter((m) => m.type === "trustWorkspace"),
+    ).toHaveLength(1);
+    // Disabled while the write is in flight: a second click must not file the
+    // same decision twice.
+    expect((grant as unknown as { disabled: boolean }).disabled).toBe(true);
+  });
+
+  it("hides the banner once the workspace is trusted, and on an unsupported engine", () => {
+    const harness = createRuntimeHarness();
+    harness.dispatchMessage({ type: "workspaceTrust", supported: true, trusted: false });
+    expect(harness.getElement("workspace-trust-banner").getAttribute("hidden")).toBeNull();
+
+    harness.dispatchMessage({ type: "workspaceTrust", supported: true, trusted: true });
+    expect(harness.getElement("workspace-trust-banner").getAttribute("hidden")).toBe("");
+
+    // An engine that cannot answer the question gets no banner rather than one
+    // whose button would 404.
+    harness.dispatchMessage({ type: "workspaceTrust", supported: false, trusted: false });
+    expect(harness.getElement("workspace-trust-banner").getAttribute("hidden")).toBe("");
+  });
+
+  it("keeps a dismissed banner dismissed for the life of the panel", () => {
+    const harness = createRuntimeHarness();
+    const banner = harness.getElement("workspace-trust-banner");
+    harness.dispatchMessage({ type: "workspaceTrust", supported: true, trusted: false });
+
+    harness.getElement("workspace-trust-dismiss").dispatch("click", {});
+    expect(banner.getAttribute("hidden")).toBe("");
+
+    harness.dispatchMessage({ type: "workspaceTrust", supported: true, trusted: false });
+    expect(banner.getAttribute("hidden")).toBe("");
+  });
+
+  it("asks the host for the terminal instructions from the banner", () => {
+    const harness = createRuntimeHarness();
+    harness.dispatchMessage({ type: "workspaceTrust", supported: true, trusted: false });
+
+    harness.getElement("workspace-trust-terminal").dispatch("click", {});
+    expect(harness.postMessages).toContainEqual({ type: "showWorkspaceTrustHelp" });
+  });
 });

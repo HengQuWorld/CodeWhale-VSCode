@@ -539,6 +539,66 @@ ${PROVIDER_PICKER_JS}
     }
   })();
 
+  /**
+   * The workspace-trust banner.
+   *
+   * The verdict is the engine's, pushed on the workspaceTrust message; the
+   * webview only renders it and reports the click. Hiding is local and lasts
+   * until the panel reloads: the host does not record a dismissal, so a
+   * decision this consequential is never suppressed for good by one stray
+   * click.
+   */
+  var workspaceTrustBannerEl = document.getElementById('workspace-trust-banner');
+  var workspaceTrustGrantEl = document.getElementById('workspace-trust-grant');
+  /** One write in flight at a time. The disabled attribute already stops a
+   *  real mouse, but the decision must not be filed twice however the click
+   *  arrives, so the guard is in the handler too. */
+  var workspaceTrustPending = false;
+  /** A hide applies to this panel only. The host records no dismissal, so the
+   *  banner returns on the next reload rather than being silenced for good by
+   *  one stray click. */
+  var workspaceTrustDismissed = false;
+
+  function renderWorkspaceTrustBanner(msg) {
+    if (!workspaceTrustBannerEl) return;
+    // supported: false is an engine that cannot answer the question at all; a
+    // banner whose button would 404 is worse than no banner.
+    if (!msg.supported || msg.trusted) {
+      workspaceTrustBannerEl.setAttribute('hidden', '');
+      return;
+    }
+    if (workspaceTrustDismissed) return;
+    workspaceTrustBannerEl.removeAttribute('hidden');
+    // The host re-announces the state after a refusal, which is what puts the
+    // button back; until then the write it started is still the open one.
+    workspaceTrustPending = false;
+    if (workspaceTrustGrantEl) workspaceTrustGrantEl.disabled = false;
+  }
+
+  (function wireWorkspaceTrustBanner() {
+    var terminalEl = document.getElementById('workspace-trust-terminal');
+    var dismissEl = document.getElementById('workspace-trust-dismiss');
+    if (workspaceTrustGrantEl) {
+      workspaceTrustGrantEl.addEventListener('click', function() {
+        if (workspaceTrustPending) return;
+        workspaceTrustPending = true;
+        workspaceTrustGrantEl.disabled = true;
+        vscode.postMessage({ type: 'trustWorkspace' });
+      });
+    }
+    if (terminalEl) {
+      terminalEl.addEventListener('click', function() {
+        vscode.postMessage({ type: 'showWorkspaceTrustHelp' });
+      });
+    }
+    if (dismissEl && workspaceTrustBannerEl) {
+      dismissEl.addEventListener('click', function() {
+        workspaceTrustDismissed = true;
+        workspaceTrustBannerEl.setAttribute('hidden', '');
+      });
+    }
+  })();
+
   function renderProviderDropdown(providers, currentId, currentExactId, viewProvider, viewProviderId) {
     if (!dropdownProviderEl) return;
     lastProviders = providers;
@@ -765,6 +825,10 @@ ${PROVIDER_PICKER_JS}
           lastProviderId = msg.providerId || '';
           applyProviderLabel();
         }
+        break;
+
+      case 'workspaceTrust':
+        renderWorkspaceTrustBanner(msg);
         break;
 
       case 'scopedDefaults':
