@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { getSidebarScript } from "./webview-js-sidebar";
+import { ACTIVITY_SECTION_KEYS, SKILL_GROUP_KEYS, getSidebarScript } from "./webview-js-sidebar";
 import { makeTr } from "./webview-test-helpers";
 
 describe("webview-js-sidebar.ts", () => {
@@ -149,6 +149,23 @@ describe("webview-js-sidebar.ts", () => {
     expect(script).toContain("ACTIVITY_SECTION_KEYS[sectionToggleIndex]");
     expect(script).toContain("document.getElementById(key + '-section-toggle')");
     expect(script).toContain("setActivitySectionCollapsed(key, !isActivitySectionCollapsed(key))");
+  });
+
+  it("carries the Activity roster into the script it generates", () => {
+    const script = getSidebarScript(makeTr());
+    // The list is interpolated, not retyped. A roster that stopped being
+    // embedded would leave the reader filtered against an undefined name, so
+    // the injected value itself is what is asserted here.
+    expect(script).toContain(
+      `var ACTIVITY_SECTION_KEYS = ${JSON.stringify(ACTIVITY_SECTION_KEYS)};`,
+    );
+  });
+
+  it("carries the Skills group roster into the script it generates", () => {
+    const script = getSidebarScript(makeTr());
+    // Same interpolation, same reason — this one is what the fold is validated
+    // against, so a dropped roster would make every fold silently refuse.
+    expect(script).toContain(`var SKILL_GROUP_KEYS = ${JSON.stringify(SKILL_GROUP_KEYS)};`);
   });
 
   it("wires render functions to window.__wvSidebar", () => {

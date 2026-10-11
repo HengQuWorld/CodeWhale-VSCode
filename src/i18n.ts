@@ -407,7 +407,14 @@ interface Translations {
   skillsArmedClear: string;
   skillsNoActivation: string;
   skillsNoLifecycle: string;
-  skillsYours: string;
+  /** Live filter over the inventory's name and description. */
+  skillsSearchPlaceholder: string;
+  /** Shown when the filter matches none of the listed skills. */
+  skillsNoMatch: string;
+  /** Inventory group headings: where a skill's SKILL.md lives, then the
+   *  engine's own bundled set. */
+  skillsProject: string;
+  skillsGlobal: string;
   skillsBuiltIn: string;
   noAgentRuns: string;
   agentStatusQueued: string;
@@ -820,7 +827,10 @@ const en: Translations = {
   skillsArmedClear: "Cancel the armed skill",
   skillsNoActivation: "This engine cannot hand back a skill's body, so activation is unavailable. Listing and toggling still work.",
   skillsNoLifecycle: "This engine has no skill install/update/remove/trust routes; the panel can list and toggle only.",
-  skillsYours: "Your skills",
+  skillsSearchPlaceholder: "Search skills…",
+  skillsNoMatch: "No skills match your search.",
+  skillsProject: "Project",
+  skillsGlobal: "Global",
   skillsBuiltIn: "Built-in",
   noAgentRuns: "No agent runs",
   agentStatusQueued: "Queued",
@@ -1233,7 +1243,10 @@ const zhCn: Translations = {
   skillsArmedClear: "取消已就绪的技能",
   skillsNoActivation: "当前引擎无法返回技能正文，因此不能激活；列表与开关仍可用。",
   skillsNoLifecycle: "当前引擎没有技能安装/更新/移除/信任接口；面板只能列表与开关。",
-  skillsYours: "你的技能",
+  skillsSearchPlaceholder: "搜索技能…",
+  skillsNoMatch: "没有匹配的技能。",
+  skillsProject: "项目",
+  skillsGlobal: "全局",
   skillsBuiltIn: "内置技能",
   noAgentRuns: "暂无子代理运行",
   agentStatusQueued: "排队中",
@@ -1681,7 +1694,10 @@ export function webviewTranslations(tr: Translations) {
     skillsArmedClear: tr.skillsArmedClear,
     skillsNoActivation: tr.skillsNoActivation,
     skillsNoLifecycle: tr.skillsNoLifecycle,
-    skillsYours: tr.skillsYours,
+    skillsSearchPlaceholder: tr.skillsSearchPlaceholder,
+    skillsNoMatch: tr.skillsNoMatch,
+    skillsProject: tr.skillsProject,
+    skillsGlobal: tr.skillsGlobal,
     skillsBuiltIn: tr.skillsBuiltIn,
     noAgentRuns: tr.noAgentRuns,
     agentStatusQueued: tr.agentStatusQueued,

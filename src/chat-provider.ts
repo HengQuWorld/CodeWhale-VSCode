@@ -57,6 +57,7 @@ import {
 } from "./utils/diff-utils";
 import { resolveRecordedFilePath } from "./utils/file-paths";
 import { loadInputHistory, pushInputHistory } from "./utils/input-history";
+import { classifySkillScope } from "./utils/skill-scope";
 import { extractCompactionSummary } from "./utils/compaction-summary";
 import { playCompletionSound } from "./utils/completion-sound";
 import { MAX_EAGER_HASH_BYTES, sha256OfFile } from "./utils/file-hash";
@@ -3227,13 +3228,27 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     await this.handleSendMessage(text);
   }
 
-  /** Push the current skill inventory to the webview's Skills panel. */
+  /** Push the current skill inventory to the webview's Skills panel.
+   *
+   *  Each row is annotated with the scope of its `SKILL.md` before it goes
+   *  out: the engine's row carries the real path but no scope, and the panel
+   *  groups by project/global. */
   public async refreshSkillList(): Promise<void> {
     try {
       const result = await this.api.listSkills();
+      // The root is the workspace the engine itself scanned: these paths came
+      // from it, and `GET /v1/workspace/status` echoes the very field
+      // `list_skills` resolves skills against. The window's folder is the
+      // fallback for a refresh that lands before that status has been read —
+      // the same directory in every ordinary run, since it is what the engine
+      // is launched with. Both empty claims nothing as a project skill.
+      const workspace = this.tuiWorkspace || this.currentWorkspaceKey() || "";
       this.postMessage({
         type: "skillList",
-        skills: result.skills ?? [],
+        skills: (result.skills ?? []).map(s => ({
+          ...s,
+          scope: classifySkillScope(s.path, workspace),
+        })),
         directory: result.directory ?? "",
         directories: result.directories ?? [],
         warnings: result.warnings ?? [],

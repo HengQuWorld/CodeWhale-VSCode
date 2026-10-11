@@ -369,8 +369,14 @@ export interface WebviewTranslations {
   skillsNoActivation: string;
   /** Shown when the engine predates the skill lifecycle family. */
   skillsNoLifecycle: string;
-  /** Inventory group headings. */
-  skillsYours: string;
+  /** Placeholder for the live filter over the inventory's name and description. */
+  skillsSearchPlaceholder: string;
+  /** Shown when the filter matches none of the listed skills. */
+  skillsNoMatch: string;
+  /** Inventory group headings: where a skill's SKILL.md lives, then the
+   *  engine's own bundled set. */
+  skillsProject: string;
+  skillsGlobal: string;
   skillsBuiltIn: string;
   noAgentRuns: string;
   agentStatusQueued: string;

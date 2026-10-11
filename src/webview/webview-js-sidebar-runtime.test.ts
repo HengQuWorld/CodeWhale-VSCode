@@ -36,7 +36,7 @@ vi.mock("vscode", () => ({
   ConfigurationTarget: { Global: "global" },
 }));
 
-import { getSidebarScript } from "./webview-js-sidebar";
+import { SKILL_GROUP_KEYS, getSidebarScript } from "./webview-js-sidebar";
 import { makeTr } from "./webview-test-helpers";
 
 class FakeClassList {
@@ -95,6 +95,8 @@ class FakeElement {
   public children: FakeElement[] = [];
   public type = "";
   public checked = false;
+  /** The Skills panel's filter reads this back; the type needs it declared. */
+  public value = "";
   private html = "";
   private listeners = new Map<string, (event: unknown) => void>();
   private attributes = new Map<string, string>();
@@ -125,8 +127,13 @@ class FakeElement {
     this.listeners.set(name, handler);
   }
 
+  /** The DOM property form the panel mixes with `addEventListener` (a card's
+   *  toggle, a heading's fold). A real click runs both, so `dispatch` does too. */
+  public onclick: ((event: unknown) => void) | null = null;
+
   dispatch(name: string, event: unknown = {}): void {
     this.listeners.get(name)?.(event);
+    if (name === "click" && typeof this.onclick === "function") this.onclick(event);
   }
 
   appendChild(child: FakeElement): void {
@@ -276,6 +283,7 @@ function createHarness(options?: { storage?: Record<string, string> | null }) {
     sidebarSection: getEl("sidebar-threads"),
     agentsPanel: getEl("tab-agents"),
     changesPanel: getEl("tab-changes"),
+    skillPanel: getEl("tab-skills"),
     activityPicker: getEl("activity-sections-picker"),
     activityToggle: getEl("activity-sections-toggle"),
     activityEmpty: getEl("activity-sections-empty"),
@@ -2083,5 +2091,305 @@ describe("thread rail branch lineage", () => {
     threadRow(rail, "thr-branch").dispatch("click", { stopPropagation: () => {} });
 
     expect(postMessages).toContainEqual({ type: "loadThread", threadId: "thr-branch" });
+  });
+});
+
+/** One inventory row as the engine reports it, plus the scope the extension
+ *  annotates it with (see utils/skill-scope). */
+function skillRowFixture(overrides: Record<string, unknown>) {
+  return {
+    name: "x",
+    description: "",
+    path: null,
+    enabled: true,
+    is_bundled: false,
+    invocation: "model+user",
+    aliases: [],
+    scope: "global",
+    ...overrides,
+  };
+}
+
+/** The group headings the Skills panel is showing, in the order it paints them.
+ *  The heading is a fold control now, so its text lives in the label child. */
+function groupTitles(panel: FakeElement): string[] {
+  return panel
+    .querySelectorAll(".skill-group-title")
+    .map((head) => head.querySelector(".skill-group-label")?.textContent ?? head.textContent);
+}
+
+/** The group keys whose headings the panel is drawing as folded. */
+function foldedGroupKeys(panel: FakeElement): string[] {
+  return panel
+    .querySelectorAll(".skill-group-title.collapsed")
+    .map((head) => head.getAttribute("data-skill-group") ?? "");
+}
+
+/** The `/name` every painted skill card shows, folded groups included. */
+function listedSkillNames(panel: FakeElement): string[] {
+  return panel
+    .querySelectorAll(".skill-card")
+    .map((card) => card.querySelector(".task-title")?.textContent ?? "");
+}
+
+/** Membership by the class *attribute*, which is what selector matching in this
+ *  stand-in reads. `FakeElement` keeps `classList` as a separate list, and the
+ *  panel's group elements are built with `className` — a check that went
+ *  through `classList` would be answering about a different value than the
+ *  selectors do. */
+function hasClass(element: FakeElement, name: string): boolean {
+  return element.className.split(/\s+/).filter(Boolean).includes(name);
+}
+
+/** The `/name` each *visible* skill card shows. A folded group keeps its cards
+ *  in the DOM — the class is what hides them — so visibility is read from the
+ *  body rather than from the row's absence. */
+function shownSkillNames(panel: FakeElement): string[] {
+  return panel
+    .querySelectorAll(".skill-group-body")
+    .filter((body) => !hasClass(body, "collapsed"))
+    .flatMap((body) =>
+      body
+        .querySelectorAll(".skill-card")
+        .map((card) => card.querySelector(".task-title")?.textContent ?? ""),
+    );
+}
+
+describe("skills panel grouping and search", () => {
+  it("groups by project, global, then the engine's bundled set", () => {
+    const { sidebar, skillPanel } = createHarness();
+
+    sidebar.renderSkills({
+      skills: [
+        skillRowFixture({ name: "project-one", scope: "project" }),
+        skillRowFixture({ name: "global-one", scope: "global" }),
+        skillRowFixture({ name: "bundled-one", is_bundled: true, scope: "global" }),
+      ],
+    });
+
+    // Built-in is checked before scope, so a bundled copy that lives in the
+    // global dir is reported as built-in and never as a user install.
+    expect(groupTitles(skillPanel)).toEqual([
+      "Project (1)",
+      "Global (1)",
+      "Built-in (1)",
+    ]);
+  });
+
+  it("leaves out a group it has no rows for", () => {
+    const { sidebar, skillPanel } = createHarness();
+
+    sidebar.renderSkills({ skills: [skillRowFixture({ name: "only" })] });
+
+    expect(groupTitles(skillPanel)).toEqual(["Global (1)"]);
+  });
+
+  it("filters rows by name and description as the reader types", () => {
+    const { sidebar, skillPanel, postMessages } = createHarness();
+    sidebar.renderSkills({
+      skills: [
+        skillRowFixture({ name: "alpha", description: "writes docs", scope: "project" }),
+        skillRowFixture({ name: "beta", description: "runs the test suite", scope: "global" }),
+      ],
+    });
+
+    const input = skillPanel.querySelector(".skill-search-input")!;
+    postMessages.length = 0;
+    input.value = "SUITE";
+    input.dispatch("input");
+
+    // The filter lives in the webview: it never leaves for the extension.
+    expect(postMessages).toEqual([]);
+    expect(listedSkillNames(skillPanel)).toEqual(["/beta"]);
+    expect(groupTitles(skillPanel)).toEqual(["Global (1)"]);
+  });
+
+  it("says so when nothing matches instead of showing an empty list", () => {
+    const { sidebar, skillPanel } = createHarness();
+    sidebar.renderSkills({ skills: [skillRowFixture({ name: "alpha" })] });
+
+    const input = skillPanel.querySelector(".skill-search-input")!;
+    input.value = "nothing-like-this";
+    input.dispatch("input");
+
+    expect(listedSkillNames(skillPanel)).toEqual([]);
+    expect(skillPanel.querySelectorAll(".work-empty").length).toBe(1);
+  });
+
+  it("keeps the typed filter across a refresh from the engine", () => {
+    const { sidebar, skillPanel } = createHarness();
+    sidebar.renderSkills({
+      skills: [
+        skillRowFixture({ name: "alpha" }),
+        skillRowFixture({ name: "beta" }),
+      ],
+    });
+
+    const input = skillPanel.querySelector(".skill-search-input")!;
+    input.value = "alpha";
+    input.dispatch("input");
+
+    // A skill toggle re-reads the list and repaints the panel; the reader's
+    // filter has to survive that, so it is kept outside the painted DOM.
+    sidebar.renderSkills({
+      skills: [
+        skillRowFixture({ name: "alpha" }),
+        skillRowFixture({ name: "beta" }),
+      ],
+    });
+
+    expect(skillPanel.querySelector(".skill-search-input")!.value).toBe("alpha");
+    expect(listedSkillNames(skillPanel)).toEqual(["/alpha"]);
+  });
+
+  it("keeps the no-skills state, without a search box, for an empty inventory", () => {
+    const { sidebar, skillPanel } = createHarness();
+
+    sidebar.renderSkills({ skills: [] });
+
+    expect(skillPanel.querySelector(".skill-search-input")).toBeNull();
+    expect(skillPanel.querySelectorAll(".work-empty").length).toBe(1);
+  });
+});
+
+/** The three groups, one skill each, so every heading is drawn. */
+function threeGroups() {
+  return [
+    skillRowFixture({ name: "project-one", scope: "project" }),
+    skillRowFixture({ name: "global-one", scope: "global" }),
+    skillRowFixture({ name: "bundled-one", is_bundled: true, scope: "global" }),
+  ];
+}
+
+describe("skills panel group folding", () => {
+  it("starts every group open, with nothing stored", () => {
+    const { sidebar, skillPanel } = createHarness();
+
+    sidebar.renderSkills({ skills: threeGroups() });
+
+    expect(foldedGroupKeys(skillPanel)).toEqual([]);
+    expect(shownSkillNames(skillPanel)).toEqual([
+      "/project-one",
+      "/global-one",
+      "/bundled-one",
+    ]);
+  });
+
+  it("draws exactly the roster's groups and nothing else", () => {
+    const { sidebar, skillPanel } = createHarness();
+    sidebar.renderSkills({ skills: threeGroups() });
+
+    // The fold is validated against the roster, so a group drawn under a key
+    // that is not in it would fold silently into nothing. Asserting the two
+    // lists against each other is what makes that a test failure instead.
+    expect(
+      skillPanel
+        .querySelectorAll(".skill-group-title")
+        .map((head) => head.getAttribute("data-skill-group")),
+    ).toEqual([...SKILL_GROUP_KEYS]);
+  });
+
+  it("folds a group from its heading and writes only the folded keys", () => {
+    const { sidebar, skillPanel, storage } = createHarness();
+    sidebar.renderSkills({ skills: threeGroups() });
+
+    skillPanel
+      .querySelector('[data-skill-group="global"]')!
+      .dispatch("click", { stopPropagation: () => {} });
+
+    expect(foldedGroupKeys(skillPanel)).toEqual(["global"]);
+    expect(shownSkillNames(skillPanel)).toEqual(["/project-one", "/bundled-one"]);
+    // Only the folded key is stored, so a group added later opens by default
+    // instead of being folded by a preference that never knew about it.
+    expect(storage.getItem("codewhale:skillsCollapsedGroups")).toBe('["global"]');
+  });
+
+  it("unfolds a group the heading was clicked on again", () => {
+    const { sidebar, skillPanel, storage } = createHarness();
+    sidebar.renderSkills({ skills: threeGroups() });
+
+    skillPanel.querySelector('[data-skill-group="global"]')!.dispatch("click", {});
+    skillPanel.querySelector('[data-skill-group="global"]')!.dispatch("click", {});
+
+    expect(foldedGroupKeys(skillPanel)).toEqual([]);
+    expect(storage.getItem("codewhale:skillsCollapsedGroups")).toBe("[]");
+  });
+
+  it("comes back folded in a window that reads the same store", () => {
+    const first = createHarness();
+    first.sidebar.renderSkills({ skills: threeGroups() });
+    first.skillPanel.querySelector('[data-skill-group="project"]')!.dispatch("click", {});
+    const stored = first.storage.getItem("codewhale:skillsCollapsedGroups");
+    expect(stored).toBe('["project"]');
+
+    // A reload is a fresh IIFE over the same store, with no repaint in
+    // between: the fold arrives from the first paint, not from a second one.
+    const second = createHarness({ storage: { "codewhale:skillsCollapsedGroups": stored! } });
+    second.sidebar.renderSkills({ skills: threeGroups() });
+
+    expect(foldedGroupKeys(second.skillPanel)).toEqual(["project"]);
+    expect(shownSkillNames(second.skillPanel)).toEqual(["/global-one", "/bundled-one"]);
+  });
+
+  it("keeps the fold across a refresh of the inventory", () => {
+    const { sidebar, skillPanel } = createHarness();
+    sidebar.renderSkills({ skills: threeGroups() });
+    skillPanel.querySelector('[data-skill-group="builtin"]')!.dispatch("click", {});
+
+    // Toggling a skill re-reads the list from the engine and rebuilds the
+    // panel; the reader's fold is theirs and has to survive that.
+    sidebar.renderSkills({
+      skills: [...threeGroups(), skillRowFixture({ name: "new-one", scope: "project" })],
+    });
+
+    expect(foldedGroupKeys(skillPanel)).toEqual(["builtin"]);
+    expect(groupTitles(skillPanel)).toEqual([
+      "Project (2)",
+      "Global (1)",
+      "Built-in (1)",
+    ]);
+  });
+
+  it("ignores a stored key this build no longer draws", () => {
+    // Another build's store, or a hand-edited one: an unknown name must not
+    // fold a heading here. Loading filters it out of what the panel holds, so
+    // the first write after that drops it from the store as well.
+    const { sidebar, skillPanel, storage } = createHarness({
+      storage: { "codewhale:skillsCollapsedGroups": '["project","retired-group"]' },
+    });
+
+    sidebar.renderSkills({ skills: threeGroups() });
+    expect(foldedGroupKeys(skillPanel)).toEqual(["project"]);
+
+    skillPanel.querySelector('[data-skill-group="global"]')!.dispatch("click", {});
+    expect(storage.getItem("codewhale:skillsCollapsedGroups")).toBe(
+      '["project","global"]',
+    );
+  });
+
+  it("survives a host that denies the store outright", () => {
+    const { sidebar, skillPanel } = createHarness({ storage: null });
+    sidebar.renderSkills({ skills: threeGroups() });
+
+    expect(() =>
+      skillPanel.querySelector('[data-skill-group="global"]')!.dispatch("click", {}),
+    ).not.toThrow();
+    expect(foldedGroupKeys(skillPanel)).toEqual(["global"]);
+  });
+
+  it("still counts a folded group's matches under a search", () => {
+    const { sidebar, skillPanel } = createHarness();
+    sidebar.renderSkills({ skills: threeGroups() });
+    skillPanel.querySelector('[data-skill-group="global"]')!.dispatch("click", {});
+
+    const input = skillPanel.querySelector(".skill-search-input")!;
+    input.value = "global-one";
+    input.dispatch("input");
+
+    // The fold is honoured — it is the reader's explicit, remembered choice —
+    // so the count is what tells them the search matched something they folded
+    // away. The match count, not the inventory count.
+    expect(groupTitles(skillPanel)).toEqual(["Global (1)"]);
+    expect(foldedGroupKeys(skillPanel)).toEqual(["global"]);
   });
 });

@@ -230,4 +230,122 @@ describe("ChatProvider skill activation", () => {
     expect(api.installSkill).not.toHaveBeenCalled();
     expect(messagesOfType(postMessage, "error")[0].message).toContain("Invalid scope");
   });
+
+  it("tags each listed skill with the scope its SKILL.md lives in", async () => {
+    const { provider, postMessage } = createProvider({
+      listSkills: vi.fn(async () => ({
+        directory: "/home/u/.codewhale/skills",
+        directories: ["/work/app/.codewhale/skills", "/home/u/.codewhale/skills"],
+        warnings: [],
+        skills: [
+          {
+            name: "proj",
+            description: "project skill",
+            path: "/work/app/.codewhale/skills/proj/SKILL.md",
+            enabled: true,
+            is_bundled: false,
+          },
+          {
+            name: "glob",
+            description: "global skill",
+            path: "/home/u/.codewhale/skills/glob/SKILL.md",
+            enabled: true,
+            is_bundled: false,
+          },
+          {
+            // A reviewed plugin snapshot carries no path; with nothing to
+            // check containment against it is grouped as global.
+            name: "plug",
+            description: "plugin skill",
+            path: null,
+            enabled: true,
+            is_bundled: false,
+          },
+        ],
+      })),
+    });
+    // The engine's own workspace, as `GET /v1/workspace/status` reports it.
+    (provider as any).tuiWorkspace = "/work/app";
+
+    await provider.refreshSkillList();
+
+    const message = messagesOfType(postMessage, "skillList")[0];
+    expect(message.skills.map((s: any) => [s.name, s.scope])).toEqual([
+      ["proj", "project"],
+      ["glob", "global"],
+      ["plug", "global"],
+    ]);
+  });
+
+  it("falls back to the window's folder before the engine reports its own", async () => {
+    const vscode = await import("vscode");
+    const folders = vscode.workspace.workspaceFolders;
+    (vscode.workspace as any).workspaceFolders = [{ uri: { fsPath: "/work/app" } }];
+    try {
+      const { provider, postMessage } = createProvider({
+        listSkills: vi.fn(async () => ({
+          directory: "/work/app/.codewhale/skills",
+          directories: ["/work/app/.codewhale/skills"],
+          warnings: [],
+          skills: [
+            {
+              name: "proj",
+              description: "project skill",
+              path: "/work/app/.codewhale/skills/proj/SKILL.md",
+              enabled: true,
+              is_bundled: false,
+            },
+          ],
+        })),
+      });
+
+      await provider.refreshSkillList();
+
+      const message = messagesOfType(postMessage, "skillList")[0];
+      expect(message.skills.map((s: any) => [s.name, s.scope])).toEqual([
+        ["proj", "project"],
+      ]);
+    } finally {
+      (vscode.workspace as any).workspaceFolders = folders;
+    }
+  });
+
+  it("splits on the engine's workspace, not on the window's folder", async () => {
+    // The paths on these rows came from the engine, so the engine's own
+    // workspace is what containment has to be checked against: the window may
+    // be showing another folder entirely, and a thread loaded from elsewhere
+    // says nothing about what this listing holds.
+    const vscode = await import("vscode");
+    const folders = vscode.workspace.workspaceFolders;
+    (vscode.workspace as any).workspaceFolders = [{ uri: { fsPath: "/work/window" } }];
+    try {
+      const { provider, postMessage } = createProvider({
+        listSkills: vi.fn(async () => ({
+          directory: "/work/engine/.codewhale/skills",
+          directories: ["/work/engine/.codewhale/skills"],
+          warnings: [],
+          skills: [
+            {
+              name: "proj",
+              description: "project skill",
+              path: "/work/engine/.codewhale/skills/proj/SKILL.md",
+              enabled: true,
+              is_bundled: false,
+            },
+          ],
+        })),
+      });
+      (provider as any).tuiWorkspace = "/work/engine";
+      provider.currentThread = { id: "thread-1", workspace: "/work/other" } as any;
+
+      await provider.refreshSkillList();
+
+      const message = messagesOfType(postMessage, "skillList")[0];
+      expect(message.skills.map((s: any) => [s.name, s.scope])).toEqual([
+        ["proj", "project"],
+      ]);
+    } finally {
+      (vscode.workspace as any).workspaceFolders = folders;
+    }
+  });
 });

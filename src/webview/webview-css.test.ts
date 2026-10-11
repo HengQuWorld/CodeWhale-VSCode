@@ -407,4 +407,40 @@ describe("long transcripts", () => {
     expect(folded![1]).toContain("min-height: auto");
     expect(folded![1]).not.toMatch(/min-height:\s*0\s*;/);
   });
+
+  it("gives the Skills panel's filter the full row above the groups", () => {
+    const css = getWebviewCss();
+
+    // The search box spans its row and sits above the grouped rows it filters;
+    // the row container is what repaints as the reader types.
+    expect(css).toMatch(/\.skill-search-input \{[\s\S]*?width: 100%;/);
+    expect(css).toContain(".skill-search-input:focus");
+    expect(css).toMatch(/\.skill-search-row \{/);
+  });
+
+  it("folds a Skills group by hiding its body, arrow and all", () => {
+    const css = getWebviewCss();
+
+    // The heading is the fold control, so it carries the button reset, and the
+    // body is hidden by a class — the same class the panel's own paint sets, so
+    // what is stored and what is drawn cannot drift apart.
+    expect(css).toMatch(/\.skill-group-body\.collapsed \{[\s\S]*?display: none;/);
+    expect(css).toMatch(/\.skill-group-title \{[\s\S]*?cursor: pointer;/);
+    expect(css).toMatch(
+      /\.skill-group-title\.collapsed \.skill-group-arrow \{[\s\S]*?transform: rotate\(-90deg\);/,
+    );
+  });
+
+  it("never lets an id-scoped rule outrank the Skills group fold", () => {
+    const css = getWebviewCss();
+
+    // The Activity sections were bitten by exactly this: `#tab-activity >
+    // .sidebar-section` is more specific than `.sidebar-section.hidden`, so
+    // the hidden class lost and the section stayed on screen (see AGENTS.md).
+    // The Skills panel's bodies carry no id-scoped display rule — the tab has
+    // no rule at all — and must not grow one, or a folded group would stop
+    // hiding its rows with nothing in the sheet to say why.
+    expect(css).not.toContain("#tab-skills");
+    expect(css).not.toMatch(/#[^{}]*\.skill-group-body/);
+  });
 });

@@ -2462,12 +2462,38 @@ export function getWebviewCss(): string {
       opacity: 0.7;
       margin-left: 4px;
     }
+    /* Scope group headings. The heading is the fold control, so it carries the
+     * button reset; the arrow turns the way the Activity sections' does. */
     .skill-group-title {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      width: 100%;
+      box-sizing: border-box;
       padding: 6px 10px 2px;
       font-size: 10px;
       text-transform: uppercase;
       letter-spacing: 0.06em;
       opacity: 0.55;
+      background: none;
+      border: none;
+      color: inherit;
+      font-family: inherit;
+      text-align: left;
+      cursor: pointer;
+    }
+    .skill-group-title:hover {
+      opacity: 0.85;
+    }
+    .skill-group-arrow {
+      font-size: 9px;
+      transition: transform 0.2s;
+    }
+    .skill-group-title.collapsed .skill-group-arrow {
+      transform: rotate(-90deg);
+    }
+    .skill-group-body.collapsed {
+      display: none;
     }
     .skill-install-row {
       display: flex;
@@ -2492,6 +2518,28 @@ export function getWebviewCss(): string {
       color: inherit;
       border: 1px solid rgba(128,128,128,0.25);
       border-radius: 3px;
+    }
+    /* Skills panel's live filter. It sits above the grouped rows and repaints
+     * only those rows as the reader types. */
+    .skill-search-row {
+      padding: 2px 10px 6px;
+    }
+    .skill-search-input {
+      width: 100%;
+      box-sizing: border-box;
+      font-size: 11px;
+      padding: 4px 6px;
+      background: var(--input-bg, rgba(128,128,128,0.08));
+      color: inherit;
+      border: 1px solid rgba(128,128,128,0.25);
+      border-radius: 3px;
+      outline: none;
+    }
+    .skill-search-input:focus {
+      border-color: var(--accent, rgba(128,128,128,0.5));
+    }
+    .skill-search-input::placeholder {
+      color: var(--muted, inherit);
     }
     .skill-capability-note {
       padding: 4px 10px;

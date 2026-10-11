@@ -13,6 +13,15 @@ import type { WebviewTranslations } from "./webview-html";
  * template's own ids are checked against it by `webview-html.test.ts`. */
 export const ACTIVITY_SECTION_KEYS = ['work', 'changes', 'fleet', 'tasks', 'agents', 'skills'] as const;
 
+/** The Skills panel's scope groups, in the order it draws them.
+ *
+ * One roster for two things that must agree: the headings `renderSkills`
+ * paints, and the keys whose fold is remembered in the webview's store. A
+ * group added here is foldable and remembered without a second place to
+ * register it, and a key left over from another build cannot fold a heading
+ * this one no longer draws. */
+export const SKILL_GROUP_KEYS = ['project', 'global', 'builtin'] as const;
+
 export function getSidebarScript(_tr: WebviewTranslations): string {
   return `(function(){
   'use strict';
@@ -52,6 +61,16 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
   // not hiding — a folded section keeps the header you click to reopen it.
   var COLLAPSED_SECTIONS_STORAGE_KEY = 'codewhale:collapsedSections';
   var collapsedActivitySections = [];
+
+  // ── Skills panel group folding ──
+  // The Skills panel's scope groups fold too, and the same way: folded keys
+  // only, so a group added later starts open, in its own key so this choice
+  // cannot overwrite the Activity one — the two stores hold different kinds of
+  // name (section ids there, group names here) and sharing one would make each
+  // list's reader reject the other's entries.
+  var SKILLS_COLLAPSED_GROUPS_STORAGE_KEY = 'codewhale:skillsCollapsedGroups';
+  var SKILL_GROUP_KEYS = ${JSON.stringify(SKILL_GROUP_KEYS)};
+  var collapsedSkillGroups = [];
 
   // ── Sidebar panel open state ──
   // Whether the sidebar is open is a layout choice, not a fact about this one
@@ -1468,12 +1487,26 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
   }
 
   // ── Render Skills ──
-  // The inventory panel. It lists what the engine reports, toggles a skill's
-  // enabled state, and — when the engine advertises the skill-lifecycle and
-  // skill-detail capabilities — offers install, update, remove, trust, audit
-  // and activation. A capability that is off dims its control with the reason
+  // The inventory panel. It groups the engine's rows by scope — project (the
+  // skill's SKILL.md sits inside the workspace), global (anywhere else), and
+  // the engine's own bundled set, which is kept apart so "Global" means what
+  // the user installed globally — and filters them by a live search over name
+  // and description. A capability that is off dims its control with the reason
   // rather than hiding it, so the panel still says what the engine can do.
   var skillInventory = { skills: [], directory: '', warnings: [] };
+  // The panel's filter, kept across re-renders: a toggle refreshes the list
+  // from the engine, and the search the user typed has to survive that.
+  var skillSearchQuery = '';
+
+  /** Case-insensitive name/description match. The panel shows the name and the
+   *  description, so those are the two fields a reader can search by; a row is
+   *  never matched on a string it does not display. */
+  function skillMatchesQuery(skill, query) {
+    if (!query) return true;
+    var q = query.toLowerCase();
+    return (skill.name || '').toLowerCase().indexOf(q) !== -1 ||
+      (skill.description || '').toLowerCase().indexOf(q) !== -1;
+  }
 
   function skillCapabilities() {
     return window.__wvApiCapabilities || {};
@@ -1652,20 +1685,95 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
       return;
     }
 
-    var userSkills = skills.filter(function(s) { return !s.is_bundled; });
-    var bundledSkills = skills.filter(function(s) { return s.is_bundled; });
+    // Search box, then the rows. The input sits outside the row container so
+    // filtering repaints the rows alone — rebuilding the input on every
+    // keystroke would drop focus and the caret mid-word.
+    var searchRow = document.createElement('div');
+    searchRow.className = 'skill-search-row';
+    var searchInput = document.createElement('input');
+    searchInput.type = 'search';
+    searchInput.className = 'skill-search-input';
+    searchInput.placeholder = __i18n.skillsSearchPlaceholder;
+    searchInput.setAttribute('aria-label', __i18n.skillsSearchPlaceholder);
+    searchInput.value = skillSearchQuery;
+    searchRow.appendChild(searchInput);
+    container.appendChild(searchRow);
 
-    function group(title, rows) {
-      if (rows.length === 0) return;
-      var head = document.createElement('div');
-      head.className = 'skill-group-title';
-      head.textContent = title + ' (' + rows.length + ')';
-      container.appendChild(head);
-      rows.forEach(function(s) { container.appendChild(skillRow(s)); });
+    var rows = document.createElement('div');
+    rows.className = 'skill-rows';
+    container.appendChild(rows);
+
+    function paintSkillRows() {
+      rows.innerHTML = '';
+      var visible = skillInventory.skills.filter(function(s) {
+        return skillMatchesQuery(s, skillSearchQuery);
+      });
+      if (visible.length === 0) {
+        var none = document.createElement('div');
+        none.className = 'work-empty';
+        none.innerHTML = '<div class="work-empty-icon">\uD83D\uDD0D</div><div class="work-empty-text">' + __wvEscapeHtml(__i18n.skillsNoMatch) + '</div>';
+        rows.appendChild(none);
+        return;
+      }
+      // Built-in is checked first: the engine marks its own bundle, and a
+      // bundled copy that happens to live in the global dir must not be
+      // reported as something the user installed globally.
+      var projectSkills = [];
+      var globalSkills = [];
+      var bundledSkills = [];
+      visible.forEach(function(s) {
+        if (s.is_bundled) bundledSkills.push(s);
+        else if (s.scope === 'project') projectSkills.push(s);
+        else globalSkills.push(s);
+      });
+      function group(key, title, groupRows) {
+        if (groupRows.length === 0) return;
+        // The count is the match count, so a folded group still says how many
+        // rows it is holding — a reader who searched and sees a folded
+        // heading never has to guess whether the typing worked.
+        var folded = isSkillGroupCollapsed(key);
+        var head = document.createElement('button');
+        head.type = 'button';
+        head.className = 'skill-group-title' + (folded ? ' collapsed' : '');
+        head.setAttribute('data-skill-group', key);
+        head.setAttribute('aria-expanded', folded ? 'false' : 'true');
+        var arrow = document.createElement('span');
+        arrow.className = 'skill-group-arrow';
+        arrow.textContent = '\u25BE';
+        var label = document.createElement('span');
+        label.className = 'skill-group-label';
+        label.textContent = title + ' (' + groupRows.length + ')';
+        head.appendChild(arrow);
+        head.appendChild(label);
+        head.onclick = function() { toggleSkillGroup(key); };
+        rows.appendChild(head);
+        var body = document.createElement('div');
+        body.className = 'skill-group-body' + (folded ? ' collapsed' : '');
+        body.setAttribute('data-skill-group-body', key);
+        groupRows.forEach(function(s) { body.appendChild(skillRow(s)); });
+        rows.appendChild(body);
+      }
+      group('project', __i18n.skillsProject || 'Project', projectSkills);
+      group('global', __i18n.skillsGlobal || 'Global', globalSkills);
+      group('builtin', __i18n.skillsBuiltIn || 'Built-in', bundledSkills);
     }
 
-    group(__i18n.skillsYours || 'Your skills', userSkills);
-    group(__i18n.skillsBuiltIn || 'Built-in', bundledSkills);
+    // Folding repaints the rows, which replaces the heading the reader just
+    // used; focus is put back on the new one so a keyboard reader is not
+    // dropped to the top of the panel by their own click.
+    function toggleSkillGroup(key) {
+      setSkillGroupCollapsed(key, !isSkillGroupCollapsed(key));
+      paintSkillRows();
+      var restored = rows.querySelector('[data-skill-group="' + key + '"]');
+      if (restored && restored.focus) restored.focus();
+    }
+
+    searchInput.addEventListener('input', function() {
+      skillSearchQuery = searchInput.value;
+      paintSkillRows();
+    });
+
+    paintSkillRows();
 
     if (skillInventory.warnings && skillInventory.warnings.length > 0) {
       var warn = document.createElement('div');
@@ -2727,6 +2835,52 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
     applyActivitySectionCollapse();
   }
 
+  // ── Skills panel group folding: the store and the toggle ──
+  // The panel's scope groups fold, and the choice is kept the same way as the
+  // Activity fold above and for the same reason: a group folded shut sprang
+  // back open on every reload, which made the fold look like it had never
+  // counted. Folded keys only, so a group added later starts open. The keys are
+  // checked against the roster, so a store written by another build cannot fold
+  // a heading this one does not draw, nor keep a stale name alive through the
+  // next write.
+  function loadCollapsedSkillGroups() {
+    var storage = webviewLocalStorage();
+    if (!storage) return;
+    var raw;
+    try { raw = storage.getItem(SKILLS_COLLAPSED_GROUPS_STORAGE_KEY); } catch (e) { return; }
+    if (!raw) return;
+    var parsed;
+    try { parsed = JSON.parse(raw); } catch (e) { return; }
+    if (!Array.isArray(parsed)) return;
+    collapsedSkillGroups = SKILL_GROUP_KEYS.filter(function(key) {
+      return parsed.indexOf(key) !== -1;
+    });
+  }
+
+  function saveCollapsedSkillGroups() {
+    var storage = webviewLocalStorage();
+    if (!storage) return;
+    try {
+      storage.setItem(SKILLS_COLLAPSED_GROUPS_STORAGE_KEY, JSON.stringify(collapsedSkillGroups));
+    } catch (e) { /* a full or blocked store is not worth failing the click */ }
+  }
+
+  function isSkillGroupCollapsed(key) {
+    return collapsedSkillGroups.indexOf(key) !== -1;
+  }
+
+  function setSkillGroupCollapsed(key, collapsed) {
+    if (SKILL_GROUP_KEYS.indexOf(key) === -1) return;
+    var shouldFold = !!collapsed;
+    if (shouldFold === isSkillGroupCollapsed(key)) return;
+    if (shouldFold) {
+      collapsedSkillGroups.push(key);
+    } else {
+      collapsedSkillGroups = collapsedSkillGroups.filter(function(item) { return item !== key; });
+    }
+    saveCollapsedSkillGroups();
+  }
+
   // ── Sidebar section collapse toggle ──
   // Bound by the roster above rather than by the class, so the sections that
   // can be hidden and the sections whose fold is remembered are one and the
@@ -2882,6 +3036,7 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
   applyActivitySectionVisibility();
   loadCollapsedActivitySections();
   applyActivitySectionCollapse();
+  loadCollapsedSkillGroups();
   applyStoredSidebarOpen();
 
   closeTaskDetail();
