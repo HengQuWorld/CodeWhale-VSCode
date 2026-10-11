@@ -1,6 +1,8 @@
 # Change Log
 
-## Unreleased
+## 0.8.5
+
+Everything here is client-side and works on engine **v0.10.1**; none of it waits on an engine build.
 
 ### New Features
 
