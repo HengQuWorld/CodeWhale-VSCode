@@ -1320,7 +1320,26 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
               const toolResultFor = typeof metadata.tool_result_for === "string"
                 ? metadata.tool_result_for
                 : undefined;
-              if (toolResultFor) {
+              // A completed live turn persists each call as ONE item holding
+              // both halves: the call's own identity (`tool_use_id`,
+              // `tool_name`, `tool_input`) and the result marker
+              // `tool_result_for`, which names that very call. Seeded history
+              // persists them apart — a `tool_use` item, then the result item
+              // that answers it. The engine rebuilds both shapes
+              // (`reconstruct_messages_from_turns_with` emits the ToolUse and
+              // the result from one merged item), so this rebuild must too:
+              // read as a result alone, the merged item asked for a call that
+              // was never seeded, found none, and dropped every tool call out
+              // of the rebuilt transcript.
+              const callOwnId = typeof metadata.tool_use_id === "string"
+                ? metadata.tool_use_id
+                : undefined;
+              const mergedCallId = toolResultFor !== undefined
+                && typeof metadata.tool_name === "string"
+                && callOwnId === toolResultFor
+                ? toolResultFor
+                : undefined;
+              if (toolResultFor && !mergedCallId) {
                 applyToolResult(
                   toolResultFor,
                   item.detail || item.summary || "",
@@ -1346,21 +1365,32 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
               // that also sets `tool_name` — request_user_input — stores a
               // non-JSON redaction marker in `detail`, so it never reaches the
               // parse branch.)
+              //
+              // A merged item hands the same arguments over the same way, one
+              // step later: in `metadata.tool_input` — also a JSON string, and
+              // the field the engine's own rebuild reads — while its `detail`
+              // is the result. Parsing `detail` there would file the call's
+              // *output* as its input.
               let toolInput: Record<string, unknown> = metadata;
               let toolOutput: string | undefined = item.detail || undefined;
-              if (typeof metadata.tool_name === "string" && item.detail) {
+              const persistedArgs = mergedCallId
+                ? metadata.tool_input
+                : typeof metadata.tool_name === "string" ? item.detail : undefined;
+              if (typeof persistedArgs === "string") {
                 try {
-                  const parsed = JSON.parse(item.detail);
+                  const parsed = JSON.parse(persistedArgs);
                   if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
                     toolInput = parsed as Record<string, unknown>;
-                    // `detail` held the tool's *arguments*, not its output —
+                    // The field held the tool's *arguments*, not its output —
                     // don't also surface it as `output`, or the same arguments
                     // render twice (inline input block + a mislabeled output
-                    // chunk) whenever no tool result overwrites it.
-                    toolOutput = undefined;
+                    // chunk) whenever no tool result overwrites it. A merged
+                    // item's arguments came from `metadata.tool_input`, so its
+                    // `detail` is still the result and stays.
+                    if (!mergedCallId) toolOutput = undefined;
                   }
                 } catch {
-                  // detail is not JSON (e.g. plain output) — keep metadata.
+                  // not JSON (e.g. plain output) — keep metadata.
                 }
               }
               const tc: ToolCallInfo = {
@@ -1398,6 +1428,18 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
               });
               if (fileChange) {
                 tc.fileChange = fileChange;
+              }
+              // A merged item carries its own result, so it settles the row
+              // just built from its arguments. Last, so the card derived from
+              // the real output and `metadata.mutation` replaces the
+              // provisional one built from those arguments.
+              if (mergedCallId) {
+                applyToolResult(
+                  mergedCallId,
+                  item.detail || item.summary || "",
+                  !!metadata.is_error,
+                  metadata,
+                );
               }
               toolCalls.push(tc);
               blocks.push({ type: "tool_call", toolCallIdx: tcIdx });

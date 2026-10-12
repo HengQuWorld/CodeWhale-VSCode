@@ -2147,3 +2147,173 @@ describe("ChatProvider Changes panel spans the session's turns", () => {
     expect(payload.turns.map((t: any) => t.index)).toEqual([1]);
   });
 });
+
+// A completed live turn persists each call as ONE item holding both halves —
+// the call's own identity (`tool_use_id`, `tool_name`, `tool_input`) plus the
+// result marker `tool_result_for`, naming that same call. Seeded history
+// persists them apart. Both shapes are rebuilt here; a merged item read as a
+// result alone dropped every tool call out of the transcript.
+describe("ChatProvider rebuilds a tool call the engine persisted as one item", () => {
+  it("renders a merged call+result item as a completed row", async () => {
+    const detail = {
+      latest_seq: 9,
+      thread: { id: "thread-1", model: "deepseek-flash" },
+      turns: [
+        {
+          id: "turn-1",
+          input_summary: "check the store",
+          created_at: "2026-10-12T11:22:42Z",
+          ended_at: "2026-10-12T11:23:10Z",
+          status: "completed",
+          item_ids: ["u1", "r1", "c1", "a1"],
+        },
+      ],
+      items: [
+        { id: "u1", kind: "user_message", summary: "check the store", detail: "check the store", status: "completed" },
+        { id: "r1", kind: "agent_reasoning", summary: "thinking", detail: "thinking", status: "completed" },
+        {
+          id: "c1",
+          kind: "tool_call",
+          summary: "bash: total 0",
+          detail: "total 0",
+          status: "completed",
+          metadata: {
+            tool_use_id: "call-1",
+            tool_name: "bash",
+            tool_input: JSON.stringify({ command: "ls -la" }),
+            tool_result_for: "call-1",
+            is_error: false,
+            exit_code: 0,
+          },
+        },
+        { id: "a1", kind: "agent_message", summary: "Done", detail: "Done", status: "completed" },
+      ],
+    };
+
+    const { provider } = createProvider(detail);
+    await (provider as any).loadHistory("thread-1");
+
+    const calls = provider.messages.flatMap((message) => message.toolCalls ?? []);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].name).toBe("bash");
+    // The arguments come from `metadata.tool_input`; this item's `detail` is
+    // the result and must not be parsed as the input as well.
+    expect(calls[0].input).toEqual({ command: "ls -la" });
+    expect(calls[0].output).toBe("total 0");
+    expect(calls[0].status).toBe("complete");
+    expect(calls[0].callId).toBe("call-1");
+    // One row, reached through the block list the webview iterates.
+    const blocks = provider.messages.flatMap((message) => message.blocks ?? []);
+    expect(blocks.filter((b) => b.type === "tool_call")).toHaveLength(1);
+    // A shell call is registered as one, so the restore points the engine
+    // recorded around it can still be read back into the Changes panel.
+    expect((provider as any).shellCallRefs.has("call-1")).toBe(true);
+  });
+
+  it("settles a merged failed call as an error", async () => {
+    const detail = {
+      latest_seq: 4,
+      thread: { id: "thread-1", model: "deepseek-flash" },
+      turns: [
+        {
+          id: "turn-1",
+          input_summary: "",
+          created_at: "2026-10-12T11:22:42Z",
+          ended_at: "2026-10-12T11:23:10Z",
+          status: "completed",
+          item_ids: ["c1", "a1"],
+        },
+      ],
+      items: [
+        {
+          id: "c1",
+          kind: "tool_call",
+          summary: "bash failed: Failed to execute tool",
+          detail: "Failed to execute tool",
+          status: "failed",
+          metadata: {
+            tool_use_id: "call-9",
+            tool_name: "bash",
+            tool_input: JSON.stringify({ command: "exit 1" }),
+            tool_result_for: "call-9",
+            is_error: true,
+          },
+        },
+        { id: "a1", kind: "agent_message", summary: "failed", detail: "failed", status: "completed" },
+      ],
+    };
+
+    const { provider } = createProvider(detail);
+    await (provider as any).loadHistory("thread-1");
+
+    const calls = provider.messages.flatMap((message) => message.toolCalls ?? []);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].status).toBe("error");
+    expect(calls[0].output).toBe("Failed to execute tool");
+    expect(calls[0].input).toEqual({ command: "exit 1" });
+  });
+
+  it("keeps the seeded call+result pair working in the same turn", async () => {
+    // The shape older engines (and a session-seeded thread) write: the call
+    // item, then the result item that answers it. A result item must settle
+    // the call it names and never become a row of its own.
+    const detail = {
+      latest_seq: 12,
+      thread: { id: "thread-1", model: "deepseek-flash" },
+      turns: [
+        {
+          id: "turn-1",
+          input_summary: "read both",
+          created_at: "2026-10-12T11:22:42Z",
+          ended_at: "2026-10-12T11:23:10Z",
+          status: "completed",
+          item_ids: ["u1", "seed-1", "result-1", "merged-1", "a1"],
+        },
+      ],
+      items: [
+        { id: "u1", kind: "user_message", summary: "read both", detail: "read both", status: "completed" },
+        {
+          id: "seed-1",
+          kind: "tool_call",
+          summary: 'read({"path":"a.txt"})',
+          detail: JSON.stringify({ path: "a.txt" }),
+          status: "completed",
+          metadata: { tool_use_id: "call-seed", tool_name: "read" },
+        },
+        {
+          id: "result-1",
+          kind: "tool_call",
+          summary: "hello",
+          detail: "hello",
+          status: "completed",
+          metadata: { tool_result_for: "call-seed", is_error: false },
+        },
+        {
+          id: "merged-1",
+          kind: "tool_call",
+          summary: "bash: done",
+          detail: "done",
+          status: "completed",
+          metadata: {
+            tool_use_id: "call-merged",
+            tool_name: "bash",
+            tool_input: JSON.stringify({ command: "echo done" }),
+            tool_result_for: "call-merged",
+            is_error: false,
+          },
+        },
+        { id: "a1", kind: "agent_message", summary: "Both read", detail: "Both read", status: "completed" },
+      ],
+    };
+
+    const { provider } = createProvider(detail);
+    await (provider as any).loadHistory("thread-1");
+
+    const calls = provider.messages.flatMap((message) => message.toolCalls ?? []);
+    expect(calls.map((call) => call.name)).toEqual(["read", "bash"]);
+    // The pair's result landed on its own call, not on a row of its own.
+    expect(calls[0].output).toBe("hello");
+    expect(calls[0].status).toBe("complete");
+    expect(calls[1].output).toBe("done");
+  });
+});
