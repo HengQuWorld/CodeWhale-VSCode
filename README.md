@@ -1,11 +1,11 @@
 # CodeWhale for VS Code — a lightweight GUI frontend for the CodeWhale agent
 
-[![Version](https://img.shields.io/badge/version-0.8.5-blue)](https://github.com/HengQuWorld/CodeWhale-VSCode)
+[![Version](https://img.shields.io/badge/version-0.8.6-blue)](https://github.com/HengQuWorld/CodeWhale-VSCode)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![CI](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/ci.yml/badge.svg)](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/ci.yml)
 [![Release](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/release.yml/badge.svg)](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/release.yml)
 [![VS Code](https://img.shields.io/badge/VS%20Code-1.85+-informational)](https://code.visualstudio.com/)
-[![VSIX](https://img.shields.io/badge/VSIX-~405%20KB-brightgreen)](https://github.com/HengQuWorld/CodeWhale-VSCode/releases)
+[![VSIX](https://img.shields.io/badge/VSIX-~413%20KB-brightgreen)](https://github.com/HengQuWorld/CodeWhale-VSCode/releases)
 [![macOS](https://img.shields.io/badge/macOS-supported-brightgreen)](#requirements)
 [![Windows](https://img.shields.io/badge/Windows-supported-brightgreen)](#requirements)
 [![Linux](https://img.shields.io/badge/Linux-supported-brightgreen)](#requirements)
@@ -21,7 +21,7 @@ The split is deliberate: **the agent stays in the engine, the ergonomics stay in
 
 | | |
 |---|---|
-| VSIX size (0.8.5) | ~405 KB |
+| VSIX size (0.8.6) | ~413 KB |
 | Runtime npm dependencies | **none** — webpack inlines the extension's own TypeScript (and `marked` for rendering) |
 | Bundled engine or model | **none** — `codewhale` is a separate native binary |
 | Duplicated agent logic | **none** — the GUI is an adapter over the engine's local runtime API |
@@ -31,11 +31,13 @@ The frontend is a webview. `ChatProvider` runs in the extension host, speaks HTT
 
 Because nothing about the agent is copied into the extension, the engine can ship new capabilities and fixes without a frontend release.
 
-### Engine compatibility for 0.8.5
+### Engine compatibility for 0.8.6
 
-0.8.5 is verified against engine **v0.10.1**: everything it ships is client-side and works on that engine as it stands — and so does everything earlier releases were still waiting on. The Branch row, a command's own change rows in the Changes panel, moving an open conversation to another provider, undo's file rollback and the per-file Revert, user-defined providers in the picker, a fork keeping its session document and the quick thread rails all light up the moment the engine reads v0.10.1.
+0.8.6 is verified against engine **v0.10.1**: apart from the workspace-trust banner noted below, everything it ships is client-side and works on that engine as it stands — and so does everything earlier releases were still waiting on. The Branch row, a command's own change rows in the Changes panel, moving an open conversation to another provider, undo's file rollback and the per-file Revert, user-defined providers in the picker, a fork keeping its session document and the quick thread rails all light up the moment the engine reads v0.10.1.
 
 What still needs a Codewhale build newer than any tagged engine release:
+
+- **Trusting a workspace from the panel** — the trust banner needs [Codewhale#6959](https://github.com/codewhale-hq/Codewhale/pull/6959), open, unmerged. It is the engine half: `GET /v1/workspace/status` reporting a workspace's trust verdict and `POST /v1/workspace/trust` recording the decision. Until an engine carries it the banner stays hidden, and the rest of this release — including the prompt for a VS Code window that is not trusted — works without it.
 
 - **Which client a session reports itself as** — needs [5166473](https://github.com/codewhale-hq/Codewhale/commit/5166473369fbe548cd5b518ed1e697ce9d4b706a), in Codewhale `main` and not yet in any tagged engine release. Until an engine carries it, sessions this extension starts are counted as an anonymous `serve` rather than naming the client they belong to; the `brotherwhale.telemetry` off-switch itself works on any engine.
 
@@ -121,12 +123,12 @@ npx @vscode/vsce package --no-dependencies
 Then install the generated `.vsix` (`Extensions: Install from VSIX...`), or from a terminal:
 
 ```bash
-code --install-extension ./brotherwhale-vscode-0.8.5.vsix --force
+code --install-extension ./brotherwhale-vscode-0.8.6.vsix --force
 ```
 
 > **Trae CN users:** if `code` is not on your `PATH`, use the bundled CLI:
 > ```bash
-> "/Applications/Trae CN.app/Contents/Resources/app/bin/code" --install-extension ./brotherwhale-vscode-0.8.5.vsix --force
+> "/Applications/Trae CN.app/Contents/Resources/app/bin/code" --install-extension ./brotherwhale-vscode-0.8.6.vsix --force
 > ```
 
 ### 3. Open it
@@ -289,7 +291,7 @@ Reloading or closing the extension stops that window's Runtime and interrupts ac
 
 **Installing a VSIX**
 ```bash
-code --install-extension /path/to/brotherwhale-vscode-0.8.5.vsix --force
+code --install-extension /path/to/brotherwhale-vscode-0.8.6.vsix --force
 ```
 
 ## Privacy & data

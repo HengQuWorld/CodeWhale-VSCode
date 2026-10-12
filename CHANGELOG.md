@@ -1,10 +1,24 @@
 # Change Log
 
-## Unreleased
+## 0.8.6
+
+Everything here works on engine **v0.10.1** except the workspace-trust banner, whose engine half is still open upstream — on an engine that predates the route the banner simply stays hidden, and the rest of this release is unaffected.
+
+### New Features
+
+- **An untrusted workspace says what it is skipping, and takes one click to trust** — Without project trust the engine quietly leaves out the folder's skills, commands, hooks, MCP servers and project context; a banner above the conversation now names what is being skipped and records the decision in one click, through the engine rather than by editing your config, and a grant the engine did not actually record is reported as a failure. Trust starts from your next turn — except for project MCP servers, which only connect when a session begins, so the confirmation offers a restart.
 
 ### Bug Fixes
 
-- **A workspace can start after another workspace's engine dies** — The engine keeps a single record of which process is holding it, shared by every workspace rather than kept one per workspace. When an engine is killed outright — a window reload, a crash — that record outlives the process, and a window on a *different* workspace then refused to start over it: the record names somebody else's store, the engine stops on that alone, and it never gets as far as noticing that the process it names is gone. Only the engine that wrote it could have cleared it, so the way out was to delete the file by hand. The extension now clears it for you, on macOS and Linux as well as Windows, and only when the process the record names is provably gone — a record naming a running CodeWhale, yours or another window's, is left exactly where it is. It also names the file to delete in the startup error, instead of offering Windows-only advice whatever platform you are on.
+- **A window VS Code does not trust says why, and recovers on its own** — There the engine cannot start at all, and the sidebar used to come up dead with only "failed to connect", naming neither the cause nor the way out. It now offers the action that opens VS Code's Workspace Trust editor and re-binds the panel as soon as you grant trust — once per restricted stretch, rather than a toast on every retry.
+
+- **Tool calls stay on screen after a reload** — Reloading the window or restarting the engine rebuilt the conversation with every tool call missing, and a session that only ran commands came back empty. Both ways the engine records a finished call are read now, so a call returns with its arguments, its result, and the change cards a command's own writes hang off.
+
+- **A workspace can start again after another workspace's engine dies** — The engine keeps a single record of which process holds it, shared by every workspace, and an engine killed outright — a window reload, a crash — leaves that record behind; a window on a *different* workspace then refused to start over it until the file was deleted by hand. The extension now clears such a record on macOS and Linux as well as Windows, and only when the process it names is provably gone — a record naming a running CodeWhale, yours or another window's, is left exactly where it is — and the startup error names the file to delete, whatever platform you are on.
+
+### Upstream TUI PRs
+
+- [Codewhale#6959](https://github.com/codewhale-hq/Codewhale/pull/6959) — **open, unmerged.** `feat(api): read and write a workspace's project trust over the Runtime API` — the engine half of the trust banner: a route reading a workspace's trust verdict on `/v1/workspace/status` and one recording the decision. Until an engine carries it the banner stays hidden, and everything else in this release works without it.
 
 ## 0.8.5
 
