@@ -3,7 +3,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import * as http from "http";
-import { ChildProcess } from "child_process";
+import { ChildProcess, spawnSync } from "child_process";
 
 const state = vi.hoisted(() => ({ fixture: "", storage: "", workspace: "", trusted: true, mode: "normal", telemetry: true, launches: [] as any[], children: [] as any[], competing: [] as any[], competingRequests: 0 }));
 vi.mock("vscode", () => ({
@@ -48,6 +48,12 @@ import { CodeWhaleEngine } from "./engine";
 
 let root: string;
 let engines: CodeWhaleEngine[];
+/** The CodeWhale home this suite points the extension at, and the value it
+ * replaced. The extension retires stale owner records before every launch, and
+ * that record's location follows `CODEWHALE_HOME`, so leaving the ambient value
+ * in place would let a test clean up — or trip over — the user's real one. */
+let codeWhaleHome: string;
+let previousCodeWhaleHome: string | undefined;
 function engine() {
   const logs: string[] = [];
   const item = new CodeWhaleEngine({ appendLine: (line: string) => logs.push(line) } as any, { globalStorageUri: { fsPath: state.storage } } as any);
@@ -104,6 +110,10 @@ else {
 }
 `);
   state.trusted = true; state.mode = "normal"; state.telemetry = true; state.launches = []; state.children = []; state.competing = []; state.competingRequests = 0; engines = [];
+  previousCodeWhaleHome = process.env.CODEWHALE_HOME;
+  codeWhaleHome = path.join(root, "codewhale-home");
+  fs.mkdirSync(path.join(codeWhaleHome, "run"), { recursive: true });
+  process.env.CODEWHALE_HOME = codeWhaleHome;
 });
 afterEach(async () => {
   await Promise.all(engines.map(item => item.stop()));
@@ -112,6 +122,11 @@ afterEach(async () => {
   }
   await Promise.all(state.competing.map(server => new Promise<void>(resolve => server.close(() => resolve()))));
   fs.rmSync(root, { recursive: true, force: true });
+  // Restored only after the stops above, which retire records against the path
+  // this test selected. Bringing the real environment back first would point
+  // that cleanup at the user's own file.
+  if (previousCodeWhaleHome === undefined) delete process.env.CODEWHALE_HOME;
+  else process.env.CODEWHALE_HOME = previousCodeWhaleHome;
 });
 
 describe("owned Runtime lifecycle", () => {
@@ -249,6 +264,24 @@ describe("owned Runtime lifecycle", () => {
     const other = state.launches.at(-1)!.options.env.CODEWHALE_RUNTIME_DIR as string;
     expect(other).not.toBe(store);
     expect(other.startsWith(path.join(state.storage, "runtime"))).toBe(true);
+  });
+
+  it("retires a dead owner record from another workspace before starting", async () => {
+    // The record's owner is gone, but the record names a *different* store —
+    // and the engine compares the record against the store it was asked for
+    // before it ever asks whether that owner is alive, so it refuses to start
+    // over it instead of recovering. Clearing it first is therefore the
+    // extension's job. One record serves every store, so this is the ordinary
+    // case, not an exotic one.
+    const dead = spawnSync(process.execPath, ["-e", ""], { stdio: "ignore" });
+    const receiptName = process.platform === "win32" ? "daemon.owner.json" : "daemon.sock.owner.json";
+    const receipt = path.join(codeWhaleHome, "run", receiptName);
+    fs.writeFileSync(receipt, JSON.stringify({ version: 1, pid: dead.pid, data_dir: "/somewhere/else" }));
+    const { item, logs } = engine();
+    await item.ensureRunning();
+    expect(item.isRunning).toBe(true);
+    expect(fs.existsSync(receipt)).toBe(false);
+    expect(logs.join("\n")).toContain(String(dead.pid));
   });
 
   it("shows the Runtime's own refusal instead of a generic exit message", async () => {

@@ -1,5 +1,11 @@
 # Change Log
 
+## Unreleased
+
+### Bug Fixes
+
+- **A workspace can start after another workspace's engine dies** — The engine keeps a single record of which process is holding it, shared by every workspace rather than kept one per workspace. When an engine is killed outright — a window reload, a crash — that record outlives the process, and a window on a *different* workspace then refused to start over it: the record names somebody else's store, the engine stops on that alone, and it never gets as far as noticing that the process it names is gone. Only the engine that wrote it could have cleared it, so the way out was to delete the file by hand. The extension now clears it for you, on macOS and Linux as well as Windows, and only when the process the record names is provably gone — a record naming a running CodeWhale, yours or another window's, is left exactly where it is. It also names the file to delete in the startup error, instead of offering Windows-only advice whatever platform you are on.
+
 ## 0.8.5
 
 Everything here is client-side and works on engine **v0.10.1**; none of it waits on an engine build.

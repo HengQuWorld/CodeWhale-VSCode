@@ -9,7 +9,11 @@ vi.mock("vscode", () => ({ workspace: {} }));
 import { engineStartupError, ownerReceiptPath, retireDeadOwnerReceipt, retirementPid } from "./engine";
 
 const HOME = "/Users/whale";
-const DEFAULT_RECEIPT = path.join(HOME, ".codewhale", "run", "daemon.owner.json");
+/** The default record for the Linux layout; the retirement cases below inject a
+ * platform so none of them depends on where the suite happens to run. */
+const DEFAULT_RECEIPT = path.posix.join(HOME, ".codewhale", "run", "daemon.sock.owner.json");
+/** The default record for the macOS layout, which is not the same file. */
+const MAC_RECEIPT = path.posix.join(HOME, "Library", "Application Support", "codewhale", "daemon.sock.owner.json");
 const WIN_FALLBACK = "C:\\Users\\fallback";
 
 /** A record as the engine writes it — only `pid` matters here. */
@@ -31,13 +35,42 @@ function makeDisk(contents: string | null) {
 }
 
 describe("ownerReceiptPath", () => {
-  it("is the default CodeWhale home's run directory", () => {
-    expect(ownerReceiptPath({}, HOME)).toBe(DEFAULT_RECEIPT);
+  it("sits beside the control socket macOS resolves by default", () => {
+    expect(ownerReceiptPath({}, HOME, "darwin")).toBe(MAC_RECEIPT);
   });
 
-  it("follows an absolute selected home", () => {
-    expect(ownerReceiptPath({ CODEWHALE_HOME: "C:\\state" }, HOME, "win32"))
+  it("sits beside the control socket Linux resolves by default", () => {
+    expect(ownerReceiptPath({}, HOME, "linux")).toBe(DEFAULT_RECEIPT);
+  });
+
+  it("follows $XDG_RUNTIME_DIR before either platform layout", () => {
+    // The variable moves the *socket*, and the record is named after it, so a
+    // session that sets it writes somewhere else entirely — on macOS too, since
+    // the engine reads the variable regardless of platform.
+    for (const platform of ["linux", "darwin"] as const) {
+      expect(ownerReceiptPath({ XDG_RUNTIME_DIR: "/run/user/501" }, HOME, platform))
+        .toBe(path.posix.join("/run/user/501", "codewhale", "daemon.sock.owner.json"));
+    }
+    expect(ownerReceiptPath({ XDG_RUNTIME_DIR: "" }, HOME, "linux")).toBe(DEFAULT_RECEIPT);
+  });
+
+  it("puts a selected home ahead of $XDG_RUNTIME_DIR, as the engine does", () => {
+    expect(ownerReceiptPath({ CODEWHALE_HOME: "/state", XDG_RUNTIME_DIR: "/run/user/501" }, HOME, "linux"))
+      .toBe(path.posix.join("/state", "run", "daemon.sock.owner.json"));
+  });
+
+  it("keeps the Windows record a plain name in the owner directory", () => {
+    // Windows owns a kernel named pipe, not a socket file, so there is nothing
+    // for the record to sit beside: `owner_directory()` and then `run`.
+    expect(ownerReceiptPath({}, WIN_FALLBACK, "win32"))
+      .toBe("C:\\Users\\fallback\\.codewhale\\run\\daemon.owner.json");
+  });
+
+  it("follows an absolute selected home on every platform", () => {
+    expect(ownerReceiptPath({ CODEWHALE_HOME: "C:\\state" }, WIN_FALLBACK, "win32"))
       .toBe("C:\\state\\run\\daemon.owner.json");
+    expect(ownerReceiptPath({ CODEWHALE_HOME: "/state" }, HOME, "darwin"))
+      .toBe(path.posix.join("/state", "run", "daemon.sock.owner.json"));
   });
 
   it("ignores an empty, blank or relative selected home", () => {
@@ -45,15 +78,17 @@ describe("ownerReceiptPath", () => {
     // the working directory — it refuses to start at all, writing no record —
     // and an absolute-only rule is what keeps this from naming a stray file.
     for (const value of ["", "   ", ".", "build", "state/codewhale"]) {
-      expect(ownerReceiptPath({ CODEWHALE_HOME: value }, HOME)).toBe(DEFAULT_RECEIPT);
+      expect(ownerReceiptPath({ CODEWHALE_HOME: value }, HOME, "darwin")).toBe(MAC_RECEIPT);
+      expect(ownerReceiptPath({ CODEWHALE_HOME: value }, WIN_FALLBACK, "win32"))
+        .toBe("C:\\Users\\fallback\\.codewhale\\run\\daemon.owner.json");
     }
   });
 
   it("expands a leading tilde the way the engine does", () => {
     expect(ownerReceiptPath({ CODEWHALE_HOME: "~/state" }, HOME, "darwin"))
-      .toBe(path.posix.join(HOME, "state", "run", "daemon.owner.json"));
+      .toBe(path.posix.join(HOME, "state", "run", "daemon.sock.owner.json"));
     expect(ownerReceiptPath({ CODEWHALE_HOME: "~" }, HOME, "darwin"))
-      .toBe(path.posix.join(HOME, "run", "daemon.owner.json"));
+      .toBe(path.posix.join(HOME, "run", "daemon.sock.owner.json"));
   });
 
   it("follows the engine's user-home order, not the platform's own answer", () => {
@@ -70,8 +105,10 @@ describe("ownerReceiptPath", () => {
   });
 
   it("lets the environment win over the supplied home, as the engine does", () => {
-    expect(ownerReceiptPath({ HOME: "/home/from-env" }, "/home/fallback"))
-      .toBe(path.posix.join("/home/from-env", ".codewhale", "run", "daemon.owner.json"));
+    expect(ownerReceiptPath({ HOME: "/home/from-env" }, "/home/fallback", "darwin"))
+      .toBe(path.posix.join("/home/from-env", "Library", "Application Support", "codewhale", "daemon.sock.owner.json"));
+    expect(ownerReceiptPath({ HOME: "/home/from-env" }, "/home/fallback", "linux"))
+      .toBe(path.posix.join("/home/from-env", ".codewhale", "run", "daemon.sock.owner.json"));
   });
 
   it("ignores a POSIX-shaped home on Windows, as the engine does", () => {
@@ -85,19 +122,20 @@ describe("ownerReceiptPath", () => {
   it("falls through where the engine would give up, and that is inert", () => {
     // A deliberate divergence, documented on `engineUserHome`: a set-but-relative
     // HOME stops the engine cold, so no record exists to find either way.
-    expect(ownerReceiptPath({ HOME: "." }, HOME)).toBe(DEFAULT_RECEIPT);
-    expect(fs.existsSync(DEFAULT_RECEIPT)).toBe(false);
+    expect(ownerReceiptPath({ HOME: "." }, HOME, "darwin")).toBe(MAC_RECEIPT);
+    expect(fs.existsSync(MAC_RECEIPT)).toBe(false);
   });
 
   it("uses POSIX rules off Windows", () => {
-    expect(ownerReceiptPath({ USERPROFILE: "C:\\Users\\ben" }, HOME, "darwin")).toBe(DEFAULT_RECEIPT);
+    expect(ownerReceiptPath({ USERPROFILE: "C:\\Users\\ben" }, HOME, "darwin")).toBe(MAC_RECEIPT);
+    expect(ownerReceiptPath({ USERPROFILE: "C:\\Users\\ben" }, HOME, "linux")).toBe(DEFAULT_RECEIPT);
   });
 });
 
 describe("retireDeadOwnerReceipt", () => {
   it("leaves nothing behind when there is no record", () => {
     const disk = makeDisk(null);
-    const result = retireDeadOwnerReceipt({ env: {}, home: HOME, readFile: disk.readFile, remove: disk.remove });
+    const result = retireDeadOwnerReceipt({ env: {}, home: HOME, platform: "linux", readFile: disk.readFile, remove: disk.remove });
     expect(result).toEqual({ path: DEFAULT_RECEIPT, retired: false, found: false, reason: "no readable owner record" });
     expect(disk.removed).toEqual([]);
   });
@@ -121,6 +159,7 @@ describe("retireDeadOwnerReceipt", () => {
     const result = retireDeadOwnerReceipt({
       env: {},
       home: HOME,
+      platform: "linux",
       readFile: disk.readFile,
       remove: disk.remove,
       isAlive: () => false,
@@ -165,6 +204,7 @@ describe("retireDeadOwnerReceipt", () => {
       env: {},
       home: HOME,
       onlyPid: 1111,
+      platform: "linux",
       readFile: disk.readFile,
       remove: disk.remove,
       isAlive: () => false,
@@ -220,10 +260,15 @@ describe("retireDeadOwnerReceipt", () => {
  * between a stale record and a live engine's. These two exercise it for real:
  * the default reader, the default removal, and the default `processAlive`. */
 describe("the real liveness check", () => {
+  /** The record is named after the control endpoint, so its name is the one
+   * thing here that depends on the platform the suite runs on — and using the
+   * real resolution is what this block is for. */
+  const RECORD_NAME = process.platform === "win32" ? "daemon.owner.json" : "daemon.sock.owner.json";
+
   function withRecord(pid: number, body: (home: string) => void): void {
     const home = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), "cw-owner-"));
     fs.mkdirSync(path.join(home, "run"));
-    fs.writeFileSync(path.join(home, "run", "daemon.owner.json"), record(pid));
+    fs.writeFileSync(path.join(home, "run", RECORD_NAME), record(pid));
     try {
       body(home);
     } finally {
@@ -236,7 +281,7 @@ describe("the real liveness check", () => {
       const result = retireDeadOwnerReceipt({ env: { CODEWHALE_HOME: home }, platform: process.platform });
       expect(result.retired).toBe(false);
       expect(result.reason).toContain("still running");
-      expect(fs.existsSync(path.join(home, "run", "daemon.owner.json"))).toBe(true);
+      expect(fs.existsSync(path.join(home, "run", RECORD_NAME))).toBe(true);
     });
   });
 
@@ -247,7 +292,7 @@ describe("the real liveness check", () => {
     withRecord(pid, home => {
       const result = retireDeadOwnerReceipt({ env: { CODEWHALE_HOME: home }, platform: process.platform });
       expect(result.retired).toBe(true);
-      expect(fs.existsSync(path.join(home, "run", "daemon.owner.json"))).toBe(false);
+      expect(fs.existsSync(path.join(home, "run", RECORD_NAME))).toBe(false);
     });
   });
 });
@@ -277,13 +322,16 @@ describe("engineStartupError", () => {
   it("names the recovery for a stranded owner record", () => {
     const message = engineStartupError("error: opening selected Windows owner; refusing fallback").message;
     expect(message).toContain("opening selected Windows owner");
-    expect(message).toContain("daemon.owner.json");
+    // The path named has to be the one this process would read, so the advice
+    // stays usable wherever the record actually is — the layout differs per
+    // platform, and macOS is not Windows.
+    expect(message).toContain(ownerReceiptPath());
     expect(message).toContain("no CodeWhale is running");
   });
 
   it("does not offer recovery advice when nothing was stranded", () => {
     expect(engineStartupError("error: no model configured").message)
-      .not.toContain("daemon.owner.json");
+      .not.toContain(ownerReceiptPath());
   });
 
   it("does not mistake another owner error for a stranded record", () => {
@@ -294,7 +342,30 @@ describe("engineStartupError", () => {
       "error: selected Windows owner parent changed during publication",
       "error: connected Windows server is not the selected owner",
     ]) {
-      expect(engineStartupError(unrelated).message).not.toContain("daemon.owner.json");
+      expect(engineStartupError(unrelated).message).not.toContain(ownerReceiptPath());
     }
+  });
+
+  it("names the record that blocks a start from another workspace", () => {
+    // One record serves every store, so a start usually trips over a *different*
+    // workspace's: the engine compares the record against the store this window
+    // selected and refuses before asking whether that owner is still alive. The
+    // path named has to be the one this process would read, because the record
+    // is not beside the store it belongs to.
+    const message = engineStartupError(
+      "error: authenticated Runtime owner belongs to another selected store; refusing attachment").message;
+    expect(message).toContain("another selected store");
+    expect(message).toContain("another CodeWhale workspace");
+    expect(message).toContain("no other CodeWhale window");
+    expect(message).toContain(ownerReceiptPath());
+  });
+
+  it("keeps the two recoveries distinct", () => {
+    // A store mismatch is not a stranded pipe: on Windows the old advice named
+    // a file and a cause that would not clear this refusal.
+    const message = engineStartupError(
+      "error: authenticated Runtime owner belongs to another selected store; refusing attachment").message;
+    expect(message).not.toContain("opening selected Windows owner");
+    expect(message).not.toContain("left by a previous run");
   });
 });

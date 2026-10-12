@@ -278,12 +278,30 @@ export function engineStartupError(childError: string): Error {
   const stranded = /opening selected Windows owner; refusing fallback|stale-owner recovery is not qualified/i.test(childError)
     ? ` The engine is refusing to start over an owner record left by a previous run. If no CodeWhale is running, delete "${ownerReceiptPath()}" and start again.`
     : "";
-  return new Error(`Engine exited before becoming ready: ${childError}${stranded}`);
+  // One record serves every workspace on the machine, so the record a start
+  // trips over usually belongs to a *different* workspace: the engine compares
+  // it against the store this window selected and refuses before it ever asks
+  // whether that owner is still alive. The extension retires a provably dead
+  // record before spawning, so reaching this message means the owner looked
+  // alive — another window or terminal session — or the record names a path
+  // this process could not clean.
+  const foreign = /belongs to another selected store; refusing attachment/i.test(childError)
+    ? ` An owner record from another CodeWhale workspace is blocking this one: "${ownerReceiptPath()}". Delete it if no other CodeWhale window or terminal session is running.`
+    : "";
+  return new Error(`Engine exited before becoming ready: ${childError}${stranded}${foreign}`);
 }
 
 /** The record the Runtime publishes while it holds a store, beside its private
- * control endpoint. */
-const OWNER_RECEIPT_NAME = "daemon.owner.json";
+ * control endpoint. The two platforms name it differently because their
+ * endpoints differ: Windows owns a kernel named pipe, which has no path to sit
+ * beside, so the record is a fixed name in the owner directory, while Unix owns
+ * a file socket and the record is `<socket basename>.owner.json` in the
+ * socket's own directory. */
+const WINDOWS_OWNER_RECEIPT_NAME = "daemon.owner.json";
+/** The Unix control endpoint's basename (`daemon_socket::DAEMON_SOCKET_FILE_NAME`). */
+const DAEMON_SOCKET_BASENAME = "daemon.sock";
+/** The engine's app directory under the user home (`codewhale_paths::CODEWHALE_APP_DIR`). */
+const CODEWHALE_APP_DIR = ".codewhale";
 
 /** Whether the engine would accept a path as absolute on this platform. The
  * rules are Rust's, not Node's: Windows needs a drive or UNC prefix, so `/c/...`
@@ -327,13 +345,41 @@ function engineUserHome(env: NodeJS.ProcessEnv, fallback: string, platform: Node
     ?? fallback;
 }
 
-/** Where that record lives: the CodeWhale home the engine was started with,
- * always in its `run` subdirectory. Mirrors the engine's `codewhale_home()`
- * followed by `owner_directory()` — an absolute `CODEWHALE_HOME` wins, a
- * relative one is ignored rather than resolved against the working directory
- * (in which case the engine refuses to start and writes nothing), and otherwise
- * the home is `<user home>/.codewhale`. Getting this wrong is not harmless: the
- * recovery this names is a path the user will act on. */
+/** `CODEWHALE_HOME` as the engine resolves it: an absolute value wins after
+ * `~` expansion, a blank one is unset, and a relative one is rejected outright
+ * — the engine refuses to start over it and writes no record, so there is
+ * nothing to name. */
+function selectedCodeWhaleHome(
+  env: NodeJS.ProcessEnv,
+  userHome: string,
+  platform: NodeJS.Platform,
+  rules: path.PlatformPath,
+): string | undefined {
+  const raw = (env.CODEWHALE_HOME ?? "").trim();
+  if (!raw) return undefined;
+  const expanded = expandTilde(raw, userHome, rules);
+  return engineAbsolute(expanded, platform) ? expanded : undefined;
+}
+
+/** `$XDG_RUNTIME_DIR` when it is set and non-empty. The engine reads the
+ * variable without trimming it, so a whitespace-only value still counts — and
+ * moving the socket is exactly what this variable is for. */
+function xdgRuntimeDir(env: NodeJS.ProcessEnv): string | undefined {
+  const value = env.XDG_RUNTIME_DIR;
+  return value ? value : undefined;
+}
+
+/** Where that record lives for the environment the engine was started with.
+ *
+ * The two platforms resolve differently, and each mirrors its own engine
+ * function: Windows is `daemon_windows::owner_directory()` — the selected home,
+ * else `<user home>/.codewhale`, always with `run` beneath it — while Unix is
+ * `daemon_socket::resolve_socket_path()` followed by the record name
+ * `observe_publication` derives from the socket, so the record sits beside a
+ * socket whose location depends on `CODEWHALE_HOME`, then `$XDG_RUNTIME_DIR`,
+ * then the platform's own layout (macOS Application Support, otherwise
+ * `~/.codewhale/run`). Getting this wrong is not harmless: the recovery this
+ * names is a path the user will act on. */
 export function ownerReceiptPath(
   env: NodeJS.ProcessEnv = process.env,
   home = os.homedir(),
@@ -341,9 +387,20 @@ export function ownerReceiptPath(
 ): string {
   const rules = platform === "win32" ? path.win32 : path.posix;
   const userHome = engineUserHome(env, home, platform);
-  const override = expandTilde((env.CODEWHALE_HOME ?? "").trim(), userHome, rules);
-  const codeWhaleHome = engineAbsolute(override, platform) ? override : rules.join(userHome, ".codewhale");
-  return rules.join(codeWhaleHome, "run", OWNER_RECEIPT_NAME);
+  const override = selectedCodeWhaleHome(env, userHome, platform, rules);
+  if (platform === "win32") {
+    const ownerHome = override ?? rules.join(userHome, CODEWHALE_APP_DIR);
+    return rules.join(ownerHome, "run", WINDOWS_OWNER_RECEIPT_NAME);
+  }
+  const xdg = xdgRuntimeDir(env);
+  const socketDir = override
+    ? rules.join(override, "run")
+    : xdg !== undefined
+      ? rules.join(xdg, "codewhale")
+      : platform === "darwin"
+        ? rules.join(userHome, "Library", "Application Support", "codewhale")
+        : rules.join(userHome, CODEWHALE_APP_DIR, "run");
+  return rules.join(socketDir, `${DAEMON_SOCKET_BASENAME}.owner.json`);
 }
 
 function processAlive(pid: number): boolean {
@@ -544,14 +601,16 @@ export class CodeWhaleEngine {
     env.DEEPSEEK_RUNTIME_DIR = runtimeDir;
     // Never inherit an alternate token or pass the generated secret in argv.
     delete env.DEEPSEEK_RUNTIME_TOKEN;
-    // A window reload kills the previous engine outright, so its owner record
-    // outlives it; clear a record whose owner is provably gone before the new
-    // child inherits the refusal.
-    if (isWindows) {
-      const retirement = retireDeadOwnerReceipt({ env });
-      if (retirement.retired) this.log(`${retirement.reason}: ${retirement.path}`);
-      else if (retirement.found) this.log(`Left the owner record alone: ${retirement.reason} (${retirement.path})`);
-    }
+    // A window reload kills the previous engine outright on every platform, so
+    // its owner record outlives it; clear a record whose owner is provably gone
+    // before the new child inherits the refusal. One record serves every store,
+    // so the record that blocks this window is usually another workspace's —
+    // and the engine will not recover from that itself, because it compares the
+    // record against the store it was asked for before asking whether the owner
+    // is still alive.
+    const retirement = retireDeadOwnerReceipt({ env });
+    if (retirement.retired) this.log(`${retirement.reason}: ${retirement.path}`);
+    else if (retirement.found) this.log(`Left the owner record alone: ${retirement.reason} (${retirement.path})`);
     this.log(`Starting: ${enginePath} ${args.join(" ")}`);
     this.log(`With CODEWHALE_RUNTIME_DIR=${runtimeDir}`);
     // A bare name here means every known install location was probed and none
@@ -691,11 +750,12 @@ export class CodeWhaleEngine {
     });
     this._stopping = stopping;
     try { await stopping; } finally { if (this._stopping === stopping) this._stopping = null; }
-    // The shutdown above is forceful on Windows, so the record this child held
-    // is still on disk. Retire it now while we know it is ours and it is dead,
-    // rather than leaving the next start — ours, or the user's terminal — to
-    // trip over it.
-    if (isWindows && child.pid) {
+    // The shutdown above is forceful on Windows and can be (on the SIGKILL
+    // path after the grace period) elsewhere too, so the record this child held
+    // may still be on disk. Retire it now while we know it is ours and it is
+    // dead, rather than leaving the next start — ours, or the user's terminal —
+    // to trip over it.
+    if (child.pid) {
       const retirement = retireDeadOwnerReceipt({ onlyPid: retirementPid(this.interpreterLaunch, child.pid) });
       if (retirement.retired) this.log(`${retirement.reason}: ${retirement.path}`);
       else if (retirement.found) this.log(`Left the owner record alone: ${retirement.reason} (${retirement.path})`);
