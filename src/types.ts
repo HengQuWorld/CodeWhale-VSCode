@@ -614,6 +614,12 @@ export interface RuntimeApiCapabilities {
    *  TUI's `/skill <name>` does. When false the GUI can list and toggle
    *  skills but offers no activation. */
   skillDetail: boolean;
+  /** The MCP management family (`/v1/apps/mcp/servers*`, `/v1/apps/mcp/tools`,
+   *  `/v1/apps/mcp/imports`) exists, advertised as
+   *  `capabilities.mcp_server_management` on `GET /v1/runtime/info`. When
+   *  false the MCP panel says which engine can serve it and offers no
+   *  mutations, rather than promising a route the engine will 404. */
+  mcpServerManagement: boolean;
 }
 
 /** One path a single tool call changed, as the call-change route reports it. */
@@ -1186,6 +1192,164 @@ export interface ThreadGoal {
   continuation_count: number;
   created_at: number;
   updated_at: number;
+}
+
+// ── MCP server management (`/v1/apps/mcp/*`) ──
+//
+// The engine owns the MCP config (global `mcp.json` + a trusted project's
+// `.mcp.json` + reviewed plugin entries) and redacts credentials before they
+// reach a client: env/header values never come back, only the key names.
+
+/** One row of `GET /v1/apps/mcp/servers`.
+ *
+ *  `origin` says which config layer owns the entry — `global`, `project`,
+ *  `plugin`, or `unknown` — and only a `global` entry is writable through the
+ *  API (`writable`); a shadowed project or plugin entry has to be changed at
+ *  its own source. `connected` is live pool state, which is absent until a
+ *  pool has been built (no server has been talked to yet). */
+export interface McpServerSummary {
+  name: string;
+  origin: string;
+  writable: boolean;
+  auth_required: boolean;
+  enabled: boolean;
+  required: boolean;
+  command: string | null;
+  url: string | null;
+  connected: boolean;
+  enabled_tools: string[];
+  disabled_tools: string[];
+}
+
+/** `GET /v1/apps/mcp/servers` — the list plus the revision every mutation
+ *  must present in `If-Match` (the engine is the single writer, so a stale
+ *  revision is refused with `412` rather than silently clobbering). */
+export interface McpServersResponse {
+  revision: string;
+  servers: McpServerSummary[];
+}
+
+/** One server's live connection state, as the tool/reconnect routes report
+ *  it. `error` carries the engine's own sentence for a failed connect. */
+export interface McpConnectionOutcome {
+  server: string;
+  connected: boolean;
+  auth_required: boolean;
+  error?: string;
+}
+
+/** One tool the engine exposes from a connected MCP server. */
+export interface McpToolEntry {
+  server: string;
+  name: string;
+  prefixed_name: string;
+  description?: string | null;
+  input_schema: unknown;
+}
+
+/** `GET /v1/apps/mcp/tools` — the tools currently visible to the model, plus
+ *  a connection outcome per server. With `connect` the engine actually tries
+ *  to reach each server first, so the outcomes say whether that worked. */
+export interface McpToolsResponse {
+  tools: McpToolEntry[];
+  connections: McpConnectionOutcome[];
+}
+
+/** The receipt `enable` / `disable` / `delete` / `reconnect` answer with. */
+export interface McpServerActionReceipt {
+  revision?: string;
+  name: string;
+  action: string;
+  ok: boolean;
+  connection?: McpConnectionOutcome;
+}
+
+/** One server's redacted config (`GET /v1/apps/mcp/servers/{name}`). Secret
+ *  values are never included: env and header values appear as key names only,
+ *  and `has_bearer_token_env_var` says whether a token source is configured
+ *  without naming it. */
+export interface McpServerDetail extends McpServerSummary {
+  credential_configured: boolean;
+  args: string[];
+  env_keys: string[];
+  transport: string | null;
+  connect_timeout: number | null;
+  execute_timeout: number | null;
+  read_timeout: number | null;
+  env_header_keys: string[];
+  has_bearer_token_env_var: boolean;
+  scopes: string[];
+  oauth_resource: string | null;
+}
+
+/** Body of `POST /v1/apps/mcp/servers`. Exactly one of `command` (stdio) or
+ *  `url` (http/sse) is required; the engine rejects a request that carries
+ *  neither. */
+export interface McpCreateServerRequest {
+  name: string;
+  command?: string;
+  args?: string[];
+  url?: string;
+  /** Explicit transport override (`"sse"`). This is the only value the
+   *  engine accepts: `stdio` and the default streamable HTTP are inferred from
+   *  whether `command` or `url` is set, and sending either would be a 400 for
+   *  repeating what the body already says. */
+  transport?: string;
+  enabled?: boolean;
+  required?: boolean;
+  env?: Record<string, string>;
+  enabled_tools?: string[];
+  disabled_tools?: string[];
+}
+
+/** One externally discovered server the engine could import, before consent.
+ *
+ *  `content_hash` covers exactly the name+entry parsed from the source, so an
+ *  approval stays valid across unrelated rewrites of the same file — and the
+ *  apply call has to echo it back, which is what makes the review binding. */
+export interface McpImportCandidate {
+  id: string;
+  name: string;
+  /** `claude_json` / `project_mcp_json` / `marketplace`. */
+  source_kind: string;
+  source_path: string;
+  content_hash: string;
+  transport: string;
+  destination: string;
+  argument_count: number;
+  env_keys: string[];
+  header_keys: string[];
+  credential_configured: boolean;
+  /** Present in the source but must never connect (e.g. `enabled: false`). */
+  hard_blocked: boolean;
+  /** The name already exists in the effective config. */
+  conflict: boolean;
+  review_token: string;
+}
+
+/** A source the engine could not read safely, with its own explanation. */
+export interface McpImportProblem {
+  source_kind: string;
+  message: string;
+}
+
+/** `GET /v1/apps/mcp/imports` — reviewed candidates from external editors.
+ *  Reading never connects or spawns anything. */
+export interface McpImportPreview {
+  revision: string;
+  candidates: McpImportCandidate[];
+  problems: McpImportProblem[];
+}
+
+/** The receipt `POST /v1/apps/mcp/imports` answers with. */
+export interface McpImportReceipt {
+  name: string;
+  decision: string;
+  imported: boolean;
+  enabled: boolean;
+  revision: string;
+  consent_recorded: boolean;
+  warning?: string | null;
 }
 
 // ── Re-exports from other modules ──

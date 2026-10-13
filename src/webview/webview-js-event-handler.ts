@@ -17,6 +17,7 @@ export function getEventHandlerScript(tr: WebviewTranslations): string {
 ${PROVIDER_PICKER_JS}
   var __wvEscapeHtml = window.__wvEscapeHtml;
   var __wvFormatLoadedThread = window.__wvFormatLoadedThread;
+  var __wvBackdropClickGuard = window.__wvBackdropClickGuard;
   var vscode = window.__wvVscode;
   var messagesEl = document.getElementById('messages');
   var inputEl = document.getElementById('input');
@@ -531,10 +532,14 @@ ${PROVIDER_PICKER_JS}
     var cancelBtn = document.getElementById('route-move-cancel');
     if (confirmBtn) confirmBtn.addEventListener('click', function() { answerRouteMove(true); });
     if (cancelBtn) cancelBtn.addEventListener('click', function() { answerRouteMove(false); });
-    // Clicking the dimmed area answers no, the way the other overlays close.
+    // Clicking the dimmed area answers no, the way the other overlays close —
+    // but only when the press landed there too: a press inside the dialog that
+    // slips past its edge reports this overlay as the click's target and would
+    // otherwise answer the question for the reader.
     if (overlay) {
+      var backdropClicked = __wvBackdropClickGuard(overlay);
       overlay.addEventListener('click', function(e) {
-        if (e && e.target === overlay) answerRouteMove(false);
+        if (backdropClicked(e)) answerRouteMove(false);
       });
     }
   })();
@@ -1012,6 +1017,29 @@ ${PROVIDER_PICKER_JS}
 
       case 'taskList':
         window.__wvSidebar.renderTasks(msg.tasks || []);
+        break;
+
+      case 'mcpServerList':
+        window.__wvSidebar.renderMcp({
+          servers: msg.servers || [],
+          revision: msg.revision || '',
+          supported: msg.supported !== false
+        });
+        break;
+
+      case 'mcpTools':
+        window.__wvSidebar.renderMcpTools(msg.server, msg.tools || [], msg.connections || []);
+        break;
+
+      case 'mcpImports':
+        window.__wvSidebar.renderMcpImports({
+          candidates: msg.candidates || [],
+          problems: msg.problems || []
+        });
+        break;
+
+      case 'openMcpPanel':
+        window.__wvSidebar.showMcpPanel();
         break;
 
       case 'skillList':

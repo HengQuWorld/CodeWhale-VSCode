@@ -190,7 +190,7 @@ code --install-extension ./brotherwhale-vscode-0.8.6.vsix --force
 - **Memory** —— `/memory` 通过 runtime API 读写引擎的原生记忆存储。
 - **Notes** —— `/note` 记录按工作区的速记。
 - **Skills** —— `/skills` 与 `/skill` 列出、切换技能。
-- **MCP** —— `/mcp` 打开 VS Code 中与 MCP 相关的设置。
+- **MCP** —— Activity 标签的 **MCP** 面板列出引擎的 MCP 服务器，按配置来源分组（**项目** / **全局** / **插件**），并显示实时连接状态。可以逐个启用/禁用、连接并查看它提供的工具、移除，或用表单添加 stdio / HTTP / SSE 服务器（也可先选一个推荐项自动填表），还能审阅本机其他工具已有的服务器配置（`~/.claude.json`、项目的 `.mcp.json`、marketplace），逐条批准或拒绝。`/mcp` 打开面板，`/mcp list` 在对话中打印服务器列表。改动由引擎完成 —— 配置归引擎所有、也只有它写入；属于项目或插件配置的条目只展示、不在此处编辑；引擎没有 MCP 接口时，面板会直接说明，而不是显示一个空列表。
 - **快照** —— `/restore` 列出快照，并可将工作区文件回滚到某个快照。
 
 ### 模型、成本与诊断

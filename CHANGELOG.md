@@ -1,5 +1,19 @@
 # Change Log
 
+## Unreleased
+
+Everything here talks to the engine's MCP routes; on an engine that predates them the panel says so instead of showing an empty list, and an engine that has some of the family has all of it.
+
+### New Features
+
+- **MCP servers are managed from the chat window** — The Activity tab has an **MCP** panel: every server the engine knows about, grouped by where it is configured (project, global, plugin), with its live connection state. Turn one on or off, connect it and see the tools it offers, remove it, or add a server from a form — the suggested ones (Hugging Face, GitHub, Chrome DevTools, Playwright, container-use) fill it in for you. **Review imports** lists the servers other tools on this machine already have, so you can approve or decline them one at a time; nothing is imported until you say so, and an imported server arrives switched off. The engine owns the config file and is its only writer: entries belonging to a project or plugin are shown but marked as managed elsewhere, and an edit made in another window is refused rather than overwritten. `/mcp` opens the panel, `/mcp list` prints the servers in the conversation, and the copy that used to send you to VS Code settings — where nothing about MCP could be edited — is gone.
+
+### Bug Fixes
+
+- **A dialog no longer closes when your press slips off it** — Holding the mouse down inside one of the pop-ups (adding an MCP server, a task draft, a Fleet run, the route-change question) and releasing it after the pointer left the panel closed the dialog and threw away whatever had been typed. A click is reported against the nearest common ancestor of where the press began and where it was released, so a press that left the panel and came up over the dimmed area — a drag that slipped past the edge, a text selection pulled past the field, a release outside the window — looked exactly like a click on the backdrop. The press is checked too now, so only a gesture that both began and ended on the backdrop dismisses.
+
+- **A tool call reads the same while it runs as it does after a reload** — A row drawn live used the raw engine name, so an MCP call showed `mcp__github__search_code` as it ran and "github / search code" once the conversation came back from history — the same call, two names, on every kind of tool. Both paths use the same label now: a call reads "Run command" or "github / search code" throughout, and the MCP label spaces each part properly, so the tool half no longer reads `search_code` beside a spaced server name.
+
 ## 0.8.6
 
 Everything here works on engine **v0.10.1** except the workspace-trust banner, whose engine half is still open upstream — on an engine that predates the route the banner simply stays hidden, and the rest of this release is unaffected.

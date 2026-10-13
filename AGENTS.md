@@ -305,7 +305,7 @@ undo / retry / patch-undo / 快照恢复这条链路**已完成对齐**：
 
 | TUI 功能面 | 端点 | GUI 现状 |
 |------------|------|----------|
-| MCP 服务器管理 | `/v1/apps/mcp/servers` 全套 CRUD + enable/disable/reconnect + `/v1/apps/mcp/tools` | `/mcp` 只打开 VSCode settings（hack，待改 API 面板） |
+| MCP 服务器管理 | `/v1/apps/mcp/servers` 全套 CRUD + enable/disable/reconnect + `/v1/apps/mcp/tools` + `/v1/apps/mcp/imports` | Activity 的 **MCP** 面板（列表/增删/启禁用/连接看工具/审查导入）；`/mcp` 打开面板，`/mcp list` 打印列表 |
 | 插件管理 | `/v1/apps/plugins` + install/update/trust/enable/disable/revoke | 完全缺失 |
 | 市场管理 | `/v1/apps/marketplaces` + install | 完全缺失 |
 | Skills 管理增强 | `/v1/skills/install`、`/{name}/update`、`/{name}/trust`、`/{name}/audit` | 只有 list + enable/disable |

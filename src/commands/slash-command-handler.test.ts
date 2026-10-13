@@ -1886,16 +1886,76 @@ describe("SlashCommandHandler - Dispatcher Pattern", () => {
   // ── /mcp ──
 
   describe("/mcp", () => {
-    it("opens MCP settings", async () => {
-      const ctx = createContext();
+    it("opens the MCP panel instead of pointing at VSCode settings", async () => {
+      // The engine owns the MCP config, so VSCode settings has nothing to
+      // edit: the command has to bring the reader to the panel that does.
+      const postMessage = vi.fn();
+      const ctx = createContext({ postMessage });
       const handler = new SlashCommandHandler(ctx);
 
       await handler.handle("/mcp", "");
 
-      expect(vscodeState.executeCommandMock).toHaveBeenCalledWith(
+      expect(postMessage).toHaveBeenCalledWith({ type: "openMcpPanel" });
+      expect(vscodeState.executeCommandMock).not.toHaveBeenCalledWith(
         "workbench.action.openSettings",
         "brotherwhale"
       );
+    });
+
+    it("prints the configured servers for /mcp list", async () => {
+      const postMessage = vi.fn();
+      const listMcpServers = vi.fn(async () => ({
+        revision: "mcp-v1-absent",
+        servers: [
+          {
+            name: "github",
+            origin: "global",
+            writable: true,
+            auth_required: false,
+            enabled: true,
+            required: false,
+            command: null,
+            url: "https://api.githubcopilot.com/mcp/",
+            connected: true,
+            enabled_tools: [],
+            disabled_tools: [],
+          },
+        ],
+      }));
+      const ctx = createContext({
+        postMessage,
+        api: { ensureReady: vi.fn(async () => undefined), listMcpServers } as any,
+      });
+      const handler = new SlashCommandHandler(ctx);
+
+      await handler.handle("/mcp", "list");
+
+      const message = (postMessage.mock.calls[0][0] as { message: string }).message;
+      expect(message).toContain("MCP servers (1)");
+      expect(message).toContain("github");
+      expect(message).toContain("connected");
+      expect(message).toContain("https://api.githubcopilot.com/mcp/");
+    });
+
+    it("names the reason when the engine cannot list MCP servers", async () => {
+      const postMessage = vi.fn();
+      const ctx = createContext({
+        postMessage,
+        api: {
+          ensureReady: vi.fn(async () => undefined),
+          listMcpServers: vi.fn(async () => {
+            throw new Error("API error 404: Not Found");
+          }),
+        } as any,
+      });
+      const handler = new SlashCommandHandler(ctx);
+
+      await handler.handle("/mcp", "list");
+
+      const message = postMessage.mock.calls[0][0] as { type: string; message: string };
+      expect(message.type).toBe("error");
+      expect(message.message).toContain("Could not list MCP servers");
+      expect(message.message).toContain("404");
     });
   });
 

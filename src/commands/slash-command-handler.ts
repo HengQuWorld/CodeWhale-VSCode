@@ -870,9 +870,69 @@ async function handleInit(ctx: SlashCommandContext, _args: string): Promise<void
   ctx.postMessage({ type: "info", message: "Use the VSCode settings to configure CodeWhale. Open settings with /config." });
 }
 
-async function handleMcp(ctx: SlashCommandContext, _args: string): Promise<void> {
-  vscode.commands.executeCommand("workbench.action.openSettings", "brotherwhale");
-  ctx.postMessage({ type: "info", message: "MCP server configuration is available in VSCode settings." });
+async function handleMcp(ctx: SlashCommandContext, args: string): Promise<void> {
+  const trimmed = args.trim();
+  // `/mcp` opens the panel that reads and changes the engine's MCP config. It
+  // used to point at VSCode settings, where nothing about MCP could be edited:
+  // the config lives on the engine, and a second editor written by hand in the
+  // GUI would race the one the TUI and the API both go through.
+  if (!trimmed || trimmed === "panel" || trimmed === "manage") {
+    ctx.postMessage({ type: "openMcpPanel" });
+    return;
+  }
+  if (trimmed === "list" || trimmed === "status") {
+    await listMcpServers(ctx);
+    return;
+  }
+  ctx.postMessage({
+    type: "error",
+    message:
+      "Usage: /mcp — open the MCP panel (list servers, add, enable/disable, connect, review imports).\n" +
+      "/mcp list — print the configured servers here.",
+  });
+}
+
+/** Print the engine's MCP servers as text — the TUI's `/mcp list` shape.
+ *
+ *  The panel is the place to *change* anything; this exists because a command
+ *  whose only answer is "look over there" is worse than one that also says
+ *  what is there. */
+async function listMcpServers(ctx: SlashCommandContext): Promise<void> {
+  try {
+    await ctx.api.ensureReady();
+    const result = await ctx.api.listMcpServers();
+    const servers = result.servers ?? [];
+    if (servers.length === 0) {
+      ctx.postMessage({
+        type: "info",
+        message: "No MCP servers configured. Run /mcp to open the panel and add one.",
+      });
+      return;
+    }
+    const lines = servers.map((server) => {
+      const target = server.command || server.url || "";
+      const state = server.enabled ? (server.connected ? "connected" : "enabled") : "disabled";
+      const flags = [
+        server.origin,
+        state,
+        ...(server.auth_required ? ["auth"] : []),
+        ...(server.required ? ["required"] : []),
+      ];
+      return `  ${server.name} — ${flags.join(", ")}\n    ${target}`;
+    });
+    ctx.postMessage({
+      type: "info",
+      message: `MCP servers (${servers.length}):\n─────────────────────────────\n${lines.join("\n")}`,
+    });
+  } catch (err) {
+    ctx.postMessage({
+      type: "error",
+      message:
+        "Could not list MCP servers: " +
+        (err instanceof Error ? err.message : String(err)) +
+        "\nUpdating the CodeWhale engine enables the MCP panel.",
+    });
+  }
 }
 
 async function handleProvider(ctx: SlashCommandContext, args: string): Promise<void> {
@@ -975,7 +1035,7 @@ async function handleHelp(ctx: SlashCommandContext, _args: string): Promise<void
 /memory - Manage native memory (show/search/get/remember/clear)
 /restore [N] - List snapshots or revert workspace files (requires trust mode)
 /init - Open settings for initialization
-/mcp - Open MCP settings
+/mcp - Open the MCP server panel (/mcp list to print the servers)
 /provider - Show provider info
 /links - Show CodeWhale links
 /feedback - Send feedback

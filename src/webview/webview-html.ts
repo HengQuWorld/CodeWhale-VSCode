@@ -378,6 +378,48 @@ export interface WebviewTranslations {
   skillsProject: string;
   skillsGlobal: string;
   skillsBuiltIn: string;
+  // MCP panel
+  /** Activity section title. */
+  mcp: string;
+  mcpRefresh: string;
+  mcpAdd: string;
+  mcpImports: string;
+  mcpEmpty: string;
+  /** Shown when the engine has no `/v1/apps/mcp/*` routes at all. */
+  mcpNoManagement: string;
+  mcpConnect: string;
+  mcpEnable: string;
+  mcpDisable: string;
+  mcpRemove: string;
+  mcpConnected: string;
+  mcpNotConnected: string;
+  mcpAuthRequired: string;
+  mcpRequired: string;
+  /** Tooltip on the actions of a project/plugin entry, which the global
+   *  editor must not silently rewrite. */
+  mcpManagedElsewhere: string;
+  mcpGroupProject: string;
+  mcpGroupGlobal: string;
+  mcpGroupPlugin: string;
+  mcpGroupOther: string;
+  mcpToolsTitle: string;
+  mcpNoTools: string;
+  mcpAddTitle: string;
+  mcpFieldName: string;
+  mcpFieldTransport: string;
+  mcpFieldCommand: string;
+  mcpFieldArgs: string;
+  mcpFieldUrl: string;
+  mcpAddSubmit: string;
+  mcpCancel: string;
+  mcpSuggested: string;
+  mcpImportsTitle: string;
+  mcpImportsEmpty: string;
+  mcpImportsProblems: string;
+  mcpApprove: string;
+  mcpDecline: string;
+  mcpImportBlocked: string;
+  mcpImportConflict: string;
   noAgentRuns: string;
   agentStatusQueued: string;
   agentStatusStarting: string;
@@ -538,6 +580,8 @@ ${css}
   <div id="fleet-detail-overlay" class="task-detail-overlay"></div>
   <div id="fleet-create-overlay" class="task-detail-overlay"></div>
   <div id="task-create-overlay" class="task-detail-overlay"></div>
+  <div id="mcp-add-overlay" class="task-detail-overlay"></div>
+  <div id="mcp-imports-overlay" class="task-detail-overlay"></div>
   <div id="route-move-overlay" class="route-move-overlay">
     <div class="route-move-panel" role="dialog" aria-modal="true">
       <div class="route-move-title" id="route-move-title">${tr.routeMoveTitle}</div>
@@ -618,6 +662,13 @@ ${css}
               <span class="sidebar-section-arrow">▼</span>
             </div>
             <div class="sidebar-section-body" id="tab-skills"></div>
+          </div>
+          <div class="sidebar-section" id="sidebar-mcp">
+            <div class="sidebar-section-header" id="mcp-section-toggle">
+              <span class="sidebar-section-title">🔌 ${tr.mcp}</span>
+              <span class="sidebar-section-arrow">▼</span>
+            </div>
+            <div class="sidebar-section-body" id="tab-mcp"></div>
           </div>
         </div>
       </div>

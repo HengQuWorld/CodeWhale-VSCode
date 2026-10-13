@@ -1,4 +1,19 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+
+// The real translation tables are imported below so these tests read what the
+// extension ships rather than a copy of it: a copy is exactly what fails to
+// notice a key that was added to one language and not the other.
+const vscodeState = vi.hoisted(() => ({ language: "en" }));
+
+vi.mock("vscode", () => ({
+  env: {
+    get language() {
+      return vscodeState.language;
+    },
+  },
+}));
+
+import { t } from "./i18n";
 
 const COMMAND_KEYS = [
   "commandMode", "commandModel", "commandModels", "commandReasoning",
@@ -333,5 +348,47 @@ describe("i18n webview translations completeness", () => {
     for (const key of workKeys) {
       expect(webviewKeys).toContain(key);
     }
+  });
+});
+
+// ── The real tables ──
+// The literal copies above pin specific values; these read the shipped tables
+// themselves, so a key that exists in one language and not the other, or that
+// was left empty, fails here rather than at the moment a user sees a blank
+// label. Functions are exempt: the two in the table (`loadedThread`, and the
+// count helpers) are code, not copy.
+
+describe("shipped translation tables", () => {
+  const LOCALES = ["en", "zh-cn"];
+
+  function table(locale: string): Record<string, unknown> {
+    vscodeState.language = locale;
+    return t() as unknown as Record<string, unknown>;
+  }
+
+  it("carries every key in every language", () => {
+    const [first, ...rest] = LOCALES;
+    const reference = Object.keys(table(first)).sort();
+    for (const locale of rest) {
+      expect(Object.keys(table(locale)).sort(), `${locale} vs ${first}`).toEqual(reference);
+    }
+  });
+
+  it("never leaves a string empty", () => {
+    for (const locale of LOCALES) {
+      const strings = Object.entries(table(locale)).filter(
+        ([, value]) => typeof value === "string",
+      );
+      // A table of nothing would pass every assertion below it.
+      expect(strings.length).toBeGreaterThan(100);
+      for (const [key, value] of strings) {
+        expect((value as string).trim(), `${locale}.${key}`).not.toBe("");
+      }
+    }
+  });
+
+  it("falls back to English for a locale it does not carry", () => {
+    vscodeState.language = "de";
+    expect(t().locale).toBe("en");
   });
 });

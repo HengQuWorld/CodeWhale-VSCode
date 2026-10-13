@@ -11,6 +11,7 @@ export function getFleetScript(_tr: WebviewTranslations): string {
   var __i18n = window.__wvI18n;
   var __wvEscapeHtml = window.__wvEscapeHtml;
   var __wvFormatRelativeTime = window.__wvFormatRelativeTime;
+  var __wvBackdropClickGuard = window.__wvBackdropClickGuard;
   var vscode = window.__wvVscode;
 
   // ── Fleet state ──
@@ -527,9 +528,13 @@ export function getFleetScript(_tr: WebviewTranslations): string {
       if (newPanel) newPanel.scrollTop = scrollTop;
     }
 
+    // Armed here rather than at module start: this render runs again on every
+    // detail refresh, and arming assigns the property, so the recorder is
+    // replaced instead of stacked.
+    var backdropClicked = __wvBackdropClickGuard(overlay);
     overlay.onclick = function(e) {
       var target = e.target;
-      if (target === overlay) { closeFleetDetail(); return; }
+      if (backdropClicked(e)) { closeFleetDetail(); return; }
       var closeBtn = target.closest && target.closest('.close-btn');
       if (closeBtn) { e.stopPropagation(); closeFleetDetail(); return; }
       var startBtn = target.closest && target.closest('.fleet-run-start');
@@ -943,9 +948,11 @@ export function getFleetScript(_tr: WebviewTranslations): string {
     overlay.innerHTML = html;
     overlay.style.display = 'flex';
 
+    // A half-filled Fleet run must survive a press that slips off the panel.
+    var backdropClicked = __wvBackdropClickGuard(overlay);
     overlay.onclick = function(e) {
       var target = e.target;
-      if (target === overlay) { closeFleetCreateDialog(); return; }
+      if (backdropClicked(e)) { closeFleetCreateDialog(); return; }
       if (target.closest && target.closest('.fleet-create-close')) { e.stopPropagation(); closeFleetCreateDialog(); return; }
       if (target.closest && target.closest('.fleet-create-cancel')) { e.stopPropagation(); closeFleetCreateDialog(); return; }
       if (target.closest && target.closest('#fleet-create-add-role')) {

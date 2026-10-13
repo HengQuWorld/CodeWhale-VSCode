@@ -3,6 +3,7 @@
  * Handles sessions, threads, tasks, work panel rendering, and sidebar tab switching.
  */
 import type { WebviewTranslations } from "./webview-html";
+import { recommendedMcpServers } from "../utils/mcp-utils";
 
 /** The Activity tab's sections, in the order the tab draws them.
  *
@@ -11,7 +12,7 @@ import type { WebviewTranslations } from "./webview-html";
  * the sections whose fold is remembered, and the header each fold is bound to.
  * It is injected into the script below rather than written twice, and the
  * template's own ids are checked against it by `webview-html.test.ts`. */
-export const ACTIVITY_SECTION_KEYS = ['work', 'changes', 'fleet', 'tasks', 'agents', 'skills'] as const;
+export const ACTIVITY_SECTION_KEYS = ['work', 'changes', 'fleet', 'tasks', 'agents', 'skills', 'mcp'] as const;
 
 /** The Skills panel's scope groups, in the order it draws them.
  *
@@ -28,6 +29,7 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
   var __i18n = window.__wvI18n;
   var __wvEscapeHtml = window.__wvEscapeHtml;
   var __wvFormatRelativeTime = window.__wvFormatRelativeTime;
+  var __wvBackdropClickGuard = window.__wvBackdropClickGuard;
   var vscode = window.__wvVscode;
 
   // ── Sidebar state ──
@@ -71,6 +73,13 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
   var SKILLS_COLLAPSED_GROUPS_STORAGE_KEY = 'codewhale:skillsCollapsedGroups';
   var SKILL_GROUP_KEYS = ${JSON.stringify(SKILL_GROUP_KEYS)};
   var collapsedSkillGroups = [];
+
+  // ── MCP roster ──
+  // The servers Codewhale suggests, injected from the host so this list and
+  // the TUI's /mcp recommendations are one list. Nothing here installs
+  // anything: picking one fills the add form in, and the reader still submits
+  // it. The pin/endpoint strings are the ones the TUI would write.
+  var MCP_RECOMMENDATIONS = ${JSON.stringify(recommendedMcpServers())};
 
   // ── Sidebar panel open state ──
   // Whether the sidebar is open is a layout choice, not a fact about this one
@@ -289,8 +298,12 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
   }
 
   function attachDetailOverlayActions(overlay, closeFn) {
+    // The backdrop check has to know where the press started: a press inside
+    // the detail panel that comes up over the backdrop still reports the
+    // overlay as the click's target. See __wvBackdropClickGuard.
+    var backdropClicked = __wvBackdropClickGuard(overlay);
     overlay.onclick = function(e) {
-      if (e.target === overlay) {
+      if (backdropClicked(e)) {
         closeFn();
         return;
       }
@@ -1341,9 +1354,13 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
     html += '</div></div>';
     overlay.innerHTML = html;
     overlay.style.display = 'flex';
+    // Text typed into this form must survive a press that slips off the panel:
+    // the release alone would otherwise read as a click on the backdrop.
+    var backdropClicked = __wvBackdropClickGuard(overlay);
     overlay.onclick = function(e) {
       var target = e.target;
-      if (target === overlay || (target.closest && (target.closest('.task-create-close') || target.closest('.task-create-cancel')))) {
+      if (backdropClicked(e) ||
+          (target.closest && (target.closest('.task-create-close') || target.closest('.task-create-cancel')))) {
         closeTaskCreateDialog();
         return;
       }
@@ -1787,6 +1804,545 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
       actNote.textContent = __i18n.skillsNoActivation;
       container.appendChild(actNote);
     }
+  }
+
+  // ── Render MCP ──
+  // The engine's MCP servers, grouped by the config layer that owns each one:
+  // a project entry lives in the workspace's .mcp.json, a plugin entry came
+  // in with a reviewed plugin, and the rest are the user's global config. Only
+  // global entries are writable through the API, so a project or plugin row
+  // keeps its buttons and greys them with the reason — a server missing from
+  // the list would read as a bug, and one whose switch quietly rewrote the
+  // global file would be worse.
+  var mcpState = { servers: [], revision: '', supported: true, loaded: false };
+  /** Tools already read, keyed by server name. A null entry marks one whose
+   *  read is in flight, so the row can say so instead of showing "no tools" —
+   *  which is a different claim. */
+  var mcpToolsByServer = {};
+  var mcpExpandedServer = null;
+  var mcpImportsState = { candidates: [], problems: [], loaded: false };
+  var mcpImportsOpen = false;
+
+  function mcpBadge(text, cls) {
+    var badge = document.createElement('span');
+    badge.className = 'skill-badge' + (cls ? ' ' + cls : '');
+    badge.textContent = text;
+    badge.title = text;
+    return badge;
+  }
+
+  function mcpOriginLabel(origin) {
+    if (origin === 'project') return __i18n.mcpGroupProject;
+    if (origin === 'plugin') return __i18n.mcpGroupPlugin;
+    if (origin === 'global') return __i18n.mcpGroupGlobal;
+    return __i18n.mcpGroupOther;
+  }
+
+  function mcpStatusDot(server) {
+    var connected = !!server.connected;
+    var dot = document.createElement('span');
+    dot.className = 'mcp-status-dot ' + (connected ? 'connected' : 'idle');
+    var title = connected ? __i18n.mcpConnected : __i18n.mcpNotConnected;
+    if (!connected && server.auth_required) title = __i18n.mcpAuthRequired;
+    dot.title = title;
+    dot.setAttribute('aria-label', title);
+    dot.textContent = connected ? '\u25CF' : '\u25CB';
+    return dot;
+  }
+
+  function mcpToolRow(tool) {
+    var row = document.createElement('div');
+    row.className = 'mcp-tool-row';
+    var name = document.createElement('div');
+    name.className = 'mcp-tool-name';
+    name.textContent = tool.name;
+    name.title = tool.prefixed_name || tool.name;
+    row.appendChild(name);
+    if (tool.description) {
+      var desc = document.createElement('div');
+      desc.className = 'mcp-tool-desc';
+      desc.textContent = tool.description;
+      row.appendChild(desc);
+    }
+    return row;
+  }
+
+  /** The tools read for one server, shown under its row. The connection line
+   *  is not decoration: an empty tool list from a server that never answered
+   *  and one from a server with no tools look identical otherwise. */
+  function mcpToolsPanel(name) {
+    var panel = document.createElement('div');
+    panel.className = 'mcp-tools';
+    var entry = mcpToolsByServer[name];
+    if (!entry) {
+      var loading = document.createElement('div');
+      loading.className = 'mcp-tools-note';
+      loading.textContent = '\u2026';
+      panel.appendChild(loading);
+      return panel;
+    }
+    var connection = null;
+    var connections = entry.connections || [];
+    for (var i = 0; i < connections.length; i++) {
+      if (connections[i].server === name) { connection = connections[i]; break; }
+    }
+    var title = document.createElement('div');
+    title.className = 'mcp-tools-title';
+    title.textContent = __i18n.mcpToolsTitle + ' (' + (entry.tools || []).length + ')';
+    panel.appendChild(title);
+    if (connection && !connection.connected) {
+      var problem = document.createElement('div');
+      problem.className = 'mcp-tools-error';
+      problem.textContent = connection.auth_required
+        ? __i18n.mcpAuthRequired + ' \u2014 codewhale mcp login ' + name
+        : (connection.error || __i18n.mcpNotConnected);
+      panel.appendChild(problem);
+      return panel;
+    }
+    var tools = entry.tools || [];
+    if (tools.length === 0) {
+      var none = document.createElement('div');
+      none.className = 'mcp-tools-note';
+      none.textContent = __i18n.mcpNoTools;
+      panel.appendChild(none);
+      return panel;
+    }
+    for (var t = 0; t < tools.length; t++) panel.appendChild(mcpToolRow(tools[t]));
+    return panel;
+  }
+
+  function mcpServerRow(server) {
+    var card = document.createElement('div');
+    card.className = 'task-card mcp-card';
+    var writable = !!server.writable;
+
+    var header = document.createElement('div');
+    header.className = 'task-header';
+    header.appendChild(mcpStatusDot(server));
+    var title = document.createElement('span');
+    title.className = 'task-title';
+    title.textContent = server.name;
+    header.appendChild(title);
+    header.appendChild(mcpBadge(mcpOriginLabel(server.origin)));
+    if (server.auth_required) header.appendChild(mcpBadge(__i18n.mcpAuthRequired, 'mcp-badge-warn'));
+    if (server.required) header.appendChild(mcpBadge(__i18n.mcpRequired, 'mcp-badge-warn'));
+    card.appendChild(header);
+
+    var subtitle = server.command || server.url || '';
+    if (subtitle) {
+      var meta = document.createElement('div');
+      meta.className = 'task-meta mcp-command';
+      meta.textContent = subtitle;
+      meta.title = subtitle;
+      card.appendChild(meta);
+    }
+
+    var actions = document.createElement('div');
+    actions.className = 'task-actions';
+    actions.appendChild(skillActionButton(
+      __i18n.mcpConnect, '\u27F3', mcpState.supported, __i18n.mcpNoManagement,
+      function() { toggleMcpTools(server.name); }
+    ));
+    actions.appendChild(skillActionButton(
+      server.enabled ? __i18n.mcpDisable : __i18n.mcpEnable,
+      server.enabled ? '\u2713' : '\u25CB',
+      writable, __i18n.mcpManagedElsewhere,
+      function() {
+        vscode.postMessage({ type: 'toggleMcpServer', name: server.name, enabled: !server.enabled });
+      }
+    ));
+    actions.appendChild(skillActionButton(
+      __i18n.mcpRemove, '\u2715', writable, __i18n.mcpManagedElsewhere,
+      function() { vscode.postMessage({ type: 'removeMcpServer', name: server.name }); }
+    ));
+    card.appendChild(actions);
+
+    if (mcpExpandedServer === server.name) card.appendChild(mcpToolsPanel(server.name));
+    return card;
+  }
+
+  /** Expand a server to read its tools — the read the TUI's /mcp doctor
+   *  performs, and the only way to see whether a stdio server actually
+   *  starts. Collapsing drops the cached read so the next expand asks again. */
+  function toggleMcpTools(name) {
+    if (mcpExpandedServer === name) {
+      mcpExpandedServer = null;
+      renderMcp();
+      return;
+    }
+    mcpExpandedServer = name;
+    mcpToolsByServer[name] = null;
+    renderMcp();
+    vscode.postMessage({ type: 'showMcpTools', name: name });
+  }
+
+  function renderMcp(inventory) {
+    var container = document.getElementById('tab-mcp');
+    if (!container) return;
+    if (inventory) {
+      mcpState = {
+        servers: inventory.servers || [],
+        revision: inventory.revision || '',
+        supported: inventory.supported !== false,
+        loaded: true,
+      };
+    }
+    container.innerHTML = '';
+
+    var controls = document.createElement('div');
+    controls.className = 'task-toolbar';
+    var addBtn = document.createElement('button');
+    addBtn.className = 'task-icon-btn primary';
+    addBtn.type = 'button';
+    addBtn.title = __i18n.mcpAdd;
+    addBtn.setAttribute('aria-label', __i18n.mcpAdd);
+    addBtn.textContent = '+';
+    addBtn.disabled = !mcpState.supported;
+    addBtn.onclick = function() { openMcpAddDialog(); };
+    var importsBtn = document.createElement('button');
+    importsBtn.className = 'task-icon-btn';
+    importsBtn.type = 'button';
+    importsBtn.title = __i18n.mcpImports;
+    importsBtn.setAttribute('aria-label', __i18n.mcpImports);
+    importsBtn.textContent = '\uD83D\uDCE5';
+    importsBtn.disabled = !mcpState.supported;
+    importsBtn.onclick = function() { openMcpImportsDialog(); };
+    var refreshBtn = document.createElement('button');
+    refreshBtn.className = 'task-icon-btn';
+    refreshBtn.type = 'button';
+    refreshBtn.title = __i18n.mcpRefresh;
+    refreshBtn.setAttribute('aria-label', __i18n.mcpRefresh);
+    refreshBtn.textContent = '\u21BB';
+    refreshBtn.onclick = function() { vscode.postMessage({ type: 'refreshMcpList' }); };
+    controls.appendChild(addBtn);
+    controls.appendChild(importsBtn);
+    controls.appendChild(refreshBtn);
+    container.appendChild(controls);
+
+    if (!mcpState.supported) {
+      var note = document.createElement('div');
+      note.className = 'skill-capability-note';
+      note.textContent = __i18n.mcpNoManagement;
+      container.appendChild(note);
+      return;
+    }
+    if (mcpState.servers.length === 0) {
+      // Before the first answer there is nothing to say: "none configured" is
+      // a claim about the engine's config, and a read that failed does not
+      // support it.
+      if (!mcpState.loaded) return;
+      var empty = document.createElement('div');
+      empty.className = 'work-empty';
+      empty.innerHTML = '<div class="work-empty-icon">\uD83D\uDD0C</div><div class="work-empty-text">' +
+        __wvEscapeHtml(__i18n.mcpEmpty) + '</div>';
+      container.appendChild(empty);
+      return;
+    }
+
+    var groups = { project: [], global: [], plugin: [], other: [] };
+    mcpState.servers.forEach(function(server) {
+      var key = groups[server.origin] ? server.origin : 'other';
+      groups[key].push(server);
+    });
+    [['project', __i18n.mcpGroupProject], ['global', __i18n.mcpGroupGlobal],
+     ['plugin', __i18n.mcpGroupPlugin], ['other', __i18n.mcpGroupOther]].forEach(function(pair) {
+      var rows = groups[pair[0]];
+      if (rows.length === 0) return;
+      rows.sort(function(a, b) { return String(a.name).localeCompare(String(b.name)); });
+      var head = document.createElement('div');
+      head.className = 'skill-group-title mcp-group-title';
+      head.textContent = pair[1] + ' (' + rows.length + ')';
+      container.appendChild(head);
+      for (var i = 0; i < rows.length; i++) container.appendChild(mcpServerRow(rows[i]));
+    });
+  }
+
+  /** Cache one server's tool read and repaint if its row is the expanded one.
+   *  The cache is keyed by name and kept even while collapsed, so a late answer
+   *  for a row the reader has since folded away is still there when they come
+   *  back to it. */
+  function renderMcpTools(server, tools, connections) {
+    if (!server) return;
+    mcpToolsByServer[server] = { tools: tools || [], connections: connections || [] };
+    if (mcpExpandedServer === server) renderMcp();
+  }
+
+  /** Bring the MCP panel on screen: open the sidebar, switch to Activity, make
+   *  sure the MCP section is neither hidden nor folded, then scroll to it.
+   *
+   *  The refresh is asked for explicitly rather than left to the panel-open
+   *  path: setThreadsPanelOpen only re-asks when it actually opened the
+   *  panel, so /mcp on an already-open sidebar would otherwise show a list
+   *  that is as old as the last unrelated refresh. */
+  function showMcpPanel() {
+    setActivitySectionVisible('mcp', true);
+    setActivitySectionCollapsed('mcp', false);
+    setThreadsPanelOpen(true);
+    switchSidebarTab('activity');
+    var section = document.getElementById('sidebar-mcp');
+    if (section && section.scrollIntoView) section.scrollIntoView({ block: 'nearest' });
+    vscode.postMessage({ type: 'refreshMcpList' });
+  }
+
+  // ── MCP add dialog ──
+  function closeMcpAddDialog() {
+    var overlay = document.getElementById('mcp-add-overlay');
+    if (!overlay) return;
+    overlay.style.display = 'none';
+    overlay.innerHTML = '';
+    overlay.onclick = null;
+  }
+
+  function mcpAddTransport() {
+    var select = document.getElementById('mcp-add-transport');
+    return select ? select.value : 'stdio';
+  }
+
+  /** Show the field the chosen transport needs. A stdio server cannot have a
+   *  URL and a remote one has no command, so the form only ever offers one of
+   *  them — the engine rejects a request carrying neither, and this keeps the
+   *  reader from filling in the half it would ignore. */
+  function syncMcpAddFields() {
+    var stdio = mcpAddTransport() === 'stdio';
+    var commandField = document.getElementById('mcp-add-command-field');
+    var argsField = document.getElementById('mcp-add-args-field');
+    var urlField = document.getElementById('mcp-add-url-field');
+    if (commandField) commandField.hidden = !stdio;
+    if (argsField) argsField.hidden = !stdio;
+    if (urlField) urlField.hidden = stdio;
+  }
+
+  function applyMcpSuggestion(index) {
+    var rec = MCP_RECOMMENDATIONS[index];
+    if (!rec) return;
+    var name = document.getElementById('mcp-add-name');
+    var command = document.getElementById('mcp-add-command');
+    var args = document.getElementById('mcp-add-args');
+    var url = document.getElementById('mcp-add-url');
+    var transport = document.getElementById('mcp-add-transport');
+    if (name) name.value = rec.id;
+    if (rec.url) {
+      if (transport) transport.value = 'http';
+      if (url) url.value = rec.url;
+      if (command) command.value = '';
+      if (args) args.value = '';
+    } else {
+      if (transport) transport.value = 'stdio';
+      if (command) command.value = rec.command || '';
+      if (args) args.value = (rec.args || []).join('\\n');
+      if (url) url.value = '';
+    }
+    syncMcpAddFields();
+  }
+
+  function submitMcpAddDialog() {
+    var nameEl = document.getElementById('mcp-add-name');
+    var name = nameEl ? nameEl.value.trim() : '';
+    if (!name) {
+      if (nameEl && nameEl.focus) nameEl.focus();
+      return;
+    }
+    var stdio = mcpAddTransport() === 'stdio';
+    var commandEl = document.getElementById('mcp-add-command');
+    var argsEl = document.getElementById('mcp-add-args');
+    var urlEl = document.getElementById('mcp-add-url');
+    var spec = { name: name, transport: mcpAddTransport() };
+    if (stdio) {
+      spec.command = commandEl ? commandEl.value.trim() : '';
+      spec.args = argsEl
+        ? argsEl.value.split('\\n').map(function(line) { return line.trim(); }).filter(Boolean)
+        : [];
+    } else {
+      spec.url = urlEl ? urlEl.value.trim() : '';
+    }
+    vscode.postMessage({ type: 'addMcpServer', spec: spec });
+    closeMcpAddDialog();
+  }
+
+  function openMcpAddDialog() {
+    var overlay = document.getElementById('mcp-add-overlay');
+    if (!overlay) return;
+    var e = __wvEscapeHtml;
+    var html = '<div class="task-create-panel mcp-panel">';
+    html += '<div class="task-create-header">';
+    html += '<h3>' + e(__i18n.mcpAddTitle) + '</h3>';
+    html += '<button class="close-btn mcp-add-close" type="button">\u2715</button></div>';
+    html += '<div class="task-create-body mcp-add-body">';
+    html += '<label class="mcp-field"><span>' + e(__i18n.mcpFieldName) + '</span>';
+    html += '<input type="text" id="mcp-add-name" /></label>';
+    html += '<label class="mcp-field"><span>' + e(__i18n.mcpFieldTransport) + '</span>';
+    html += '<select id="mcp-add-transport">';
+    html += '<option value="stdio">stdio</option><option value="http">http</option><option value="sse">sse</option>';
+    html += '</select></label>';
+    html += '<label class="mcp-field" id="mcp-add-command-field"><span>' + e(__i18n.mcpFieldCommand) + '</span>';
+    html += '<input type="text" id="mcp-add-command" placeholder="npx" /></label>';
+    html += '<label class="mcp-field" id="mcp-add-args-field"><span>' + e(__i18n.mcpFieldArgs) + '</span>';
+    html += '<textarea id="mcp-add-args" rows="3"></textarea></label>';
+    html += '<label class="mcp-field" id="mcp-add-url-field" hidden><span>' + e(__i18n.mcpFieldUrl) + '</span>';
+    html += '<input type="text" id="mcp-add-url" placeholder="https://" /></label>';
+    html += '<div class="mcp-suggestions"><div class="mcp-suggestions-title">' + e(__i18n.mcpSuggested) + '</div>';
+    for (var i = 0; i < MCP_RECOMMENDATIONS.length; i++) {
+      html += '<button type="button" class="mcp-suggestion" data-mcp-suggestion="' + i + '" title="' +
+        e(MCP_RECOMMENDATIONS[i].label) + '">' + e(MCP_RECOMMENDATIONS[i].id) + '</button>';
+    }
+    html += '</div></div>';
+    html += '<div class="task-create-footer">';
+    html += '<button class="detail-action-btn mcp-add-cancel" type="button">' + e(__i18n.mcpCancel) + '</button>';
+    html += '<button class="detail-action-btn mcp-add-submit" type="button">' + e(__i18n.mcpAddSubmit) + '</button>';
+    html += '</div></div>';
+    overlay.innerHTML = html;
+    overlay.style.display = 'flex';
+    // A half-filled form must survive a press that slips off the panel — the
+    // release alone would otherwise read as a click on the backdrop.
+    var backdropClicked = __wvBackdropClickGuard(overlay);
+    overlay.onclick = function(event) {
+      var target = event.target;
+      if (backdropClicked(event) ||
+          (target.closest && (target.closest('.mcp-add-close') || target.closest('.mcp-add-cancel')))) {
+        closeMcpAddDialog();
+        return;
+      }
+      var suggestion = target.closest && target.closest('[data-mcp-suggestion]');
+      if (suggestion) {
+        applyMcpSuggestion(Number(suggestion.getAttribute('data-mcp-suggestion')));
+        return;
+      }
+      if (target.closest && target.closest('.mcp-add-submit')) submitMcpAddDialog();
+    };
+    var transport = document.getElementById('mcp-add-transport');
+    if (transport) transport.addEventListener('change', syncMcpAddFields);
+    syncMcpAddFields();
+    var nameInput = document.getElementById('mcp-add-name');
+    if (nameInput) nameInput.focus();
+    // Assigned rather than added: the overlay outlives the dialog, and a
+    // handler registered per open would pile up on it.
+    overlay.onkeydown = function(event) {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        closeMcpAddDialog();
+      }
+    };
+  }
+
+  // ── MCP imports dialog ──
+  function closeMcpImportsDialog() {
+    mcpImportsOpen = false;
+    var overlay = document.getElementById('mcp-imports-overlay');
+    if (!overlay) return;
+    overlay.style.display = 'none';
+    overlay.innerHTML = '';
+    overlay.onclick = null;
+  }
+
+  function openMcpImportsDialog() {
+    var overlay = document.getElementById('mcp-imports-overlay');
+    if (!overlay) return;
+    mcpImportsOpen = true;
+    overlay.style.display = 'flex';
+    renderMcpImports();
+    vscode.postMessage({ type: 'refreshMcpImports' });
+  }
+
+  function mcpImportCard(candidate) {
+    var e = __wvEscapeHtml;
+    var blocked = !!candidate.hard_blocked;
+    var conflict = !!candidate.conflict;
+    var html = '<div class="mcp-import-card">';
+    html += '<div class="task-header"><span class="task-title">' + e(candidate.name) + '</span>';
+    html += '<span class="skill-badge">' + e(candidate.source_kind) + '</span>';
+    if (blocked) html += '<span class="skill-badge mcp-badge-warn">' + e(__i18n.mcpImportBlocked) + '</span>';
+    if (conflict) html += '<span class="skill-badge mcp-badge-warn">' + e(__i18n.mcpImportConflict) + '</span>';
+    html += '</div>';
+    html += '<div class="task-meta mcp-command" title="' + e(candidate.source_path) + '">' + e(candidate.source_path) + '</div>';
+    html += '<div class="task-meta">' + e(candidate.transport) + ' \u00B7 ' + e(candidate.destination) + '</div>';
+    var credentials = (candidate.env_keys || []).concat(candidate.header_keys || []);
+    if (credentials.length > 0) {
+      html += '<div class="task-meta">' + e(credentials.join(', ')) + '</div>';
+    }
+    html += '<div class="task-actions">';
+    // Approve is refused for a source that is disabled, or whose name is
+    // already taken — the engine refuses those, and it says so here rather than
+    // after the click. Decline stays live in both cases: declining one is a
+    // real decision (it is remembered until the source changes), and a reader
+    // who does not want it should not have to leave it unanswered forever.
+    html += '<button type="button" class="detail-action-btn mcp-import-approve"' +
+      ' data-mcp-import-id="' + e(candidate.id) + '"' +
+      ' data-mcp-import-hash="' + e(candidate.content_hash) + '"' +
+      (blocked || conflict ? ' disabled' : '') + '>' + e(__i18n.mcpApprove) + '</button>';
+    html += '<button type="button" class="detail-action-btn mcp-import-decline"' +
+      ' data-mcp-import-id="' + e(candidate.id) + '"' +
+      ' data-mcp-import-hash="' + e(candidate.content_hash) + '">' + e(__i18n.mcpDecline) + '</button>';
+    html += '</div></div>';
+    return html;
+  }
+
+  /** Paint the import review.
+   *
+   *  Called with a payload when the engine answers and without one when the
+   *  dialog needs repainting from what is already known — the overlay only
+   *  exists while it is open, so a payload arriving after it was closed is
+   *  kept in mcpImportsState and shown on the next open. */
+  function renderMcpImports(payload) {
+    if (payload) {
+      mcpImportsState = {
+        candidates: payload.candidates || [],
+        problems: payload.problems || [],
+        loaded: true,
+      };
+    }
+    if (!mcpImportsOpen) return;
+    var overlay = document.getElementById('mcp-imports-overlay');
+    if (!overlay) return;
+    var e = __wvEscapeHtml;
+    var html = '<div class="task-create-panel mcp-panel">';
+    html += '<div class="task-create-header">';
+    html += '<h3>' + e(__i18n.mcpImportsTitle) + '</h3>';
+    html += '<button class="close-btn mcp-imports-close" type="button">\u2715</button></div>';
+    html += '<div class="task-create-body mcp-imports-body">';
+    if (!mcpImportsState.loaded) {
+      html += '<div class="mcp-tools-note">\u2026</div>';
+    } else if (mcpImportsState.candidates.length === 0) {
+      html += '<div class="mcp-tools-note">' + e(__i18n.mcpImportsEmpty) + '</div>';
+    } else {
+      for (var i = 0; i < mcpImportsState.candidates.length; i++) {
+        html += mcpImportCard(mcpImportsState.candidates[i]);
+      }
+    }
+    var problems = mcpImportsState.problems || [];
+    if (problems.length > 0) {
+      html += '<div class="mcp-tools-error">' + e(__i18n.mcpImportsProblems) + '</div>';
+      for (var p = 0; p < problems.length; p++) {
+        html += '<div class="mcp-tools-note">' + e(problems[p].source_kind + ': ' + problems[p].message) + '</div>';
+      }
+    }
+    html += '</div></div>';
+    overlay.innerHTML = html;
+    var backdropClicked = __wvBackdropClickGuard(overlay);
+    overlay.onclick = function(event) {
+      var target = event.target;
+      if (backdropClicked(event) || (target.closest && target.closest('.mcp-imports-close'))) {
+        closeMcpImportsDialog();
+        return;
+      }
+      var approve = target.closest && target.closest('.mcp-import-approve');
+      var decline = target.closest && target.closest('.mcp-import-decline');
+      var button = approve || decline;
+      if (!button || button.disabled) return;
+      vscode.postMessage({
+        type: 'decideMcpImport',
+        id: button.getAttribute('data-mcp-import-id'),
+        contentHash: button.getAttribute('data-mcp-import-hash'),
+        decision: approve ? 'approve' : 'decline',
+      });
+    };
+    // Assigned rather than added: the overlay outlives the dialog, and a
+    // handler registered per open would pile up on it.
+    overlay.onkeydown = function(event) {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        closeMcpImportsDialog();
+      }
+    };
   }
 
   // ── Render Agent Runs ──
@@ -2987,6 +3543,14 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
     renderTasks: renderTasks,
     renderAgents: renderAgents,
     renderSkills: renderSkills,
+    renderMcp: renderMcp,
+    renderMcpTools: renderMcpTools,
+    renderMcpImports: renderMcpImports,
+    /** Bring the MCP panel into view: open the sidebar on the Activity tab with
+     *  the MCP section shown and unfolded. /mcp is the reason this exists —
+     *  a command that only printed a list would leave the reader to find the
+     *  panel the list describes. */
+    showMcpPanel: showMcpPanel,
     renderWork: renderWork,
     renderChanges: renderChanges,
     switchSidebarTab: switchSidebarTab,

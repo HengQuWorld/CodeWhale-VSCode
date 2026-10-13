@@ -45,5 +45,36 @@ export function getUtilitiesScript(tr: WebviewTranslations): string {
 
   window.__wvI18n = __i18n;
   window.__wvLocale = __locale;
+
+  // ── Backdrop dismissal for the modal overlays ──
+  // Every overlay here closes when the dimmed area behind its panel is clicked.
+  // The click's own target cannot tell such a click from a press that merely
+  // *ended* on the backdrop: a click is dispatched on the nearest common
+  // ancestor of where the press began and where it was released, so a press
+  // inside a panel that leaves the panel before coming up — a drag that slipped
+  // past the edge, a text selection pulled past the field, a release outside the
+  // window, which resolves to that same in-document ancestor — reports the
+  // overlay as its target. Read as "clicked the backdrop", that shuts the dialog
+  // on a slipped hand, discarding whatever was typed into it.
+  //
+  // So the press has to have landed on the backdrop as well, and only the press
+  // is consulted: Chromium retargets the release of a drag to whatever the press
+  // landed on, so a release that leaves the window is not evidence either way,
+  // while the press is exactly the fact that decides it.
+  //
+  // The guard arms the overlay and returns the question to ask at click time.
+  // Arming assigns the property rather than adding a listener, so arming a
+  // dialog again on each open replaces the recorder instead of stacking another
+  // one on an overlay that outlives every open.
+  window.__wvBackdropClickGuard = function(overlay) {
+    if (!overlay) return function() { return false; };
+    var pressedOnBackdrop = false;
+    overlay.onmousedown = function(event) {
+      pressedOnBackdrop = !!event && event.target === overlay;
+    };
+    return function(event) {
+      return !!event && event.target === overlay && pressedOnBackdrop;
+    };
+  };
   })();`;
 }

@@ -196,6 +196,7 @@ describe("types.ts - Interface structural conformance", () => {
       callChanges: true,
       skillLifecycle: true,
       skillDetail: true,
+      mcpServerManagement: true,
     };
     expect(caps.saveSession).toBe(true);
     expect(caps.threadPatchUndo).toBe(false);

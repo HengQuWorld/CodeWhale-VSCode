@@ -37,6 +37,7 @@ vi.mock("vscode", () => ({
 }));
 
 import { SKILL_GROUP_KEYS, getSidebarScript } from "./webview-js-sidebar";
+import { getUtilitiesScript } from "./webview-js-utilities";
 import { makeTr } from "./webview-test-helpers";
 
 class FakeClassList {
@@ -128,12 +129,17 @@ class FakeElement {
   }
 
   /** The DOM property form the panel mixes with `addEventListener` (a card's
-   *  toggle, a heading's fold). A real click runs both, so `dispatch` does too. */
+   *  toggle, a heading's fold, the overlays' mouse and key handlers). A real
+   *  event runs both, so `dispatch` does too. */
   public onclick: ((event: unknown) => void) | null = null;
+  public onmousedown: ((event: unknown) => void) | null = null;
+  public onmouseup: ((event: unknown) => void) | null = null;
+  public onkeydown: ((event: unknown) => void) | null = null;
 
   dispatch(name: string, event: unknown = {}): void {
     this.listeners.get(name)?.(event);
-    if (name === "click" && typeof this.onclick === "function") this.onclick(event);
+    const property = (this as any)["on" + name];
+    if (typeof property === "function") property(event);
   }
 
   appendChild(child: FakeElement): void {
@@ -153,6 +159,13 @@ class FakeElement {
     if (this.parentElement) this.parentElement.detach(this);
     this.parentElement = null;
   }
+
+  /** Focus and scrolling are called through rather than asserted here. The real
+   *  element answers both, so a stand-in without them turns "the dialog opened"
+   *  into a thrown TypeError far from the thing under test. */
+  focus(): void {}
+  scrollIntoView(): void {}
+  setSelectionRange(): void {}
 
   querySelectorAll(selector?: string): FakeElement[] {
     // Descendant-scoped, like the real thing: the rail's own row removal looks
@@ -266,6 +279,15 @@ function createHarness(options?: { storage?: Record<string, string> | null }) {
     clearTimeout: () => {},
     console,
   });
+  // The real utilities module runs first, as it does in the template: the
+  // sidebar captures its backdrop guard, and that guard is the mechanism under
+  // test — a stand-in here could drift from the one that ships. The three
+  // helpers the rest of this file asserts against are then put back as this
+  // harness's own stubs, which is what the other tests are written to.
+  vm.runInContext(getUtilitiesScript(makeTr()), context);
+  windowObj.__wvEscapeHtml = (value: unknown) => String(value ?? "");
+  windowObj.__wvI18n = makeTr();
+  windowObj.__wvFormatRelativeTime = () => "now";
   vm.runInContext(getSidebarScript(makeTr()), context);
 
   const rail = getEl("tab-threads-list");
@@ -284,6 +306,11 @@ function createHarness(options?: { storage?: Record<string, string> | null }) {
     agentsPanel: getEl("tab-agents"),
     changesPanel: getEl("tab-changes"),
     skillPanel: getEl("tab-skills"),
+    mcpPanel: getEl("tab-mcp"),
+    taskPanel: getEl("tab-tasks"),
+    mcpAddOverlay: getEl("mcp-add-overlay"),
+    mcpImportsOverlay: getEl("mcp-imports-overlay"),
+    taskCreateOverlay: getEl("task-create-overlay"),
     activityPicker: getEl("activity-sections-picker"),
     activityToggle: getEl("activity-sections-toggle"),
     activityEmpty: getEl("activity-sections-empty"),
@@ -294,6 +321,7 @@ function createHarness(options?: { storage?: Record<string, string> | null }) {
       tasks: getEl("sidebar-tasks"),
       agents: getEl("sidebar-agents"),
       skills: getEl("sidebar-skills"),
+      mcp: getEl("sidebar-mcp"),
     },
     /** The header each of those sections is folded by, as the document's own
      *  ids address it. */
@@ -303,6 +331,8 @@ function createHarness(options?: { storage?: Record<string, string> | null }) {
       fleet: getEl("fleet-section-toggle"),
       tasks: getEl("tasks-section-toggle"),
       agents: getEl("agents-section-toggle"),
+      skills: getEl("skills-section-toggle"),
+      mcp: getEl("mcp-section-toggle"),
     },
     storage,
     postMessages,
@@ -806,7 +836,7 @@ describe("Activity section folding", () => {
     // The binding walks the roster and skips a header it cannot find, so a
     // section whose header id drifted would fail silently — as a fold that
     // does nothing. Each one is folded from its own header here.
-    for (const key of ["work", "changes", "fleet", "tasks", "agents"] as const) {
+    for (const key of ["work", "changes", "fleet", "tasks", "agents", "skills", "mcp"] as const) {
       const { sectionHeaders, sections, sidebar } = createHarness();
 
       sectionHeaders[key].dispatch("click");
@@ -1707,7 +1737,7 @@ describe("Changes panel keeps every row visible", () => {
 });
 
 describe("Activity section visibility", () => {
-  const ALL = ["work", "changes", "fleet", "tasks", "agents", "skills"] as const;
+  const ALL = ["work", "changes", "fleet", "tasks", "agents", "skills", "mcp"] as const;
 
   it("shows every section until the reader hides one", () => {
     const { sections, activityEmpty } = createHarness();
@@ -2391,5 +2421,276 @@ describe("skills panel group folding", () => {
     // away. The match count, not the inventory count.
     expect(groupTitles(skillPanel)).toEqual(["Global (1)"]);
     expect(foldedGroupKeys(skillPanel)).toEqual(["global"]);
+  });
+});
+
+// ── MCP panel ──
+
+function mcpRowFixture(overrides: Record<string, unknown> = {}) {
+  return {
+    name: "github",
+    origin: "global",
+    writable: true,
+    auth_required: false,
+    enabled: true,
+    required: false,
+    command: null,
+    url: "https://api.githubcopilot.com/mcp/",
+    connected: false,
+    enabled_tools: [],
+    disabled_tools: [],
+    ...overrides,
+  };
+}
+
+/** The group headings the panel paints, in order. */
+function mcpGroupTitles(panel: FakeElement): string[] {
+  return panel.querySelectorAll(".mcp-group-title").map((head) => head.textContent);
+}
+
+/** The server names the panel paints, in order. */
+function mcpRowNames(panel: FakeElement): string[] {
+  return panel
+    .querySelectorAll(".mcp-card")
+    .map((card) => card.querySelector(".task-title")?.textContent ?? "");
+}
+
+describe("MCP panel", () => {
+  it("says the engine cannot manage servers instead of drawing an empty list", () => {
+    const { sidebar, mcpPanel } = createHarness();
+
+    sidebar.renderMcp({ servers: [], revision: "", supported: false });
+
+    expect(mcpPanel.querySelector(".skill-capability-note")?.textContent).toContain(
+      "no MCP management routes",
+    );
+    // An empty list would read as "you have no servers", which is a different
+    // and unverified claim about an engine that cannot be asked.
+    expect(mcpRowNames(mcpPanel)).toEqual([]);
+  });
+
+  it("does not claim 'none configured' before the first answer lands", () => {
+    const { sidebar, mcpPanel } = createHarness();
+
+    sidebar.renderMcp();
+
+    expect(mcpPanel.querySelectorAll(".work-empty")).toEqual([]);
+    expect(mcpPanel.querySelectorAll(".task-icon-btn").length).toBe(3);
+  });
+
+  it("groups servers by the config layer that owns them", () => {
+    const { sidebar, mcpPanel } = createHarness();
+
+    sidebar.renderMcp({
+      servers: [
+        mcpRowFixture({ name: "global-one", origin: "global" }),
+        mcpRowFixture({ name: "project-one", origin: "project" }),
+        mcpRowFixture({ name: "plugin-one", origin: "plugin" }),
+        mcpRowFixture({ name: "mystery", origin: "unknown" }),
+      ],
+      revision: "mcp-v1-abc",
+      supported: true,
+    });
+
+    expect(mcpGroupTitles(mcpPanel)).toEqual([
+      "Project (1)",
+      "Global (1)",
+      "Plugin (1)",
+      "Other (1)",
+    ]);
+    expect(mcpRowNames(mcpPanel)).toEqual([
+      "project-one",
+      "global-one",
+      "plugin-one",
+      "mystery",
+    ]);
+  });
+
+  it("greys the controls another layer owns rather than hiding them", () => {
+    // A row that vanished would read as a bug; one whose switch quietly
+    // rewrote the global file would be worse. The entry stays, the reason is
+    // on the control.
+    const { sidebar, mcpPanel } = createHarness();
+
+    sidebar.renderMcp({
+      servers: [mcpRowFixture({ name: "project-one", origin: "project", writable: false })],
+      revision: "mcp-v1-abc",
+      supported: true,
+    });
+
+    const card = mcpPanel.querySelector(".mcp-card")!;
+    expect(
+      card.querySelector('[aria-label="Disable"]')!.classList.contains("is-unavailable"),
+    ).toBe(true);
+    expect(
+      card.querySelector('[aria-label="Remove"]')!.classList.contains("is-unavailable"),
+    ).toBe(true);
+    // Connect is not a config edit, so it stays live.
+    expect(
+      card
+        .querySelector('[aria-label="Connect and list tools"]')!
+        .classList.contains("is-unavailable"),
+    ).toBe(false);
+  });
+
+  it("reads a server's tools when its row is expanded", () => {
+    const { sidebar, mcpPanel, postMessages } = createHarness();
+    sidebar.renderMcp({
+      servers: [mcpRowFixture()],
+      revision: "mcp-v1-abc",
+      supported: true,
+    });
+    postMessages.length = 0;
+
+    mcpPanel
+      .querySelector(".mcp-card")!
+      .querySelector('[aria-label="Connect and list tools"]')!
+      .dispatch("click", { stopPropagation() {} });
+
+    expect(postMessages).toEqual([{ type: "showMcpTools", name: "github" }]);
+    // The read is in flight: the row says so rather than claiming no tools.
+    expect(mcpPanel.querySelector(".mcp-tools-note")?.textContent).toBe("\u2026");
+
+    sidebar.renderMcpTools(
+      "github",
+      [
+        {
+          server: "github",
+          name: "search_code",
+          prefixed_name: "mcp__github__search_code",
+          description: "Search code",
+        },
+      ],
+      [{ server: "github", connected: true, auth_required: false }],
+    );
+
+    expect(mcpPanel.querySelector(".mcp-tools-title")?.textContent).toBe("Tools (1)");
+    expect(mcpPanel.querySelector(".mcp-tool-name")?.textContent).toBe("search_code");
+  });
+
+  it("says why an empty tool list is empty", () => {
+    // A server that never answered and one with no tools both list nothing;
+    // without the connection line they are indistinguishable.
+    const { sidebar, mcpPanel } = createHarness();
+    sidebar.renderMcp({ servers: [mcpRowFixture()], revision: "r", supported: true });
+    mcpPanel
+      .querySelector('[aria-label="Connect and list tools"]')!
+      .dispatch("click", { stopPropagation() {} });
+
+    sidebar.renderMcpTools("github", [], [
+      { server: "github", connected: false, auth_required: false, error: "spawn ENOENT" },
+    ]);
+
+    expect(mcpPanel.querySelector(".mcp-tools-error")?.textContent).toBe("spawn ENOENT");
+    // And the spinner it was showing is gone: a failure is an answer, not a
+    // reason to keep saying "reading".
+    expect(mcpPanel.querySelector(".mcp-tools-note")).toBeNull();
+  });
+
+  it("names the login command when a server needs authentication", () => {
+    const { sidebar, mcpPanel } = createHarness();
+    sidebar.renderMcp({ servers: [mcpRowFixture()], revision: "r", supported: true });
+    mcpPanel
+      .querySelector('[aria-label="Connect and list tools"]')!
+      .dispatch("click", { stopPropagation() {} });
+
+    sidebar.renderMcpTools("github", [], [
+      { server: "github", connected: false, auth_required: true },
+    ]);
+
+    expect(mcpPanel.querySelector(".mcp-tools-error")?.textContent).toContain(
+      "codewhale mcp login github",
+    );
+  });
+
+  it("asks the host to re-read the list", () => {
+    const { sidebar, mcpPanel, postMessages } = createHarness();
+    sidebar.renderMcp({ servers: [mcpRowFixture()], revision: "r", supported: true });
+    postMessages.length = 0;
+
+    mcpPanel.querySelector('[aria-label="Refresh"]')!.dispatch("click", {});
+
+    expect(postMessages).toEqual([{ type: "refreshMcpList" }]);
+  });
+
+  it("flags a server that needs authentication or is required", () => {
+    const { sidebar, mcpPanel } = createHarness();
+    sidebar.renderMcp({
+      servers: [mcpRowFixture({ auth_required: true, required: true })],
+      revision: "r",
+      supported: true,
+    });
+
+    expect(mcpPanel.querySelector(".task-title")?.textContent).toBe("github");
+    expect(
+      mcpPanel.querySelectorAll(".mcp-badge-warn").map((badge) => badge.textContent),
+    ).toEqual(["Needs authentication", "Required"]);
+  });
+});
+
+// ── Modal backdrop dismissal ──
+// A press inside a dialog that comes up over the backdrop reports the overlay
+// as the click's target: a click is dispatched on the nearest common ancestor of
+// where the press began and where it was released, so a press that leaves the
+// panel before coming up — a slipped drag, a text selection pulled past the
+// field, a release outside the window — reads as a backdrop click unless the
+// press is consulted too. These drive that through the real guard.
+describe("modal backdrop dismissal", () => {
+  it("keeps the MCP add form when the press slips off the panel", () => {
+    const { sidebar, mcpPanel, mcpAddOverlay } = createHarness();
+    sidebar.renderMcp({ servers: [], revision: "r", supported: true });
+    mcpPanel.querySelector(".task-icon-btn.primary")!.dispatch("click", {});
+    expect(mcpAddOverlay.style.display).toBe("flex");
+
+    // Press on the panel (any element other than the overlay), release on the
+    // backdrop. The click still reports the overlay as its target.
+    mcpAddOverlay.dispatch("mousedown", { target: {} });
+    mcpAddOverlay.dispatch("click", { target: mcpAddOverlay });
+
+    expect(mcpAddOverlay.style.display).toBe("flex");
+  });
+
+  it("still closes the MCP add form on a real backdrop click", () => {
+    const { sidebar, mcpPanel, mcpAddOverlay } = createHarness();
+    sidebar.renderMcp({ servers: [], revision: "r", supported: true });
+    mcpPanel.querySelector(".task-icon-btn.primary")!.dispatch("click", {});
+
+    mcpAddOverlay.dispatch("mousedown", { target: mcpAddOverlay });
+    mcpAddOverlay.dispatch("click", { target: mcpAddOverlay });
+
+    expect(mcpAddOverlay.style.display).toBe("none");
+  });
+
+  it("does not carry one gesture's press into the next dialog", () => {
+    // Arming is per open, so a backdrop press from an earlier dialog cannot
+    // licence the next one's dismissal.
+    const { sidebar, mcpPanel, mcpAddOverlay } = createHarness();
+    sidebar.renderMcp({ servers: [], revision: "r", supported: true });
+    mcpPanel.querySelector(".task-icon-btn.primary")!.dispatch("click", {});
+    mcpAddOverlay.dispatch("mousedown", { target: mcpAddOverlay });
+    mcpAddOverlay.dispatch("click", { target: mcpAddOverlay });
+    expect(mcpAddOverlay.style.display).toBe("none");
+
+    mcpPanel.querySelector(".task-icon-btn.primary")!.dispatch("click", {});
+    mcpAddOverlay.dispatch("click", { target: mcpAddOverlay });
+
+    expect(mcpAddOverlay.style.display).toBe("flex");
+  });
+
+  it("keeps the task draft dialog when the press slips off the panel", () => {
+    // Same defect, same mechanism, a different dialog: the task draft is typed
+    // text too, so a press that slips off the panel must not throw it away.
+    const { sidebar, taskPanel, taskCreateOverlay } = createHarness();
+    sidebar.renderTasks([]);
+    taskPanel.querySelector(".task-icon-btn.primary")!.dispatch("click", {});
+    expect(taskCreateOverlay.style.display).toBe("flex");
+
+    taskCreateOverlay.dispatch("mousedown", { target: {} });
+    taskCreateOverlay.dispatch("click", { target: taskCreateOverlay });
+    expect(taskCreateOverlay.style.display).toBe("flex");
+
+    taskCreateOverlay.dispatch("mousedown", { target: taskCreateOverlay });
+    taskCreateOverlay.dispatch("click", { target: taskCreateOverlay });
+    expect(taskCreateOverlay.style.display).toBe("none");
   });
 });

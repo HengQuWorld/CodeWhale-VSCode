@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { detectFileChange } from "./tool-utils";
+import { detectFileChange, friendlyToolName } from "./tool-utils";
 import {
   extractDiffForTool,
   extractMutationFromMetadata,
@@ -274,5 +274,26 @@ describe("formatWriteInputAsDiff", () => {
         "",
       ].join("\n"),
     );
+  });
+});
+
+describe("friendlyToolName", () => {
+  it("reads an MCP call as server / tool, both halves spaced", () => {
+    // The doubled underscores separate the parts; each part's own underscores
+    // are word separators inside it. Replacing only the doubled ones left the
+    // tool half reading `search_code` beside a spaced server name.
+    expect(friendlyToolName("mcp__github__search_code")).toBe("github / search code");
+    expect(friendlyToolName("mcp__chrome-devtools__new_page")).toBe(
+      "chrome-devtools / new page",
+    );
+  });
+
+  it("keeps a curated name for the tools it knows", () => {
+    // A wrong friendly name would be worse than the raw one, so the map wins.
+    expect(friendlyToolName("exec_shell")).toBe("Run command");
+  });
+
+  it("spaces and title-cases anything else", () => {
+    expect(friendlyToolName("some_unknown_tool")).toBe("Some Unknown Tool");
   });
 });

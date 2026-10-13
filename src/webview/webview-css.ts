@@ -2549,6 +2549,181 @@ export function getWebviewCss(): string {
       white-space: pre-wrap;
     }
 
+    /* ── MCP panel (sidebar) ── */
+
+    /* The group headings are plain labels, not fold controls: the panel's
+     * groups are the config layers owning the entries, and hiding one of them
+     * would hide the only sign that a project/plugin entry exists at all. */
+    .mcp-group-title {
+      cursor: default;
+      padding-bottom: 4px;
+    }
+    .mcp-group-title:hover {
+      opacity: 0.55;
+    }
+    .mcp-card .task-meta.mcp-command {
+      font-family: var(--vscode-editor-font-family, monospace);
+      font-size: 0.7em;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      display: block;
+    }
+    .mcp-status-dot {
+      flex-shrink: 0;
+      font-size: 0.75em;
+      line-height: 1;
+    }
+    .mcp-status-dot.connected { color: #4caf50; }
+    .mcp-status-dot.idle { color: var(--muted); opacity: 0.7; }
+    .skill-badge.mcp-badge-warn {
+      border-color: rgba(255,152,0,0.45);
+      color: #ff9800;
+      opacity: 0.9;
+    }
+    /* The tools read under a row. Indented so it reads as belonging to the
+     * server above it rather than as another row. */
+    .mcp-tools {
+      margin: 4px 0 2px 12px;
+      padding-left: 6px;
+      border-left: 2px solid rgba(128,128,128,0.18);
+    }
+    .mcp-tools-title {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      opacity: 0.55;
+      margin-bottom: 2px;
+    }
+    .mcp-tools-note,
+    .mcp-tools-error {
+      font-size: 10px;
+      line-height: 1.4;
+      opacity: 0.6;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .mcp-tools-error {
+      color: #f44336;
+      opacity: 0.85;
+    }
+    .mcp-tool-row {
+      margin: 2px 0;
+    }
+    .mcp-tool-name {
+      font-size: 11px;
+      font-family: var(--vscode-editor-font-family, monospace);
+    }
+    .mcp-tool-desc {
+      font-size: 10px;
+      opacity: 0.6;
+      line-height: 1.35;
+      white-space: normal;
+      word-break: break-word;
+    }
+
+    /* The add/import dialogs reuse the task-create panel shell; these are the
+     * parts that are MCP-specific. */
+    .mcp-panel {
+      max-width: 420px;
+    }
+    .mcp-add-body,
+    .mcp-imports-body {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      max-height: 60vh;
+      overflow-y: auto;
+    }
+    .mcp-field {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      opacity: 0.85;
+    }
+    .mcp-field input,
+    .mcp-field select,
+    .mcp-field textarea {
+      font-size: 11px;
+      font-family: inherit;
+      text-transform: none;
+      letter-spacing: normal;
+      padding: 4px 6px;
+      background: var(--input-bg, rgba(128,128,128,0.08));
+      color: inherit;
+      border: 1px solid rgba(128,128,128,0.25);
+      border-radius: 3px;
+      outline: none;
+      resize: vertical;
+    }
+    .mcp-field input:focus,
+    .mcp-field select:focus,
+    .mcp-field textarea:focus {
+      border-color: var(--accent, rgba(128,128,128,0.5));
+    }
+    .mcp-suggestions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      align-items: center;
+    }
+    .mcp-suggestions-title {
+      width: 100%;
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      opacity: 0.55;
+    }
+    .mcp-suggestion {
+      font-size: 10px;
+      padding: 2px 6px;
+      background: rgba(128,128,128,0.08);
+      color: inherit;
+      border: 1px solid rgba(128,128,128,0.25);
+      border-radius: 10px;
+      cursor: pointer;
+    }
+    .mcp-suggestion:hover {
+      border-color: var(--fg);
+    }
+    .mcp-import-card {
+      border: 1px solid rgba(128,128,128,0.18);
+      border-radius: 4px;
+      padding: 6px 8px;
+    }
+    .mcp-import-card .task-header {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 0.85em;
+    }
+    .mcp-import-card .task-title {
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-weight: 500;
+    }
+    .mcp-import-card .task-meta {
+      font-size: 10px;
+      opacity: 0.65;
+      white-space: normal;
+      word-break: break-all;
+      margin-top: 3px;
+    }
+    .mcp-import-card .task-actions {
+      display: flex;
+      gap: 4px;
+      margin-top: 6px;
+    }
+    .mcp-import-card .task-actions button[disabled] {
+      opacity: 0.4;
+      cursor: default;
+    }
+
     /* ── Armed-skill chip (composer) ── */
 
     .skill-armed {

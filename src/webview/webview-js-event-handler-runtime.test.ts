@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import vm from "node:vm";
 import { getEventHandlerScript } from "./webview-js-event-handler";
+import { getUtilitiesScript } from "./webview-js-utilities";
 import { makeTr } from "./webview-test-helpers";
 
 class FakeClassList {
@@ -85,9 +86,18 @@ class FakeElement {
     this.listeners.set(name, handler);
   }
 
+  public onmousedown: ((event: unknown) => void) | null = null;
+  public onclick: ((event: unknown) => void) | null = null;
+
+  /** Both forms, the way a real event reaches an element: a listener added with
+   *  `addEventListener`, and the `on<name>` property. The modules mix them —
+   *  the overlays' own handlers are properties — so a dispatch that ran only
+   *  one would silently skip half the wiring. */
   dispatch(name: string, event: unknown): void {
     const handler = this.listeners.get(name);
     if (handler) handler(event);
+    const property = (this as any)["on" + name];
+    if (typeof property === "function") property(event);
   }
 
   querySelector(selector?: string): FakeElement | null {
@@ -200,6 +210,12 @@ function createRuntimeHarness() {
   // What the Changes panel was handed: the change list, and the turns it is
   // grouped by. Both are needed — the panel is session-wide.
   const changesStateCalls: Array<{ changes: unknown[]; turns: unknown[] }> = [];
+  /** What the MCP panel was handed, route by route. Each message type has to
+   *  arrive somewhere: a case this handler forgot would be a silent no-op. */
+  const mcpListCalls: unknown[] = [];
+  const mcpToolsCalls: Array<{ server: unknown; tools: unknown[]; connections: unknown[] }> = [];
+  const mcpImportsCalls: unknown[] = [];
+  let mcpPanelCalls = 0;
 
   const windowObj: Record<string, any> = {
     __wvI18n: makeTr(),
@@ -253,6 +269,18 @@ function createRuntimeHarness() {
         changesStateCalls.push({ changes, turns });
       },
       renderChanges: () => {},
+      renderMcp: (state: unknown) => {
+        mcpListCalls.push(state);
+      },
+      renderMcpTools: (server: unknown, tools: unknown[], connections: unknown[]) => {
+        mcpToolsCalls.push({ server, tools, connections });
+      },
+      renderMcpImports: (payload: unknown) => {
+        mcpImportsCalls.push(payload);
+      },
+      showMcpPanel: () => {
+        mcpPanelCalls += 1;
+      },
       setActiveSessionId: () => {},
       setActiveThreadId: (id: unknown) => {
         activeThreadCalls.push((id ?? null) as string | null);
@@ -358,8 +386,17 @@ function createRuntimeHarness() {
     console,
   });
 
-  vm.runInContext(getEventHandlerScript(makeTr()), context);
+  // The utilities module runs first, as it does in the template: this module
+  // captures its backdrop guard, and that guard is the mechanism under test —
+  // a stand-in here could drift from the one that ships. The helpers the rest
+  // of this file asserts against are then put back as this harness's own
+  // stubs, which is what those assertions are written to.
+  vm.runInContext(getUtilitiesScript(makeTr()), context);
+  windowObj.__wvEscapeHtml = (value: unknown) => String(value ?? "");
+  windowObj.__wvI18n = makeTr();
+  windowObj.__wvFormatLoadedThread = () => "";
 
+  vm.runInContext(getEventHandlerScript(makeTr()), context);
   return {
     dispatchMessage(msg: Record<string, unknown>) {
       const handler = windowListeners.get("message");
@@ -410,6 +447,10 @@ function createRuntimeHarness() {
     /** Every thread the sidebar was told is on screen, in order. */
     activeThreadCalls,
     changesStateCalls,
+    mcpListCalls,
+    mcpToolsCalls,
+    mcpImportsCalls,
+    mcpPanelCalls: () => mcpPanelCalls,
   };
 }
 
@@ -1843,6 +1884,11 @@ describe("webview-js-event-handler runtime", () => {
 
     harness.dispatchMessage(prompt);
     const overlay = harness.getElement("route-move-overlay");
+    // A real backdrop click is a press *and* a release on the dimmed area. The
+    // press is what makes it one: a press inside the dialog that comes up over
+    // the backdrop reports the overlay as the click's target too, so the target
+    // alone cannot decide and must not answer the question.
+    overlay.dispatch("mousedown", { target: overlay });
     overlay.dispatch("click", { target: overlay });
     expect(harness.postMessages).toContainEqual({ type: "routeMoveAnswer", accept: false });
 
@@ -2030,6 +2076,26 @@ describe("webview-js-event-handler runtime: a turn's failure", () => {
     expect(harness.getElement("workspace-trust-banner").getAttribute("hidden")).toBe("");
   });
 
+  it("does not answer the question when the press slipped off the dialog", () => {
+    // Answering "no" here would move the conversation onto a route the reader
+    // never agreed to, or drop the change they asked for, on a slipped hand.
+    const harness = createRuntimeHarness();
+    harness.dispatchMessage({
+      type: "routeMovePrompt",
+      provider: "deepseek",
+      providerId: "deepseek",
+      from: "custom",
+      fromProviderId: "bigmodel-cn",
+      model: "deepseek-flash",
+    });
+    const overlay = harness.getElement("route-move-overlay");
+
+    overlay.dispatch("mousedown", { target: {} });
+    overlay.dispatch("click", { target: overlay });
+
+    expect(harness.postMessages.filter((m) => m.type === "routeMoveAnswer")).toEqual([]);
+  });
+
   it("keeps a dismissed banner dismissed for the life of the panel", () => {
     const harness = createRuntimeHarness();
     const banner = harness.getElement("workspace-trust-banner");
@@ -2048,5 +2114,60 @@ describe("webview-js-event-handler runtime: a turn's failure", () => {
 
     harness.getElement("workspace-trust-terminal").dispatch("click", {});
     expect(harness.postMessages).toContainEqual({ type: "showWorkspaceTrustHelp" });
+  });
+
+  it("hands the MCP inventory, its tools and its imports to the panel", () => {
+    const harness = createRuntimeHarness();
+
+    harness.dispatchMessage({
+      type: "mcpServerList",
+      servers: [{ name: "github" }],
+      revision: "mcp-v1-abc",
+      supported: true,
+    });
+    expect(harness.mcpListCalls).toEqual([
+      { servers: [{ name: "github" }], revision: "mcp-v1-abc", supported: true },
+    ]);
+
+    harness.dispatchMessage({
+      type: "mcpTools",
+      server: "github",
+      tools: [{ name: "search_code" }],
+      connections: [{ server: "github", connected: true }],
+    });
+    expect(harness.mcpToolsCalls).toEqual([
+      {
+        server: "github",
+        tools: [{ name: "search_code" }],
+        connections: [{ server: "github", connected: true }],
+      },
+    ]);
+
+    harness.dispatchMessage({
+      type: "mcpImports",
+      candidates: [{ name: "local" }],
+      problems: [],
+    });
+    expect(harness.mcpImportsCalls).toEqual([
+      { candidates: [{ name: "local" }], problems: [] },
+    ]);
+  });
+
+  it("treats a message with no server list as an engine that cannot manage them", () => {
+    // `supported` absent must not read as "supported, with nothing": the panel
+    // would then claim the user has no servers.
+    const harness = createRuntimeHarness();
+
+    harness.dispatchMessage({ type: "mcpServerList", supported: false });
+
+    expect(harness.mcpListCalls).toEqual([{ servers: [], revision: "", supported: false }]);
+  });
+
+  it("brings the MCP panel on screen when /mcp asks for it", () => {
+    const harness = createRuntimeHarness();
+
+    harness.dispatchMessage({ type: "openMcpPanel" });
+
+    expect(harness.mcpPanelCalls()).toBe(1);
   });
 });

@@ -56,7 +56,17 @@ export { FRIENDLY_TOOL_NAMES };
 
 export function friendlyToolName(raw: string): string {
   if (FRIENDLY_TOOL_NAMES[raw]) return FRIENDLY_TOOL_NAMES[raw];
-  if (raw.startsWith("mcp__")) return raw.slice(5).replace(/__/g, " / ");
+  // `mcp__<server>__<tool>`: the double underscore separates the three parts,
+  // and each part's own underscores are word separators inside it. Replacing
+  // only the doubled ones left the tool half reading `search_code` beside a
+  // spaced server name.
+  if (raw.startsWith("mcp__")) {
+    return raw
+      .slice(5)
+      .split("__")
+      .map((part) => part.replace(/_/g, " "))
+      .join(" / ");
+  }
   return raw.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 

@@ -72,6 +72,13 @@ import type {
   ThreadGoal,
   RevertThreadFileResponse,
   CallChangesResponse,
+  McpServersResponse,
+  McpServerDetail,
+  McpServerActionReceipt,
+  McpToolsResponse,
+  McpCreateServerRequest,
+  McpImportPreview,
+  McpImportReceipt,
 } from "../types";
 
 /**
@@ -150,6 +157,13 @@ export type {
   ThreadGoal,
   RevertThreadFileResponse,
   CallChangesResponse,
+  McpServersResponse,
+  McpServerDetail,
+  McpServerActionReceipt,
+  McpToolsResponse,
+  McpCreateServerRequest,
+  McpImportPreview,
+  McpImportReceipt,
 };
 
 const NOT_SYNCED: unique symbol = Symbol("NOT_SYNCED");
@@ -708,6 +722,97 @@ export class CodeWhaleApiClient {
     )) as SkillAuditResponse;
   }
 
+  // ── MCP servers ──
+  //
+  // The engine owns the MCP config and is its only writer, so every mutation
+  // is conditional: the caller reads the list (which carries the revision) and
+  // presents that revision back. Two clients editing at once cannot silently
+  // overwrite each other — the loser gets `412` and re-reads. Only entries the
+  // engine reports as `writable` (i.e. owned by the global config) can be
+  // changed here; a project or plugin entry is refused with its origin named.
+
+  async listMcpServers(): Promise<McpServersResponse> {
+    return (await this.get("/v1/apps/mcp/servers")) as McpServersResponse;
+  }
+
+  /** The tools the model can currently see, grouped by server. With
+   *  `connect: true` the engine tries to reach each server first (spawning a
+   *  stdio child or opening the HTTP session) and reports the outcome per
+   *  server, which is also how the panel's Connect action works. */
+  async listMcpTools(opts?: { server?: string; connect?: boolean }): Promise<McpToolsResponse> {
+    const params = new URLSearchParams();
+    if (opts?.server) params.set("server", opts.server);
+    if (opts?.connect) params.set("connect", "true");
+    const qs = params.toString() ? `?${params.toString()}` : "";
+    return (await this.get(`/v1/apps/mcp/tools${qs}`)) as McpToolsResponse;
+  }
+
+  async createMcpServer(
+    request: McpCreateServerRequest,
+    revision: string
+  ): Promise<McpServerDetail> {
+    return (await this.requestWithHeader(
+      "POST",
+      "/v1/apps/mcp/servers",
+      request,
+      { "If-Match": revision }
+    )) as McpServerDetail;
+  }
+
+  async deleteMcpServer(name: string, revision: string): Promise<McpServerActionReceipt> {
+    return (await this.requestWithHeader(
+      "DELETE",
+      `/v1/apps/mcp/servers/${encodeURIComponent(name)}`,
+      undefined,
+      { "If-Match": revision }
+    )) as McpServerActionReceipt;
+  }
+
+  /** Turn one server on or off. The engine writes both the `enabled` and the
+   *  legacy `disabled` flag, so the two can never disagree. */
+  async setMcpServerEnabled(    name: string,
+    enabled: boolean,
+    revision: string
+  ): Promise<McpServerActionReceipt> {
+    const action = enabled ? "enable" : "disable";
+    return (await this.requestWithHeader(
+      "POST",
+      `/v1/apps/mcp/servers/${encodeURIComponent(name)}/${action}`,
+      {},
+      { "If-Match": revision }
+    )) as McpServerActionReceipt;
+  }
+
+  /** Retry one server's connection without disturbing its healthy siblings.
+   *  Not conditional: it reads config, not writes. */
+  async reconnectMcpServer(name: string): Promise<McpServerActionReceipt> {
+    return (await this.post(
+      `/v1/apps/mcp/servers/${encodeURIComponent(name)}/reconnect`,
+      {}
+    )) as McpServerActionReceipt;
+  }
+
+  /** Servers other tools found on this machine (Claude Code's `~/.claude.json`,
+   *  a project's `.mcp.json`, a marketplace manifest). Reading never connects
+   *  or spawns anything. */
+  async previewMcpImports(): Promise<McpImportPreview> {
+    return (await this.get("/v1/apps/mcp/imports")) as McpImportPreview;
+  }
+
+  /** Approve or decline one reviewed candidate. `contentHash` must be the one
+   *  from the preview — the approval is bound to exactly what was read. */
+  async applyMcpImport(
+    request: { id: string; content_hash: string; decision: "approve" | "decline" },
+    revision: string
+  ): Promise<McpImportReceipt> {
+    return (await this.requestWithHeader(
+      "POST",
+      "/v1/apps/mcp/imports",
+      request,
+      { "If-Match": revision }
+    )) as McpImportReceipt;
+  }
+
   // ── Sessions ──
 
   async listSessions(opts?: { limit?: number; search?: string }): Promise<SessionsResponse> {
@@ -826,7 +931,7 @@ export class CodeWhaleApiClient {
       threadFileRevert,
       threadForkAtTurn,
       callChanges,
-      skillFlags,
+      runtimeFlags,
     ] = await Promise.all([
       this.probePath("/v1/sessions"),
       this.probePath("/v1/threads/__probe__/undo"),
@@ -857,12 +962,12 @@ export class CodeWhaleApiClient {
         "/v1/threads/__probe__/turns/__probe__/calls/__probe__/changes",
         "POST"
       ),
-      // Feature-detect the skill families from the engine's own capability
-      // flags rather than by probing: a 404 from `/v1/skills/{name}` means
-      // "no such skill", which is indistinguishable from "no such route".
-      // (The install path *is* probeable — a GET there answers 405 — but that
-      // only proves the install route, not the detail one.)
-      this.probeSkillCapabilityFlags(),
+      // Feature-detect the skill and MCP families from the engine's own
+      // capability flags rather than by probing: a 404 from `/v1/skills/{name}`
+      // means "no such skill", which is indistinguishable from "no such
+      // route". (The install path *is* probeable — a GET there answers 405 —
+      // but that only proves the install route, not the detail one.)
+      this.probeRuntimeInfoFlags(),
     ]);
 
     return {
@@ -877,18 +982,20 @@ export class CodeWhaleApiClient {
       threadFileRevert,
       threadForkAtTurn,
       callChanges,
-      skillLifecycle: skillFlags.skill_lifecycle,
-      skillDetail: skillFlags.skill_detail,
+      skillLifecycle: runtimeFlags.skill_lifecycle,
+      skillDetail: runtimeFlags.skill_detail,
+      mcpServerManagement: runtimeFlags.mcp_server_management,
     };
   }
 
-  /** Read `GET /v1/runtime/info`'s capability flags. Both default to false,
+  /** Read `GET /v1/runtime/info`'s capability flags. Each defaults to false,
    *  so an engine that predates the field (or a failed request) disables the
-   *  Skills panel's mutations and activation rather than promising an
-   *  operation the route will 404. */
-  private async probeSkillCapabilityFlags(): Promise<{
+   *  Skills panel's mutations and activation and the MCP panel entirely,
+   *  rather than promising an operation the route will 404. */
+  private async probeRuntimeInfoFlags(): Promise<{
     skill_lifecycle: boolean;
     skill_detail: boolean;
+    mcp_server_management: boolean;
   }> {
     try {
       const info = (await this.get("/v1/runtime/info")) as {
@@ -897,9 +1004,14 @@ export class CodeWhaleApiClient {
       return {
         skill_lifecycle: info.capabilities?.skill_lifecycle === true,
         skill_detail: info.capabilities?.skill_detail === true,
+        mcp_server_management: info.capabilities?.mcp_server_management === true,
       };
     } catch {
-      return { skill_lifecycle: false, skill_detail: false };
+      return {
+        skill_lifecycle: false,
+        skill_detail: false,
+        mcp_server_management: false,
+      };
     }
   }
 
@@ -1352,6 +1464,30 @@ export class CodeWhaleApiClient {
     return this.request("PUT", path, body);
   }
 
+  /** A request carrying one extra header.
+   *
+   *  The MCP management family is the reason this exists: every mutation there
+   *  is conditional (`If-Match: <revision>`), because the engine is the only
+   *  writer of the MCP config and two clients editing it must not clobber each
+   *  other. The plain helpers above have no header slot, and widening all of
+   *  them to gain one would put a parameter nobody uses on every call site. */
+  private async requestWithHeader(
+    method: string,
+    path: string,
+    body: unknown,
+    headers: Record<string, string>
+  ): Promise<unknown> {
+    const { statusCode, data } = await this.requestRaw(method, path, body, undefined, headers);
+    if (statusCode >= 400) {
+      throw new Error(`API error ${statusCode}: ${extractApiErrorMessage(data)}`);
+    }
+    try {
+      return JSON.parse(data);
+    } catch {
+      return data;
+    }
+  }
+
   private async probePath(path: string, method: "GET" | "POST" = "GET"): Promise<boolean> {
     try {
       // Use GET instead of HEAD since TUI doesn't explicitly support HEAD.
@@ -1404,7 +1540,8 @@ export class CodeWhaleApiClient {
     method: string,
     path: string,
     body: unknown,
-    timeoutMs: number = DEFAULT_REQUEST_TIMEOUT_MS
+    timeoutMs: number = DEFAULT_REQUEST_TIMEOUT_MS,
+    extraHeaders?: Record<string, string>
   ): Promise<{ statusCode: number; data: string }> {
     return new Promise((resolve, reject) => {
       const url = new URL(path, this.baseUrl);
@@ -1418,6 +1555,11 @@ export class CodeWhaleApiClient {
       }
       if (payload) {
         headers["Content-Length"] = String(Buffer.byteLength(payload));
+      }
+      if (extraHeaders) {
+        for (const [name, value] of Object.entries(extraHeaders)) {
+          headers[name] = value;
+        }
       }
 
       const req = http.request(

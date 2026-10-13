@@ -374,6 +374,11 @@ interface Translations {
   deleteSessionConfirmButton: string;
   deleteSessionSuccess: string;
   deleteSessionFailed: string;
+  /** The modal that guards removing an MCP server: it rewrites the user's
+   *  config file, and the app has no undo for it. `{name}` is the server. */
+  mcpRemoveConfirmTitle: string;
+  mcpRemoveConfirmMessage: string;
+  mcpRemoveConfirmButton: string;
   noSearchResults: string;
   /** Badge on a session the engine recorded a source for: it was branched from
    *  another conversation. See webview-html.ts for the full contract of this
@@ -416,6 +421,49 @@ interface Translations {
   skillsProject: string;
   skillsGlobal: string;
   skillsBuiltIn: string;
+  // MCP panel
+  /** Activity section title. */
+  mcp: string;
+  mcpRefresh: string;
+  mcpAdd: string;
+  mcpImports: string;
+  mcpEmpty: string;
+  /** Shown when the engine has no `/v1/apps/mcp/*` routes at all. */
+  mcpNoManagement: string;
+  mcpConnect: string;
+  mcpEnable: string;
+  mcpDisable: string;
+  mcpRemove: string;
+  mcpConnected: string;
+  mcpNotConnected: string;
+  mcpAuthRequired: string;
+  mcpRequired: string;
+  /** Tooltip on the actions of a project/plugin entry, which the global
+   *  editor must not silently rewrite. */
+  mcpManagedElsewhere: string;
+  mcpGroupProject: string;
+  mcpGroupGlobal: string;
+  mcpGroupPlugin: string;
+  mcpGroupOther: string;
+  /** "Tools (3)" — the count is filled in. */
+  mcpToolsTitle: string;
+  mcpNoTools: string;
+  mcpAddTitle: string;
+  mcpFieldName: string;
+  mcpFieldTransport: string;
+  mcpFieldCommand: string;
+  mcpFieldArgs: string;
+  mcpFieldUrl: string;
+  mcpAddSubmit: string;
+  mcpCancel: string;
+  mcpSuggested: string;
+  mcpImportsTitle: string;
+  mcpImportsEmpty: string;
+  mcpImportsProblems: string;
+  mcpApprove: string;
+  mcpDecline: string;
+  mcpImportBlocked: string;
+  mcpImportConflict: string;
   noAgentRuns: string;
   agentStatusQueued: string;
   agentStatusStarting: string;
@@ -822,6 +870,10 @@ const en: Translations = {
   deleteSessionConfirmButton: "Delete",
   deleteSessionSuccess: "Session deleted",
   deleteSessionFailed: "Failed to delete session",
+  mcpRemoveConfirmTitle: "Remove MCP server?",
+  mcpRemoveConfirmMessage:
+    'This removes "{name}" from your global MCP configuration. Project and plugin entries are not affected.',
+  mcpRemoveConfirmButton: "Remove",
   noSearchResults: "No matching sessions",
   sessionForkBadge: "Fork",
   forkFromMissing: "Branched from “{source}” — not in this list",
@@ -853,6 +905,44 @@ const en: Translations = {
   skillsProject: "Project",
   skillsGlobal: "Global",
   skillsBuiltIn: "Built-in",
+  // MCP panel
+  mcp: "MCP",
+  mcpRefresh: "Refresh",
+  mcpAdd: "Add server",
+  mcpImports: "Review imports",
+  mcpEmpty: "No MCP servers configured. Add one, or review what other tools on this machine already have.",
+  mcpNoManagement: "This engine has no MCP management routes; update the CodeWhale engine to manage servers here.",
+  mcpConnect: "Connect and list tools",
+  mcpEnable: "Enable",
+  mcpDisable: "Disable",
+  mcpRemove: "Remove",
+  mcpConnected: "Connected",
+  mcpNotConnected: "Not connected",
+  mcpAuthRequired: "Needs authentication",
+  mcpRequired: "Required",
+  mcpManagedElsewhere: "This entry belongs to a project or plugin configuration; change it at its source.",
+  mcpGroupProject: "Project",
+  mcpGroupGlobal: "Global",
+  mcpGroupPlugin: "Plugin",
+  mcpGroupOther: "Other",
+  mcpToolsTitle: "Tools",
+  mcpNoTools: "This server exposes no tools.",
+  mcpAddTitle: "Add MCP server",
+  mcpFieldName: "Name",
+  mcpFieldTransport: "Type",
+  mcpFieldCommand: "Command",
+  mcpFieldArgs: "Arguments (one per line)",
+  mcpFieldUrl: "URL",
+  mcpAddSubmit: "Add",
+  mcpCancel: "Cancel",
+  mcpSuggested: "Suggested",
+  mcpImportsTitle: "Import from other tools",
+  mcpImportsEmpty: "Nothing to import from ~/.claude.json, a project .mcp.json, or the marketplace.",
+  mcpImportsProblems: "Some sources could not be read:",
+  mcpApprove: "Approve",
+  mcpDecline: "Decline",
+  mcpImportBlocked: "Blocked at source",
+  mcpImportConflict: "Name already in use",
   noAgentRuns: "No agent runs",
   agentStatusQueued: "Queued",
   agentStatusStarting: "Starting",
@@ -1252,6 +1342,9 @@ const zhCn: Translations = {
   deleteSessionConfirmButton: "删除",
   deleteSessionSuccess: "会话已删除",
   deleteSessionFailed: "删除会话失败",
+  mcpRemoveConfirmTitle: "移除 MCP 服务器?",
+  mcpRemoveConfirmMessage: "将从全局 MCP 配置中移除「{name}」。项目与插件里的条目不受影响。",
+  mcpRemoveConfirmButton: "移除",
   noSearchResults: "没有匹配的会话",
   sessionForkBadge: "分叉",
   forkFromMissing: "分叉自「{source}」— 不在当前列表中",
@@ -1283,6 +1376,44 @@ const zhCn: Translations = {
   skillsProject: "项目",
   skillsGlobal: "全局",
   skillsBuiltIn: "内置技能",
+  // MCP panel
+  mcp: "MCP",
+  mcpRefresh: "刷新",
+  mcpAdd: "添加服务器",
+  mcpImports: "审查导入",
+  mcpEmpty: "尚未配置 MCP 服务器。可以添加一个，或查看本机其他工具已有的配置。",
+  mcpNoManagement: "当前引擎没有 MCP 管理接口；如需在此管理，请更新 CodeWhale 引擎。",
+  mcpConnect: "连接并列出工具",
+  mcpEnable: "启用",
+  mcpDisable: "禁用",
+  mcpRemove: "移除",
+  mcpConnected: "已连接",
+  mcpNotConnected: "未连接",
+  mcpAuthRequired: "需要认证",
+  mcpRequired: "必需",
+  mcpManagedElsewhere: "该条目属于项目或插件配置，请在其来源处修改。",
+  mcpGroupProject: "项目",
+  mcpGroupGlobal: "全局",
+  mcpGroupPlugin: "插件",
+  mcpGroupOther: "其他",
+  mcpToolsTitle: "工具",
+  mcpNoTools: "该服务器未提供任何工具。",
+  mcpAddTitle: "添加 MCP 服务器",
+  mcpFieldName: "名称",
+  mcpFieldTransport: "类型",
+  mcpFieldCommand: "命令",
+  mcpFieldArgs: "参数（每行一个）",
+  mcpFieldUrl: "URL",
+  mcpAddSubmit: "添加",
+  mcpCancel: "取消",
+  mcpSuggested: "推荐",
+  mcpImportsTitle: "从其他工具导入",
+  mcpImportsEmpty: "~/.claude.json、项目 .mcp.json 与市场里都没有可导入的项。",
+  mcpImportsProblems: "以下来源无法安全读取：",
+  mcpApprove: "批准",
+  mcpDecline: "拒绝",
+  mcpImportBlocked: "来源处已禁用",
+  mcpImportConflict: "名称已被占用",
   noAgentRuns: "暂无子代理运行",
   agentStatusQueued: "排队中",
   agentStatusStarting: "启动中",
@@ -1748,6 +1879,44 @@ export function webviewTranslations(tr: Translations) {
     skillsProject: tr.skillsProject,
     skillsGlobal: tr.skillsGlobal,
     skillsBuiltIn: tr.skillsBuiltIn,
+    // MCP panel
+    mcp: tr.mcp,
+    mcpRefresh: tr.mcpRefresh,
+    mcpAdd: tr.mcpAdd,
+    mcpImports: tr.mcpImports,
+    mcpEmpty: tr.mcpEmpty,
+    mcpNoManagement: tr.mcpNoManagement,
+    mcpConnect: tr.mcpConnect,
+    mcpEnable: tr.mcpEnable,
+    mcpDisable: tr.mcpDisable,
+    mcpRemove: tr.mcpRemove,
+    mcpConnected: tr.mcpConnected,
+    mcpNotConnected: tr.mcpNotConnected,
+    mcpAuthRequired: tr.mcpAuthRequired,
+    mcpRequired: tr.mcpRequired,
+    mcpManagedElsewhere: tr.mcpManagedElsewhere,
+    mcpGroupProject: tr.mcpGroupProject,
+    mcpGroupGlobal: tr.mcpGroupGlobal,
+    mcpGroupPlugin: tr.mcpGroupPlugin,
+    mcpGroupOther: tr.mcpGroupOther,
+    mcpToolsTitle: tr.mcpToolsTitle,
+    mcpNoTools: tr.mcpNoTools,
+    mcpAddTitle: tr.mcpAddTitle,
+    mcpFieldName: tr.mcpFieldName,
+    mcpFieldTransport: tr.mcpFieldTransport,
+    mcpFieldCommand: tr.mcpFieldCommand,
+    mcpFieldArgs: tr.mcpFieldArgs,
+    mcpFieldUrl: tr.mcpFieldUrl,
+    mcpAddSubmit: tr.mcpAddSubmit,
+    mcpCancel: tr.mcpCancel,
+    mcpSuggested: tr.mcpSuggested,
+    mcpImportsTitle: tr.mcpImportsTitle,
+    mcpImportsEmpty: tr.mcpImportsEmpty,
+    mcpImportsProblems: tr.mcpImportsProblems,
+    mcpApprove: tr.mcpApprove,
+    mcpDecline: tr.mcpDecline,
+    mcpImportBlocked: tr.mcpImportBlocked,
+    mcpImportConflict: tr.mcpImportConflict,
     noAgentRuns: tr.noAgentRuns,
     agentStatusQueued: tr.agentStatusQueued,
     agentStatusStarting: tr.agentStatusStarting,

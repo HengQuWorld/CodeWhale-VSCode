@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { getFleetScript } from "./webview-js-fleet";
+import { getUtilitiesScript } from "./webview-js-utilities";
 import { makeTr } from "./webview-test-helpers";
 
 describe("webview-js-fleet.ts", () => {
@@ -163,6 +164,14 @@ describe("webview-js-fleet.ts", () => {
       createElement: el,
       querySelectorAll() { return []; },
     };
+    // The utilities module runs first here, as it does in the template: this
+    // module reaches for the shared backdrop guard, and a stand-in for it here
+    // would test something other than what ships. The harness's own helpers are
+    // then put back, since that is what its assertions are written against.
+    new Function("document", "window", getUtilitiesScript(tr))(doc, win);
+    win.__wvEscapeHtml = esc;
+    win.__wvI18n = tr;
+    win.__wvFormatRelativeTime = (t: string) => String(t);
     new Function("document", "window", script)(doc, win);
     const fleet = win.__wvFleet as {
       showFleetDetail(p: unknown): void;
@@ -199,5 +208,65 @@ describe("webview-js-fleet.ts", () => {
     ).not.toThrow();
     // SSE-triggered refresh of the same payload must not throw either.
     expect(() => fleet.showFleetDetail(payload)).not.toThrow();
+  });
+
+  it("keeps a half-filled create dialog when the press slips off the panel", () => {
+    // The same defect the sidebar's dialogs had, in the dialog with the most
+    // typing in it (roles and task cards). A press held inside the panel and
+    // released after the pointer left it reports the overlay as the click's
+    // target — a click is dispatched on the nearest common ancestor of its two
+    // ends — so dismissing on the target alone throws the draft away.
+    const script = getFleetScript(makeTr());
+    const esc = (s: unknown) => String(s ?? "");
+    const listeners: Record<string, (event: unknown) => void> = {};
+    const makeEl = () => ({
+      style: {} as Record<string, string>,
+      attrs: {} as Record<string, string>,
+      innerHTML: "",
+      firstElementChild: null,
+      setAttribute(k: string, v: string) { this.attrs[k] = v; },
+      getAttribute(k: string) { return this.attrs[k] ?? null; },
+      querySelector() { return null; },
+      querySelectorAll() { return [] as unknown[]; },
+      appendChild() {},
+      insertAdjacentHTML() {},
+      remove() {},
+      addEventListener(name: string, handler: (event: unknown) => void) {
+        listeners[name] = handler;
+      },
+      classList: { add() {}, remove() {}, toggle() {}, contains() { return false; } },
+      onclick: null as ((event: unknown) => void) | null,
+      onmousedown: null as ((event: unknown) => void) | null,
+    });
+    const createOverlay = makeEl();
+    const tr = makeTr();
+    const win: Record<string, unknown> = {
+      __wvI18n: tr,
+      __wvEscapeHtml: esc,
+      __wvFormatRelativeTime: (t: string) => String(t),
+      __wvVscode: { postMessage() {} },
+    };
+    const doc = {
+      getElementById(id: string) { return id === "fleet-create-overlay" ? createOverlay : null; },
+      createElement: makeEl,
+      querySelectorAll() { return []; },
+    };
+    new Function("document", "window", getUtilitiesScript(tr))(doc, win);
+    win.__wvEscapeHtml = esc;
+    win.__wvI18n = tr;
+    new Function("document", "window", script)(doc, win);
+    const fleet = win.__wvFleet as { openFleetCreateDialog(): void; closeFleetCreateDialog(): void };
+
+    fleet.openFleetCreateDialog();
+    expect(createOverlay.style.display).toBe("flex");
+
+    createOverlay.onmousedown!({ target: {} });
+    createOverlay.onclick!({ target: createOverlay });
+    expect(createOverlay.style.display).toBe("flex");
+
+    // The backdrop itself still closes it.
+    createOverlay.onmousedown!({ target: createOverlay });
+    createOverlay.onclick!({ target: createOverlay });
+    expect(createOverlay.style.display).toBe("none");
   });
 });
