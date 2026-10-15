@@ -21,8 +21,11 @@ models. Everything narrower lives below it.
   background watching, forking from a turn, the new-thread route.
 - **`turns/`** — one turn's life: send, steer, stop and send-refusal, why a turn
   failed, undo/retry, manual compaction, the completion cue.
-- **`transcript/`** — what a loaded or rebuilt conversation shows: history
-  rendering, the detail view, the file changes a command caused.
+- **`transcript/`** — what a loaded or rebuilt conversation shows: how it is
+  rebuilt (`history-rendering`, `history-tool-calls`, `history-changes-panel`,
+  `history-diff-rebuild`, `history-pending-attention`,
+  `history-viewed-session`, `history-unreadable-block`), the detail view, and
+  the file changes a command caused.
 - **`composer/`** — the input area: image/attachment handling, input history.
 - **`settings/`** — mode, permission posture, provider switch, workspace trust.
 - **`integrations/`** — engine capabilities the panel manages: MCP servers,
