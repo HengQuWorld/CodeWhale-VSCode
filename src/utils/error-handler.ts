@@ -37,3 +37,28 @@ export function formatError(prefix: string, err: unknown): string {
   const msg = getErrorMessage(err);
   return msg ? `${prefix}: ${msg}` : prefix;
 }
+
+/** Socket-level failures that mean "the engine is not there right now".
+ *  A webview reload relaunches the Runtime on a fresh port, so a request
+ *  issued in that window hits a dead listener and is worth one retry. */
+export const TRANSIENT_SOCKET_CODES = new Set([
+  "ECONNREFUSED",
+  "ECONNRESET",
+  "EPIPE",
+  "EHOSTUNREACH",
+  "ENETUNREACH",
+]);
+
+/**
+ * Whether a failed thread-list fetch is worth retrying.
+ *
+ * A timeout is not transient here: `GET /v1/threads/summary` builds every row
+ * from a full thread-detail read, so it legitimately takes seconds-per-thread
+ * and a second attempt would just spend the same time again. A refused or
+ * reset connection is transient, because the engine is coming back.
+ */
+export function isTransientFetchError(err: unknown): boolean {
+  if (err instanceof Error && err.message.startsWith("Request timed out")) return false;
+  const code = (err as NodeJS.ErrnoException | null | undefined)?.code;
+  return typeof code === "string" && TRANSIENT_SOCKET_CODES.has(code);
+}

@@ -43,3 +43,12 @@ export function resolveRecordedFilePath(
     ? path.normalize(path.join(workspaceRoots[0], recorded))
     : artifact;
 }
+
+/**
+ * Normalize a path for dedup comparison: backslashes to forward slashes, and
+ * no trailing slash. Two paths that name the same file must compare equal
+ * whichever way the runtime and the webview spelled them.
+ */
+export function normalizePath(p: string): string {
+  return p.replace(/\\/g, '/').replace(/\/+$/, '');
+}

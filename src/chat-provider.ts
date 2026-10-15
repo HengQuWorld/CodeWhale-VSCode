@@ -23,7 +23,7 @@ import type {
   WorkspaceSnapshotRef,
   CallChangesResponse,
 } from "./types";
-import { formatError, getErrorMessage } from "./utils/error-handler";
+import { formatError, getErrorMessage, isTransientFetchError } from "./utils/error-handler";
 import {
   providerEntryRouteKey,
   providerRouteKey,
@@ -56,8 +56,10 @@ import {
   formatRecordedEditsAsDiff,
   type RecordedEdit,
 } from "./utils/diff-utils";
-import { resolveRecordedFilePath } from "./utils/file-paths";
+import { normalizePath, resolveRecordedFilePath } from "./utils/file-paths";
 import { loadInputHistory, pushInputHistory } from "./utils/input-history";
+import { imageBytesMatchMime, sniffImageMime } from "./utils/image-bytes";
+import { defaultTasksDir, resolveTaskArtifactPath } from "./utils/task-paths";
 import { classifySkillScope } from "./utils/skill-scope";
 import { mcpConnectionMessage, mcpTransportOverride } from "./utils/mcp-utils";
 import { extractCompactionSummary } from "./utils/compaction-summary";
@@ -94,47 +96,6 @@ import {
   detectFileChange,
 } from "./utils/tool-utils";
 
-/** Normalize file path for dedup comparison: backslashes to forward, strip trailing slashes. */
-function normalizePath(p: string): string {
-  return p.replace(/\\/g, '/').replace(/\/+$/, '');
-}
-
-// TUI-compatible artifact path resolution
-function getHomeDirectory(): string {
-  return os.homedir();
-}
-
-function defaultTasksDir(): string {
-  const deepseekTasksDir = process.env.DEEPSEEK_TASKS_DIR;
-  if (deepseekTasksDir && deepseekTasksDir.trim()) {
-    return deepseekTasksDir;
-  }
-  const home = getHomeDirectory();
-  const primary = path.join(home, ".codewhale", "tasks");
-  try {
-    if (fs.existsSync(primary) && fs.statSync(primary).isDirectory()) {
-      return primary;
-    }
-  } catch {
-    // ignore
-  }
-  const legacy = path.join(home, ".deepseek", "tasks");
-  try {
-    if (fs.existsSync(legacy) && fs.statSync(legacy).isDirectory()) {
-      return legacy;
-    }
-  } catch {
-    // ignore
-  }
-  return primary;
-}
-
-function resolveTaskArtifactPath(relativeOrAbsolute: string): string {
-  if (path.isAbsolute(relativeOrAbsolute)) {
-    return path.normalize(relativeOrAbsolute);
-  }
-  return path.normalize(path.join(defaultTasksDir(), relativeOrAbsolute));
-}
 
 function mergeThreadRecord(
   current: ThreadRecord,
@@ -148,35 +109,6 @@ function mergeThreadRecord(
   };
 }
 
-/**
- * Identify an image's format from its magic bytes, mirroring TUI
- * image_attach.rs sniff_media_type: the provider validates the payload,
- * not the file extension or the label the sender chose. Returns null for
- * anything outside the four accepted formats.
- */
-function sniffImageMime(bytes: Buffer): string | null {
-  const head = (len: number) => bytes.subarray(0, len).toString("latin1");
-  if (bytes.length >= 8 && head(8) === "\x89PNG\r\n\x1a\n") {
-    return "image/png";
-  }
-  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
-    return "image/jpeg";
-  }
-  if (bytes.length >= 6) {
-    const gif = head(6);
-    if (gif === "GIF87a" || gif === "GIF89a") {
-      return "image/gif";
-    }
-  }
-  if (bytes.length >= 12 && head(4) === "RIFF" && bytes.subarray(8, 12).toString("latin1") === "WEBP") {
-    return "image/webp";
-  }
-  return null;
-}
-
-function imageBytesMatchMime(bytes: Buffer, mime: string): boolean {
-  return sniffImageMime(bytes) === mime;
-}
 
 /**
  * One pending attachment. `previewUrl` is a transient thumbnail payload: it is
@@ -231,30 +163,6 @@ interface BackgroundThreadState {
   goalChecked: boolean;
 }
 
-/** Socket-level failures that mean "the engine is not there right now".
- *  A webview reload relaunches the Runtime on a fresh port, so a request
- *  issued in that window hits a dead listener and is worth one retry. */
-const TRANSIENT_SOCKET_CODES = new Set([
-  "ECONNREFUSED",
-  "ECONNRESET",
-  "EPIPE",
-  "EHOSTUNREACH",
-  "ENETUNREACH",
-]);
-
-/**
- * Whether a failed thread-list fetch is worth retrying.
- *
- * A timeout is not transient here: `GET /v1/threads/summary` builds every row
- * from a full thread-detail read, so it legitimately takes seconds-per-thread
- * and a second attempt would just spend the same time again. A refused or
- * reset connection is transient, because the engine is coming back.
- */
-function isTransientFetchError(err: unknown): boolean {
-  if (err instanceof Error && err.message.startsWith("Request timed out")) return false;
-  const code = (err as NodeJS.ErrnoException | null | undefined)?.code;
-  return typeof code === "string" && TRANSIENT_SOCKET_CODES.has(code);
-}
 
 export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandContext {
   public static readonly viewType = "brotherwhale.chat";
