@@ -30,6 +30,7 @@ import {
   providerRouteSelectable,
 } from "./utils/provider-route";
 import { McpController } from "./chat-provider/mcp";
+import { SkillController } from "./chat-provider/skills";
 import { getWebviewHtml } from "./webview/webview-html";
 import { renderMarkdown } from "./utils/markdown";
 import { finalizeAssistantMessage } from "./utils/event-helpers";
@@ -61,18 +62,11 @@ import { normalizePath, resolveRecordedFilePath } from "./utils/file-paths";
 import { loadInputHistory, pushInputHistory } from "./utils/input-history";
 import { imageBytesMatchMime, sniffImageMime } from "./utils/image-bytes";
 import { defaultTasksDir, resolveTaskArtifactPath } from "./utils/task-paths";
-import { classifySkillScope } from "./utils/skill-scope";
 import { extractCompactionSummary } from "./utils/compaction-summary";
 import { playCompletionSound } from "./utils/completion-sound";
 import { MAX_EAGER_HASH_BYTES, sha256OfFile } from "./utils/file-hash";
 import { t, webviewTranslations, currentLocale } from "./i18n";
-import {
-  buildSkillActivationInstruction,
-  composeSkillTurnPrompt,
-  isUserInvocableSkill,
-  parseSkillScope,
-  skillReceiptMessage,
-} from "./utils/skill-activation";
+import { composeSkillTurnPrompt } from "./utils/skill-activation";
 import { ConfigPanel } from "./config-panel";
 import {
   SessionStateStore,
@@ -300,6 +294,9 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
   /** The engine's MCP servers: list, mutate, review imports. */
   private readonly mcp: McpController;
 
+  /** The engine's skills: list, toggle, activate, install, mutate, audit. */
+  private readonly skills: SkillController;
+
   // ── Background (non-viewed) thread support ──
   // The runtime owns every turn: it keeps running server-side when the
   // client switches away (runtime_threads.rs owns the turn lifecycle). The
@@ -437,6 +434,16 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       hasMcpManagement: () => this.apiCapabilities.mcpServerManagement,
       postMessage: (msg) => this.postMessage(msg),
       debugLog: (msg) => this.debugLog(msg),
+    });
+    this.skills = new SkillController({
+      api: this.api,
+      hasSkillDetail: () => this.apiCapabilities.skillDetail,
+      workspaceRoot: () => this.tuiWorkspace || this.currentWorkspaceKey() || "",
+      postMessage: (msg) => this.postMessage(msg),
+      debugLog: (msg) => this.debugLog(msg),
+      armSkill: (skill) => this.armSkill(skill),
+      // Activation that carries its own task sends it straight away.
+      sendMessage: (text) => this.sendMessage(text),
     });
   }
 
@@ -3480,136 +3487,27 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     }
   }
 
-  /** Push the current skill inventory to the webview's Skills panel.
-   *
-   *  Each row is annotated with the scope of its `SKILL.md` before it goes
-   *  out: the engine's row carries the real path but no scope, and the panel
-   *  groups by project/global. */
+  // ── Skills ──
+  //
+  // The behaviour lives in `chat-provider/skills.ts`; these are the provider's
+  // entry points into it, because the webview's messages and the slash
+  // commands are routed through here.
+
+  /** Push the current skill inventory to the webview's Skills panel. */
   public async refreshSkillList(): Promise<void> {
-    try {
-      const result = await this.api.listSkills();
-      // The root is the workspace the engine itself scanned: these paths came
-      // from it, and `GET /v1/workspace/status` echoes the very field
-      // `list_skills` resolves skills against. The window's folder is the
-      // fallback for a refresh that lands before that status has been read —
-      // the same directory in every ordinary run, since it is what the engine
-      // is launched with. Both empty claims nothing as a project skill.
-      const workspace = this.tuiWorkspace || this.currentWorkspaceKey() || "";
-      this.postMessage({
-        type: "skillList",
-        skills: (result.skills ?? []).map(s => ({
-          ...s,
-          scope: classifySkillScope(s.path, workspace),
-        })),
-        directory: result.directory ?? "",
-        directories: result.directories ?? [],
-        warnings: result.warnings ?? [],
-      });
-    } catch (err) {
-      // The panel keeps whatever it had; a failed refresh is not a reason to
-      // blank a list the user was reading.
-      this.debugLog(`refreshSkillList failed: ${getErrorMessage(err)}`);
-    }
+    return this.skills.refreshSkillList();
   }
 
-  /** Turn a skill on or off. The engine persists this per identity, so the
-   *  listing is re-read after the write rather than guessed at. */
   public async setSkillEnabled(name: string, enabled: boolean): Promise<void> {
-    try {
-      const result = await this.api.setSkillEnabled(name, enabled);
-      this.postMessage({
-        type: "info",
-        message: enabled
-          ? `Skill '${result.name}' enabled. It will auto-trigger when the task matches.`
-          : `Skill '${result.name}' disabled.`,
-      });
-      await this.refreshSkillList();
-    } catch (err) {
-      const message = getErrorMessage(err);
-      this.postMessage({
-        type: "error",
-        message: message.includes("not found")
-          ? `Skill '${name}' not found. Run /skills to list available skills.`
-          : formatError("Failed to toggle skill", err),
-      });
-    }
+    return this.skills.setSkillEnabled(name, enabled);
   }
 
-  /** Activate a skill for the next message. With `task`, that message is sent
-   *  immediately — TUI's `/skill <name> <task>`. The body comes from the
-   *  engine, so activation needs the `skill_detail` capability; without it
-   *  the request is refused with the reason instead of a bare 404. */
   public async activateSkill(name: string, task?: string): Promise<void> {
-    const trimmed = name.trim();
-    if (!trimmed) return;
-    if (!this.apiCapabilities.skillDetail) {
-      this.postMessage({
-        type: "error",
-        message:
-          "This engine cannot hand back a skill's body, so the GUI cannot activate it. " +
-          "Update the CodeWhale engine, or run the skill from the TUI.",
-      });
-      return;
-    }
-    try {
-      const detail = await this.api.getSkillDetail(trimmed);
-      if (!isUserInvocableSkill(detail.invocation)) {
-        this.postMessage({
-          type: "error",
-          message: `Skill '${detail.name}' does not allow user invocation (invocation: ${detail.invocation}).`,
-        });
-        return;
-      }
-      const instruction = buildSkillActivationInstruction({
-        name: detail.name,
-        body: detail.body,
-      });
-      this.armSkill({
-        name: detail.name,
-        description: detail.description,
-        instruction,
-      });
-      // TUI writes an "Activated skill: X" system line into the transcript; the
-      // chat-area info card is the GUI's equivalent, and it names the once-only
-      // scope so the arming cannot be mistaken for a permanent setting.
-      this.postMessage({
-        type: "info",
-        message: `Skill '${detail.name}' activated for your next message.`,
-      });
-      if (task && task.trim()) {
-        await this.sendMessage(task.trim());
-      }
-    } catch (err) {
-      const message = getErrorMessage(err);
-      this.postMessage({
-        type: "error",
-        message: message.includes("not found")
-          ? `Skill '${trimmed}' not found. Run /skills to list available skills.`
-          : formatError("Failed to activate skill", err),
-      });
-    }
+    return this.skills.activateSkill(name, task);
   }
 
-  /** Install a skill from a remote spec through the engine's mutation
-   *  controller. The engine owns the network policy, path-traversal guard and
-   *  atomic write; the GUI only reports the receipt. */
   public async installSkill(source: string, scope?: string): Promise<void> {
-    const target = parseSkillScope(scope);
-    if (target === null) {
-      this.postMessage({ type: "error", message: `Invalid scope: ${scope}` });
-      return;
-    }
-    if (!source.trim()) {
-      this.postMessage({ type: "error", message: "Usage: /skill install <github:owner/repo|url|registry-name>" });
-      return;
-    }
-    try {
-      const receipt = await this.api.installSkill(source.trim(), target);
-      this.postMessage({ type: "info", message: skillReceiptMessage(receipt) });
-      await this.refreshSkillList();
-    } catch (err) {
-      this.postMessage({ type: "error", message: formatError("Install failed", err) });
-    }
+    return this.skills.installSkill(source, scope);
   }
 
   public async mutateSkill(
@@ -3617,67 +3515,11 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     name: string,
     scope?: string
   ): Promise<void> {
-    if (!name.trim()) {
-      this.postMessage({ type: "error", message: `Usage: /skill ${kind} <name>` });
-      return;
-    }
-    const target = parseSkillScope(scope);
-    if (target === null) {
-      this.postMessage({ type: "error", message: `Invalid scope: ${scope}` });
-      return;
-    }
-    const label = kind === "update" ? "Update" : kind === "uninstall" ? "Uninstall" : "Trust";
-    try {
-      const receipt =
-        kind === "update"
-          ? await this.api.updateSkill(name.trim(), { scope: target })
-          : kind === "uninstall"
-            ? await this.api.uninstallSkill(name.trim(), { scope: target })
-            : await this.api.trustSkill(name.trim(), { scope: target });
-      this.postMessage({ type: "info", message: skillReceiptMessage(receipt) });
-      await this.refreshSkillList();
-    } catch (err) {
-      this.postMessage({ type: "error", message: formatError(`${label} failed`, err) });
-    }
+    return this.skills.mutateSkill(kind, name, scope);
   }
 
-  /** Read-only integrity/trust/provenance receipt for one skill, rendered as
-   *  the same field lines the TUI manager's detail pane shows. */
   public async auditSkill(name: string, scope?: string): Promise<void> {
-    const target = parseSkillScope(scope);
-    if (target === null) {
-      this.postMessage({ type: "error", message: `Invalid scope: ${scope}` });
-      return;
-    }
-    try {
-      const audit = await this.api.auditSkill(name.trim(), { scope: target });
-      if (!audit.skills || audit.skills.length === 0) {
-        this.postMessage({ type: "error", message: `Skill '${name}' not found in any audited root.` });
-        return;
-      }
-      const lines: string[] = [];
-      if (audit.ambiguous) {
-        lines.push(
-          `Multiple copies of '${name}' exist; pass --project or --global to pick one.`
-        );
-      }
-      for (const entry of audit.skills) {
-        lines.push(`Skill '${entry.name}' (${entry.source_kind}, ${entry.scope})`);
-        lines.push(`  path:       ${entry.safe_display_path}`);
-        lines.push(`  digest:     ${entry.digest.state}${entry.digest.value ? ` — ${entry.digest.value}` : ""}`);
-        lines.push(`  trust:      ${entry.trust}`);
-        lines.push(`  integrity:  ${entry.integrity}`);
-        if (entry.available_actions.length > 0) {
-          lines.push(`  actions:    ${entry.available_actions.join(", ")}`);
-        }
-        for (const warning of entry.warnings) {
-          lines.push(`  warning:    ${warning}`);
-        }
-      }
-      this.postMessage({ type: "info", message: lines.join("\n") });
-    } catch (err) {
-      this.postMessage({ type: "error", message: formatError("Audit failed", err) });
-    }
+    return this.skills.auditSkill(name, scope);
   }
 
   // ── MCP server management ──
