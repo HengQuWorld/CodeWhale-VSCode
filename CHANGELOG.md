@@ -1,8 +1,8 @@
 # Change Log
 
-## Unreleased
+## 0.9.0
 
-Everything here talks to the engine's MCP routes; on an engine that predates them the panel says so instead of showing an empty list, and an engine that has some of the family has all of it.
+Everything here works on engine **v0.10.0** or newer. The MCP panel needs the management routes that release introduced — the layer each server belongs to, the configuration revision every edit presents, and the review of the servers other tools on this machine left behind; the rest is client-side and lights up on **v0.10.1**.
 
 ### New Features
 
