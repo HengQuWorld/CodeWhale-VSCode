@@ -296,6 +296,8 @@ export interface WebviewTranslations {
   fileModified: string;
   viewDiff: string;
   viewDiffTooltip: string;
+  diffUnavailableTooltip: string;
+  diffUnavailable: string;
   openFile: string;
   openFileTooltip: string;
   revertFile: string;

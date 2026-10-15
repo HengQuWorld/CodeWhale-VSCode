@@ -294,6 +294,8 @@ interface Translations {
   locateChangeTooltip: string;
   viewDiff: string;
   viewDiffTooltip: string;
+  diffUnavailableTooltip: string;
+  diffUnavailable: string;
   openFile: string;
   openFileTooltip: string;
   noChanges: string;
@@ -790,6 +792,8 @@ const en: Translations = {
   locateChangeTooltip: "Jump to the tool call card that made this change",
   viewDiff: "View Diff",
   viewDiffTooltip: "Open diff view for this file",
+  diffUnavailableTooltip: "The file has changed since this edit, so its diff could not be rebuilt. The +/- counts describe the edit itself.",
+  diffUnavailable: "This change's diff is no longer held, so there is nothing to compare. Open the file instead, or reload the session.",
   openFile: "Open File",
   openFileTooltip: "Open file in editor",
   noChanges: "No file changes this turn",
@@ -1262,6 +1266,8 @@ const zhCn: Translations = {
   locateChangeTooltip: "跳转到产生此变更的工具调用卡片",
   viewDiff: "查看差异",
   viewDiffTooltip: "在差异视图中对比文件变更",
+  diffUnavailableTooltip: "该文件在此次编辑之后又有了改动，无法还原这次编辑的差异视图。+/- 描述的是这次编辑本身的规模。",
+  diffUnavailable: "已不再持有该变更的差异内容，无法打开对比视图。可改用「打开文件」，或重新加载会话。",
   openFile: "打开文件",
   openFileTooltip: "在编辑器中打开文件",
   noChanges: "本轮无文件变更",
@@ -1789,6 +1795,8 @@ export function webviewTranslations(tr: Translations) {
     locateChangeTooltip: tr.locateChangeTooltip,
     viewDiff: tr.viewDiff,
     viewDiffTooltip: tr.viewDiffTooltip,
+    diffUnavailableTooltip: tr.diffUnavailableTooltip,
+    diffUnavailable: tr.diffUnavailable,
     openFile: tr.openFile,
     openFileTooltip: tr.openFileTooltip,
     noChanges: tr.noChanges,

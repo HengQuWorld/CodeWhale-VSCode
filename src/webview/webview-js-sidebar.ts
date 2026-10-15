@@ -2556,6 +2556,14 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
     html += '<span class="change-actions">';
     if (fc.diff) {
       html += '<button class="change-btn change-view-diff" data-file-path="' + __wvEscapeHtml(fc.filePath) + '" data-diff-key="' + __wvEscapeHtml(diffKey) + '" data-change-index="' + (fc.changeIndex !== undefined ? fc.changeIndex : '') + '" title="' + __wvEscapeHtml(__i18n.viewDiffTooltip) + '">Diff</button>';
+    } else if (fc.addedLines > 0 || fc.removedLines > 0) {
+      // A change whose size is known but whose patch is not: the runtime issued
+      // no diff for it and the file has moved on since, so the recorded edit
+      // cannot be placed. The counts stay — they describe the edit itself — and
+      // the action stays too, disabled and saying why. A row showing +18 -11
+      // with no Diff at all read as a missing button rather than as a patch
+      // that could not be rebuilt.
+      html += '<button class="change-btn change-view-diff is-unavailable" aria-disabled="true" data-disabled="true" data-tooltip="' + __wvEscapeHtml(__i18n.diffUnavailableTooltip) + '">Diff</button>';
     }
     if (fc.changeType !== 'deleted') {
       html += '<button class="change-btn change-open-file" data-file-path="' + __wvEscapeHtml(fc.filePath) + '" title="' + __wvEscapeHtml(__i18n.openFileTooltip) + '">Open</button>';
@@ -2765,6 +2773,9 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
           else delete collapsedChangeTurns[String(turnIndex)];
         }
       } else if (target.classList.contains('change-view-diff')) {
+        // A disabled one is the row saying its patch could not be rebuilt, not
+        // a button waiting to be pressed.
+        if (target.getAttribute('aria-disabled') === 'true' || target.getAttribute('data-disabled') === 'true') return;
         var filePath = target.getAttribute('data-file-path');
         var diffKey = target.getAttribute('data-diff-key');
         var changeIdx = target.getAttribute('data-change-index');

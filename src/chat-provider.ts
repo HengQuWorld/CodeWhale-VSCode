@@ -45,6 +45,7 @@ import {
   type TuiMode,
 } from "./utils/modes";
 import {
+  parseDiffStats,
   parseDiffToSides,
   stripTurnMeta,
   isInternalRuntimeHandoff,
@@ -190,6 +191,27 @@ interface AttachmentRecord {
   path: string;
   name: string;
   previewUrl?: string;
+}
+
+/**
+ * One block of a saved session's message content, as the document stores it.
+ *
+ * The runtime writes these, not this client, so the shape is read defensively:
+ * an expanded `[Attached image: …]` attachment arrives as a `null` entry, and a
+ * block's `type` is whatever the runtime wrote. Fields are optional because a
+ * reader may only look at the ones its own branch needs.
+ */
+interface SessionContentBlock {
+  type: string;
+  text?: string;
+  thinking?: string;
+  id?: string;
+  name?: string;
+  input?: Record<string, unknown>;
+  tool_use_id?: string;
+  content?: string;
+  content_blocks?: Array<{ type: string; text?: string }>;
+  is_error?: boolean;
 }
 
 /**
@@ -951,7 +973,6 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     this.refreshSessionList();
     this.refreshThreadList();
     this.refreshTaskList();
-    this.refreshWorkPanel();
     this.refreshAgentRuns();
     void this.refreshFleetRuns();
     void this.refreshGoal();
@@ -973,6 +994,13 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     } else {
       this.postMessage({ type: "clearChat" });
     }
+
+    // The Work and Changes panels are published after the rebuild, for the
+    // reason `loadSessionMessages` gives at its own call site: the rebuild
+    // clears the webview's shared diff store, and a Changes row keys its Diff
+    // action into that store. Published first, every row of a reloaded webview
+    // held a key the rebuild had already dropped.
+    this.refreshWorkPanel();
 
     this.postMessage({
         type: "ready",
@@ -1867,21 +1895,27 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         };
       }
 
-      const rawMessages = session.messages as Array<{
+      // A saved document can carry a block this client cannot read. The runtime
+      // writes an expanded `[Attached image: …]` attachment's block as `null`,
+      // and every reader below walks the blocks assuming objects — so one
+      // unreadable entry used to throw "Cannot read properties of null" out of
+      // the replay and take the whole session with it: the conversation would
+      // not open at all, while the same conversation's thread, built from turn
+      // items rather than this document, opened fine.
+      //
+      // Unreadable entries are dropped once, here, rather than guarded at each
+      // of the dozen places that read a block's `type`. The text the runtime
+      // wrote around the attachment still names it, so nothing readable is
+      // lost, and a block nothing can read has nothing to render from.
+      const rawMessages = (session.messages as Array<{
         role: string;
-        content: Array<{
-          type: string;
-          text?: string;
-          thinking?: string;
-          id?: string;
-          name?: string;
-          input?: Record<string, unknown>;
-          tool_use_id?: string;
-          content?: string;
-          content_blocks?: Array<{ type: string; text?: string }>;
-          is_error?: boolean;
-        }>;
-      }>;
+        content: Array<SessionContentBlock | null>;
+      }>).map((message) => ({
+        ...message,
+        content: (Array.isArray(message.content) ? message.content : []).filter(
+          (block): block is SessionContentBlock => !!block && typeof block === "object"
+        ),
+      }));
 
     const globalToolCalls: ToolCallInfo[] = [];
     const globalToolIdMap: Map<string, number> = new Map();
@@ -2091,8 +2125,12 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       const tc = globalToolCalls[ci];
       if (tc.fileChange) this.appendFileChange(tc.fileChange, changeTurnByCallIdx[ci]);
     }
-    this.backfillSessionFileDiffs(globalToolCalls);
-    this.refreshChangesPanel();
+    // The engine's own receipt for a call it made is authoritative; the
+    // reconstruction covers whatever it leaves out (a session it does not hold,
+    // or a call whose receipt it no longer keeps). Read in that order so a
+    // derived patch never stands in for the runtime's own answer. Both run
+    // *after* the transcript is posted, below: neither is needed to read the
+    // conversation, and both can be slow.
 
     // ── Restore Work state from tool calls (checklist + strategy) ──
     // When viewing a saved session, the SSE event stream is not replaying,
@@ -2132,7 +2170,6 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         }
       }
     }
-    this.refreshWorkPanel();
 
     const msgCount = this.messages.length;
     const costUsd = session.metadata.cost?.session_cost_usd ?? 0;
@@ -2140,6 +2177,21 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     const modelStr = session.metadata.model ? ` | ${session.metadata.model}` : "";
 
     this.postMessage({ type: "loadHistory", messages: this.messages, compactMode: true });
+    // The diffs are resolved after the transcript is on screen. Their two
+    // sources — the engine's receipts for these calls, and the files on disk —
+    // are optional enrichment, and an engine that stops answering must not hold
+    // the conversation hostage while the client waits out its socket timeout.
+    // The panels are then published after that rebuild and never before it: the
+    // rebuild clears the webview's shared diff store, and every Diff action the
+    // Changes panel draws keys into that store, so panel state published first
+    // left rows holding keys whose entries the rebuild had already dropped. A
+    // Diff click then arrived with no diff and the host fell back to opening the
+    // file — Open's behaviour under a Diff label, for every session opened from
+    // the Sessions rail. The thread path publishes after its own rebuild for the
+    // same reason (see `loadThread`).
+    await this.fillSessionDiffsFromEngine(sessionId, globalToolCalls);
+    this.backfillSessionFileDiffs(globalToolCalls);
+    this.refreshWorkPanel();
     this.postMessage({
       type: "status",
       text: `Viewing: ${title.slice(0, 50)}${msgCount ? ` (${msgCount} msgs${costStr}${modelStr})` : ""}`
@@ -4918,25 +4970,26 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
           const edits = editsByCall.get(call)!;
           const patch = formatRecordedEditsAsDiff(call.fileChange!.filePath, content, edits);
           const before = patch === null ? null : reverseApplyRecordedEdits(content, edits);
-          if (patch === null || before === null) {
-            reconstructedByCall.clear();
-            break;
-          }
+          // The first link that does not verify ends the walk, because every
+          // earlier call's post-state runs through it: continuing would be
+          // guessing at what the file held then. What already verified is
+          // *kept* — those patches describe the file as the reader sees it, and
+          // dropping them took the whole file's history down with one broken
+          // link. A call left without a diff reports its size and no patch;
+          // the panel says so rather than hiding the row.
+          if (patch === null || before === null) break;
           reconstructedByCall.set(call, patch);
           content = before;
         }
       }
 
-      if (!missingCallDiff || reconstructedByCall.size === recordedEditCalls.length) {
-        for (const call of recordedEditCalls) {
-          const fileChange = call.fileChange!;
-          const diff = fileChange.diff ?? reconstructedByCall.get(call);
-          if (diff) fileChange.diff = diff;
-        }
+      for (const call of recordedEditCalls) {
+        const fileChange = call.fileChange!;
+        // A diff the runtime issued for this change is authoritative and is
+        // never replaced by a reconstruction.
+        const diff = fileChange.diff ?? reconstructedByCall.get(call);
+        if (diff) fileChange.diff = diff;
       }
-      // A diff that cannot be walked back is left absent rather than replaced
-      // by an earlier one: showing the wrong patch for a change is worse than
-      // showing none.
     }
     // Every change carries its own position in its file's history; the diff
     // reconstruction above may have filled in diffs that shift later ones.
@@ -5383,6 +5436,123 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     return this.turnFileChanges
       .filter((change) => normalizePath(change.filePath) === key && change.diff)
       .map((change) => change.diff!);
+  }
+
+  /**
+   * Fills the diffs a replayed session cannot produce from its own document
+   * with the engine's own receipts for the calls that made them.
+   *
+   * A saved session keeps no per-call diff — the runtime stores those on turn
+   * items — so the Changes panel reconstructs them from the recorded edit
+   * inputs against the file on disk (`backfillSessionFileDiffs`), which fails
+   * as soon as the file has moved on. The engine's receipts are authoritative
+   * and are exactly what the thread view draws, so a session the engine still
+   * holds as a thread is filled from them first, and the reconstruction covers
+   * only what they leave out. A session the engine cannot answer for (another
+   * workspace, a pruned conversation, a document the TUI wrote) keeps the
+   * reconstruction as its only source.
+   *
+   * Only changes that already have a row are filled: the panel's list and its
+   * turn grouping are the session's own, and reading the thread's call spans
+   * into them would add rows the transcript does not account for.
+   *
+   * A row is paired with its receipt by what the call *was* — its path and the
+   * replacements it recorded — not by an id: a replayed transcript is built
+   * from message blocks, which carry no call id, and the two documents are
+   * written by different halves of the runtime. Matching on the call's own
+   * content is the pairing both sides can always produce.
+   */
+  private async fillSessionDiffsFromEngine(
+    sessionId: string,
+    toolCalls: ToolCallInfo[]
+  ): Promise<void> {
+    // A change is identified by the call that made it: the file, and the exact
+    // replacements it recorded. Field order is fixed here rather than inherited
+    // from either document, so the same edit keys the same on both sides — and
+    // the path is resolved first, because a file tool records the path the model
+    // asked for while the engine records the one it resolved.
+    const keyFor = (input: Record<string, unknown> | undefined, filePath: string): string | undefined => {
+      const edits = extractRecordedEdits(input);
+      if (edits.length === 0) return undefined;
+      const absPath = resolveRecordedFilePath(
+        filePath,
+        this.recordedPathRoots(),
+        defaultTasksDir()
+      );
+      const body = edits.map((edit) => `${edit.oldText}\u0000${edit.newText}`).join("\u0001");
+      return `${normalizePath(absPath)}\u0002${body}`;
+    };
+
+    const pending = new Map<string, FileChangeInfo[]>();
+    for (const call of toolCalls) {
+      const change = call.fileChange;
+      if (!change || change.diff) continue;
+      const key = keyFor(call.input, change.filePath);
+      if (!key) continue;
+      const list = pending.get(key) ?? [];
+      list.push(change);
+      pending.set(key, list);
+    }
+    if (pending.size === 0) return;
+
+    let detail: ThreadDetailResponse;
+    try {
+      detail = await this.api.getThreadDetail(sessionId);
+    } catch {
+      return;
+    }
+
+    for (const item of detail.items ?? []) {
+      const metadata = item.metadata as Record<string, unknown> | null | undefined;
+      // Where the runtime put the call's arguments: a merged item keeps them in
+      // `metadata.tool_input`, an older seed-path item in `detail`.
+      const rawInput = typeof metadata?.tool_input === "string"
+        ? metadata.tool_input
+        : typeof metadata?.tool_name === "string"
+          ? item.detail
+          : undefined;
+      if (typeof rawInput !== "string") continue;
+      let input: Record<string, unknown> | undefined;
+      try {
+        const parsed = JSON.parse(rawInput);
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          input = parsed as Record<string, unknown>;
+        }
+      } catch {
+        continue;
+      }
+      if (!input) continue;
+
+      try {
+        const signal = detectFileChange({
+          toolName: typeof metadata?.tool_name === "string" ? metadata.tool_name : "",
+          input,
+          output: item.detail || "",
+          metadata,
+        });
+        if (!signal?.diff) continue;
+        const key = keyFor(input, signal.filePath);
+        const records = key ? pending.get(key) : undefined;
+        if (!records || records.length === 0) continue;
+
+        // A retry records the same replacements twice: the receipts are read in
+        // order, so the nth one answers the nth row still waiting for it.
+        const change = records.shift()!;
+        change.diff = signal.diff;
+        // The counts travel with the patch they describe, so a row's numbers and
+        // the diff it opens are read from one source — the engine's, which is
+        // also the thread view's.
+        const stats = parseDiffStats(signal.diff);
+        change.addedLines = stats.added;
+        change.removedLines = stats.removed;
+      } catch {
+        // One item this client cannot read is a change left without a patch,
+        // not a session that fails to open: the reconstruction and the panel
+        // both stand without it.
+        continue;
+      }
+    }
+    this.reindexFileChanges();
   }
 
   /** Push the recorded changes to the webview Changes panel.
@@ -7751,8 +7921,15 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       const absPath = resolveRecordedFilePath(filePath, this.recordedPathRoots(), defaultTasksDir());
 
       const diffs = this.diffsForPath(filePath);
+      // The webview sends the diff it is holding, keyed per rendered card. That
+      // store is emptied whenever the conversation is rebuilt, so a click that
+      // lands after the wipe reports no diff even though this extension still
+      // holds the change: read it back by the index the row was drawn with.
+      // Without this, Diff silently fell through to opening the file.
+      const recorded = diff
+        ?? (changeIndex !== undefined && changeIndex >= 0 ? diffs[changeIndex] : undefined);
 
-      if (diff) {
+      if (recorded) {
         this.ensureDiffProvider();
 
         let oldContent: string;
@@ -7771,12 +7948,12 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
               newContent = state.newContent;
             } else {
               // Reconstruction failed, fall back to parsing diff
-              const parsed = parseDiffToSides(diff);
+              const parsed = parseDiffToSides(recorded);
               oldContent = parsed.oldContent;
               newContent = parsed.newContent;
             }
           } catch {
-            const parsed = parseDiffToSides(diff);
+            const parsed = parseDiffToSides(recorded);
             oldContent = parsed.oldContent;
             newContent = parsed.newContent;
           }
@@ -7787,10 +7964,10 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
             const currentUri = vscode.Uri.file(absPath);
             const doc = await vscode.workspace.openTextDocument(currentUri);
             newContent = doc.getText();
-            const reconstructed = reconstructOldContent(newContent, diff);
-            oldContent = reconstructed !== null ? reconstructed : parseDiffToSides(diff).oldContent;
+            const reconstructed = reconstructOldContent(newContent, recorded);
+            oldContent = reconstructed !== null ? reconstructed : parseDiffToSides(recorded).oldContent;
           } catch {
-            const parsed = parseDiffToSides(diff);
+            const parsed = parseDiffToSides(recorded);
             oldContent = parsed.oldContent;
             newContent = parsed.newContent;
           }
@@ -7806,9 +7983,9 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         const title = `${path.basename(filePath)} (Diff)`;
         await vscode.commands.executeCommand("vscode.diff", oldUri, newUri, title);
       } else {
-        const currentUri = vscode.Uri.file(absPath);
-        const doc = await vscode.workspace.openTextDocument(currentUri);
-        await vscode.window.showTextDocument(doc);
+        // Nothing left to compare against. Opening the file here is what made
+        // the Diff action lie about what it does, so say what happened instead.
+        this.postMessage({ type: "info", message: t().diffUnavailable });
       }
     } catch (err) {
       this.postMessage({ type: "error", message: formatError("Failed to open diff", err) });

@@ -4,16 +4,123 @@
  * Extracted from chat-provider.ts for independent testing and reuse.
  */
 
+/**
+ * Splits text into diff lines: a trailing newline ends the last line rather
+ * than adding an empty one, and empty text has no lines at all.
+ *
+ * The diff writers and the stats readers both count through this, so a hunk
+ * they disagree about cannot come from two different ideas of where a line
+ * ends.
+ */
+export function toDiffLines(text: string): string[] {
+  if (text === "") return [];
+  const lines = text.split("\n");
+  if (lines.length > 1 && lines[lines.length - 1] === "") lines.pop();
+  return lines;
+}
+
+/** A run of lines two sides share, or that only one of them has. */
+export interface LineRun {
+  kind: "equal" | "delete" | "insert";
+  lines: string[];
+}
+
+/** Above this many cells the LCS table is refused and the two sides are
+ *  reported as one wholesale replacement. Recorded edits are small blocks, so
+ *  this is a guard against a pathological input, not an expected path. */
+const MAX_DIFF_CELLS = 1_000_000;
+
+export function diffLineRuns(oldLines: string[], newLines: string[]): LineRun[] {
+  const runs: LineRun[] = [];
+  const push = (kind: LineRun["kind"], lines: string[]): void => {
+    if (lines.length === 0) return;
+    // Merging keeps the result a list of runs rather than a list of lines.
+    const last = runs[runs.length - 1];
+    if (last && last.kind === kind) last.lines.push(...lines);
+    else runs.push({ kind, lines: [...lines] });
+  };
+  const pushOne = (kind: LineRun["kind"], line: string): void => push(kind, [line]);
+
+  // The common prefix and suffix are shared lines by definition, and peeling
+  // them first is what keeps the table below small: the usual shape is one
+  // small replacement inside a block that is otherwise identical.
+  let start = 0;
+  while (start < oldLines.length && start < newLines.length && oldLines[start] === newLines[start]) start += 1;
+  let endOld = oldLines.length;
+  let endNew = newLines.length;
+  while (endOld > start && endNew > start && oldLines[endOld - 1] === newLines[endNew - 1]) {
+    endOld -= 1;
+    endNew -= 1;
+  }
+
+  push("equal", oldLines.slice(0, start));
+
+  const midOld = oldLines.slice(start, endOld);
+  const midNew = newLines.slice(start, endNew);
+  if (midOld.length === 0 || midNew.length === 0) {
+    push("delete", midOld);
+    push("insert", midNew);
+  } else if (midOld.length * midNew.length > MAX_DIFF_CELLS) {
+    push("delete", midOld);
+    push("insert", midNew);
+  } else {
+    // dp[i][j]: how many lines midOld[i..] and midNew[j..] have in common.
+    const width = midNew.length + 1;
+    const dp = new Int32Array((midOld.length + 1) * width);
+    for (let i = midOld.length - 1; i >= 0; i -= 1) {
+      for (let j = midNew.length - 1; j >= 0; j -= 1) {
+        dp[i * width + j] = midOld[i] === midNew[j]
+          ? dp[(i + 1) * width + j + 1] + 1
+          : Math.max(dp[(i + 1) * width + j], dp[i * width + j + 1]);
+      }
+    }
+    let i = 0;
+    let j = 0;
+    while (i < midOld.length && j < midNew.length) {
+      if (midOld[i] === midNew[j]) {
+        pushOne("equal", midOld[i]);
+        i += 1;
+        j += 1;
+      } else if (dp[(i + 1) * width + j] >= dp[i * width + j + 1]) {
+        pushOne("delete", midOld[i]);
+        i += 1;
+      } else {
+        pushOne("insert", midNew[j]);
+        j += 1;
+      }
+    }
+    push("delete", midOld.slice(i));
+    push("insert", midNew.slice(j));
+  }
+
+  push("equal", oldLines.slice(endOld));
+  return runs;
+}
+
+/** A line that belongs to the diff's own wrapper rather than to the file's
+ *  content: the `---` / `+++` file headers and the metadata above a hunk.
+ *
+ *  The trailing space matters, and every reader of a diff uses this one
+ *  predicate for it. A removed line whose content begins with `--` — a
+ *  decrement, a SQL comment, a horizontal rule — is written `---i`, and
+ *  treating that as a header drops it from the reconstructed file. Skipping
+ *  the whole `---` prefix would do exactly that. */
+function isDiffHeaderLine(line: string): boolean {
+  return (
+    line.startsWith("--- ") ||
+    line.startsWith("+++ ") ||
+    line.startsWith("diff ") ||
+    line.startsWith("index ")
+  );
+}
+
 export function parseDiffStats(diff: string): { added: number; removed: number } {
   let added = 0;
   let removed = 0;
   for (const line of diff.split("\n")) {
-    // File headers are `--- a/...` / `+++ b/...` (git) and `--- /dev/null`
-    // (our synthesized creation diffs) — always `--- ` / `+++ ` WITH a
-    // trailing space. Matching without the space would miscount code lines
-    // whose content begins with `--` / `++` (e.g. `--i`, `++count`).
-    if (line.startsWith("+") && !line.startsWith("+++ ")) added++;
-    else if (line.startsWith("-") && !line.startsWith("--- ")) removed++;
+    if (isDiffHeaderLine(line)) continue;
+    if (line.startsWith("+")) added++;
+    else if (line.startsWith("-")) removed++;
   }
   return { added, removed };
 }
@@ -229,10 +336,17 @@ export function reverseApplyRecordedEdits(
  * when the call finished).
  *
  * Hunks carry the real line numbers of `afterContent`, so
- * `reconstructOldContent` recovers the pre-call content exactly. No context
- * lines are synthesized: the recorded input does not know them, and a wrong
- * diff is worse than no diff. Returns null when a replacement cannot be
- * located, appears more than once, or overlaps another replacement.
+ * `reconstructOldContent` recovers the pre-call content exactly. Returns null
+ * when a replacement cannot be located, appears more than once, or overlaps
+ * another replacement.
+ *
+ * A hunk spans the whole block the replacement touched, because the recorded
+ * input does not say how far the change reaches. Inside it, lines the two
+ * sides share are written as context and only the lines that actually differ
+ * carry `-` / `+`: the block is what the model quoted to anchor its edit, not
+ * what it changed, and calling every quoted line a change would report an
+ * untouched line as both removed and added. Those context lines are read off
+ * `afterContent`, never invented — a wrong diff is still worse than none.
  */
 export function formatRecordedEditsAsDiff(
   filePath: string,
@@ -250,11 +364,7 @@ export function formatRecordedEditsAsDiff(
     for (let i = 0; i < lineStarts.length && lineStarts[i] <= charIndex; i++) line += 1;
     return Math.max(0, line - 1);
   };
-  const splitBlock = (text: string): string[] => {
-    const lines = text.split("\n");
-    if (lines.length > 1 && lines[lines.length - 1] === "") lines.pop();
-    return lines;
-  };
+  const splitBlock = (text: string): string[] => toDiffLines(text);
 
   const hunks: Array<{ startLine: number; oldLines: string[]; newLines: string[] }> = [];
   for (const edit of edits) {
@@ -285,8 +395,12 @@ export function formatRecordedEditsAsDiff(
   out += `--- a/${filePath}\n+++ b/${filePath}\n`;
   for (const hunk of hunks) {
     out += `@@ -${hunk.startLine + 1},${hunk.oldLines.length} +${hunk.startLine + 1},${hunk.newLines.length} @@\n`;
-    for (const line of hunk.oldLines) out += `-${line}\n`;
-    for (const line of hunk.newLines) out += `+${line}\n`;
+    // Shared lines are context, so the hunk reports the change the edit made
+    // rather than the block it quoted around it (see this function's note).
+    for (const run of diffLineRuns(hunk.oldLines, hunk.newLines)) {
+      const prefix = run.kind === "equal" ? " " : run.kind === "delete" ? "-" : "+";
+      for (const line of run.lines) out += `${prefix}${line}\n`;
+    }
   }
   return out;
 }
@@ -366,9 +480,7 @@ export function parseDiffToSides(diff: string): { oldContent: string; newContent
       continue;
     }
     if (!inHunk) continue;
-    if (line.startsWith("---") || line.startsWith("+++") || line.startsWith("diff ") || line.startsWith("index ")) {
-      continue;
-    }
+    if (isDiffHeaderLine(line)) continue;
     if (line.startsWith("+")) {
       newLines.push(line.slice(1));
     } else if (line.startsWith("-")) {
@@ -527,9 +639,7 @@ export function reconstructOldContent(currentContent: string, diff: string): str
         lines: [],
       };
     } else if (currentHunk) {
-      if (line.startsWith("---") || line.startsWith("+++") || line.startsWith("diff ") || line.startsWith("index ")) {
-        continue;
-      }
+      if (isDiffHeaderLine(line)) continue;
       if (line.startsWith("+")) {
         currentHunk.lines.push({ type: "+", content: line.slice(1) });
       } else if (line.startsWith("-")) {

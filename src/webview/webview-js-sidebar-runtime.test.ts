@@ -1705,6 +1705,75 @@ describe("Changes panel drawn from the extension's own payload", () => {
   });
 });
 
+describe("Changes panel Diff availability", () => {
+  /** A change whose size is known but whose patch could not be rebuilt: the
+   *  runtime issued no diff for it and the file has moved on since. */
+  function unpatchableChange(overrides: Record<string, unknown> = {}) {
+    return recordedChange({
+      diff: undefined,
+      changeIndex: undefined,
+      addedLines: 4,
+      removedLines: 2,
+      turnIndex: 1,
+      ...overrides,
+    });
+  }
+
+  it("tells the reader why a change it cannot show has no patch", () => {
+    const { changesPanel, postMessages, sidebar } = createHarness();
+    sidebar.setChangesState([unpatchableChange()], [{ index: 1, label: "first" }]);
+    sidebar.renderChanges();
+
+    const items = drawnGroups(changesPanel)[0].items;
+    const [button] = diffButtons(items.innerHTML);
+    expect(button).toBeTruthy();
+    // The action is drawn, marked unavailable, and carries the reason — a row
+    // showing +4 -2 with no Diff at all read as a missing button.
+    expect(button.getAttribute("aria-disabled")).toBe("true");
+    expect(button.getAttribute("data-disabled")).toBe("true");
+    expect(button.getAttribute("data-tooltip")).toContain("changed since this edit");
+    // The counts stay: they describe the edit itself.
+    expect(items.innerHTML).toContain("+4");
+    expect(items.innerHTML).toContain("-2");
+
+    // And pressing it asks the host for nothing — there is no patch to open.
+    changeList(changesPanel).dispatch("click", { target: button });
+    expect(postMessages.filter((message) => message.type === "openDiff")).toEqual([]);
+  });
+
+  it("still offers a real Diff, and still opens it, when the patch is there", () => {
+    const { changesPanel, postMessages, sidebar } = createHarness();
+    sidebar.setChangesState([recordedChange({ diff: "diff --git a/src/a.ts", turnIndex: 1 })], [
+      { index: 1, label: "first" },
+    ]);
+    sidebar.renderChanges();
+
+    const [button] = diffButtons(drawnGroups(changesPanel)[0].items.innerHTML);
+    expect(button.getAttribute("aria-disabled")).toBeNull();
+    changeList(changesPanel).dispatch("click", { target: button });
+    expect(postMessages.filter((message) => message.type === "openDiff")).toHaveLength(1);
+  });
+
+  it("shows no Diff for a change with neither a patch nor counts to report", () => {
+    const { changesPanel, sidebar } = createHarness();
+    sidebar.setChangesState(
+      [
+        recordedChange({
+          diff: undefined,
+          changeIndex: undefined,
+          addedLines: 0,
+          removedLines: 0,
+          turnIndex: 1,
+        }),
+      ],
+      [{ index: 1, label: "first" }],
+    );
+    sidebar.renderChanges();
+
+    expect(diffButtons(drawnGroups(changesPanel)[0].items.innerHTML)).toHaveLength(0);
+  });
+});
+
 describe("Changes panel keeps every row visible", () => {
   it("falls back to the flat list when a change belongs to no published group", () => {
     const { changesPanel, sidebar } = createHarness();

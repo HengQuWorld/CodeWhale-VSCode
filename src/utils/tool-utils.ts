@@ -5,6 +5,7 @@
  */
 
 import {
+  diffLineRuns,
   extractDiffForTool,
   extractFilePathFromDiff,
   extractMutationFromMetadata,
@@ -12,6 +13,7 @@ import {
   outcomeToChangeType,
   parseDiffStats,
   shortPath,
+  toDiffLines,
   truncate,
 } from "./diff-utils";
 
@@ -222,26 +224,44 @@ function legacyChangeType(toolName: string, hasDiff: boolean): "created" | "modi
   return "modified";
 }
 
-/** Counts +/- lines for edit tools when no diff is available. */
+/** Counts +/- lines for edit tools when no diff is available.
+ *
+ * `oldText` / `newText` are the block the model quoted to anchor its edit —
+ * usually the changed lines plus a few untouched neighbours that make the
+ * match unique. Counting every quoted line would report an untouched line as
+ * both removed and added, so the two sides are diffed and only the lines that
+ * actually differ are counted: the same reading `parseDiffStats` gives an
+ * engine-issued diff, which is what keeps a replayed session's counts agreeing
+ * with the same change's counts in a live thread. */
 function countEditStats(input: Record<string, unknown>): { added: number; removed: number } {
-  const countLines = (v: unknown): number =>
-    typeof v === "string" && v.length > 0 ? v.replace(/\n$/, "").split("\n").length : 0;
+  const statsFor = (oldText: unknown, newText: unknown): { added: number; removed: number } => {
+    const runs = diffLineRuns(
+      toDiffLines(typeof oldText === "string" ? oldText : ""),
+      toDiffLines(typeof newText === "string" ? newText : ""),
+    );
+    let added = 0;
+    let removed = 0;
+    for (const run of runs) {
+      if (run.kind === "insert") added += run.lines.length;
+      else if (run.kind === "delete") removed += run.lines.length;
+    }
+    return { added, removed };
+  };
+
   if (Array.isArray(input.edits)) {
     let added = 0;
     let removed = 0;
     for (const e of input.edits) {
       if (e && typeof e === "object") {
         const edit = e as Record<string, unknown>;
-        added += countLines(edit.newText);
-        removed += countLines(edit.oldText);
+        const stats = statsFor(edit.oldText, edit.newText);
+        added += stats.added;
+        removed += stats.removed;
       }
     }
     return { added, removed };
   }
-  return {
-    added: countLines(input.replace ?? input.newText),
-    removed: countLines(input.search ?? input.oldText),
-  };
+  return statsFor(input.search ?? input.oldText, input.replace ?? input.newText);
 }
 
 export function extractToolNameFromSummary(summary: string): string {

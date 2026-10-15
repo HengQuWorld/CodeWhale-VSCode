@@ -3357,6 +3357,22 @@ export function getWebviewCss(): string {
       background: rgba(128,128,128,0.12);
       transform: scale(0.96);
     }
+    /* A row action that cannot run says so, the way a file card's does: the
+       panel draws it rather than dropping it, so a change with counts and no
+       patch reads as a stated limit instead of a missing button. */
+    .change-btn.is-unavailable,
+    .change-btn[aria-disabled="true"] {
+      border-style: dashed;
+      border-color: var(--muted);
+      opacity: 0.75;
+      cursor: not-allowed;
+    }
+    .change-btn.is-unavailable:hover,
+    .change-btn[aria-disabled="true"]:hover {
+      color: var(--muted);
+      border-color: var(--muted);
+      background: transparent;
+    }
 
     /* ── Task Detail Overlay ── */
 

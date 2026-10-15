@@ -10,6 +10,14 @@ Everything here talks to the engine's MCP routes; on an engine that predates the
 
 ### Bug Fixes
 
+- **Diff in a session opened from the Sessions rail opens a diff again** — Clicking **Diff** there opened the file instead, as if you had pressed **Open**.
+
+- **A change's +/− counts read the same in a saved session as in its thread** — The same edit used to report different numbers depending on where you read it.
+
+- **A saved session shows the diffs its thread shows** — Rows whose patch could not be rebuilt showed their size with no **Diff** next to them at all. A session the engine still holds now takes those patches from the engine's own records for the calls that made them; anything left over says why on hover instead of the button quietly going missing.
+
+- **A conversation that contains a picture opens again from the Sessions rail** — It failed with "Failed to load session" and cleared the view. The same conversation opened fine as a thread.
+
 - **A dialog no longer closes when your press slips off it** — Holding the mouse down inside one of the pop-ups (adding an MCP server, a task draft, a Fleet run, the route-change question) and releasing it after the pointer left the panel closed the dialog and threw away whatever had been typed. A click is reported against the nearest common ancestor of where the press began and where it was released, so a press that left the panel and came up over the dimmed area — a drag that slipped past the edge, a text selection pulled past the field, a release outside the window — looked exactly like a click on the backdrop. The press is checked too now, so only a gesture that both began and ended on the backdrop dismisses.
 
 - **A tool call reads the same while it runs as it does after a reload** — A row drawn live used the raw engine name, so an MCP call showed `mcp__github__search_code` as it ran and "github / search code" once the conversation came back from history — the same call, two names, on every kind of tool. Both paths use the same label now: a call reads "Run command" or "github / search code" throughout, and the MCP label spaces each part properly, so the tool half no longer reads `search_code` beside a spaced server name.

@@ -15,6 +15,8 @@ import {
   extractRecordedEdits,
   reverseApplyRecordedEdits,
   formatRecordedEditsAsDiff,
+  toDiffLines,
+  diffLineRuns,
 } from "./diff-utils";
 
 describe("parseDiffStats", () => {
@@ -904,10 +906,107 @@ describe("formatRecordedEditsAsDiff", () => {
     expect(reconstructOldContent(edited, diff!)).toBe("one\ntwo\nthree\nfour\nfive\n");
   });
 
+  it("writes the quoted-but-unchanged lines as context, so the counts match the change", () => {
+    // The block the model quoted is wider than what it changed: `two` and
+    // `four` come back unchanged. Counting every quoted line would report them
+    // as both removed and added, and a replayed session would show a bigger
+    // change than the same edit shows in a live thread.
+    const after2 = ["one", "two", "THREE", "four", "five"].join("\n") + "\n";
+    const edits = [{ oldText: "two\nthree\nfour", newText: "two\nTHREE\nfour" }];
+    const diff = formatRecordedEditsAsDiff("src/app.ts", after2, edits);
+    expect(diff).toBeTruthy();
+    expect(diff).toContain(" two");
+    expect(diff).toContain(" four");
+    expect(parseDiffStats(diff!)).toEqual({ added: 1, removed: 1 });
+    // Context lines are additive: the pre-edit content still comes back exactly.
+    expect(reconstructOldContent(after2, diff!)).toBe(
+      reverseApplyRecordedEdits(after2, edits),
+    );
+    expect(reconstructOldContent(after2, diff!)).toBe("one\ntwo\nthree\nfour\nfive\n");
+    expect(diff).toContain("-three");
+    expect(diff).toContain("+THREE");
+  });
+
+  it("still reconstructs a hunk that adds more lines than it removes", () => {
+    const after2 = ["a", "X", "Y", "b"].join("\n") + "\n";
+    const edits = [{ oldText: "a\nb", newText: "a\nX\nY\nb" }];
+    const diff = formatRecordedEditsAsDiff("src/app.ts", after2, edits);
+    expect(parseDiffStats(diff!)).toEqual({ added: 2, removed: 0 });
+    expect(reconstructOldContent(after2, diff!)).toBe("a\nb\n");
+  });
+
   it("refuses to guess when the replacement is ambiguous or absent", () => {
     expect(formatRecordedEditsAsDiff("a.ts", "x\nx\n", [{ oldText: "y", newText: "x" }])).toBeNull();
     expect(formatRecordedEditsAsDiff("a.ts", after, [{ oldText: "y", newText: "zzz" }])).toBeNull();
     expect(formatRecordedEditsAsDiff("a.ts", "ac\n", [{ oldText: "b", newText: "" }])).toBeNull();
     expect(formatRecordedEditsAsDiff("a.ts", after, [])).toBeNull();
+  });
+});
+
+describe("a removed line that starts with --", () => {
+  // `--i` in the file is `---i` on a diff line. Reading that as a file header
+  // drops the line, so the reconstructed "before" is a file that never existed.
+  const diff = ["@@ -1,2 +1,2 @@", " keep", "---i", "+++i"].join("\n");
+
+  it("survives reconstruction of the pre-edit content", () => {
+    expect(reconstructOldContent("keep\n++i", diff)).toBe("keep\n--i");
+  });
+
+  it("is counted as a removed line, not read as a header", () => {
+    expect(parseDiffStats(diff)).toEqual({ added: 1, removed: 1 });
+  });
+
+  it("still reads the file headers above the hunk as headers", () => {
+    const full = ["--- a/f.ts", "+++ b/f.ts", "@@ -1,1 +1,1 @@", "-old", "+new"].join("\n");
+    expect(parseDiffStats(full)).toEqual({ added: 1, removed: 1 });
+    expect(parseDiffToSides(full).oldContent).toBe("old");
+  });
+});
+
+describe("diffLineRuns", () => {
+  it("peels the shared head and tail and reports only the middle as changed", () => {
+    expect(diffLineRuns(["a", "b", "c", "d"], ["a", "X", "c", "d"])).toEqual([
+      { kind: "equal", lines: ["a"] },
+      { kind: "delete", lines: ["b"] },
+      { kind: "insert", lines: ["X"] },
+      { kind: "equal", lines: ["c", "d"] },
+    ]);
+  });
+
+  it("keeps a line both sides share in the middle as context", () => {
+    // The shape a model's anchor block usually has: a few untouched lines
+    // quoted around one real change.
+    const runs = diffLineRuns(["keep", "old", "keep2"], ["keep", "new", "keep2"]);
+    expect(runs.filter((r) => r.kind === "equal").flatMap((r) => r.lines)).toEqual([
+      "keep",
+      "keep2",
+    ]);
+    expect(runs.filter((r) => r.kind === "delete").flatMap((r) => r.lines)).toEqual(["old"]);
+    expect(runs.filter((r) => r.kind === "insert").flatMap((r) => r.lines)).toEqual(["new"]);
+  });
+
+  it("merges neighbouring runs of the same kind", () => {
+    const runs = diffLineRuns(["a", "b", "c"], ["c"]);
+    // One deletion of two lines, not two runs of one.
+    expect(runs.filter((r) => r.kind === "delete")).toHaveLength(1);
+    expect(runs.filter((r) => r.kind === "delete")[0].lines).toEqual(["a", "b"]);
+  });
+
+  it("reads a pure insertion and a pure deletion", () => {
+    expect(diffLineRuns([], ["a"])).toEqual([{ kind: "insert", lines: ["a"] }]);
+    expect(diffLineRuns(["a"], [])).toEqual([{ kind: "delete", lines: ["a"] }]);
+    expect(diffLineRuns([], [])).toEqual([]);
+  });
+});
+
+describe("toDiffLines", () => {
+  it("does not turn a trailing newline into an extra empty line", () => {
+    expect(toDiffLines("a\nb\n")).toEqual(["a", "b"]);
+    expect(toDiffLines("a\nb")).toEqual(["a", "b"]);
+  });
+
+  it("keeps a blank line that is really there, and gives empty text no lines", () => {
+    expect(toDiffLines("a\n\n")).toEqual(["a", ""]);
+    expect(toDiffLines("")).toEqual([]);
   });
 });

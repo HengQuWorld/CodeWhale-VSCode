@@ -144,6 +144,37 @@ describe("detectFileChange", () => {
     expect(fc?.changeType).toBe("modified");
   });
 
+  it("counts only the lines an edit changed, not the block it quoted", () => {
+    // The model anchors its edit by quoting a few untouched lines around it.
+    // Those lines are in neither the old nor the new content for a reason to
+    // do with matching, not with the change — counting them would report the
+    // same edit as a bigger one here than the engine reports for it in a live
+    // thread, which is what makes the two views disagree.
+    const fc = detectFileChange({
+      toolName: "edit",
+      input: {
+        path: "src/app.ts",
+        edits: [{ oldText: "two\nthree\nfour", newText: "two\nTHREE\nfour" }],
+      },
+      output: "Successfully replaced 1 block(s) in src/app.ts.",
+    });
+    expect(fc?.diff).toBeUndefined();
+    expect(fc?.addedLines).toBe(1);
+    expect(fc?.removedLines).toBe(1);
+  });
+
+  it("counts a block whose lines all changed in full", () => {
+    // Nothing is shared, so the whole replacement is the change — the reading
+    // the engine's own diff gives it too.
+    const fc = detectFileChange({
+      toolName: "edit",
+      input: { path: "src/app.ts", edits: [{ oldText: "a\nb", newText: "x\ny\nz" }] },
+      output: "Successfully replaced 1 block(s) in src/app.ts.",
+    });
+    expect(fc?.addedLines).toBe(3);
+    expect(fc?.removedLines).toBe(2);
+  });
+
   it("returns undefined for non-file tools without mutation metadata", () => {
     expect(
       detectFileChange({ toolName: "read", input: { path: "a.txt" }, output: "contents" }),

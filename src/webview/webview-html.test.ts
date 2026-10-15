@@ -223,6 +223,8 @@ function makeTr(): WebviewTranslations {
     fileModified: "Modified",
     viewDiff: "View Diff",
     viewDiffTooltip: "View file diff",
+    diffUnavailableTooltip: "The file has changed since this edit, so its diff could not be rebuilt.",
+    diffUnavailable: "This change's diff is no longer held, so there is nothing to compare.",
     openFile: "Open File",
     openFileTooltip: "Open file in editor",
     revertFile: "Revert",
