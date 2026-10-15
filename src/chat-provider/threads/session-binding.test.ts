@@ -15,31 +15,6 @@
  */
 import { describe, expect, it, vi } from "vitest";
 
-const vscodeMock = vi.hoisted(() => ({
-  configGet: vi.fn((_key: string, fallback?: unknown) => fallback),
-}));
-
-vi.mock("vscode", () => ({
-  workspace: {
-    getConfiguration: vi.fn(() => ({
-      get: vscodeMock.configGet,
-      update: vi.fn(async () => undefined),
-    })),
-    workspaceFolders: undefined,
-  },
-  commands: { executeCommand: vi.fn() },
-  window: {
-    showInformationMessage: vi.fn(async () => undefined),
-    showErrorMessage: vi.fn(),
-  },
-  env: { language: "en" },
-  Uri: {
-    file: (fsPath: string) => ({ fsPath }),
-    parse: (value: string) => ({ toString: () => value }),
-  },
-  ConfigurationTarget: { Global: "global" },
-}));
-
 import { ChatProvider } from "../../chat-provider";
 import type { ThreadRecord } from "../../types";
 

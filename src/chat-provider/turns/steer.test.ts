@@ -1,28 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("vscode", () => ({
-  workspace: {
-    getConfiguration: vi.fn(() => ({
-      get: (_key: string, fallback?: unknown) => fallback,
-      update: vi.fn(async () => undefined),
-    })),
-  },
-  commands: {
-    executeCommand: vi.fn(),
-  },
-  window: {},
-  env: {
-    language: "en",
-  },
-  Uri: {
-    file: (fsPath: string) => ({ fsPath }),
-    parse: (value: string) => ({ toString: () => value }),
-  },
-  ConfigurationTarget: {
-    Global: "global",
-  },
-}));
-
 import { ChatProvider } from "../../chat-provider";
 
 function createProvider() {

@@ -1,57 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const vscodeState = vi.hoisted(() => {
-  const configValues = new Map<string, unknown>([
-    ["defaultMode", "agent"],
-    // The poisoned value this test is about: one global default model, left
-    // behind by whichever provider was touched last.
-    ["defaultModel", "deepseek-flash"],
-    ["modelByProvider", {} as Record<string, string>],
-    ["reasoningEffort", "auto"],
-    ["autoApprove", false],
-  ]);
-
-  return {
-    configValues,
-    updateMock: vi.fn(async (key: string, value: unknown) => {
-      vscodeState.configValues.set(key, value);
-    }),
-    workspaceFolders: undefined as Array<{ uri: { fsPath: string } }> | undefined,
-  };
-});
-
-vi.mock("vscode", () => ({
-  workspace: {
-    getConfiguration: vi.fn(() => ({
-      get: (key: string, fallback?: unknown) =>
-        vscodeState.configValues.has(key)
-          ? vscodeState.configValues.get(key)
-          : fallback,
-      update: vscodeState.updateMock,
-    })),
-    get workspaceFolders() {
-      return vscodeState.workspaceFolders;
-    },
-  },
-  window: {
-    showWarningMessage: vi.fn(),
-    showErrorMessage: vi.fn(),
-    setStatusBarMessage: vi.fn(),
-  },
-  commands: {
-    executeCommand: vi.fn(),
-  },
-  env: {
-    language: "en",
-  },
-  Uri: {
-    file: (fsPath: string) => ({ fsPath }),
-    parse: (value: string) => ({ toString: () => value }),
-  },
-  ConfigurationTarget: {
-    Global: "global",
-  },
-}));
+import { vscodeState } from "../vscode-double";
 
 import { ChatProvider } from "../../chat-provider";
 

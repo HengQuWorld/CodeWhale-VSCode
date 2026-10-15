@@ -1,48 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const vscodeState = vi.hoisted(() => {
-  const configValues = new Map<string, unknown>([
-    ["defaultMode", "agent"],
-    ["defaultModel", "deepseek-v4-pro"],
-    ["reasoningEffort", "auto"],
-    ["autoApprove", false],
-  ]);
-
-  return {
-    configValues,
-    updateMock: vi.fn(async (key: string, value: unknown) => {
-      vscodeState.configValues.set(key, value);
-    }),
-    showWarningMessage: vi.fn(),
-  };
-});
-
-vi.mock("vscode", () => ({
-  workspace: {
-    getConfiguration: vi.fn(() => ({
-      get: (key: string, fallback?: unknown) =>
-        vscodeState.configValues.has(key)
-          ? vscodeState.configValues.get(key)
-          : fallback,
-      update: vscodeState.updateMock,
-    })),
-  },
-  window: {
-    showWarningMessage: vscodeState.showWarningMessage,
-    showErrorMessage: vi.fn(),
-    setStatusBarMessage: vi.fn(),
-  },
-  env: {
-    language: "en",
-  },
-  Uri: {
-    file: (fsPath: string) => ({ fsPath }),
-    parse: (value: string) => ({ toString: () => value }),
-  },
-  ConfigurationTarget: {
-    Global: "global",
-  },
-}));
+import { vscodeState } from "../vscode-double";
 
 import { ChatProvider } from "../../chat-provider";
 

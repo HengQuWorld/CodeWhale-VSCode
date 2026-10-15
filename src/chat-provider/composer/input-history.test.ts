@@ -8,31 +8,17 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
-vi.mock("vscode", () => ({
-  workspace: {
-    getConfiguration: vi.fn(() => ({
-      get: (_key: string, fallback?: unknown) => fallback,
-      update: vi.fn(async () => undefined),
-    })),
-    workspaceFolders: [{ uri: { fsPath: "/hist-ws" } }],
-  },
-  commands: { executeCommand: vi.fn() },
-  window: {},
-  env: { language: "en" },
-  Uri: {
-    file: (fsPath: string) => ({ fsPath }),
-    parse: (value: string) => ({ toString: () => value }),
-  },
-  ConfigurationTarget: { Global: "global" },
-}));
-
 import { ChatProvider } from "../../chat-provider";
 import { loadInputHistory } from "../../utils/input-history";
+import { vscodeState } from "../vscode-double";
 
 const realHome = process.env.HOME;
 
 beforeEach(() => {
   process.env.HOME = fs.mkdtempSync(path.join(os.tmpdir(), "chat-hist-"));
+  // The host files the history under the window's folder, and the assertions
+  // below read it back by that same path.
+  vscodeState.workspaceFolders = [{ uri: { fsPath: "/hist-ws" } }];
 });
 
 afterEach(() => {

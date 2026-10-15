@@ -1,34 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("vscode", () => ({
-  workspace: {
-    getConfiguration: vi.fn(() => ({
-      get: (_key: string, fallback?: unknown) => fallback,
-      update: vi.fn(async () => undefined),
-    })),
-    workspaceFolders: undefined,
-  },
-  commands: {
-    executeCommand: vi.fn(),
-  },
-  window: {
-    showOpenDialog: vi.fn(),
-  },
-  env: {
-    language: "en",
-  },
-  Uri: {
-    file: (fsPath: string) => ({ fsPath }),
-    parse: (value: string) => ({
-      toString: () => value,
-      fsPath: value.replace(/^file:\/\//, ""),
-    }),
-  },
-  ConfigurationTarget: {
-    Global: "global",
-  },
-}));
-
 vi.mock("fs", async (importOriginal) => {
   const actual = await importOriginal<typeof import("fs")>();
   return {

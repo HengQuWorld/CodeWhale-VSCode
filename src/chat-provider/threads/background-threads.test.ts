@@ -12,35 +12,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const vscodeMock = vi.hoisted(() => ({
-  showInformationMessage: vi.fn(
-    async (_message: string, ..._items: string[]): Promise<string | undefined> => undefined,
-  ),
-  showErrorMessage: vi.fn(),
-  configGet: vi.fn((_key: string, fallback?: unknown) => fallback),
-}));
-
-vi.mock("vscode", () => ({
-  workspace: {
-    getConfiguration: vi.fn(() => ({
-      get: vscodeMock.configGet,
-      update: vi.fn(async () => undefined),
-    })),
-    // undefined so loadThread skips the workspace-update branch
-    workspaceFolders: undefined,
-  },
-  commands: { executeCommand: vi.fn() },
-  window: {
-    showInformationMessage: vscodeMock.showInformationMessage,
-    showErrorMessage: vscodeMock.showErrorMessage,
-  },
-  env: { language: "en" },
-  Uri: {
-    file: (fsPath: string) => ({ fsPath }),
-    parse: (value: string) => ({ toString: () => value }),
-  },
-  ConfigurationTarget: { Global: "global" },
-}));
+import { vscodeState as vscodeMock } from "../vscode-double";
 
 import { ChatProvider } from "../../chat-provider";
 import type {

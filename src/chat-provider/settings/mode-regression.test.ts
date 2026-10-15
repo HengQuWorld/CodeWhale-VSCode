@@ -1,56 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const vscodeState = vi.hoisted(() => {
-  const configValues = new Map<string, unknown>([
-    ["defaultMode", "plan"],
-    ["defaultModel", "deepseek-v4-pro"],
-    ["reasoningEffort", "auto"],
-    ["autoApprove", false],
-  ]);
-
-  return {
-    configValues,
-    updateMock: vi.fn(async (key: string, value: unknown) => {
-      vscodeState.configValues.set(key, value);
-    }),
-    executeCommandMock: vi.fn(),
-    workspaceFolders: undefined as Array<{ uri: { fsPath: string } }> | undefined,
-  };
-});
-
-vi.mock("vscode", () => ({
-  workspace: {
-    getConfiguration: vi.fn(() => ({
-      get: (key: string, fallback?: unknown) =>
-        vscodeState.configValues.has(key)
-          ? vscodeState.configValues.get(key)
-          : fallback,
-      update: vscodeState.updateMock,
-    })),
-    get workspaceFolders() {
-      return vscodeState.workspaceFolders;
-    },
-  },
-  commands: {
-    executeCommand: vscodeState.executeCommandMock,
-  },
-  window: {
-    showWarningMessage: vi.fn(),
-    showErrorMessage: vi.fn(),
-    setStatusBarMessage: vi.fn(),
-    showTextDocument: vi.fn(),
-  },
-  env: {
-    language: "en",
-  },
-  Uri: {
-    file: (fsPath: string) => ({ fsPath }),
-    parse: (value: string) => ({ toString: () => value }),
-  },
-  ConfigurationTarget: {
-    Global: "global",
-  },
-}));
+import { vscodeState } from "../vscode-double";
 
 import { ChatProvider } from "../../chat-provider";
 

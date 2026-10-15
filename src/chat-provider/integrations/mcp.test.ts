@@ -1,30 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const warningMessage = vi.fn(async () => "Remove");
-
-vi.mock("vscode", () => ({
-  workspace: {
-    getConfiguration: vi.fn(() => ({
-      get: (_key: string, fallback?: unknown) => fallback,
-      update: vi.fn(async () => undefined),
-    })),
-    workspaceFolders: undefined,
-  },
-  commands: { executeCommand: vi.fn() },
-  window: {
-    showWarningMessage: (...args: unknown[]) => warningMessage(...(args as [])),
-    showErrorMessage: vi.fn(),
-    setStatusBarMessage: vi.fn(),
-  },
-  env: { language: "en" },
-  Uri: {
-    file: (fsPath: string) => ({ fsPath }),
-    parse: (value: string) => ({ toString: () => value }),
-  },
-  ConfigurationTarget: { Global: "global" },
-}));
-
 import { ChatProvider } from "../../chat-provider";
+import { vscodeState } from "../vscode-double";
 
 const SERVER = {
   name: "github",
@@ -116,6 +93,9 @@ function messagesOfType(postMessage: ReturnType<typeof vi.fn>, type: string): an
 describe("ChatProvider MCP management", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // The confirmation this panel asks before it removes a server; the answer
+    // is the user choosing to go ahead.
+    vscodeState.showWarningMessage.mockResolvedValue("Remove");
   });
 
   it("says the engine cannot do it rather than going quiet", async () => {
@@ -282,11 +262,11 @@ describe("ChatProvider MCP management", () => {
 
     await provider.removeMcpServer("github");
 
-    expect(warningMessage).toHaveBeenCalled();
+    expect(vscodeState.showWarningMessage).toHaveBeenCalled();
     // The modal's copy travels through the translation table, like the session
     // delete confirmation it is modelled on — and it names the server being
     // removed, so a mis-click cannot be mistaken for a different one.
-    const [title, options, message, button] = warningMessage.mock.calls[0] as unknown as [
+    const [title, options, message, button] = vscodeState.showWarningMessage.mock.calls[0] as unknown as [
       string,
       { modal?: boolean },
       string,
@@ -303,7 +283,7 @@ describe("ChatProvider MCP management", () => {
     const { provider, api } = createProvider();
     (provider as any).apiCapabilities.mcpServerManagement = true;
     await provider.refreshMcpServers();
-    warningMessage.mockResolvedValueOnce(undefined as any);
+    vscodeState.showWarningMessage.mockResolvedValueOnce(undefined as any);
 
     await provider.removeMcpServer("github");
 

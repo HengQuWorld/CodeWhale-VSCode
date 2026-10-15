@@ -5,10 +5,11 @@ module (webview message handling, engine event routing, thread/session
 lifecycle, settings).
 
 The module itself stays at `src/chat-provider.ts`; this directory holds only its
-tests. Every suite here imports it as `../../chat-provider`, which resolves to
-that file. **Do not add an `index.ts` here** — a directory index would silently
-change what `../../chat-provider` resolves to and shadow the module (the file
-wins today; the directory index wins only once the file is gone).
+tests and their double. Every suite here imports it as `../../chat-provider`,
+which resolves to that file. **Do not add an `index.ts` here** — a directory
+index would silently change what `../../chat-provider` resolves to and shadow
+the module (the file wins today; the directory index wins only once the file is
+gone).
 
 ## Layout
 
@@ -41,9 +42,15 @@ npx vitest run src/chat-provider/threads       # one area
 
 ## Shared setup
 
-Each suite declares its own `vi.mock("vscode", ...)` double, because `vi.mock`
-factories are hoisted per test file and cannot be hoisted out of an import.
-Those doubles are near-duplicates by necessity, not by accident; the variants
-differ in which window/workspace members each suite needs. The `createProvider()`
-harness is likewise per-file, since each suite fakes a different subset of the
-runtime API client.
+`vscode-double.ts` is the `vscode` module every suite here runs against;
+`vitest.config.ts` maps `vscode` to it. Suites do not mock `vscode` — they
+import it and get the double. The double is the union of what these suites
+need, and `vscodeState` is its mutable half: which configuration values
+`getConfiguration()` answers with, what `workspaceFolders` reports, what a
+document opened off disk contains.
+
+A suite that needs the double to behave differently from its defaults — an
+answer to a confirmation dialog, a file's bytes, a workspace folder — sets that
+on `vscodeState` in its own setup, beside the tests it affects. `createProvider()`
+stays per-file: each suite fakes a different subset of the runtime API client,
+and that harness is about the client, not the host.

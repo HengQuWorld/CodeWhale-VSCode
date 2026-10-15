@@ -1,37 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
 
-// What a diff view reads off disk when it reconstructs a change's before/after.
-const diskState = vi.hoisted(() => ({ fileText: "" }));
-
-vi.mock("vscode", () => ({
-  workspace: {
-    getConfiguration: vi.fn(() => ({
-      get: (_key: string, fallback?: unknown) => fallback,
-      update: vi.fn(async () => undefined),
-    })),
-    workspaceFolders: undefined,
-    openTextDocument: vi.fn(async () => ({ getText: () => diskState.fileText })),
-    registerTextDocumentContentProvider: vi.fn(() => ({ dispose: vi.fn() })),
-  },
-  commands: {
-    executeCommand: vi.fn(),
-  },
-  window: {
-    showTextDocument: vi.fn(async () => undefined),
-    showWarningMessage: vi.fn(async () => undefined),
-  },
-  env: {
-    language: "en",
-  },
-  Uri: {
-    file: (fsPath: string) => ({ fsPath }),
-    parse: (value: string) => ({ toString: () => value }),
-  },
-  ConfigurationTarget: {
-    Global: "global",
-  },
-}));
-
 import { ChatProvider } from "../../chat-provider";
 import { friendlyToolName } from "../../utils/tool-utils";
 

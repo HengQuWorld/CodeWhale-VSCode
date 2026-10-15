@@ -3,46 +3,8 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 
-const {
-  openTextDocumentMock,
-  showTextDocumentMock,
-  showWarningMessageMock,
-} = vi.hoisted(() => ({
-  openTextDocumentMock: vi.fn(async (input?: unknown) => ({ input })),
-  showTextDocumentMock: vi.fn(async () => undefined),
-  showWarningMessageMock: vi.fn(async () => undefined),
-}));
-
-vi.mock("vscode", () => ({
-  workspace: {
-    getConfiguration: vi.fn(() => ({
-      get: (_key: string, fallback?: unknown) => fallback,
-      update: vi.fn(async () => undefined),
-    })),
-    workspaceFolders: undefined,
-    openTextDocument: openTextDocumentMock,
-  },
-  commands: {
-    executeCommand: vi.fn(),
-  },
-  window: {
-    showErrorMessage: vi.fn(),
-    showTextDocument: showTextDocumentMock,
-    showWarningMessage: showWarningMessageMock,
-  },
-  env: {
-    language: "en",
-  },
-  Uri: {
-    file: (fsPath: string) => ({ fsPath }),
-    parse: (value: string) => ({ toString: () => value }),
-  },
-  ConfigurationTarget: {
-    Global: "global",
-  },
-}));
-
 import { ChatProvider } from "../../chat-provider";
+import { vscodeState } from "../vscode-double";
 
 function createDeferred<T>() {
   let resolve!: (value: T) => void;
@@ -444,12 +406,12 @@ describe("ChatProvider detail view routing", () => {
 
     await (provider as any).handleOpenFile("/missing/artifacts/result.txt");
 
-    expect(openTextDocumentMock).toHaveBeenCalledWith({
+    expect(vscodeState.openTextDocument).toHaveBeenCalledWith({
       content: "preview body",
       language: "markdown",
     });
-    expect(showTextDocumentMock).toHaveBeenCalled();
-    expect(showWarningMessageMock).not.toHaveBeenCalled();
+    expect(vscodeState.showTextDocument).toHaveBeenCalled();
+    expect(vscodeState.showWarningMessage).not.toHaveBeenCalled();
   });
 
   it("shows a warning instead of throwing when an artifact file is missing", async () => {
@@ -462,7 +424,7 @@ describe("ChatProvider detail view routing", () => {
 
     await (provider as any).handleOpenFile("/missing/artifacts/detail.txt");
 
-    expect(showWarningMessageMock).toHaveBeenCalledWith(
+    expect(vscodeState.showWarningMessage).toHaveBeenCalledWith(
       "Artifact file is no longer available: /missing/artifacts/detail.txt",
     );
     expect(provider.postMessage).not.toHaveBeenCalledWith(

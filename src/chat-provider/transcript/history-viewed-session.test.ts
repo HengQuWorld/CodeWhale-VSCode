@@ -1,40 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+
+import { vscodeState } from "../vscode-double";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import * as vscode from "vscode";
-
-// What a diff view reads off disk when it reconstructs a change's before/after.
-const diskState = vi.hoisted(() => ({ fileText: "" }));
-
-vi.mock("vscode", () => ({
-  workspace: {
-    getConfiguration: vi.fn(() => ({
-      get: (_key: string, fallback?: unknown) => fallback,
-      update: vi.fn(async () => undefined),
-    })),
-    workspaceFolders: undefined,
-    openTextDocument: vi.fn(async () => ({ getText: () => diskState.fileText })),
-    registerTextDocumentContentProvider: vi.fn(() => ({ dispose: vi.fn() })),
-  },
-  commands: {
-    executeCommand: vi.fn(),
-  },
-  window: {
-    showTextDocument: vi.fn(async () => undefined),
-    showWarningMessage: vi.fn(async () => undefined),
-  },
-  env: {
-    language: "en",
-  },
-  Uri: {
-    file: (fsPath: string) => ({ fsPath }),
-    parse: (value: string) => ({ toString: () => value }),
-  },
-  ConfigurationTarget: {
-    Global: "global",
-  },
-}));
 
 import { ChatProvider } from "../../chat-provider";
 import { t } from "../../i18n";
@@ -99,7 +69,7 @@ describe("a viewed session's Diff action", () => {
   async function viewed(workspace: string) {
     fs.mkdirSync(path.join(workspace, "src"), { recursive: true });
     fs.writeFileSync(path.join(workspace, "src", "app.ts"), "one\nTWO\nthree\n");
-    diskState.fileText = "one\nTWO\nthree\n";
+    vscodeState.diskFileText = "one\nTWO\nthree\n";
     (vscode.workspace as unknown as { workspaceFolders: unknown }).workspaceFolders = [
       { uri: { fsPath: workspace } },
     ];

@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { vscodeState } from "../vscode-double";
+
 /**
  * The workspace-trust banner's host half.
  *
@@ -9,36 +11,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  * A future refactor that "helps" by writing the setting locally would make two
  * sources of truth for a security decision, and these tests are what catch it.
  */
-
-const vscodeState = vi.hoisted(() => ({
-  updateMock: vi.fn(async () => undefined),
-  showInformationMessage: vi.fn(async () => undefined),
-  showWarningMessage: vi.fn(async () => undefined),
-  executeCommand: vi.fn(async () => undefined),
-  writeText: vi.fn(async () => undefined),
-}));
-
-vi.mock("vscode", () => ({
-  workspace: {
-    getConfiguration: vi.fn(() => ({
-      get: (_key: string, fallback?: unknown) => fallback,
-      update: vscodeState.updateMock,
-    })),
-  },
-  window: {
-    showInformationMessage: vscodeState.showInformationMessage,
-    showWarningMessage: vscodeState.showWarningMessage,
-    showErrorMessage: vi.fn(),
-    setStatusBarMessage: vi.fn(),
-  },
-  commands: { executeCommand: vscodeState.executeCommand },
-  env: { language: "en", clipboard: { writeText: vscodeState.writeText } },
-  ConfigurationTarget: { Global: "global" },
-  Uri: {
-    file: (fsPath: string) => ({ fsPath }),
-    parse: (value: string) => ({ toString: () => value }),
-  },
-}));
 
 import { ChatProvider } from "../../chat-provider";
 

@@ -4,29 +4,6 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-vi.mock("vscode", () => ({
-  workspace: {
-    getConfiguration: vi.fn(() => ({
-      get: (_key: string, fallback?: unknown) => fallback,
-      update: vi.fn(async () => undefined),
-    })),
-  },
-  commands: {
-    executeCommand: vi.fn(),
-  },
-  window: {},
-  env: {
-    language: "en",
-  },
-  Uri: {
-    file: (fsPath: string) => ({ fsPath }),
-    parse: (value: string) => ({ toString: () => value }),
-  },
-  ConfigurationTarget: {
-    Global: "global",
-  },
-}));
-
 import type { ThreadRecord } from "../../types";
 import { ChatProvider } from "../../chat-provider";
 import type { FileChangeInfo } from "../../utils/session-state";
