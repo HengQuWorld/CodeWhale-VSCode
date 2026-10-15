@@ -36,10 +36,10 @@ vi.mock("vscode", () => ({
   },
 }));
 
-import { ChatProvider } from "./chat-provider";
-import { t } from "./i18n";
-import { reconstructOldContent, reconstructOriginalContent } from "./utils/diff-utils";
-import { friendlyToolName } from "./utils/tool-utils";
+import { ChatProvider } from "../../chat-provider";
+import { t } from "../../i18n";
+import { reconstructOldContent, reconstructOriginalContent } from "../../utils/diff-utils";
+import { friendlyToolName } from "../../utils/tool-utils";
 
 function createProvider(detail: Record<string, unknown>) {
   const api = {

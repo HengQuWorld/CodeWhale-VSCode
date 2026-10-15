@@ -42,8 +42,8 @@ vi.mock("vscode", () => ({
   ConfigurationTarget: { Global: "global" },
 }));
 
-import { ChatProvider } from "./chat-provider";
-import type { ThreadRecord, ThreadSummary } from "./types";
+import { ChatProvider } from "../../chat-provider";
+import type { ThreadRecord, ThreadSummary } from "../../types";
 
 function makeSummary(id: string, overrides: Partial<ThreadSummary> = {}): ThreadSummary {
   return {

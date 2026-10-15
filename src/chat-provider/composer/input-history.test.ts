@@ -26,8 +26,8 @@ vi.mock("vscode", () => ({
   ConfigurationTarget: { Global: "global" },
 }));
 
-import { ChatProvider } from "./chat-provider";
-import { loadInputHistory } from "./utils/input-history";
+import { ChatProvider } from "../../chat-provider";
+import { loadInputHistory } from "../../utils/input-history";
 
 const realHome = process.env.HOME;
 

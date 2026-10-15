@@ -44,7 +44,7 @@ import { readFileSync, statSync, writeFileSync } from "fs";
 import * as os from "os";
 import * as path from "path";
 import { commands, window } from "vscode";
-import { ChatProvider } from "./chat-provider";
+import { ChatProvider } from "../../chat-provider";
 
 const executeCommand = vi.mocked(commands.executeCommand);
 

@@ -24,7 +24,7 @@ vi.mock("vscode", () => ({
   },
 }));
 
-import { ChatProvider } from "./chat-provider";
+import { ChatProvider } from "../../chat-provider";
 
 function turn(id: string, status: string, mode = "agent") {
   return {

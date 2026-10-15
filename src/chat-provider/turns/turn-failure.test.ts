@@ -32,8 +32,8 @@ vi.mock("vscode", () => ({
   ConfigurationTarget: { Global: "global" },
 }));
 
-import { ChatProvider } from "./chat-provider";
-import { t } from "./i18n";
+import { ChatProvider } from "../../chat-provider";
+import { t } from "../../i18n";
 
 /** Everything turn.completed does after the banner, so the test watches the
  *  report rather than the bookkeeping around it. */

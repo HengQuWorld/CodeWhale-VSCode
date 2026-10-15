@@ -24,7 +24,7 @@ vi.mock("vscode", () => ({
   },
 }));
 
-import { ChatProvider } from "./chat-provider";
+import { ChatProvider } from "../../chat-provider";
 
 const SKILL_BODY = "Reproduce the bug before changing anything.";
 

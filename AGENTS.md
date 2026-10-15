@@ -39,7 +39,7 @@ npm run package
 npm test
 ```
 - 使用 vitest 运行单元测试
-- 测试文件位于 `src/*.test.ts`
+- 测试文件位于 `src/**/*.test.ts`；`chat-provider` 的 25 个测试文件在 `src/chat-provider/` 下按领域分组（threads / turns / transcript / composer / settings / integrations），规则见该目录的 `README.md`
 
 ## 插件打包与安装
 
@@ -80,6 +80,7 @@ DeepSeek-GUI/
 ├── src/
 │   ├── extension.ts          # 扩展入口点
 │   ├── chat-provider.ts      # 主聊天界面逻辑（业务编排）
+│   ├── chat-provider/        # ↑ 的测试套件，按领域分组（见目录内 README.md）
 │   ├── config-panel.ts       # 配置面板
 │   ├── i18n.ts               # 国际化支持（en/zh/tr 三语映射）
 │   ├── types.ts              # 共享类型定义
@@ -251,7 +252,7 @@ threadsPanel.classList.remove('open');
 - 提示音只播**扩展自己带的那个文件**：路径必须来自**绝对**扩展目录，且 `media/completion-chime.wav` **确实存在**，两条缺一即静默（`utils/completion-sound.ts` 的 `bundledCuePath`）。相对路径、或不存在的文件，一律不播——播放器拿相对路径去问"当前工作目录"，那不是我们能担保的对象。
 - 空路径不做兜底：`playCompletionCue()` 在没有 `extensionUri.fsPath` 时直接返回，不传 `""`。
 - 写测试时：
-  - 验证"某一轮会响"→ 把 `./utils/completion-sound` mock 掉（见 `chat-provider-completion-sound.test.ts`），只测接线，不碰播放器。
+  - 验证"某一轮会响"→ 把 `./utils/completion-sound` mock 掉（见 `src/chat-provider/turns/completion-sound.test.ts`），只测接线，不碰播放器。
   - 验证播放本身（设置开关、间隔下限、播放器选择）→ 用 `completion-sound.test.ts` 的注入宿主：时钟 / 平台 / PATH 查找全部注入，需要真文件就建临时扩展目录。
   - 别给 `ChatProvider` 传真实扩展目录，除非你真的想让这次测试发声。
 

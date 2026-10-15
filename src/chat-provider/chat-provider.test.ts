@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { shouldRefreshTaskList, TASK_REFRESH_TOOL_NAMES } from "./utils/tool-utils";
+import { shouldRefreshTaskList, TASK_REFRESH_TOOL_NAMES } from "../utils/tool-utils";
 
 // Note: Cost calculation, diff-utils, and tool-utils tests have been moved to
 // their dedicated test files. This file only contains chat-provider-specific

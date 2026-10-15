@@ -53,7 +53,7 @@ vi.mock("vscode", () => ({
   },
 }));
 
-import { ChatProvider } from "./chat-provider";
+import { ChatProvider } from "../../chat-provider";
 
 /** The catalog the Runtime publishes for this machine: the DeepSeek vendor
  *  route, the legacy Anthropic dialect route (no key), and the user's Zhipu

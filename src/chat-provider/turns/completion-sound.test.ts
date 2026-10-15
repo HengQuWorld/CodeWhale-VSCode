@@ -28,12 +28,12 @@ vi.mock("vscode", () => ({
   ConfigurationTarget: { Global: "global" },
 }));
 
-vi.mock("./utils/completion-sound", () => ({
+vi.mock("../../utils/completion-sound", () => ({
   playCompletionSound: vi.fn(() => true),
 }));
 
-import { ChatProvider } from "./chat-provider";
-import { playCompletionSound } from "./utils/completion-sound";
+import { ChatProvider } from "../../chat-provider";
+import { playCompletionSound } from "../../utils/completion-sound";
 
 const cue = playCompletionSound as unknown as ReturnType<typeof vi.fn>;
 const EXTENSION_PATH = "/ext";

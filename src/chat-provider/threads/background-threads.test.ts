@@ -42,7 +42,7 @@ vi.mock("vscode", () => ({
   ConfigurationTarget: { Global: "global" },
 }));
 
-import { ChatProvider } from "./chat-provider";
+import { ChatProvider } from "../../chat-provider";
 import type {
   PendingUserInputRequest,
   RuntimeEvent,
@@ -50,7 +50,7 @@ import type {
   ThreadGoal,
   ThreadRecord,
   ThreadSummary,
-} from "./types";
+} from "../../types";
 
 function makeThread(id: string, overrides: Partial<ThreadRecord> = {}): ThreadRecord {
   return {

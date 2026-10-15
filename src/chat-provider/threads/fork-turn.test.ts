@@ -23,8 +23,8 @@ vi.mock("vscode", () => ({
   },
 }));
 
-import type { ThreadRecord } from "./types";
-import { ChatProvider } from "./chat-provider";
+import type { ThreadRecord } from "../../types";
+import { ChatProvider } from "../../chat-provider";
 
 function createProvider() {
   const thread = { id: "thread-1", model: "deepseek-v4-pro", mode: "agent" };

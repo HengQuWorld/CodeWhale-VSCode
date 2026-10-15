@@ -24,8 +24,8 @@ vi.mock("vscode", () => ({
   },
 }));
 
-import { ChatProvider } from "./chat-provider";
-import { t } from "./i18n";
+import { ChatProvider } from "../../chat-provider";
+import { t } from "../../i18n";
 
 /** The manual-compaction turn the stubbed engine accepts. */
 const COMPACT_TURN_ID = "turn_compact";

@@ -24,7 +24,7 @@ vi.mock("vscode", () => ({
   ConfigurationTarget: { Global: "global" },
 }));
 
-import { ChatProvider } from "./chat-provider";
+import { ChatProvider } from "../../chat-provider";
 
 const SERVER = {
   name: "github",

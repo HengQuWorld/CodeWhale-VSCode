@@ -40,7 +40,7 @@ vi.mock("vscode", () => ({
   },
 }));
 
-import { ChatProvider } from "./chat-provider";
+import { ChatProvider } from "../../chat-provider";
 
 function makeApi(overrides: Record<string, unknown> = {}) {
   return {

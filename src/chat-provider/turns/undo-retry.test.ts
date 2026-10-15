@@ -27,9 +27,9 @@ vi.mock("vscode", () => ({
   },
 }));
 
-import type { ThreadRecord } from "./types";
-import { ChatProvider } from "./chat-provider";
-import type { FileChangeInfo } from "./utils/session-state";
+import type { ThreadRecord } from "../../types";
+import { ChatProvider } from "../../chat-provider";
+import type { FileChangeInfo } from "../../utils/session-state";
 
 function createProvider() {
   const api = {

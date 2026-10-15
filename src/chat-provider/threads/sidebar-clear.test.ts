@@ -25,8 +25,8 @@ vi.mock("vscode", () => ({
   },
 }));
 
-import { ChatProvider } from "./chat-provider";
-import type { ThreadRecord } from "./types";
+import { ChatProvider } from "../../chat-provider";
+import type { ThreadRecord } from "../../types";
 
 function makeThread(id: string): ThreadRecord {
   return {

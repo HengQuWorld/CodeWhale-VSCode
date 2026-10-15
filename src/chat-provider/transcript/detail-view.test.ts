@@ -42,7 +42,7 @@ vi.mock("vscode", () => ({
   },
 }));
 
-import { ChatProvider } from "./chat-provider";
+import { ChatProvider } from "../../chat-provider";
 
 function createDeferred<T>() {
   let resolve!: (value: T) => void;

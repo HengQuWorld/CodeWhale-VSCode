@@ -44,7 +44,7 @@ vi.mock("vscode", () => ({
   },
 }));
 
-import { ChatProvider } from "./chat-provider";
+import { ChatProvider } from "../../chat-provider";
 
 describe("ChatProvider provider switch", () => {
   beforeEach(() => {

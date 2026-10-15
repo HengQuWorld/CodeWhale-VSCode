@@ -31,8 +31,8 @@ vi.mock("vscode", () => ({
   ConfigurationTarget: { Global: "global" },
 }));
 
-import { ChatProvider } from "./chat-provider";
-import type { RuntimeEvent, ThreadRecord, TurnItemRecord, TurnRecord } from "./types";
+import { ChatProvider } from "../../chat-provider";
+import type { RuntimeEvent, ThreadRecord, TurnItemRecord, TurnRecord } from "../../types";
 
 function makeThread(id: string): ThreadRecord {
   return {

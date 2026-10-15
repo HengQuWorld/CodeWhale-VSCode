@@ -24,7 +24,7 @@ vi.mock("vscode", () => ({
   },
 }));
 
-import { ChatProvider } from "./chat-provider";
+import { ChatProvider } from "../../chat-provider";
 
 /** The engine's refusal verbatim: runtime_threads.rs `start_turn` bails with
  *  "Thread already has an active turn" and `map_thread_err` answers 409. */
