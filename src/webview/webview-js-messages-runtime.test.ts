@@ -216,10 +216,11 @@ function createHarness(options: { frames?: Array<() => void> } = {}) {
     return element;
   };
 
+  const postMessages: Array<Record<string, unknown>> = [];
   const windowObj: Record<string, any> = {
     __wvI18n: makeTr(),
     __wvEscapeHtml: (value: unknown) => String(value ?? ""),
-    __wvVscode: { postMessage: () => {} },
+    __wvVscode: { postMessage: (msg: Record<string, unknown>) => postMessages.push(msg) },
     __wvDiffStore: new Map<string, string>(),
     __wvDiffIdCounter: { value: 0 },
     __wvApiCapabilities: {},
@@ -272,7 +273,7 @@ function createHarness(options: { frames?: Array<() => void> } = {}) {
     return card;
   };
 
-  return { messages, messagesEl, addCard, getEl, window: windowObj };
+  return { messages, messagesEl, addCard, getEl, window: windowObj, postMessages };
 }
 
 describe("revealFileChangeCard", () => {
@@ -913,5 +914,137 @@ describe("message navigation rail", () => {
     harness.messages.updateNavDots();
 
     expect(rail.children).toHaveLength(0);
+  });
+});
+
+/**
+ * The card actions in the conversation: Diff, Open, Revert.
+ *
+ * These are the buttons a change card carries in the stream, and they are
+ * routed by one delegated click listener on the conversation element. That
+ * listener is the only place the routing exists — an earlier panel's own copies
+ * of the Diff and Open branches were left behind for months after their
+ * renderer was deleted, unreachable and unexercised — so the survivors are
+ * pinned here, against buttons read back out of the markup the module actually
+ * renders.
+ */
+describe("change-card actions", () => {
+  /** The buttons `renderFileChangeCard` wrote, class by class. Read out of the
+   *  markup rather than hand-built: a renderer that stops emitting an attribute
+   *  must fail here, because the click handler reads exactly those attributes. */
+  function buttonsIn(renderedHtml: string, className: string): FakeElement[] {
+    const tags = renderedHtml.match(new RegExp(`<button[^>]*${className}[^>]*>`, "g")) ?? [];
+    return tags.map((tag) => {
+      const button = new FakeElement();
+      button.className = className;
+      for (const [, name, value] of tag.matchAll(/([\w-]+)="([^"]*)"/g)) {
+        button.setAttribute(name, value);
+      }
+      return button;
+    });
+  }
+
+  const change = {
+    filePath: "src/a.ts",
+    changeType: "modified" as const,
+    addedLines: 1,
+    removedLines: 1,
+    diff: "--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1 +1 @@\n-old\n+new\n",
+    changeIndex: 3,
+    callId: "call-7",
+    toolName: "edit",
+  };
+
+  it("opens the diff the card is holding, keyed by the card's own key", () => {
+    const harness = createHarness();
+    const html = harness.messages.renderFileChangeCard(change);
+    const [button] = buttonsIn(html, "fc-view-diff");
+    expect(button).toBeTruthy();
+
+    harness.messagesEl.dispatch("click", { target: button });
+
+    const opened = harness.postMessages.filter((message) => message.type === "openDiff");
+    expect(opened).toHaveLength(1);
+    expect(opened[0]).toMatchObject({ filePath: "src/a.ts", changeIndex: 3 });
+    // The patch travels from the card's own key in the shared store. A card
+    // that minted a key nothing wrote would arrive as a bare path, and the host
+    // could only open the file — the failure this routing exists to avoid.
+    expect(opened[0].diff).toBe(change.diff);
+  });
+
+  it("leaves the diff store holding one entry per card, however often it draws", () => {
+    const harness = createHarness();
+    const store = harness.window.__wvDiffStore as Map<string, string>;
+    harness.messages.renderFileChangeCard(change);
+    harness.messages.renderFileChangeCard(change);
+    // Keys are minted per draw, so two draws are two entries — the point is
+    // that each card reads back its own patch, not that the map is small.
+    expect(store.size).toBe(2);
+    const second = buttonsIn(harness.messages.renderFileChangeCard(change), "fc-view-diff")[0];
+    harness.messagesEl.dispatch("click", { target: second });
+    const opened = harness.postMessages.filter((message) => message.type === "openDiff");
+    expect(opened[0].diff).toBe(change.diff);
+  });
+
+  it("opens the file itself from Open, and asks for no diff", () => {
+    const harness = createHarness();
+    const [button] = buttonsIn(harness.messages.renderFileChangeCard(change), "fc-open-file");
+    expect(button).toBeTruthy();
+
+    harness.messagesEl.dispatch("click", { target: button });
+
+    expect(harness.postMessages.filter((message) => message.type === "openFile")).toEqual([
+      { type: "openFile", filePath: "src/a.ts" },
+    ]);
+    expect(harness.postMessages.filter((message) => message.type === "openDiff")).toEqual([]);
+  });
+
+  it("reverts the change the card names, not merely the file", () => {
+    const harness = createHarness();
+    // Revert is offered only where the engine supports it, so the card draws
+    // the live button — which is the one whose routing this asserts.
+    harness.window.__wvApiCapabilities.revertFileChange = true;
+    const [button] = buttonsIn(harness.messages.renderFileChangeCard(change), "fc-revert");
+    expect(button).toBeTruthy();
+    expect(button.getAttribute("aria-disabled")).toBeNull();
+
+    harness.messagesEl.dispatch("click", { target: button });
+
+    const reverted = harness.postMessages.filter((message) => message.type === "revertFileChange");
+    expect(reverted).toHaveLength(1);
+    // One file can change several times: the call id is what keeps a revert on
+    // the change the reader is looking at.
+    expect(reverted[0]).toMatchObject({
+      filePath: "src/a.ts",
+      changeType: "modified",
+      callId: "call-7",
+    });
+    expect(reverted[0].diff).toBe(change.diff);
+  });
+
+  it("asks for nothing when the engine offers no single-file revert", () => {
+    const harness = createHarness();
+    // Capability off: the card still shows Revert, marked unavailable, and a
+    // press on it must reach no host call at all.
+    const [button] = buttonsIn(harness.messages.renderFileChangeCard(change), "fc-revert");
+    expect(button).toBeTruthy();
+    expect(button.getAttribute("aria-disabled")).toBe("true");
+
+    harness.messagesEl.dispatch("click", { target: button });
+
+    expect(harness.postMessages).toEqual([]);
+  });
+
+  it("does nothing for a click on a class no card carries", () => {
+    // The shape the deleted `work-fc-*` branches used to answer: a click on
+    // something that is not a card action must post nothing at all.
+    const harness = createHarness();
+    const stray = new FakeElement();
+    stray.className = "work-fc-view-diff";
+    stray.setAttribute("data-file-path", "src/a.ts");
+
+    harness.messagesEl.dispatch("click", { target: stray });
+
+    expect(harness.postMessages).toEqual([]);
   });
 });

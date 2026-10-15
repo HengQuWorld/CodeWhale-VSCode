@@ -888,24 +888,6 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
       return;
     }
 
-    if (target.classList.contains('work-fc-view-diff')) {
-      var filePath = target.getAttribute('data-file-path');
-      var diffKey = target.getAttribute('data-diff-key');
-      var changeIdx = target.getAttribute('data-change-index');
-      if (filePath) {
-        vscode.postMessage({ type: 'openDiff', filePath: filePath, diff: (diffKey ? _diffStore.get(diffKey) : undefined) || undefined, changeIndex: changeIdx !== null && changeIdx !== '' ? parseInt(changeIdx) : undefined });
-      }
-      return;
-    }
-
-    if (target.classList.contains('work-fc-open-file')) {
-      var filePath = target.getAttribute('data-file-path');
-      if (filePath) {
-        vscode.postMessage({ type: 'openFile', filePath: filePath });
-      }
-      return;
-    }
-
     // Branch the conversation at this turn: a live thread's bubble carries
     // the turn id the engine resolves, so the click never guesses a position.
     if (target.classList.contains('turn-fork-btn')) {
