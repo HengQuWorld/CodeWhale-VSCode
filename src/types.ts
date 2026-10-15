@@ -211,6 +211,145 @@ export interface ClearMemoryResponse {
   cleared: boolean;
 }
 
+// ── Context Lens (`/v1/memory/lens`)
+//
+// A different view of the same store as `MemoryEntryRecord`. The flat listing
+// above is filtered to live memory on the engine side, so a `candidate` is not
+// visible there at all; the Lens is the only read that shows one, and the only
+// one that reports whether the caller may review it. Field names mirror the
+// TUI's `LensEntry` / `LensSnapshot` (crates/memory/src/lens.rs).
+
+/** The four lifecycle states an entry can be reviewed out of, in the engine's
+ *  own vocabulary. `candidate` is not in context and not yet a fact the model
+ *  is given: it is the model's proposal, or a note that has not been reviewed. */
+export type MemoryLensStatus =
+  | "candidate"
+  | "active"
+  | "stale"
+  | "superseded"
+  | "rejected";
+
+/** Which scope a memory belongs to. Global entries are the tenant/user pair;
+ *  workspace entries add the id derived from the repo's git origin, which is
+ *  what keeps one repo's notes out of another repo's prompt. */
+export interface MemoryScopeDescriptor {
+  tenant: string;
+  user: string;
+  workspace?: string;
+  branch?: string;
+  session?: string;
+  agent?: string;
+}
+
+export interface MemoryEvidence {
+  kind: string;
+  uri: string;
+  locator: string;
+  sha256: string | null;
+  observed_at: number;
+}
+
+export interface MemoryLensDraft {
+  scope: MemoryScopeDescriptor;
+  kind: string;
+  title: string;
+  body: string;
+  key: string | null;
+  tags: string[];
+  confidence: number;
+  importance: number;
+  evidence: MemoryEvidence[];
+  repository_revision: string | null;
+  dependencies: Record<string, unknown>;
+  expires_at: number | null;
+  valid_from: number | null;
+  valid_until: number | null;
+  parent_ids: string[];
+}
+
+export interface MemoryLensPreferences {
+  revision: number;
+  /** Pinned entries keep their place in the context budget. */
+  pinned: boolean;
+  /** Suppressed entries stay in the store but are never injected. */
+  suppressed: boolean;
+}
+
+export interface MemoryLensEntry {
+  memory: {
+    /** A UUID, unlike `MemoryEntryRecord.id`, which is the listing's row
+     *  number. The two are not interchangeable. */
+    id: string;
+    revision: number;
+    status: MemoryLensStatus;
+    draft: MemoryLensDraft;
+    created_at: number;
+    updated_at: number;
+    content_hash: string;
+  };
+  /** Why this entry is or is not in context right now. */
+  freshness: string;
+  preferences: MemoryLensPreferences;
+  in_contexts: string[];
+}
+
+/** The engine's record of one assembled context packet. `appended_at` and
+ *  `dispatched_at` are separate because a prepared packet is not proof of
+ *  delivery: only the engine can acknowledge its own transport. */
+export interface MemoryContextReceipt {
+  id: string;
+  trace_id: string;
+  stage: string;
+  packet_hash: string;
+  created_at: number;
+  appended_at: number | null;
+  dispatched_at: number | null;
+  used_units: number;
+  unit: string;
+  omitted: number;
+  selected: Array<{ id: string; revision: number }>;
+  /** Knowledge discovered later cannot rewrite what a previous request
+   *  already contained. */
+  invalidated_ids: string[];
+}
+
+export interface MemoryLensSnapshot {
+  schema: string;
+  entries: MemoryLensEntry[];
+  next_after: string | null;
+  contexts: MemoryContextReceipt[];
+  as_of: number;
+  /** The operator controls the bound request actually holds. A client shows
+   *  or hides the review buttons from these rather than from an assumption
+   *  about who is calling. */
+  can_review: boolean;
+  can_forget: boolean;
+  can_dispatch: boolean;
+}
+
+/** One Lens mutation. `revision` is the revision the caller read: the engine
+ *  refuses a write against an entry that moved on. */
+export type MemoryLensAction =
+  | { action: "approve"; id: string; revision: number }
+  | { action: "reject"; id: string; revision: number }
+  | { action: "forget"; id: string; revision: number }
+  | {
+      action: "preferences";
+      id: string;
+      revision: number;
+      pinned: boolean;
+      suppressed: boolean;
+    };
+
+export interface MemoryLensActionResponse {
+  ok: boolean;
+  refresh_required: boolean;
+  /** The engine's standing caveat, carried on every Lens mutation: approving
+   *  or forgetting changes what later turns are given, never what a model
+   *  already received. */
+  already_sent_context_cannot_be_retracted: boolean;
+}
+
 
 export interface ThreadDetailResponse {
   thread: ThreadRecord;

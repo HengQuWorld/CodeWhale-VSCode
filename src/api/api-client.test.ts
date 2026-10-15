@@ -457,6 +457,42 @@ function mockHttpRequest(statusCode: number, responseData: string) {
   );
 }
 
+/** The same mock, with the request body kept.
+ *
+ *  A POST whose contract is its body needs to assert the bytes that went out:
+ *  the mock above answers with a canned response whatever it is handed, so a
+ *  wrong wrapper or field name would pass unnoticed. */
+function mockHttpRequestCapturingBody(
+  statusCode: number,
+  responseData: string,
+  bodies: string[]
+) {
+  (http.request as any).mockImplementation(
+    (_url: unknown, _opts: unknown, callback: (res: { statusCode: number; on: (evt: string, fn: (chunk?: Buffer) => void) => void }) => void) => {
+      const res = {
+        statusCode,
+        on(evt: string, fn: (chunk?: Buffer) => void) {
+          if (evt === "data") {
+            fn(Buffer.from(responseData));
+          } else if (evt === "end") {
+            fn();
+          }
+        },
+      };
+      callback(res);
+      const req = {
+        on: () => req,
+        setTimeout: () => req,
+        write: (payload: string) => {
+          bodies.push(payload);
+        },
+        end: () => {},
+      };
+      return req;
+    }
+  );
+}
+
 describe("CodeWhaleApiClient - Constructor and configuration", () => {
   it("creates client with baseUrl", () => {
     const client = new CodeWhaleApiClient("http://localhost:54321");
@@ -795,6 +831,102 @@ describe("CodeWhaleApiClient - HTTP methods with mocked server", () => {
     mockHttpRequest(200, "plain text");
     const result = await client.health();
     expect(result).toBe("plain text");
+  });
+});
+
+// ── Context Lens ──
+//
+// The Lens is a separate route family from the flat `/v1/memory` listing, and
+// the review actions carry the entry's revision so the engine can refuse a
+// write against an entry that moved on. These assert the wire, because a
+// mismatch in path, wrapper or field name is not something a type can catch.
+
+describe("CodeWhaleApiClient - Context Lens", () => {
+  let client: CodeWhaleApiClient;
+
+  beforeEach(() => {
+    client = new CodeWhaleApiClient("http://localhost:54321", "sk-test");
+    vi.clearAllMocks();
+  });
+
+  it("getMemoryLens() reads the lens route and returns the snapshot", async () => {
+    const response = {
+      schema: "codewhale.memory.lens/v1",
+      entries: [
+        {
+          memory: {
+            id: "ede5ced5-ff3c-4d74-86eb-eb3ea97279d8",
+            revision: 1,
+            status: "candidate",
+            draft: { title: "diff is shadowed", body: "diff is shadowed" },
+          },
+          freshness: "inactive",
+          preferences: { revision: 0, pinned: false, suppressed: false },
+          in_contexts: [],
+        },
+      ],
+      next_after: null,
+      contexts: [],
+      as_of: 0,
+      can_review: true,
+      can_forget: true,
+      can_dispatch: true,
+    };
+    mockHttpRequest(200, JSON.stringify(response));
+
+    const result = await client.getMemoryLens();
+
+    const requestUrl = vi.mocked(http.request).mock.calls.at(-1)?.[0] as URL;
+    expect(requestUrl.pathname).toBe("/v1/memory/lens");
+    expect(result.entries[0].memory.status).toBe("candidate");
+    expect(result.can_review).toBe(true);
+  });
+
+  it("getMemoryLens() passes thread, cursor and limit", async () => {
+    mockHttpRequest(200, JSON.stringify({ schema: "", entries: [], contexts: [] }));
+
+    await client.getMemoryLens({ threadId: "thread-1", after: "abc", limit: 25 });
+
+    const requestUrl = vi.mocked(http.request).mock.calls.at(-1)?.[0] as URL;
+    expect(requestUrl.pathname).toBe("/v1/memory/lens");
+    expect(requestUrl.searchParams.get("thread_id")).toBe("thread-1");
+    expect(requestUrl.searchParams.get("after")).toBe("abc");
+    expect(requestUrl.searchParams.get("limit")).toBe("25");
+  });
+
+  it("memoryLensAction() posts the command under its wrapper key", async () => {
+    const bodies: string[] = [];
+    mockHttpRequestCapturingBody(
+      200,
+      JSON.stringify({ ok: true, refresh_required: true, already_sent_context_cannot_be_retracted: true }),
+      bodies
+    );
+
+    const result = await client.memoryLensAction({
+      action: "approve",
+      id: "ede5ced5-ff3c-4d74-86eb-eb3ea97279d8",
+      revision: 3,
+    });
+
+    const requestUrl = vi.mocked(http.request).mock.calls.at(-1)?.[0] as URL;
+    expect(requestUrl.pathname).toBe("/v1/memory/lens/actions");
+    // The engine denies unknown fields and expects the command nested, so the
+    // exact wrapper is the contract rather than a detail.
+    expect(JSON.parse(bodies.at(-1) as string)).toEqual({
+      command: { action: "approve", id: "ede5ced5-ff3c-4d74-86eb-eb3ea97279d8", revision: 3 },
+    });
+    expect(result.already_sent_context_cannot_be_retracted).toBe(true);
+  });
+
+  it("memoryLensAction() reports a refusal as an error the caller can read", async () => {
+    mockHttpRequest(
+      409,
+      JSON.stringify({ error: { message: "Revision conflict", status: 409 } })
+    );
+
+    await expect(
+      client.memoryLensAction({ action: "approve", id: "x", revision: 1 })
+    ).rejects.toThrow("API error 409: Revision conflict");
   });
 });
 

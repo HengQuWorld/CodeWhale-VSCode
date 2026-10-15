@@ -28,7 +28,7 @@ import {
   type TuiMode,
 } from "../utils/modes";
 import { formatError, getErrorMessage } from "../utils/error-handler";
-import type { CodeWhaleApiClient, CodeWhaleEngine, ThreadRecord, TaskSummary, ProviderEntry, SkillEntry } from "../types";
+import type { CodeWhaleApiClient, CodeWhaleEngine, ThreadRecord, TaskSummary, ProviderEntry, SkillEntry, MemoryLensAction, MemoryLensEntry, MemoryLensSnapshot } from "../types";
 
 // ── Context interface for dependency injection ──
 
@@ -1883,17 +1883,154 @@ async function handleNote(ctx: SlashCommandContext, args: string): Promise<void>
   }
 }
 
-const MEMORY_USAGE = "Usage: /memory [show|search <query>|get <id>|remember [global|workspace] <note>|clear [all|global|workspace]]";
+const MEMORY_USAGE = "Usage: /memory [show|pending|search <query>|get <id>|remember [global|workspace] <note>|approve <id>|reject <id>|forget <id>|clear [all|global|workspace]]";
 
 function formatMemoryEntryLine(entry: { id: number; scope: string; stale: boolean; summary: string }): string {
   const staleMark = entry.stale ? " (stale)" : "";
   return `  #${entry.id} [${entry.scope}]${staleMark} ${entry.summary}`;
 }
 
+/** The id characters this command prints for a Lens entry.
+ *
+ *  Lens ids are UUIDs. `/memory pending` shows this short form and the review
+ *  subcommands accept it, so a candidate does not have to be approved by
+ *  typing 36 characters. */
+const MEMORY_LENS_ID_CHARS = 8;
+
+function lensId(entry: MemoryLensEntry): string {
+  return entry.memory.id.slice(0, MEMORY_LENS_ID_CHARS);
+}
+
+/** One line per entry for `/memory pending`: the review state, the short id
+ *  the review subcommands take, and enough of the note to recognize it. */
+function formatLensEntryLine(entry: MemoryLensEntry): string {
+  const draft = entry.memory.draft;
+  const title = draft.title || draft.body;
+  return `  ${lensId(entry)} [${entry.memory.status}, rev ${entry.memory.revision}] ${title}`;
+}
+
+/** Resolve `/memory approve|reject|forget <id>` against the current snapshot.
+ *
+ *  A prefix that matches more than one entry is refused rather than guessed:
+ *  the wrong match here is an approve, and the two entries a prefix could mean
+ *  are shown so the caller can paste a longer one. */
+function resolveLensEntry(
+  entries: MemoryLensEntry[],
+  token: string
+): { kind: "ok"; entry: MemoryLensEntry } | { kind: "none" } | { kind: "ambiguous"; matches: MemoryLensEntry[] } {
+  const needle = token.trim().toLowerCase();
+  if (!needle) return { kind: "none" };
+  const matches = entries.filter((e) => e.memory.id.toLowerCase().startsWith(needle));
+  if (matches.length === 1) return { kind: "ok", entry: matches[0] };
+  if (matches.length === 0) return { kind: "none" };
+  return { kind: "ambiguous", matches };
+}
+
+/** The engine clamps one Lens page to 100 entries. */
+const MEMORY_LENS_PAGE_SIZE = 100;
+/** Pages a single `/memory` subcommand will walk before it stops and says so. */
+const MEMORY_LENS_MAX_PAGES = 5;
+
+/** Read the whole Lens, a page at a time.
+ *
+ *  The id a user types must resolve against every entry, not only the first
+ *  page, or a store larger than one page would answer "no memory matches" for
+ *  an entry it is holding. The bound keeps a slash command from turning into an
+ *  unbounded read; when it is hit, the caller is told the list was cut. */
+async function collectLensEntries(
+  ctx: SlashCommandContext
+): Promise<{ entries: MemoryLensEntry[]; snapshot: MemoryLensSnapshot; truncated: boolean }> {
+  let snapshot = await ctx.api.getMemoryLens({ limit: MEMORY_LENS_PAGE_SIZE });
+  const entries: MemoryLensEntry[] = [];
+  for (let page = 0; ; page++) {
+    entries.push(...snapshot.entries);
+    if (!snapshot.next_after) return { entries, snapshot, truncated: false };
+    if (page + 1 >= MEMORY_LENS_MAX_PAGES) return { entries, snapshot, truncated: true };
+    snapshot = await ctx.api.getMemoryLens({
+      limit: MEMORY_LENS_PAGE_SIZE,
+      after: snapshot.next_after,
+    });
+  }
+}
+
+/** Read the Lens, or say that this engine has no such route.
+ *
+ *  The Lens arrived with the engine's reviewed memory store. On an engine that
+ *  predates it, a review subcommand has to say so: answering "nothing awaits
+ *  review" would be a claim about the store that the engine never made. Returns
+ *  null once it has posted that explanation, so the caller stops there. */
+async function readLensOrReport(
+  ctx: SlashCommandContext
+): Promise<{ entries: MemoryLensEntry[]; snapshot: MemoryLensSnapshot; truncated: boolean } | null> {
+  try {
+    return await collectLensEntries(ctx);
+  } catch (err) {
+    // The status is the discriminator, not any digits that happen to appear in
+    // the message: the client throws `API error <status>: <body>`, and a body
+    // that mentions 404 (an entry id, say) must not read as a missing route.
+    if (!/^API error 404\b/.test(getErrorMessage(err))) throw err;
+    ctx.postMessage({
+      type: "error",
+      message:
+        "This engine has no Context Lens routes, so it cannot list or decide memory candidates — it predates the memory review API. /memory show, search and get still work.",
+    });
+    return null;
+  }
+}
+
+/** What a completed review action means, in the engine's own terms.
+ *
+ *  The retraction caveat is stated on every action, approve included: a memory
+ *  joins the context from the next turn on, and a turn that already ran keeps
+ *  what it was given. */
+function formatLensActionResult(
+  verb: "approve" | "reject" | "forget",
+  entry: MemoryLensEntry,
+  cannotRetract: boolean
+): string {
+  const title = entry.memory.draft.title || entry.memory.draft.body;
+  const head =
+    verb === "approve"
+      ? `Approved ${lensId(entry)} (${title}) — it is given to later turns.`
+      : verb === "reject"
+        ? `Rejected ${lensId(entry)} (${title}) — it will not be given to the model.`
+        : `Forgotten ${lensId(entry)} (${title}) — it will not be given to later turns.`;
+  return head +
+    (cannotRetract ? " Text already sent to the model cannot be retracted." : "");
+}
+
+/** Turn the engine's refusal codes into the next step the user needs.
+ *
+ *  A Lens error arrives as `{"error":"<code>"}` rather than the `error.message`
+ *  envelope the client unwraps, so left alone it surfaces as raw JSON with no
+ *  way forward. These are the codes a review action can actually produce; an
+ *  unrecognised one falls back to the client's own message rather than being
+ *  replaced by a guess. */
+function formatLensFailure(err: unknown): string {
+  const message = getErrorMessage(err);
+  if (message.includes("revision_conflict")) {
+    return "That memory changed since it was listed, so nothing was decided. Run /memory pending and act on the entry as it reads now.";
+  }
+  if (message.includes("invalid_state")) {
+    return "That memory is not in a reviewable state — it may already have been decided. Run /memory pending to see what still awaits review.";
+  }
+  if (message.includes("validation_required")) {
+    return "That memory needs a validation receipt before it can be approved, which this command cannot supply. It can still be rejected or forgotten.";
+  }
+  if (message.includes("denied")) {
+    return "This runtime does not grant the permission that action needs; nothing was changed.";
+  }
+  return formatError("Memory error", err);
+}
+
 /**
  * `/memory` — manage the native memory store via the runtime API
  * (`/v1/memory`), the same store the TUI's `/memory native` subcommands
  * and the model's `remember` tool use. Never touches local files directly.
+ *
+ * `show` / `search` / `get` read the flat listing, which the engine filters to
+ * live memory. `pending` and the review subcommands read the Context Lens
+ * instead, because a candidate is not in that listing at all.
  */
 async function handleMemory(ctx: SlashCommandContext, args: string): Promise<void> {
   const memArg = args.trim();
@@ -1917,6 +2054,35 @@ async function handleMemory(ctx: SlashCommandContext, args: string): Promise<voi
         const lines = result.entries.map(formatMemoryEntryLine);
         ctx.postMessage({ type: "info", message: `Native memory (${result.total}):\n${lines.join("\n")}\n\n${MEMORY_USAGE}` });
       }
+      return;
+    }
+
+    if (sub === "pending") {
+      const lens = await readLensOrReport(ctx);
+      if (!lens) return;
+      const { entries, snapshot, truncated } = lens;
+      const candidates = entries.filter((e) => e.memory.status === "candidate");
+      if (!candidates.length) {
+        // The same rule as the id miss below: an empty window is not an empty
+        // store, and saying "nothing awaits review" about a store this command
+        // only read part of is a claim the engine never made.
+        ctx.postMessage({
+          type: "info",
+          message: truncated
+            ? "No memory candidates await review among the entries this command reads, and the store is larger than that — candidates past them were not listed."
+            : "No memory candidates await review.",
+        });
+        return;
+      }
+      const lines = candidates.map(formatLensEntryLine);
+      const how = snapshot.can_review
+        ? "Approve with /memory approve <id>, decline with /memory reject <id>."
+        : "This runtime does not grant review, so they cannot be decided here.";
+      const cut = truncated ? "\n(The store is larger than this command reads; the list is cut.)" : "";
+      ctx.postMessage({
+        type: "info",
+        message: `Memory candidates awaiting review (${candidates.length}):\n${lines.join("\n")}\n${how}${cut}`,
+      });
       return;
     }
 
@@ -1968,6 +2134,81 @@ async function handleMemory(ctx: SlashCommandContext, args: string): Promise<voi
       }
       const { entry } = await ctx.api.createMemoryEntry(note, scope);
       ctx.postMessage({ type: "info", message: `Memory remembered as #${entry.id} (${entry.scope}): ${entry.summary}` });
+      return;
+    }
+
+    if (sub === "approve" || sub === "reject" || sub === "forget") {
+      if (!rest) {
+        ctx.postMessage({ type: "error", message: `Usage: /memory ${sub} <id>` });
+        return;
+      }
+      const lens = await readLensOrReport(ctx);
+      if (!lens) return;
+      const { entries, snapshot, truncated } = lens;
+      const permission = sub === "forget" ? snapshot.can_forget : snapshot.can_review;
+      if (!permission) {
+        ctx.postMessage({
+          type: "error",
+          message: `This runtime does not grant ${sub === "forget" ? "forgetting" : "review"}; nothing was changed.`,
+        });
+        return;
+      }
+      const resolved = resolveLensEntry(entries, rest);
+      if (resolved.kind === "none") {
+        // A miss in a store larger than this command reads is not the same
+        // claim as a miss in the whole store, and must not be stated as one.
+        ctx.postMessage({
+          type: "error",
+          message: truncated
+            ? `No memory matches '${rest}' among the entries this command reads, and the store is larger than that — an entry past them was not searched.`
+            : `No memory matches '${rest}'. /memory pending lists the candidates.`,
+        });
+        return;
+      }
+      if (resolved.kind === "ambiguous") {
+        const lines = resolved.matches.map(formatLensEntryLine);
+        ctx.postMessage({
+          type: "error",
+          message: `'${rest}' matches ${resolved.matches.length} entries — use a longer id:\n${lines.join("\n")}`,
+        });
+        return;
+      }
+      // The revision read here is the one sent: the engine refuses a write
+      // against an entry that moved on rather than applying it to whatever
+      // now holds that id.
+      const entry = resolved.entry;
+      // Approve and reject are decisions a candidate is waiting for, and the
+      // engine refuses them on anything else. Checking the state here turns a
+      // likely double-approve into a sentence with a next step instead of the
+      // engine's bare refusal code.
+      if (sub !== "forget" && entry.memory.status !== "candidate") {
+        ctx.postMessage({
+          type: "error",
+          message: `Memory ${lensId(entry)} is ${entry.memory.status}, not a candidate, so there is nothing to ${sub} — /memory forget removes it instead.`,
+        });
+        return;
+      }
+      const command: MemoryLensAction =
+        sub === "approve"
+          ? { action: "approve", id: entry.memory.id, revision: entry.memory.revision }
+          : sub === "reject"
+            ? { action: "reject", id: entry.memory.id, revision: entry.memory.revision }
+            : { action: "forget", id: entry.memory.id, revision: entry.memory.revision };
+      let result: Awaited<ReturnType<CodeWhaleApiClient["memoryLensAction"]>>;
+      try {
+        result = await ctx.api.memoryLensAction(command);
+      } catch (err) {
+        ctx.postMessage({ type: "error", message: formatLensFailure(err) });
+        return;
+      }
+      ctx.postMessage({
+        type: "info",
+        message: formatLensActionResult(
+          sub,
+          entry,
+          result.already_sent_context_cannot_be_retracted
+        ),
+      });
       return;
     }
 

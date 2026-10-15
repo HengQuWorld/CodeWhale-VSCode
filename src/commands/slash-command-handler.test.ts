@@ -133,6 +133,63 @@ function goalRecord(overrides: Record<string, unknown> = {}) {
   };
 }
 
+// ── Helper: a Context Lens entry as the engine returns one ──
+
+/** The Lens shape (`/v1/memory/lens`). Its `memory.id` is a UUID, unlike the
+ *  flat listing's row number, and `status` is what makes a candidate visible
+ *  here and nowhere else. */
+function lensEntry(overrides: { id?: string; status?: string; revision?: number; title?: string } = {}) {
+  const id = overrides.id ?? "ede5ced5-ff3c-4d74-86eb-eb3ea97279d8";
+  const title = overrides.title ?? "alpha note";
+  return {
+    memory: {
+      id,
+      revision: overrides.revision ?? 1,
+      status: overrides.status ?? "candidate",
+      draft: {
+        scope: { tenant: "local", user: "owner" },
+        kind: "fact",
+        title,
+        body: title,
+        key: null,
+        tags: [],
+        confidence: 0.5,
+        importance: 0.5,
+        evidence: [],
+        repository_revision: null,
+        dependencies: {},
+        expires_at: null,
+        valid_from: null,
+        valid_until: null,
+        parent_ids: [],
+      },
+      created_at: 0,
+      updated_at: 0,
+      content_hash: "hash",
+    },
+    freshness: "inactive",
+    preferences: { revision: 0, pinned: false, suppressed: false },
+    in_contexts: [],
+  };
+}
+
+function lensSnapshot(
+  entries: Array<ReturnType<typeof lensEntry>>,
+  overrides: Record<string, unknown> = {}
+) {
+  return {
+    schema: "codewhale.memory.lens/v1",
+    entries,
+    next_after: null as string | null,
+    contexts: [],
+    as_of: 0,
+    can_review: true,
+    can_forget: true,
+    can_dispatch: true,
+    ...overrides,
+  };
+}
+
 // ── Helper: create context ──
 
 function createContext(overrides: Partial<SlashCommandContext> = {}): SlashCommandContext {
@@ -226,6 +283,21 @@ function createContext(overrides: Partial<SlashCommandContext> = {}): SlashComma
         entry: { id: 3, scope: "global", workspace_id: null, summary: "new note", stale: false, line_start: 3, line_end: 3, status: "active" },
       })),
       clearMemory: vi.fn(async () => ({ cleared: true })),
+      getMemoryLens: vi.fn(async () => ({
+        schema: "codewhale.memory.lens/v1",
+        entries: [],
+        next_after: null,
+        contexts: [],
+        as_of: 0,
+        can_review: true,
+        can_forget: true,
+        can_dispatch: true,
+      })),
+      memoryLensAction: vi.fn(async () => ({
+        ok: true,
+        refresh_required: true,
+        already_sent_context_cannot_be_retracted: true,
+      })),
       listSkills: vi.fn(async () => ({
         directory: "/home/user/.codewhale/skills",
         directories: ["/home/user/.codewhale/skills"],
@@ -2095,6 +2167,536 @@ describe("SlashCommandHandler - Dispatcher Pattern", () => {
 
       expect(postMessage).toHaveBeenCalledWith(
         expect.objectContaining({ type: "error", message: expect.stringContaining("Unknown subcommand 'bogus'") })
+      );
+    });
+
+    // ── Context Lens: candidates are invisible to the flat listing, so the
+    // review subcommands read the Lens instead ──
+
+    it("pending lists the candidates and not the live entries", async () => {
+      const postMessage = vi.fn();
+      const ctx = createContext({
+        postMessage,
+        api: {
+          ...createContext().api,
+          listMemory: vi.fn(async () => ({ entries: [], total: 0 })),
+          getMemoryLens: vi.fn(async () =>
+            lensSnapshot([
+              lensEntry({ id: "ede5ced5-ff3c-4d74-86eb-eb3ea97279d8", title: "diff is shadowed" }),
+              lensEntry({ id: "aaaaaaaa-0000-0000-0000-000000000000", status: "active", title: "already kept" }),
+            ])
+          ),
+        } as any,
+      });
+      const handler = new SlashCommandHandler(ctx);
+
+      await handler.handle("/memory", "pending");
+
+      const message = postMessage.mock.calls[0][0].message as string;
+      expect(message).toContain("awaiting review (1)");
+      expect(message).toContain("ede5ced5 [candidate, rev 1] diff is shadowed");
+      expect(message).not.toContain("already kept");
+      expect(message).toContain("/memory approve <id>");
+      // The flat listing has no candidate in it at all.
+      expect(ctx.api.listMemory).not.toHaveBeenCalled();
+    });
+
+    it("pending says so when nothing awaits review", async () => {
+      const postMessage = vi.fn();
+      const ctx = createContext({
+        postMessage,
+        api: {
+          ...createContext().api,
+          getMemoryLens: vi.fn(async () =>
+            lensSnapshot([lensEntry({ id: "aaaaaaaa-0000-0000-0000-000000000000", status: "active" })])
+          ),
+        } as any,
+      });
+      const handler = new SlashCommandHandler(ctx);
+
+      await handler.handle("/memory", "pending");
+
+      expect(postMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ message: expect.stringContaining("No memory candidates await review") })
+      );
+    });
+
+    it("pending does not offer the review hint when the runtime withholds review", async () => {
+      const postMessage = vi.fn();
+      const ctx = createContext({
+        postMessage,
+        api: {
+          ...createContext().api,
+          getMemoryLens: vi.fn(async () => lensSnapshot([lensEntry()], { can_review: false })),
+        } as any,
+      });
+      const handler = new SlashCommandHandler(ctx);
+
+      await handler.handle("/memory", "pending");
+
+      const message = postMessage.mock.calls[0][0].message as string;
+      expect(message).toContain("does not grant review");
+      expect(message).not.toContain("/memory approve <id>");
+    });
+
+    it("approve posts the entry's current revision", async () => {
+      const postMessage = vi.fn();
+      const ctx = createContext({
+        postMessage,
+        api: {
+          ...createContext().api,
+          getMemoryLens: vi.fn(async () => lensSnapshot([lensEntry({ revision: 3 })])),
+          memoryLensAction: vi.fn(async () => ({
+            ok: true,
+            refresh_required: true,
+            already_sent_context_cannot_be_retracted: true,
+          })),
+        } as any,
+      });
+      const handler = new SlashCommandHandler(ctx);
+
+      await handler.handle("/memory", "approve ede5ced5");
+
+      expect(ctx.api.memoryLensAction).toHaveBeenCalledWith({
+        action: "approve",
+        id: "ede5ced5-ff3c-4d74-86eb-eb3ea97279d8",
+        revision: 3,
+      });
+      const message = postMessage.mock.calls[0][0].message as string;
+      expect(message).toContain("Approved ede5ced5");
+      // The engine's caveat is repeated, not swallowed.
+      expect(message).toContain("cannot be retracted");
+    });
+
+    it("approve accepts the full uuid it printed truncated", async () => {
+      const ctx = createContext({
+        api: {
+          ...createContext().api,
+          getMemoryLens: vi.fn(async () => lensSnapshot([lensEntry()])),
+        } as any,
+      });
+      const handler = new SlashCommandHandler(ctx);
+
+      await handler.handle("/memory", "approve ede5ced5-ff3c-4d74-86eb-eb3ea97279d8");
+
+      expect(ctx.api.memoryLensAction).toHaveBeenCalledWith(
+        expect.objectContaining({ action: "approve" })
+      );
+    });
+
+    it("refuses an ambiguous prefix instead of guessing which entry to approve", async () => {
+      const postMessage = vi.fn();
+      const ctx = createContext({
+        postMessage,
+        api: {
+          ...createContext().api,
+          getMemoryLens: vi.fn(async () =>
+            lensSnapshot([
+              lensEntry({ id: "ede5ced5-ff3c-4d74-86eb-eb3ea97279d8", title: "first" }),
+              lensEntry({ id: "ede5c0aa-1111-2222-3333-444455556666", title: "second" }),
+            ])
+          ),
+        } as any,
+      });
+      const handler = new SlashCommandHandler(ctx);
+
+      await handler.handle("/memory", "approve ede5");
+
+      expect(ctx.api.memoryLensAction).not.toHaveBeenCalled();
+      const message = postMessage.mock.calls[0][0].message as string;
+      expect(message).toContain("matches 2 entries");
+      expect(message).toContain("first");
+      expect(message).toContain("second");
+    });
+
+    it("reports an id that matches nothing without asking the engine to act", async () => {
+      const postMessage = vi.fn();
+      const ctx = createContext({
+        postMessage,
+        api: {
+          ...createContext().api,
+          getMemoryLens: vi.fn(async () => lensSnapshot([lensEntry()])),
+        } as any,
+      });
+      const handler = new SlashCommandHandler(ctx);
+
+      await handler.handle("/memory", "approve deadbeef");
+
+      expect(ctx.api.memoryLensAction).not.toHaveBeenCalled();
+      expect(postMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ type: "error", message: expect.stringContaining("No memory matches 'deadbeef'") })
+      );
+    });
+
+    it("resolves an id that sits on a later page", async () => {
+      // A store larger than one page must not answer "no memory matches" for
+      // an entry it is holding.
+      const second = "f00dbabe-1111-2222-3333-444455556666";
+      const getMemoryLens = vi.fn(async (opts?: { after?: string }) =>
+        opts?.after
+          ? lensSnapshot([lensEntry({ id: second, title: "page two" })])
+          : lensSnapshot([lensEntry({ id: "ede5ced5-ff3c-4d74-86eb-eb3ea97279d8", title: "page one" })], {
+              next_after: "ede5ced5-ff3c-4d74-86eb-eb3ea97279d8",
+            })
+      );
+      const ctx = createContext({
+        api: { ...createContext().api, getMemoryLens } as any,
+      });
+      const handler = new SlashCommandHandler(ctx);
+
+      await handler.handle("/memory", "approve f00dbabe");
+
+      expect(ctx.api.memoryLensAction).toHaveBeenCalledWith({
+        action: "approve",
+        id: second,
+        revision: 1,
+      });
+    });
+
+    it("reject posts a rejection for the resolved entry", async () => {
+      const ctx = createContext({
+        api: {
+          ...createContext().api,
+          getMemoryLens: vi.fn(async () => lensSnapshot([lensEntry()])),
+        } as any,
+      });
+      const handler = new SlashCommandHandler(ctx);
+
+      await handler.handle("/memory", "reject ede5ced5");
+
+      expect(ctx.api.memoryLensAction).toHaveBeenCalledWith({
+        action: "reject",
+        id: "ede5ced5-ff3c-4d74-86eb-eb3ea97279d8",
+        revision: 1,
+      });
+    });
+
+    it("forget acts only where the runtime grants forgetting", async () => {
+      const postMessage = vi.fn();
+      const ctx = createContext({
+        postMessage,
+        api: {
+          ...createContext().api,
+          getMemoryLens: vi.fn(async () => lensSnapshot([lensEntry({ status: "active" })], { can_forget: false })),
+        } as any,
+      });
+      const handler = new SlashCommandHandler(ctx);
+
+      await handler.handle("/memory", "forget ede5ced5");
+
+      expect(ctx.api.memoryLensAction).not.toHaveBeenCalled();
+      expect(postMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ type: "error", message: expect.stringContaining("does not grant forgetting") })
+      );
+    });
+
+    it("forgets an active entry and states the retraction caveat", async () => {
+      const postMessage = vi.fn();
+      const ctx = createContext({
+        postMessage,
+        api: {
+          ...createContext().api,
+          getMemoryLens: vi.fn(async () => lensSnapshot([lensEntry({ status: "active", revision: 2 })])),
+          memoryLensAction: vi.fn(async () => ({
+            ok: true,
+            refresh_required: true,
+            already_sent_context_cannot_be_retracted: true,
+          })),
+        } as any,
+      });
+      const handler = new SlashCommandHandler(ctx);
+
+      await handler.handle("/memory", "forget ede5ced5");
+
+      expect(ctx.api.memoryLensAction).toHaveBeenCalledWith({
+        action: "forget",
+        id: "ede5ced5-ff3c-4d74-86eb-eb3ea97279d8",
+        revision: 2,
+      });
+      const message = postMessage.mock.calls[0][0].message as string;
+      expect(message).toContain("Forgotten ede5ced5");
+      expect(message).toContain("cannot be retracted");
+    });
+
+    it("asks for an id when a review subcommand is given none", async () => {
+      const postMessage = vi.fn();
+      const ctx = createContext({ postMessage });
+      const handler = new SlashCommandHandler(ctx);
+
+      await handler.handle("/memory", "approve");
+
+      expect(ctx.api.getMemoryLens).not.toHaveBeenCalled();
+      expect(postMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ type: "error", message: expect.stringContaining("Usage: /memory approve <id>") })
+      );
+    });
+
+    it("says the engine has no Lens routes instead of reporting an empty store", async () => {
+      // An engine that predates the review API must not be reported as a store
+      // with nothing to review: that is a claim about the user's memory that
+      // the engine never made.
+      const postMessage = vi.fn();
+      const ctx = createContext({
+        postMessage,
+        api: {
+          ...createContext().api,
+          getMemoryLens: vi.fn(async () => {
+            throw new Error("API error 404: not found");
+          }),
+        } as any,
+      });
+      const handler = new SlashCommandHandler(ctx);
+
+      await handler.handle("/memory", "pending");
+
+      const message = postMessage.mock.calls[0][0].message as string;
+      expect(message).toContain("no Context Lens routes");
+      expect(message).not.toContain("No memory candidates await review");
+    });
+
+    it("does not claim the whole store lacks an id it only searched part of", async () => {      const postMessage = vi.fn();
+      const pages: Array<{ after?: string }> = [];
+      const ctx = createContext({
+        postMessage,
+        api: {
+          ...createContext().api,
+          // Every page reports another one, so the bound is what ends the walk.
+          getMemoryLens: vi.fn(async (opts?: { after?: string }) => {
+            pages.push(opts ?? {});
+            return lensSnapshot([lensEntry({ id: `${pages.length}0000000-0000-0000-0000-000000000000` })], {
+              next_after: `${pages.length}0000000-0000-0000-0000-000000000000`,
+            });
+          }),
+        } as any,
+      });
+      const handler = new SlashCommandHandler(ctx);
+
+      await handler.handle("/memory", "approve ffffffff");
+
+      expect(pages).toHaveLength(5);
+      expect(ctx.api.memoryLensAction).not.toHaveBeenCalled();
+      const message = postMessage.mock.calls[0][0].message as string;
+      expect(message).toContain("the store is larger than that");
+    });
+
+    it("does not say nothing awaits review when it only read part of the store", async () => {
+      const postMessage = vi.fn();
+      const ctx = createContext({
+        postMessage,
+        api: {
+          ...createContext().api,
+          // Every page holds a live entry and reports another page, so the walk
+          // ends on the bound with no candidate seen.
+          getMemoryLens: vi.fn(async (opts?: { after?: string }) =>
+            lensSnapshot([lensEntry({ id: `${(opts?.after ? 2 : 1)}0000000-0000-0000-0000-000000000000`, status: "active" })], {
+              next_after: `${(opts?.after ? 2 : 1)}0000000-0000-0000-0000-000000000000`,
+            })
+          ),
+        } as any,
+      });
+      const handler = new SlashCommandHandler(ctx);
+
+      await handler.handle("/memory", "pending");
+
+      const message = postMessage.mock.calls[0][0].message as string;
+      expect(message).toContain("the store is larger than that");
+      expect(message).not.toBe("No memory candidates await review.");
+    });
+
+    it("says plainly that nothing awaits review when the whole store was read", async () => {
+      const postMessage = vi.fn();
+      const ctx = createContext({
+        postMessage,
+        api: {
+          ...createContext().api,
+          getMemoryLens: vi.fn(async () =>
+            lensSnapshot([lensEntry({ status: "active" })])
+          ),
+        } as any,
+      });
+      const handler = new SlashCommandHandler(ctx);
+
+      await handler.handle("/memory", "pending");
+
+      expect(postMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ message: "No memory candidates await review." })
+      );
+    });
+
+    it("refuses to approve an entry that is not a candidate, before asking the engine", async () => {
+      // A double approve is the likely way to get here, and the engine answers
+      // it with a bare refusal code. The state is known from the snapshot, so
+      // the command can answer with a next step instead.
+      const postMessage = vi.fn();
+      const ctx = createContext({
+        postMessage,
+        api: {
+          ...createContext().api,
+          getMemoryLens: vi.fn(async () => lensSnapshot([lensEntry({ status: "active" })])),
+        } as any,
+      });
+      const handler = new SlashCommandHandler(ctx);
+
+      await handler.handle("/memory", "approve ede5ced5");
+
+      expect(ctx.api.memoryLensAction).not.toHaveBeenCalled();
+      const message = postMessage.mock.calls[0][0].message as string;
+      expect(message).toContain("is active, not a candidate");
+      expect(message).toContain("/memory forget");
+    });
+
+    it("refuses to reject an entry that is not a candidate", async () => {
+      const postMessage = vi.fn();
+      const ctx = createContext({
+        postMessage,
+        api: {
+          ...createContext().api,
+          getMemoryLens: vi.fn(async () => lensSnapshot([lensEntry({ status: "rejected" })])),
+        } as any,
+      });
+      const handler = new SlashCommandHandler(ctx);
+
+      await handler.handle("/memory", "reject ede5ced5");
+
+      expect(ctx.api.memoryLensAction).not.toHaveBeenCalled();
+      expect(postMessage.mock.calls[0][0].message).toContain("is rejected, not a candidate");
+    });
+
+    it("still forgets a live entry, which is not a candidate", async () => {
+      const ctx = createContext({
+        api: {
+          ...createContext().api,
+          getMemoryLens: vi.fn(async () => lensSnapshot([lensEntry({ status: "active" })])),
+        } as any,
+      });
+      const handler = new SlashCommandHandler(ctx);
+
+      await handler.handle("/memory", "forget ede5ced5");
+
+      expect(ctx.api.memoryLensAction).toHaveBeenCalledWith(
+        expect.objectContaining({ action: "forget" })
+      );
+    });
+
+    it("turns the engine's revision-conflict code into a next step", async () => {
+      const postMessage = vi.fn();
+      const ctx = createContext({
+        postMessage,
+        api: {
+          ...createContext().api,
+          getMemoryLens: vi.fn(async () => lensSnapshot([lensEntry()])),
+          memoryLensAction: vi.fn(async () => {
+            throw new Error('API error 422: {"error":"revision_conflict"}');
+          }),
+        } as any,
+      });
+      const handler = new SlashCommandHandler(ctx);
+
+      await handler.handle("/memory", "approve ede5ced5");
+
+      const message = postMessage.mock.calls[0][0].message as string;
+      expect(message).toContain("changed since it was listed");
+      // The raw envelope must not reach the user.
+      expect(message).not.toContain("revision_conflict");
+    });
+
+    it("turns a validation-required refusal into a sentence naming the alternative", async () => {
+      const postMessage = vi.fn();
+      const ctx = createContext({
+        postMessage,
+        api: {
+          ...createContext().api,
+          getMemoryLens: vi.fn(async () => lensSnapshot([lensEntry()])),
+          memoryLensAction: vi.fn(async () => {
+            throw new Error('API error 422: {"error":"validation_required"}');
+          }),
+        } as any,
+      });
+      const handler = new SlashCommandHandler(ctx);
+
+      await handler.handle("/memory", "approve ede5ced5");
+
+      expect(postMessage.mock.calls[0][0].message).toContain("validation receipt");
+    });
+
+    it("keeps a specific, unrecognised failure readable rather than replacing it", async () => {
+      const postMessage = vi.fn();
+      const ctx = createContext({
+        postMessage,
+        api: {
+          ...createContext().api,
+          getMemoryLens: vi.fn(async () => lensSnapshot([lensEntry()])),
+          memoryLensAction: vi.fn(async () => {
+            throw new Error("socket hang up");
+          }),
+        } as any,
+      });
+      const handler = new SlashCommandHandler(ctx);
+
+      await handler.handle("/memory", "approve ede5ced5");
+
+      expect(postMessage.mock.calls[0][0].message).toContain("socket hang up");
+    });
+
+    it("reports a Lens failure that is not a missing route as an error", async () => {
+      const postMessage = vi.fn();
+      const ctx = createContext({
+        postMessage,
+        api: {
+          ...createContext().api,
+          getMemoryLens: vi.fn(async () => {
+            throw new Error("API error 500: internal");
+          }),
+        } as any,
+      });
+      const handler = new SlashCommandHandler(ctx);
+
+      await handler.handle("/memory", "pending");
+
+      expect(postMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ type: "error", message: expect.stringContaining("Memory error") })
+      );
+    });
+
+    it("does not read a 404 that is not the route as a missing route", async () => {
+      // The client throws `API error <status>: <body>`; only the status decides
+      // whether the route is missing, not digits inside the body.
+      const postMessage = vi.fn();
+      const ctx = createContext({
+        postMessage,
+        api: {
+          ...createContext().api,
+          getMemoryLens: vi.fn(async () => {
+            throw new Error("API error 422: entry 404 was not found");
+          }),
+        } as any,
+      });
+      const handler = new SlashCommandHandler(ctx);
+
+      await handler.handle("/memory", "pending");
+
+      const message = postMessage.mock.calls[0][0].message as string;
+      expect(message).not.toContain("no Context Lens routes");
+      expect(message).toContain("entry 404 was not found");
+    });
+
+    it("reports a Lens failure that is not a missing route as an error", async () => {
+      const postMessage = vi.fn();
+      const ctx = createContext({
+        postMessage,
+        api: {
+          ...createContext().api,
+          getMemoryLens: vi.fn(async () => {
+            throw new Error("API error 500: internal");
+          }),
+        } as any,
+      });
+      const handler = new SlashCommandHandler(ctx);
+
+      await handler.handle("/memory", "pending");
+
+      expect(postMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ type: "error", message: expect.stringContaining("Memory error") })
       );
     });
   });

@@ -14,6 +14,9 @@ import type {
   MemoryListResponse,
   MemoryEntryResponse,
   ClearMemoryResponse,
+  MemoryLensSnapshot,
+  MemoryLensAction,
+  MemoryLensActionResponse,
   ThreadDetailResponse,
   ApprovalRequest,
   PendingApprovalRequest,
@@ -105,6 +108,9 @@ export type {
   MemoryListResponse,
   MemoryEntryResponse,
   ClearMemoryResponse,
+  MemoryLensSnapshot,
+  MemoryLensAction,
+  MemoryLensActionResponse,
   ThreadDetailResponse,
   ApprovalRequest,
   PendingApprovalRequest,
@@ -567,6 +573,47 @@ export class CodeWhaleApiClient {
     return (await this.delete(
       `/v1/memory?scope=${encodeURIComponent(scope)}`
     )) as ClearMemoryResponse;
+  }
+
+  // ── Context Lens (review candidates, correct and forget) ──
+
+  /** Read the Context Lens snapshot: what the store holds, why each entry is
+   *  or is not in context, and which review controls this caller holds.
+   *
+   *  This is the only read that shows `candidate` entries — `listMemory`'s
+   *  flat listing is filtered to live memory on the engine side — and it
+   *  reports `can_review` / `can_forget` rather than implying them, so a
+   *  caller can hide a control it does not hold instead of failing on click. */
+  async getMemoryLens(opts?: {
+    threadId?: string;
+    after?: string;
+    limit?: number;
+  }): Promise<MemoryLensSnapshot> {
+    const params = new URLSearchParams();
+    if (opts?.threadId) params.set("thread_id", opts.threadId);
+    if (opts?.after) params.set("after", opts.after);
+    if (opts?.limit !== undefined) params.set("limit", String(opts.limit));
+    const qs = params.toString();
+    return (await this.get(
+      `/v1/memory/lens${qs ? "?" + qs : ""}`
+    )) as MemoryLensSnapshot;
+  }
+
+  /** Approve, reject, forget or re-preference one Lens entry.
+   *
+   *  `revision` is the revision the caller read. The engine treats a write
+   *  against an entry that has moved on as a conflict rather than applying it
+   *  to whatever now occupies that id, so callers pass what they displayed and
+   *  re-read afterwards.
+   *
+   *  The response repeats the engine's own caveat: this changes what later
+   *  turns are given, never what a model has already received. */
+  async memoryLensAction(
+    command: MemoryLensAction
+  ): Promise<MemoryLensActionResponse> {
+    return (await this.post("/v1/memory/lens/actions", {
+      command,
+    })) as MemoryLensActionResponse;
   }
 
   // ── Approvals ──
