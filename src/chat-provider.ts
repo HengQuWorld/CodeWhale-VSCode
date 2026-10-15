@@ -31,6 +31,7 @@ import {
 } from "./utils/provider-route";
 import { McpController } from "./chat-provider/mcp";
 import { SkillController } from "./chat-provider/skills";
+import { FleetController } from "./chat-provider/fleet";
 import { getWebviewHtml } from "./webview/webview-html";
 import { renderMarkdown } from "./utils/markdown";
 import { finalizeAssistantMessage } from "./utils/event-helpers";
@@ -185,10 +186,6 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
   private taskRefreshTimer: ReturnType<typeof setInterval> | null = null;
   private taskDetailRefreshTimer: ReturnType<typeof setInterval> | null = null;
   private activeTaskDetailId: string | null = null;
-  private fleetDetailRefreshTimer: ReturnType<typeof setTimeout> | null = null;
-  private fleetEventController: AbortController | null = null;
-  private fleetDetailPollTimer: ReturnType<typeof setInterval> | null = null;
-  private activeFleetRunId: string | null = null;
   private _disposables: vscode.Disposable[] = [];
   private currentAttachments: AttachmentRecord[] = [];
   /** Monotonic source of attachment ids; see AttachmentRecord. */
@@ -296,6 +293,9 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
 
   /** The engine's skills: list, toggle, activate, install, mutate, audit. */
   private readonly skills: SkillController;
+
+  /** Managed multi-agent runs: the list, and the one open in the panel. */
+  private readonly fleet: FleetController;
 
   // ── Background (non-viewed) thread support ──
   // The runtime owns every turn: it keeps running server-side when the
@@ -444,6 +444,10 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       armSkill: (skill) => this.armSkill(skill),
       // Activation that carries its own task sends it straight away.
       sendMessage: (text) => this.sendMessage(text),
+    });
+    this.fleet = new FleetController({
+      api: this.api,
+      postMessage: (msg) => this.postMessage(msg),
     });
   }
 
@@ -828,31 +832,31 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         await this.refreshFleetRuns();
         break;
       case "showFleetDetail":
-        await this.showFleetDetail(msg.runId as string);
+        await this.fleet.showFleetDetail(msg.runId as string);
         break;
       case "closeFleetDetail":
-        this.handleCloseFleetDetail();
+        this.fleet.handleCloseFleetDetail();
         break;
       case "startFleetRun":
-        await this.handleStartFleetRun(msg.runId as string);
+        await this.fleet.handleStartFleetRun(msg.runId as string);
         break;
       case "stopFleetRun":
-        await this.handleStopFleetRun(msg.runId as string);
+        await this.fleet.handleStopFleetRun(msg.runId as string);
         break;
       case "fleetWorkerAction":
-        await this.handleFleetWorkerAction(msg.action as string, msg.workerId as string);
+        await this.fleet.handleFleetWorkerAction(msg.action as string, msg.workerId as string);
         break;
       case "createFleetRun":
-        await this.handleCreateFleetRun(
+        await this.fleet.handleCreateFleetRun(
           msg.payload as CreateFleetRunRequest,
           msg.startAfterCreate === true
         );
         break;
       case "requestFleetProfiles":
-        await this.handleRequestFleetProfiles();
+        await this.fleet.handleRequestFleetProfiles();
         break;
       case "fleetOpenSession":
-        await this.handleFleetOpenSession(msg.sessionId as string);
+        await this.fleet.handleFleetOpenSession(msg.sessionId as string);
         break;
       case "setGoal":
         await this.handleSetGoal(
@@ -3636,243 +3640,16 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
   }
 
   // ── Fleet (managed multi-agent runs) ──
+  //
+  // The behaviour lives in `chat-provider/fleet.ts`; this is the provider's
+  // entry point into it, because the sidebar's initial paint and the webview's
+  // messages are routed through here.
 
   /** Refresh the Fleet run list shown in the sidebar. */
   public async refreshFleetRuns(): Promise<void> {
-    try {
-      const result = await this.api.listFleetRuns();
-      this.postMessage({ type: "fleetRunList", status: result.status, runs: result.runs });
-    } catch {
-      // best-effort — endpoint may not exist on older TUI versions
-    }
+    return this.fleet.refreshFleetRuns();
   }
 
-  private isTerminalFleetStatus(status: string | null | undefined): boolean {
-    return status === "completed" || status === "failed" || status === "cancelled";
-  }
-
-  private async fetchFleetDetailPayload(runId: string): Promise<{
-    run: unknown;
-    workers: unknown[];
-    receipts: unknown[];
-  }> {
-    const [run, workersResp, receiptsResp] = await Promise.all([
-      this.api.getFleetRun(runId),
-      this.api.listFleetRunWorkers(runId),
-      this.api.listFleetRunReceipts(runId),
-    ]);
-    return {
-      run,
-      workers: workersResp.workers,
-      receipts: receiptsResp.receipts,
-    };
-  }
-
-  /** Load a Fleet run's detail (workers + tasks + receipts) into the overlay,
-   *  then subscribe to its live SSE event stream for real-time refreshes. */
-  private async showFleetDetail(runId: string): Promise<void> {
-    try {
-      this.activeFleetRunId = runId;
-      const payload = await this.fetchFleetDetailPayload(runId);
-      this.postMessage({ type: "fleetRunDetail", ...payload });
-      const status = (payload.run as { lifecycle_status?: string }).lifecycle_status;
-      if (this.isTerminalFleetStatus(status)) {
-        this.stopFleetEventStream();
-      } else {
-        this.startFleetEventStream(runId);
-      }
-    } catch (err) {
-      if (this.activeFleetRunId === runId) {
-        this.activeFleetRunId = null;
-      }
-      this.stopFleetEventStream();
-      vscode.window.showErrorMessage(`Failed to load Fleet run: ${(err as Error).message}`);
-    }
-  }
-
-  private handleCloseFleetDetail(): void {
-    this.activeFleetRunId = null;
-    this.stopFleetEventStream();
-  }
-
-  private async refreshActiveFleetDetail(): Promise<void> {
-    if (!this.activeFleetRunId) return;
-    try {
-      const payload = await this.fetchFleetDetailPayload(this.activeFleetRunId);
-      this.postMessage({ type: "fleetRunDetail", ...payload });
-      const status = (payload.run as { lifecycle_status?: string }).lifecycle_status;
-      if (this.isTerminalFleetStatus(status)) {
-        this.stopFleetEventStream();
-      }
-    } catch {
-      this.stopFleetEventStream();
-    }
-  }
-
-  /** Debounce a detail refresh triggered by a streamed event. */
-  private scheduleFleetDetailRefresh(): void {
-    if (this.fleetDetailRefreshTimer) return;
-    this.fleetDetailRefreshTimer = setTimeout(() => {
-      this.fleetDetailRefreshTimer = null;
-      void this.refreshActiveFleetDetail();
-    }, 400);
-  }
-
-  /** Subscribe to the run's live SSE stream. Falls back to a slow poll if the
-   *  stream errors, so the overlay never silently freezes. */
-  private startFleetEventStream(runId: string): void {
-    this.stopFleetEventStream();
-    this.fleetEventController = this.api.streamFleetEvents(
-      runId,
-      (event) => {
-        // Forward the raw event to the webview for the live timeline, then
-        // debounce a full detail refresh (workers/tasks/receipts).
-        this.postMessage({ type: "fleetEvent", event });
-        this.scheduleFleetDetailRefresh();
-        void this.refreshFleetRuns();
-      },
-      () => {
-        this.fleetEventController = null;
-        this.startFleetDetailPollFallback();
-      }
-    );
-  }
-
-  private stopFleetEventStream(): void {
-    this.fleetEventController?.abort();
-    this.fleetEventController = null;
-    if (this.fleetDetailRefreshTimer) {
-      clearTimeout(this.fleetDetailRefreshTimer);
-      this.fleetDetailRefreshTimer = null;
-    }
-    this.stopFleetDetailPollFallback();
-  }
-
-  private startFleetDetailPollFallback(): void {
-    if (!this.activeFleetRunId || this.fleetDetailPollTimer) return;
-    this.fleetDetailPollTimer = setInterval(() => {
-      void this.refreshActiveFleetDetail();
-    }, 3000);
-  }
-
-  private stopFleetDetailPollFallback(): void {
-    if (this.fleetDetailPollTimer) {
-      clearInterval(this.fleetDetailPollTimer);
-      this.fleetDetailPollTimer = null;
-    }
-  }
-
-  private async handleCreateFleetRun(
-    req: CreateFleetRunRequest,
-    startAfterCreate: boolean
-  ): Promise<void> {
-    try {
-      const result = await this.api.createFleetRun(req);
-      if (startAfterCreate && result.run?.id) {
-        // TUI semantics: creation only queues the run; `/start` activates it.
-        // The checkbox chains both steps so one click = one running fleet.
-        try {
-          await this.api.startFleetRun(result.run.id);
-        } catch (startErr) {
-          vscode.window.showWarningMessage(
-            `Fleet run queued, but auto-start failed: ${(startErr as Error).message}`
-          );
-        }
-      }
-      await this.refreshFleetRuns();
-      if (result.run?.id) {
-        await this.showFleetDetail(result.run.id);
-      }
-    } catch (err) {
-      vscode.window.showErrorMessage(`Failed to create Fleet run: ${(err as Error).message}`);
-    }
-  }
-
-  private async handleRequestFleetProfiles(): Promise<void> {
-    try {
-      const resp = await this.api.listFleetProfiles();
-      this.postMessage({
-        type: "fleetProfiles",
-        profiles: resp?.profiles ?? [],
-        loadError: resp?.load_error ?? null,
-      });
-    } catch {
-      // Older TUI or transient failure: send an empty list so the webview
-      // falls back to free-text agent_profile entry.
-      this.postMessage({ type: "fleetProfiles", profiles: [], loadError: null });
-    }
-  }
-
-  private async handleStartFleetRun(runId: string): Promise<void> {
-    try {
-      await this.api.startFleetRun(runId);
-    } catch (err) {
-      vscode.window.showErrorMessage(`Failed to start Fleet run: ${(err as Error).message}`);
-    }
-    await this.refreshFleetRuns();
-    if (this.activeFleetRunId === runId) {
-      await this.refreshActiveFleetDetail();
-    }
-  }
-
-  private async handleStopFleetRun(runId: string): Promise<void> {
-    try {
-      await this.api.stopFleetRun(runId);
-    } catch (err) {
-      vscode.window.showErrorMessage(`Failed to stop Fleet run: ${(err as Error).message}`);
-    }
-    await this.refreshFleetRuns();
-    if (this.activeFleetRunId === runId) {
-      await this.refreshActiveFleetDetail();
-    }
-  }
-
-  private async handleFleetWorkerAction(action: string, workerId: string): Promise<void> {
-    try {
-      if (action === "interrupt") await this.api.interruptFleetWorker(workerId);
-      else if (action === "stop") await this.api.stopFleetWorker(workerId);
-      else if (action === "restart") await this.api.restartFleetWorker(workerId);
-      else return;
-    } catch (err) {
-      vscode.window.showErrorMessage(`Failed to ${action} worker: ${(err as Error).message}`);
-    }
-    if (this.activeFleetRunId) {
-      await this.refreshActiveFleetDetail();
-    }
-    await this.refreshFleetRuns();
-  }
-
-  /** Resolve a Fleet receipt's saved exec session and surface the worker's
-   *  final assistant reply — the same transcript a normal chat shows. */
-  private async handleFleetOpenSession(sessionId: string): Promise<void> {
-    if (!sessionId) return;
-    try {
-      await this.api.ensureReady();
-      const session = await this.api.getSession(sessionId);
-      const messages = session.messages || [];
-      let reply = "";
-      for (let i = messages.length - 1; i >= 0; i--) {
-        const role = (messages[i] as { role?: unknown }).role;
-        if (role !== "assistant") continue;
-        reply = this.extractTextFromSessionMessage(messages[i]);
-        if (reply) break;
-      }
-      this.postMessage({ type: "fleetSessionReply", sessionId, reply });
-    } catch (err) {
-      vscode.window.showErrorMessage(`Failed to load fleet reply: ${(err as Error).message}`);
-    }
-  }
-
-  private extractTextFromSessionMessage(message: Record<string, unknown>): string {
-    const content = message.content;
-    if (!Array.isArray(content)) return "";
-    let out = "";
-    for (const block of content) {
-      const b = block as { type?: unknown; text?: unknown };
-      if (b && b.type === "text" && typeof b.text === "string") out += b.text;
-    }
-    return out;
-  }
 
   /** Resume the saved session the view is showing into a thread of its own.
    *  Both callers that can be the first thing done to a viewed session —
@@ -8745,8 +8522,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     this.stopActiveTaskDetailRefresh();
     this.stopAttentionDiscoveryPoll();
     this.activeTaskDetailId = null;
-    this.stopFleetEventStream();
-    this.activeFleetRunId = null;
+    this.fleet.cleanup();
     this.diffContentStore.clear();
     this.diffProviderDisposable?.dispose();
     this.diffProviderDisposable = null;
