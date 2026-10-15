@@ -80,7 +80,7 @@ DeepSeek-GUI/
 ├── src/
 │   ├── extension.ts          # 扩展入口点
 │   ├── chat-provider.ts      # 主聊天界面逻辑（业务编排）
-│   ├── chat-provider/        # ↑ 的测试套件，按领域分组（见目录内 README.md）
+│   ├── chat-provider/        # ↑ 拆出的 mcp/skills/fleet 模块 + 全部测试（见目录内 README.md）
 │   ├── config-panel.ts       # 配置面板
 │   ├── i18n.ts               # 国际化支持（en/zh/tr 三语映射）
 │   ├── types.ts              # 共享类型定义

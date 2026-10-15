@@ -1,17 +1,34 @@
 # `src/chat-provider/`
 
-Test suites for `../chat-provider.ts` — the extension host's chat orchestration
-module (webview message handling, engine event routing, thread/session
-lifecycle, settings).
+Two things live here: the parts that have been **split out of**
+`../chat-provider.ts`, each with its own tests beside it, and the suites that
+cover the provider itself.
 
-The module itself stays at `src/chat-provider.ts`; this directory holds only its
-tests and their double. Every suite here imports it as `../../chat-provider`,
-which resolves to that file. **Do not add an `index.ts` here** — a directory
-index would silently change what `../../chat-provider` resolves to and shadow
-the module (the file wins today; the directory index wins only once the file is
-gone).
+The provider module stays at `src/chat-provider.ts`. Suites here import it as
+`../../chat-provider`, which resolves to that file. **Do not add an `index.ts`
+here** — a directory index would silently change what `../../chat-provider`
+resolves to and shadow the module (the file wins today; the directory index
+wins only once the file is gone).
 
-## Layout
+## The modules split out of the provider
+
+Each is a small controller that owns the state for one concern and reaches the
+provider through a narrow host interface rather than the provider itself. The
+provider keeps the same methods as one-line delegations, so the webview's
+messages and the slash commands route exactly as before — the split changed
+where the code lives, not what it does.
+
+- **`mcp.ts`** — the engine's MCP servers: list, enable/disable, reconnect,
+  remove, add, read a server's tools, review imports.
+- **`skills.ts`** — the skills panel: list, toggle, activate, install, mutate,
+  audit.
+- **`fleet.ts`** — managed multi-agent runs: the list, the open run's detail
+  and event stream, and the worker actions.
+
+Capability flags are read through host methods rather than captured, because
+they are filled in by the runtime probe after startup.
+
+## The provider's own suites
 
 One directory per area of the module's behavior. The suite at the top of this
 directory is the module's own — event routing guards, the event-handling state
@@ -36,9 +53,19 @@ models. Everything narrower lives below it.
 
 ```sh
 npm test                                       # everything
-npx vitest run src/chat-provider               # this module's suites
+npx vitest run src/chat-provider               # this directory
 npx vitest run src/chat-provider/threads       # one area
 ```
+
+## What is still in the provider
+
+`chat-provider.ts` is still one large class, deliberately. The parts above
+could move because each needed a handful of things from it. What remains — the
+webview message dispatch, initialization, the SSE event stream, the background
+thread watcher, the changes bookkeeping — reaches across 19 to 63 of the
+class's own members at a time, so any split would need a host interface nearly
+as large as the behavior it carried. That is a state-boundary redesign rather
+than a move, and it has not been done.
 
 ## Shared setup
 
