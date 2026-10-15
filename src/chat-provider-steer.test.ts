@@ -283,4 +283,134 @@ describe("ChatProvider steer flow", () => {
     expect(completeIdx).toBeGreaterThanOrEqual(0);
     expect(removeIdx).toBeGreaterThan(completeIdx);
   });
+
+  it("carries the composer's attachments on the steer prompt", async () => {
+    const { provider, api, postMessage } = createProvider();
+    (provider as any).currentAttachments = [
+      { id: "att-1", kind: "image", path: "/tmp/shot.png", name: "shot.png" },
+      { id: "att-2", kind: "file", path: "/tmp/notes.md", name: "notes.md" },
+    ];
+
+    await (provider as any).handleSteer("look at this");
+
+    // The wire prompt is what the engine expands: the image line becomes a
+    // real image block on the steer's own user message, the plain file rides
+    // the @path mention a send would use. Without this the picture stayed in
+    // the composer and the model was told nothing about it.
+    expect(api.steerTurn).toHaveBeenCalledWith(
+      "thread-1",
+      "turn-1",
+      "look at this\n[Attached image: /tmp/shot.png]\n@/tmp/notes.md"
+    );
+
+    // The bubble carries the same text the engine stores on the turn, so it
+    // reads the same live and after a reload — the shape a send uses.
+    const bubble = postMessage.mock.calls
+      .map((c: any[]) => c[0] as any)
+      .find((c: any) => c.type === "addMessage" && c.message.steered);
+    expect(bubble.message.content).toBe(
+      "look at this\n[Attached image: /tmp/shot.png]\n@/tmp/notes.md"
+    );
+
+    // The composer lets go of them, exactly as a send does: an attachment left
+    // behind would ride the next message a second time.
+    expect((provider as any).currentAttachments).toEqual([]);
+    expect(postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "attachmentsChanged", attachments: [] })
+    );
+  });
+
+  it("guides with an attachment alone, with nothing typed", async () => {
+    const { provider, api, postMessage } = createProvider();
+    (provider as any).currentAttachments = [
+      { id: "att-1", kind: "image", path: "/tmp/shot.png", name: "shot.png" },
+    ];
+
+    await (provider as any).handleSteer("");
+
+    expect(api.steerTurn).toHaveBeenCalledWith(
+      "thread-1",
+      "turn-1",
+      "[Attached image: /tmp/shot.png]"
+    );
+    const bubble = postMessage.mock.calls
+      .map((c: any[]) => c[0] as any)
+      .find((c: any) => c.type === "addMessage" && c.message.steered);
+    expect(bubble.message.content).toBe("[Attached image: /tmp/shot.png]");
+  });
+
+  it("a refused steer hands the attachments back with the text", async () => {
+    const { provider, api, postMessage } = createProvider();
+    const attachments = [
+      {
+        id: "att-1",
+        kind: "image",
+        path: "/tmp/shot.png",
+        name: "shot.png",
+        previewUrl: "data:image/png;base64,SHOT",
+      },
+    ];
+    (provider as any).currentAttachments = [...attachments];
+    api.steerTurn.mockRejectedValueOnce(new Error("turn is stopping"));
+
+    await (provider as any).handleSteer("look at this");
+
+    // Nothing is lost (TUI parity): the picture goes back to the composer
+    // beside the restored text.
+    expect(postMessage).toHaveBeenCalledWith({ type: "setInputText", text: "look at this" });
+    expect((provider as any).currentAttachments).toMatchObject([{ id: "att-1" }]);
+
+    const calls = postMessage.mock.calls.map((c: any[]) => c[0] as any);
+
+    // And it is published back, not merely left in the host's own field: the
+    // composer's chips are painted from this message, so a restore that never
+    // posts would leave the picture invisible in a box that claims to hold it.
+    // (Asserting the field alone cannot tell a restore from never having let
+    // go — the failure this test exists for.)
+    const lists = calls.filter((c: any) => c.type === "attachmentsChanged");
+    expect(lists[0].attachments).toEqual([]);
+    expect(lists[lists.length - 1].attachments).toMatchObject([{ id: "att-1" }]);
+
+    // The thumbnail comes back too. The list never carries it (it would be
+    // megabytes on every republish) and the webview pruned its cached copy the
+    // moment the steer emptied the composer, so a restore that published the
+    // list alone would bring back an icon where the picture had been.
+    expect(calls).toContainEqual({
+      type: "attachmentPreview",
+      id: "att-1",
+      previewUrl: "data:image/png;base64,SHOT",
+    });
+  });
+
+  it("a refused steer keeps an attachment added while it was in flight", async () => {
+    const { provider, api } = createProvider();
+    (provider as any).currentAttachments = [
+      { id: "att-1", kind: "image", path: "/tmp/shot.png", name: "shot.png" },
+    ];
+    // The composer stays live during the round trip: the user attaches
+    // something else while the guidance is on its way.
+    api.steerTurn.mockImplementationOnce(async () => {
+      (provider as any).currentAttachments = [
+        { id: "att-2", kind: "file", path: "/tmp/notes.md", name: "notes.md" },
+      ];
+      throw new Error("turn is stopping");
+    });
+
+    await (provider as any).handleSteer("look at this");
+
+    // A restore that replaced the list would throw away what the user added
+    // after the message left.
+    expect((provider as any).currentAttachments).toMatchObject([
+      { id: "att-1" },
+      { id: "att-2" },
+    ]);
+  });
+
+  it("an empty steer with no attachments is still dropped", async () => {
+    const { provider, api } = createProvider();
+
+    await (provider as any).handleSteer("   ");
+
+    expect(api.steerTurn).not.toHaveBeenCalled();
+  });
 });

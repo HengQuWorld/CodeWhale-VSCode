@@ -243,8 +243,12 @@ export function getInputScript(tr: WebviewTranslations): string {
     if (isStreaming && !isSlash && !canSteer) return;
     setComposerText('');
     window.__wvMessages.setUserScrolledUp(false);
-    messageHistory.unshift(text);
-    if (messageHistory.length > 200) messageHistory.length = 200;
+    // An attachment-only message has no words to remember: pushing the empty
+    // string would put a blank entry at the top of the arrow-key history.
+    if (text) {
+      messageHistory.unshift(text);
+      if (messageHistory.length > 200) messageHistory.length = 200;
+    }
     historyIndex = -1;
     draftBeforeHistory = '';
 
@@ -264,7 +268,9 @@ export function getInputScript(tr: WebviewTranslations): string {
     // unshift + cap above, so the list survives a window reload / restart and
     // comes back via 'inputHistory'. Sent after the action itself, so the
     // turn is never kept waiting on bookkeeping.
-    vscode.postMessage({ type: 'inputHistoryPush', text: text });
+    if (text) {
+      vscode.postMessage({ type: 'inputHistoryPush', text: text });
+    }
   }
 
   // ── Button capability state ──
@@ -396,7 +402,11 @@ export function getInputScript(tr: WebviewTranslations): string {
     if (!steerBtn) return;
     var streaming = !!(window.__wvMessages && window.__wvMessages.isStreaming());
     var shown = streaming && steerCapable();
-    var armed = shown && !!inputEl.value.trim();
+    // Armed by text or by an attachment: sendMessage() sends either, and a
+    // picture with no words is a complete piece of guidance ("this is what I
+    // mean"). Keying this off the text alone left the button dim over an
+    // image it would have sent.
+    var armed = shown && (!!inputEl.value.trim() || currentAttachments.length > 0);
     steerBtn.classList.toggle('is-active', shown);
     // Marked unavailable, never 'disabled': a disabled button swallows the
     // hover, and the hover is where a dim control says what it is waiting for.
@@ -755,6 +765,7 @@ export function getInputScript(tr: WebviewTranslations): string {
     slashMenuSelected = 0;
     updateSlashMenu(inputEl.value);
     // Typing is what arms the steer button: the text is the thing it sends.
+    // (An attachment arms it too — see updateSteerButtonState.)
     updateSteerButtonState();
   });
 
@@ -791,7 +802,12 @@ export function getInputScript(tr: WebviewTranslations): string {
     applyApiCapabilities: applyApiCapabilities,
     renderAttachments: renderAttachments,
     getCurrentAttachments: function() { return currentAttachments; },
-    setCurrentAttachments: function(v) { currentAttachments = v; },
+    setCurrentAttachments: function(v) {
+      currentAttachments = v;
+      // An attachment is content the steer button counts (see
+      // updateSteerButtonState), so a change to the list can arm or dim it.
+      updateSteerButtonState();
+    },
     setAttachmentPreview: setAttachmentPreview,
     setInputHistory: setInputHistory,
     updateSendStopButton: updateSendStopButton,

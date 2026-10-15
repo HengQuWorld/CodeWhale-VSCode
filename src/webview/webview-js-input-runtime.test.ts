@@ -778,6 +778,66 @@ describe("webview-js-input runtime: the steer button, and not the Stop button", 
     expect(h.getElement("btn-steer").getAttribute("aria-disabled")).toBe("false");
   });
 
+  it("arms over an attachment with no words — a picture is guidance too", () => {
+    const h = createHarness();
+    streamingWithSteering(h);
+
+    h.receive({
+      type: "attachmentsChanged",
+      attachments: [{ id: "att-1", kind: "image", path: "/tmp/shot.png", name: "shot.png" }],
+    });
+
+    // The text was the only thing that armed it, so an image a user had just
+    // attached sat in a dim button it would have sent.
+    const btn = h.getElement("btn-steer");
+    expect(btn.getAttribute("aria-disabled")).toBe("false");
+
+    h.getElement("btn-steer").dispatch("click", syntheticEvent());
+
+    // The host reads the attachment list itself, so the webview posts the same
+    // steer it posts for typed text — and no empty entry rides the history.
+    expect(h.postMessages).toEqual([{ type: "steer", text: "" }]);
+  });
+
+  it("dims again when the last attachment is taken away", () => {
+    const h = createHarness();
+    streamingWithSteering(h);
+
+    h.receive({
+      type: "attachmentsChanged",
+      attachments: [{ id: "att-1", kind: "image", path: "/tmp/shot.png", name: "shot.png" }],
+    });
+    expect(h.getElement("btn-steer").getAttribute("aria-disabled")).toBe("false");
+
+    h.receive({ type: "attachmentsChanged", attachments: [] });
+
+    expect(h.getElement("btn-steer").getAttribute("aria-disabled")).toBe("true");
+  });
+
+  it("leaves no blank entry in the arrow-key history after an attachment-only steer", () => {
+    const h = createHarness();
+    // A message the user actually typed, so the history has something to come
+    // back to.
+    h.input.value = "earlier question";
+    h.input.dispatch("keydown", syntheticEvent({ key: "Enter", shiftKey: false }));
+
+    streamingWithSteering(h);
+    h.receive({
+      type: "attachmentsChanged",
+      attachments: [{ id: "att-1", kind: "image", path: "/tmp/shot.png", name: "shot.png" }],
+    });
+    // Enter with the box empty: the attachment is the whole message.
+    h.input.dispatch("keydown", syntheticEvent({ key: "Enter", shiftKey: false }));
+
+    // ↑ reaches the question the user typed, not a blank line pushed by a
+    // message that had no words to remember.
+    h.input.selectionStart = 0;
+    h.input.selectionEnd = 0;
+    h.input.dispatch("keydown", syntheticEvent({ key: "ArrowUp" }));
+
+    expect(h.input.value).toBe("earlier question");
+  });
+
   it("names the box honestly when the engine cannot take guidance", () => {
     const h = createHarness();
     h.windowObj.__wvApiCapabilities = { turnSteer: false };

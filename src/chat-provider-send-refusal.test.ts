@@ -155,7 +155,13 @@ describe("ChatProvider send refused for the thread's active turn", () => {
   it("hands the attachments back too — a refused send carried them nowhere", async () => {
     const { provider, api, postMessage } = createProvider();
     (provider as any).currentAttachments = [
-      { id: "att-1", kind: "image", path: "/tmp/shot.png", name: "shot.png" },
+      {
+        id: "att-1",
+        kind: "image",
+        path: "/tmp/shot.png",
+        name: "shot.png",
+        previewUrl: "data:image/png;base64,SHOT",
+      },
     ];
 
     await sendRefused(provider, api, "look at this", [turn("turn-running", "in_progress")]);
@@ -164,6 +170,14 @@ describe("ChatProvider send refused for the thread's active turn", () => {
     // The send emptied the composer; the recovery republishes what it took.
     expect(lists[0].attachments).toEqual([]);
     expect(lists[lists.length - 1].attachments).toMatchObject([{ id: "att-1" }]);
+    // The thumbnail rides its own message (the list never carries the bytes,
+    // and the webview pruned its cached copy when the send emptied the
+    // composer), so a restore without it returns an icon-only chip.
+    expect(messagesOfType(postMessage, "attachmentPreview")).toContainEqual({
+      type: "attachmentPreview",
+      id: "att-1",
+      previewUrl: "data:image/png;base64,SHOT",
+    });
     // The typed text comes back without the attachment placeholder lines.
     expect(messagesOfType(postMessage, "setInputText")).toEqual([
       { type: "setInputText", text: "look at this" },

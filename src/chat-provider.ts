@@ -2460,6 +2460,33 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     }
   }
 
+  /** Hand the composer back the attachments a refused message was carrying.
+   *
+   *  Three things a plain republication gets wrong, and each would cost the
+   *  user work they already did:
+   *
+   *  - The list is *merged*, not replaced: the composer stays live while the
+   *    request is in flight, so an attachment added in that window would be
+   *    wiped by a restore that overwrote the list it found.
+   *  - Thumbnails are re-announced first. `postAttachmentsChanged` carries no
+   *    `previewUrl` (see its own note), and the webview prunes cached
+   *    thumbnails for attachments that leave the list — which is exactly what
+   *    happened when the message took them. Publishing the list alone brings
+   *    the chips back icon-only, so the bytes go first and the list follows.
+   *  - The text is the caller's business: a refused send and a refused steer
+   *    hand back the same thing they took (see `promptWithAttachments`), but
+   *    only the caller knows that string.
+   *
+   *  Shared by both refusal paths so they cannot drift apart. */
+  private restoreComposerAttachments(
+    attachments: readonly AttachmentRecord[]
+  ): void {
+    if (attachments.length === 0) return;
+    this.currentAttachments = [...attachments, ...this.currentAttachments];
+    this.reannounceAttachmentPreviews();
+    this.postAttachmentsChanged();
+  }
+
   /**
    * Attach one path as an attachment record. Image-kind paths are validated
    * here at attach time — TUI /attach parity (contract.rs attach_media →
@@ -2684,6 +2711,29 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     }
   }
 
+  /** A prompt with the composer's attachments appended as their own lines:
+   *  an `@path` mention for a plain file (the engine reads it as a context
+   *  reference, not as bytes) and `[Attached <kind>: <path>]` for media — the
+   *  placeholder `image_attach::expand_attachment_blocks` turns into real
+   *  image blocks, and the logged record of what the user attached. An
+   *  attachment-only prompt is those lines and nothing else.
+   *
+   *  Shared by the send path and the steer path: guidance has to carry what a
+   *  send carries, or a picture attached to a mid-turn message silently stays
+   *  in the composer while the model is told nothing about it. */
+  private static promptWithAttachments(
+    text: string,
+    attachments: readonly AttachmentRecord[]
+  ): string {
+    if (attachments.length === 0) return text;
+    const lines = attachments
+      .map((a) =>
+        a.kind === "file" ? `@${a.path}` : `[Attached ${a.kind}: ${a.path}]`
+      )
+      .join("\n");
+    return text.trim() ? text.trimEnd() + "\n" + lines : lines;
+  }
+
   private async handleSendMessage(text: string): Promise<void> {
     if (!text.trim() && this.currentAttachments.length === 0) return;
 
@@ -2696,20 +2746,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     // here, where the catch can still see it.
     const userMsgId = `user-${Date.now()}`;
 
-    let fullText = text;
-    if (attachments.length > 0) {
-      const attachmentLines = attachments.map((a) => {
-        if (a.kind === "file") {
-          return `@${a.path}`;
-        }
-        return `[Attached ${a.kind}: ${a.path}]`;
-      });
-      if (fullText.trim()) {
-        fullText = fullText.trimEnd() + "\n" + attachmentLines.join("\n");
-      } else {
-        fullText = attachmentLines.join("\n");
-      }
-    }
+    const fullText = ChatProvider.promptWithAttachments(text, attachments);
 
     // An armed skill rides the *next* message only, and it rides the wire
     // rather than the transcript: the bubble shows what the user typed, the
@@ -2913,10 +2950,20 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
    *  only touch the transcript on success; flush the streaming assistant
    *  segment so the steer bubble interrupts it, and route subsequent output
    *  to a fresh segment. The steered prompt is persisted server-side as a
-   *  user_message item on the turn, so loadHistory renders it after reload. */
+   *  user_message item on the turn, so loadHistory renders it after reload.
+   *
+   *  Attachments the user put in the composer go with it: the prompt's
+   *  `[Attached image: …]` lines are what the engine expands into image
+   *  blocks, so guidance carrying a screenshot reaches the model as one. */
   private async handleSteer(text: string): Promise<void> {
     const trimmed = text.trim();
-    if (!trimmed) return;
+    // The composer's attachments ride the guidance exactly as they ride a
+    // send — mid-turn guidance is often the picture itself ("this is what I
+    // mean", "the error is here"). Read before anything can clear them, and
+    // handed back untouched if the engine refuses the steer. An
+    // attachment-only steer is a steer: the send path already accepts one.
+    const attachments = [...this.currentAttachments];
+    if (!trimmed && attachments.length === 0) return;
 
     const thread = this.currentThread;
     const turnId = this.currentTurnId;
@@ -2929,21 +2976,36 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       return;
     }
 
-    // TUI parity (dispatch.rs steer_user_message): the engine is called
-    // FIRST and the transcript is only touched on success — on failure the
-    // TUI restores state and surfaces the error without visual changes.
-    // The engine rejects steering when the turn is stopping (interrupt
-    // requested) or already finished.
+    // The wire prompt carries the attachment lines; the bubble below carries
+    // it too — the same text a send shows, and the same text the engine
+    // persists on the turn's user_message item, so the bubble reads the same
+    // before and after a reload.
+    const prompt = ChatProvider.promptWithAttachments(trimmed, attachments);
+
+    // The composer lets go of the attachments as soon as the guidance leaves
+    // it — the same optimism a send makes, so a second click cannot send the
+    // same picture twice. A refused steer hands them back below.
+    if (attachments.length > 0) {
+      this.currentAttachments = [];
+      this.postAttachmentsChanged();
+    }
+
+    // TUI parity (dispatch.rs steer_user_message): the transcript is only
+    // touched on success — the engine rejects steering when the turn is
+    // stopping (interrupt requested) or already finished, and a refused steer
+    // leaves no bubble behind.
     try {
-      await this.api.steerTurn(thread.id, turnId, trimmed);
+      await this.api.steerTurn(thread.id, turnId, prompt);
     } catch (err) {
       // The engine refused the guidance — a turn that moved on, a turn that is
       // stopping, a lost connection. The webview cleared the box the moment
-      // the text left it, so the words go back where they came from: TUI
-      // parity (`dispatch.rs` restores the failed steer plus anything
-      // unattempted, "so nothing is lost"), and the same recovery a refused
-      // send already gets. The steer button re-arms with the restored text.
+      // the text left it, so the words go back where they came from — and the
+      // attachments with them — TUI parity (`dispatch.rs` restores the failed
+      // steer plus anything unattempted, "so nothing is lost"), and the same
+      // recovery a refused send already gets. The steer button re-arms with
+      // the restored text.
       this.restoreComposerText(trimmed);
+      this.restoreComposerAttachments(attachments);
       this.postMessage({
         type: "error",
         message: formatError(t().steerFailed, err),
@@ -2954,7 +3016,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     const steerMsg: ChatMessage = {
       id: `user-steer-${Date.now()}`,
       role: "user",
-      content: trimmed,
+      content: prompt,
       status: "complete",
       timestamp: Date.now(),
       steered: true,
@@ -6724,10 +6786,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     }
     this.retractRefusedChangeTurn();
     this.restoreComposerText(text);
-    if (attachments.length > 0) {
-      this.currentAttachments = [...attachments];
-      this.postAttachmentsChanged();
-    }
+    this.restoreComposerAttachments(attachments);
 
     if (!turn) return false;
     this.adoptActiveTurn(turn);

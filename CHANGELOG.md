@@ -14,6 +14,8 @@ Everything here talks to the engine's MCP routes; on an engine that predates the
 
 - **A tool call reads the same while it runs as it does after a reload** — A row drawn live used the raw engine name, so an MCP call showed `mcp__github__search_code` as it ran and "github / search code" once the conversation came back from history — the same call, two names, on every kind of tool. Both paths use the same label now: a call reads "Run command" or "github / search code" throughout, and the MCP label spaces each part properly, so the tool half no longer reads `search_code` beside a spaced server name.
 
+- **Guidance sent mid-turn carries your pictures** — While a turn is running the composer guides that turn instead of starting a new one, and an image attached to the box was left behind: the words went to the model and the picture stayed in the composer, unmentioned. A guided message now carries what is attached, exactly as a normal send does — a screenshot reaches the model as a picture — and a guidance the engine refuses hands back both the words and the picture. An image with no text at all is a complete steer too; the guide button used to stay dim over it.
+
 ## 0.8.6
 
 Everything here works on engine **v0.10.1** except the workspace-trust banner, whose engine half is still open upstream — on an engine that predates the route the banner simply stays hidden, and the rest of this release is unaffected.
