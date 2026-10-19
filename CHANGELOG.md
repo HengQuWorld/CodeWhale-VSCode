@@ -1,12 +1,12 @@
 # Change Log
 
-## Unreleased
+## 0.9.1
 
-These review commands read the engine's Context Lens routes, which arrive with engine **v0.10.0** — the floor this extension already documents. On anything older they say the routes are missing rather than reporting that you have nothing to review; `/memory show`, `search` and `get` are unaffected.
+Everything here works on engine **v0.10.0** or newer. The review commands read the engine's Context Lens routes, which arrive with that release — the floor this extension already documents — and on anything older they say the routes are missing rather than reporting that you have nothing to review; `/memory show`, `search` and `get` are unaffected.
 
 ### New Features
 
-- **The memory the model proposes is now yours to decide on** — Codewhale does not write a memory by itself. A note the model offers arrives as a **candidate** and waits for you: `/memory pending` lists what is waiting, and `/memory approve <id>`, `reject <id>` and `forget <id>` decide it. Ids are printed short enough to copy, and a prefix that could mean two entries is refused rather than guessed — the wrong guess here is an approval. Approving is what puts a note into what the model is given from then on; declining leaves it stored and out of context. No decision rewrites what a model has already been told, so a decision applies to what comes next rather than retroactively — each command says so instead of implying a retraction. `/memory show`, `search` and `get` keep listing what is already kept, which is why a candidate never appeared there — these commands read the review surface the engine exposes as the Context Lens.
+- **The memory the model proposes is now yours to decide on** — Codewhale never writes a memory by itself: a note the model offers arrives as a **candidate** and waits for you. `/memory pending` lists what is waiting, and `/memory approve <id>`, `reject <id>` and `forget <id>` decide it — approving is what puts a note into what the model is given from then on, while declining leaves it stored and out of context. A prefix that could mean two entries is refused rather than guessed, because the wrong guess here is an approval; and no decision rewrites what a model has already been told, so each command says it applies from then on. `/memory show`, `search` and `get` keep listing what is already kept, which is why a candidate never appeared there.
 
 ## 0.9.0
 

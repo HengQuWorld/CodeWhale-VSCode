@@ -1,11 +1,11 @@
 # CodeWhale for VS Code —— CodeWhale 代理的轻量图形前端
 
-[![Version](https://img.shields.io/badge/version-0.9.0-blue)](https://github.com/HengQuWorld/CodeWhale-VSCode)
+[![Version](https://img.shields.io/badge/version-0.9.1-blue)](https://github.com/HengQuWorld/CodeWhale-VSCode)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![CI](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/ci.yml/badge.svg)](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/ci.yml)
 [![Release](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/release.yml/badge.svg)](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/release.yml)
 [![VS Code](https://img.shields.io/badge/VS%20Code-1.85+-informational)](https://code.visualstudio.com/)
-[![VSIX](https://img.shields.io/badge/VSIX-~435%20KB-brightgreen)](https://github.com/HengQuWorld/CodeWhale-VSCode/releases)
+[![VSIX](https://img.shields.io/badge/VSIX-~441%20KB-brightgreen)](https://github.com/HengQuWorld/CodeWhale-VSCode/releases)
 [![macOS](https://img.shields.io/badge/macOS-supported-brightgreen)](#系统要求)
 [![Windows](https://img.shields.io/badge/Windows-supported-brightgreen)](#系统要求)
 [![Linux](https://img.shields.io/badge/Linux-supported-brightgreen)](#系统要求)
@@ -21,7 +21,7 @@ CodeWhale for VS Code 是 [CodeWhale](https://github.com/Hmbown/CodeWhale) 的**
 
 | | |
 |---|---|
-| VSIX 体积（0.9.0） | 约 435 KB |
+| VSIX 体积（0.9.1） | 约 441 KB |
 | 运行时 npm 依赖 | **零** —— 扩展自身的 TypeScript（以及用于渲染的 `marked`）都被 webpack 内联 |
 | 打包的引擎或模型 | **无** —— `codewhale` 是独立的原生二进制 |
 | 重复实现的代理逻辑 | **无** —— GUI 只是引擎本地 runtime API 之上的适配层 |
@@ -31,11 +31,11 @@ CodeWhale for VS Code 是 [CodeWhale](https://github.com/Hmbown/CodeWhale) 的**
 
 正因为代理的任何一部分都没有被复制进扩展，引擎可以独立发布新能力和修复，而不需要前端跟着发版。
 
-### 0.9.0 的引擎兼容性
+### 0.9.1 的引擎兼容性
 
-0.9.0 针对引擎 **v0.10.1** 验证：本版交付的每一项都在客户端侧、在该引擎上直接生效 —— 早期版本一直在等的那些也在其中。Branch 行、Changes 面板中命令自己的变更行、把打开的会话移到另一个 provider、undo 的文件回滚与按文件 Revert、选择器里的用户自定义 provider、fork 保留会话文档、线程栏的流畅，都在引擎读到 v0.10.1 的那一刻全部点亮。
+0.9.1 针对引擎 **v0.10.1** 验证；记忆审阅命令需要引擎 **v0.10.0** —— 正是那个版本引入了它们读取的 Context Lens 路由，在更早的引擎上它们会说明路由缺失，而不是报告你没有可审阅的内容。其余各项都在客户端侧、在 v0.10.1 上直接生效 —— 早期版本一直在等的那些也在其中：Branch 行、Changes 面板中命令自己的变更行、把打开的会话移到另一个 provider、undo 的文件回滚与按文件 Revert、选择器里的用户自定义 provider、fork 保留会话文档、线程栏的流畅，都在引擎读到 v0.10.1 的那一刻全部点亮。
 
-只有一项不是纯客户端的：**MCP** 面板建立在引擎的 MCP 管理路由上，需要引擎 **v0.10.0** —— 正是那个版本让清单带上每个服务器所属的层级、让每次修改都能呈上配置 revision，也是它第一次有了导入审查。在更早的引擎上，面板可以列出你的服务器，但改不动它们。
+**MCP** 面板同样不只在客户端：它建立在引擎的 MCP 管理路由上，需要引擎 **v0.10.0** —— 正是那个版本让清单带上每个服务器所属的层级、让每次修改都能呈上配置 revision，也是它第一次有了导入审查。在更早的引擎上，面板可以列出你的服务器，但改不动它们。
 
 以下仍需要比任何已发布引擎 tag 更新的 Codewhale 构建：
 
@@ -125,12 +125,12 @@ npx @vscode/vsce package --no-dependencies
 然后安装生成的 `.vsix`（`Extensions: Install from VSIX...`），或在终端执行：
 
 ```bash
-code --install-extension ./brotherwhale-vscode-0.9.0.vsix --force
+code --install-extension ./brotherwhale-vscode-0.9.1.vsix --force
 ```
 
 > **Trae CN 用户：** 如果 `code` 不在 `PATH` 中，使用自带的 CLI：
 > ```bash
-> "/Applications/Trae CN.app/Contents/Resources/app/bin/code" --install-extension ./brotherwhale-vscode-0.9.0.vsix --force
+> "/Applications/Trae CN.app/Contents/Resources/app/bin/code" --install-extension ./brotherwhale-vscode-0.9.1.vsix --force
 > ```
 
 ### 3. 打开它
@@ -189,7 +189,7 @@ code --install-extension ./brotherwhale-vscode-0.9.0.vsix --force
 ### 目标、记忆与技能
 - **Thread Goal** —— 状态、token 预算（超支显示红色）、耗时与续跑次数，支持设置 / 编辑 / 完成 / 阻塞 / 删除。
 - **后台目标** —— 设置目标时勾选*在后台线程运行*，它会移到独立线程上，继承当前线程的模型、模式与权限姿态；工作面板会在当前目标下方列出这些目标，并提供**打开线程**。**恢复运行**用于重新唤醒被 Runtime 重启搁置的目标（引擎启动时不会自动扫它们）。
-- **Memory** —— `/memory` 通过 runtime API 读写引擎的原生记忆存储。
+- **Memory** —— `/memory` 通过 runtime API 读写引擎的原生记忆存储。模型提议的记忆会作为候选等你决定：`/memory pending` 列出它们，`/memory approve|reject|forget <id>` 逐条处理。这项审阅需要引擎 v0.10.0（Context Lens 路由）；更早的引擎会直接说明。
 - **Notes** —— `/note` 记录按工作区的速记。
 - **Skills** —— `/skills` 与 `/skill` 列出、切换技能。
 - **MCP** —— Activity 标签的 **MCP** 面板列出引擎的 MCP 服务器，按配置来源分组（**项目** / **全局** / **插件**），并显示实时连接状态。可以逐个启用/禁用、连接并查看它提供的工具、移除，或用表单添加 stdio / HTTP / SSE 服务器（也可先选一个推荐项自动填表），还能审阅本机其他工具已有的服务器配置（`~/.claude.json`、项目的 `.mcp.json`、marketplace），逐条批准或拒绝。`/mcp` 打开面板，`/mcp list` 在对话中打印服务器列表。改动由引擎完成 —— 配置归引擎所有、也只有它写入；属于项目或插件配置的条目只展示、不在此处编辑；引擎没有 MCP 接口时，面板会直接说明，而不是显示一个空列表。
@@ -295,7 +295,7 @@ codewhale serve（引擎 —— 单独安装与升级）
 
 **安装 VSIX**
 ```bash
-code --install-extension /path/to/brotherwhale-vscode-0.9.0.vsix --force
+code --install-extension /path/to/brotherwhale-vscode-0.9.1.vsix --force
 ```
 
 ## 隐私与数据

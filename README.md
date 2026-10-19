@@ -1,11 +1,11 @@
 # CodeWhale for VS Code — a lightweight GUI frontend for the CodeWhale agent
 
-[![Version](https://img.shields.io/badge/version-0.9.0-blue)](https://github.com/HengQuWorld/CodeWhale-VSCode)
+[![Version](https://img.shields.io/badge/version-0.9.1-blue)](https://github.com/HengQuWorld/CodeWhale-VSCode)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![CI](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/ci.yml/badge.svg)](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/ci.yml)
 [![Release](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/release.yml/badge.svg)](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/release.yml)
 [![VS Code](https://img.shields.io/badge/VS%20Code-1.85+-informational)](https://code.visualstudio.com/)
-[![VSIX](https://img.shields.io/badge/VSIX-~435%20KB-brightgreen)](https://github.com/HengQuWorld/CodeWhale-VSCode/releases)
+[![VSIX](https://img.shields.io/badge/VSIX-~441%20KB-brightgreen)](https://github.com/HengQuWorld/CodeWhale-VSCode/releases)
 [![macOS](https://img.shields.io/badge/macOS-supported-brightgreen)](#requirements)
 [![Windows](https://img.shields.io/badge/Windows-supported-brightgreen)](#requirements)
 [![Linux](https://img.shields.io/badge/Linux-supported-brightgreen)](#requirements)
@@ -21,7 +21,7 @@ The split is deliberate: **the agent stays in the engine, the ergonomics stay in
 
 | | |
 |---|---|
-| VSIX size (0.9.0) | ~435 KB |
+| VSIX size (0.9.1) | ~441 KB |
 | Runtime npm dependencies | **none** — webpack inlines the extension's own TypeScript (and `marked` for rendering) |
 | Bundled engine or model | **none** — `codewhale` is a separate native binary |
 | Duplicated agent logic | **none** — the GUI is an adapter over the engine's local runtime API |
@@ -31,11 +31,11 @@ The frontend is a webview. `ChatProvider` runs in the extension host, speaks HTT
 
 Because nothing about the agent is copied into the extension, the engine can ship new capabilities and fixes without a frontend release.
 
-### Engine compatibility for 0.9.0
+### Engine compatibility for 0.9.1
 
-0.9.0 is verified against engine **v0.10.1**: everything it ships is client-side and works on that engine as it stands, and so does everything earlier releases were still waiting on. The Branch row, a command's own change rows in the Changes panel, moving an open conversation to another provider, undo's file rollback and the per-file Revert, user-defined providers in the picker, a fork keeping its session document and the quick thread rails all light up the moment the engine reads v0.10.1.
+0.9.1 is verified against engine **v0.10.1**, and the memory review commands need engine **v0.10.0** — the release that introduced the Context Lens routes they read; on anything older they say the routes are missing rather than reporting that you have nothing to review. Everything else it ships is client-side and works on v0.10.1 as it stands, and so does everything earlier releases were still waiting on: the Branch row, a command's own change rows in the Changes panel, moving an open conversation to another provider, undo's file rollback and the per-file Revert, user-defined providers in the picker, a fork keeping its session document and the quick thread rails all light up the moment the engine reads v0.10.1.
 
-One thing here is not client-only: the **MCP** panel is built on the engine's MCP management routes, and it needs engine **v0.10.0** — the release whose listing names the layer each server belongs to and carries the configuration revision every edit presents, and which has the import review at all. On an older engine the panel can list your servers but not change them.
+The **MCP** panel is also not client-only: it is built on the engine's MCP management routes, and it needs engine **v0.10.0** — the release whose listing names the layer each server belongs to and carries the configuration revision every edit presents, and which has the import review at all. On an older engine the panel can list your servers but not change them.
 
 What still needs a Codewhale build newer than any tagged engine release:
 
@@ -125,12 +125,12 @@ npx @vscode/vsce package --no-dependencies
 Then install the generated `.vsix` (`Extensions: Install from VSIX...`), or from a terminal:
 
 ```bash
-code --install-extension ./brotherwhale-vscode-0.9.0.vsix --force
+code --install-extension ./brotherwhale-vscode-0.9.1.vsix --force
 ```
 
 > **Trae CN users:** if `code` is not on your `PATH`, use the bundled CLI:
 > ```bash
-> "/Applications/Trae CN.app/Contents/Resources/app/bin/code" --install-extension ./brotherwhale-vscode-0.9.0.vsix --force
+> "/Applications/Trae CN.app/Contents/Resources/app/bin/code" --install-extension ./brotherwhale-vscode-0.9.1.vsix --force
 > ```
 
 ### 3. Open it
@@ -189,7 +189,7 @@ Switch from the status bar or with `/mode` (shortcuts `1`/`2`/`3`) and `/auto`. 
 ### Goal, memory, and skills
 - **Thread Goal** — status, token budget (red when over), elapsed time and continuation count, with set / edit / complete / block / delete.
 - **Background goals** — tick *Run on a background thread* when setting a goal and it moves to its own thread, inheriting the model, mode and permission posture of the one you are on; the Work panel lists those goals below the current one, with **Open Thread**. **Resume** re-arms a goal left parked by a Runtime restart (the engine has no startup sweep for them).
-- **Memory** — `/memory` reads and writes the engine's native memory store through the runtime API.
+- **Memory** — `/memory` reads and writes the engine's native memory store through the runtime API. The notes the model proposes arrive as candidates you decide on: `/memory pending` lists them, and `/memory approve|reject|forget <id>` decide one. That review needs engine v0.10.0 (the Context Lens routes); on an older engine it says so.
 - **Notes** — `/note` for quick per-workspace notes.
 - **Skills** — the Activity tab's **Skills** panel lists your skills and the shipped ones, switches each on or off, installs one from GitHub (`github:owner/repo`, a URL, or a registry name), and offers update / remove / trust / audit for the skills you own. `/skill <name>` arms a skill for your next message — its instructions go with that one message, while the message you see stays the one you typed — `/skill <name> <task>` sends the task immediately, `/skill <name> on|off` toggles it, and `/skills <name>` (or typing `/skill `) shows a skill's detail and completes its name. Install/update/remove/trust/audit and activation need an engine that answers the skill routes; on an older one the panel dims those controls and says why, and listing/toggling keep working.
 - **MCP** — the Activity tab's **MCP** panel lists the engine's MCP servers, grouped by where each one is configured (**Project** / **Global** / **Plugin**), with its live connection state. Switch one on or off, connect it and read the tools it exposes, remove it, add a stdio/HTTP/SSE server with the form (or pick one of the suggested servers to fill it in), and review the servers other tools on this machine already have (`~/.claude.json`, a project `.mcp.json`, a marketplace) to approve or decline them one by one. `/mcp` opens the panel; `/mcp list` prints the servers in the conversation. Editing is the engine's: it owns the config and is its only writer, an entry owned by a project or plugin config is shown but not editable here, and on an engine without the MCP routes the panel says so rather than showing an empty list.
@@ -293,7 +293,7 @@ Reloading or closing the extension stops that window's Runtime and interrupts ac
 
 **Installing a VSIX**
 ```bash
-code --install-extension /path/to/brotherwhale-vscode-0.9.0.vsix --force
+code --install-extension /path/to/brotherwhale-vscode-0.9.1.vsix --force
 ```
 
 ## Privacy & data
