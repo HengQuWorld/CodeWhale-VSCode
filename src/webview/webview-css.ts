@@ -728,6 +728,16 @@ export function getWebviewCss(): string {
       padding: 8px;
     }
 
+    /* The transcript is a container, not a control, but it takes focus on a
+       press inside it so that a selection made there is still the document's
+       selection when the host replays a copy (see claimTranscriptFocus in the
+       messages script). Taking focus must not paint anything: a ring around
+       the whole conversation would read as a widget. */
+    #messages:focus,
+    #messages:focus-visible {
+      outline: none;
+    }
+
     /* A transcript can hold thousands of rows — a fork of a long conversation
        cloned its source's items once per stream delta — and every row carries
        rendered markdown and tool output. Laying all of them out is what made

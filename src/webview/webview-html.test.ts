@@ -503,6 +503,17 @@ describe("webview-html.ts assembler", () => {
     expect(html).toContain('id="debug-panel"');
   });
 
+  it("makes the transcript focusable without adding it to the tab ring", () => {
+    const html = getWebviewHtml(makeMockWebview(), makeMockExtensionUri(), makeTr());
+    // A selection made in the transcript is only still the document's
+    // selection when the host replays a copy if the transcript itself holds
+    // focus; VS Code 1.143 otherwise moves focus back to the composer, which
+    // collapses the selection and copies nothing. `-1` keeps it out of the tab
+    // order, so this adds no keyboard stop.
+    expect(html).toContain('<div id="messages" tabindex="-1">');
+    expect(html).not.toContain('id="messages" tabindex="0"');
+  });
+
   it("contains sidebar sections", () => {
     const html = getWebviewHtml(makeMockWebview(), makeMockExtensionUri(), makeTr());
     expect(html).toContain('id="sidebar-threads"');

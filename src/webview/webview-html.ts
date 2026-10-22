@@ -734,7 +734,10 @@ ${css}
         </div>
       </div>
       <div id="messages-wrapper">
-        <div id="messages"></div>
+        <!-- Focusable but not tab-reachable: the transcript takes focus on a
+             press inside it, so a selection made there survives the host's
+             copy (see claimTranscriptFocus in the messages script). -->
+        <div id="messages" tabindex="-1"></div>
         <div id="approval-float" class="approval-float" hidden></div>
         <div id="message-nav"></div>
       </div>

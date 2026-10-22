@@ -76,6 +76,9 @@ function matchesSelector(element: FakeElement, selector?: string): boolean {
 class FakeElement {
   public className = "";
   public id = "";
+  public tagName = "";
+  /** How many times the module asked this element to take focus. */
+  public focusCalls = 0;
   public classList = new FakeClassList(this);
   public textContent = "";
   public value = "";
@@ -180,7 +183,9 @@ class FakeElement {
     this.scrollTop = Number(options.top ?? this.scrollTop);
   }
 
-  focus(): void {}
+  focus(): void {
+    this.focusCalls++;
+  }
 
   querySelectorAll(selector?: string): FakeElement[] {
     const found: FakeElement[] = [];
@@ -541,6 +546,44 @@ describe("lazy row layout", () => {
     expect(messagesEl.scrollCalls).toHaveLength(2);
     expect(messagesEl.scrollCalls[1].top as number).toBeGreaterThan(first);
     expect(messagesEl.scrollCalls[1].behavior).toBe("auto");
+  });
+});
+
+describe("transcript focus", () => {
+  /** A press inside a row: the module walks from the event's target up to
+   *  #messages, so the target only has to hang off a real row. */
+  const pressIn = (messages: Record<string, any>, messagesEl: FakeElement, target: FakeElement) => {
+    messages.addMessage({ id: "m1", role: "assistant", content: "an answer" });
+    const row = messagesEl.children.find((el) => el.id === "msg-m1")!;
+    target.parentElement = row;
+    messagesEl.dispatch("mousedown", { target });
+  };
+
+  it("takes focus when a press lands on plain text", () => {
+    // The transcript has to hold focus after the press: VS Code 1.143 restores
+    // the last focused element (the composer) before replaying a host copy, and
+    // that focus move collapses the selection the copy was meant to take.
+    const { messages, messagesEl } = createHarness();
+    pressIn(messages, messagesEl, new FakeElement());
+    expect(messagesEl.focusCalls).toBe(1);
+  });
+
+  it("leaves a button to take its own focus", () => {
+    const { messages, messagesEl } = createHarness();
+    const btn = new FakeElement();
+    btn.tagName = "BUTTON";
+    pressIn(messages, messagesEl, btn);
+    expect(messagesEl.focusCalls).toBe(0);
+  });
+
+  it("leaves a focusable tool block to take its own focus", () => {
+    // The blocks are `tabindex="0"` so a keyboard reader can scroll them; a
+    // press in one must keep landing there, not on the transcript.
+    const { messages, messagesEl } = createHarness();
+    const block = new FakeElement();
+    block.setAttribute("tabindex", "0");
+    pressIn(messages, messagesEl, block);
+    expect(messagesEl.focusCalls).toBe(0);
   });
 });
 

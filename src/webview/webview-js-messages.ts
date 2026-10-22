@@ -850,6 +850,48 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
     if (target) target.classList.add('scrollable');
   }
 
+  // ── Focus on press, so a selection survives the host's copy ──
+  // VS Code's webview shell replays a host copy into the frame, and before it
+  // does, it restores the document's *last focused* element whenever the
+  // frame's activeElement has fallen back to the body. In this panel that
+  // element is the composer, so copying an answer moved the caret into the
+  // input box and collapsed the selection the copy was meant to take: ⌘C
+  // produced nothing at all (VS Code 1.143.0, microsoft/vscode f5f64f08ab).
+  //
+  // A press inside the transcript therefore has to leave the transcript
+  // focused. Anything that takes focus on its own — a button, a link, a tool
+  // block's tabindex — is left to do so; that is also what keeps those blocks
+  // keyboard-scrollable.
+  var OWNS_FOCUS_TAGS = { A: 1, BUTTON: 1, INPUT: 1, SELECT: 1, SUMMARY: 1, TEXTAREA: 1 };
+
+  function ownsFocus(el) {
+    if (!el || typeof el.getAttribute !== 'function') return false;
+    var tag = String(el.tagName || '').toUpperCase();
+    if (OWNS_FOCUS_TAGS[tag]) return tag !== 'A' || el.getAttribute('href') !== null;
+    if (el.getAttribute('tabindex') !== null) return true;
+    if (el.getAttribute('contenteditable') === 'true') return true;
+    return false;
+  }
+
+  function claimTranscriptFocus(e) {
+    var node = e && e.target;
+    // Walk to the container: the press may land on text several boxes deep,
+    // and only the nearest owning element decides.
+    while (node && node !== messagesEl) {
+      if (ownsFocus(node)) return;
+      node = node.parentElement;
+    }
+    // preventScroll matters: taking focus must not move the conversation the
+    // reader is in the middle of selecting.
+    if (document.activeElement !== messagesEl && messagesEl.focus) {
+      messagesEl.focus({ preventScroll: true });
+    }
+  }
+
+  // Capture phase: a handler deeper in the tree may stop propagation, and the
+  // press still has to leave the transcript focused.
+  messagesEl.addEventListener('mousedown', claimTranscriptFocus, true);
+
   // ── Event delegation for message area clicks ──
   messagesEl.addEventListener('click', function(e) {
     var target = e.target;

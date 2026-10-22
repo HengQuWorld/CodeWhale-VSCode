@@ -159,6 +159,23 @@ describe("webview-css.ts", () => {
     expect(toolbarRule).toContain("flex-wrap: wrap;");
   });
 
+  it("keeps the focusable transcript from painting a focus ring", () => {
+    const css = getWebviewCss();
+    // The conversation takes focus on a press so a selection made there is
+    // still selected when the host replays a copy (see claimTranscriptFocus).
+    // A ring around the whole transcript would read as a widget rather than a
+    // selection, so both the focus and the keyboard-visible state stay bare.
+    expect(css).toMatch(/#messages:focus,\s*#messages:focus-visible \{\s*outline: none;/);
+  });
+
+  it("leaves text in the transcript selectable", () => {
+    const css = getWebviewCss();
+    // Copying out of the transcript is the point of the focus work above; a
+    // blanket user-select: none anywhere over #messages would quietly undo it.
+    const messagesRules = css.match(/#messages[^{]*\{[^}]*\}/g) ?? [];
+    for (const rule of messagesRules) expect(rule).not.toContain("user-select: none");
+  });
+
   it("contains message styling", () => {
     const css = getWebviewCss();
     expect(css).toContain(".message");
