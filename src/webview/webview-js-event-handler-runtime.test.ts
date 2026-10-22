@@ -2171,3 +2171,118 @@ describe("webview-js-event-handler runtime: a turn's failure", () => {
     expect(harness.mcpPanelCalls()).toBe(1);
   });
 });
+
+describe("webview-js-event-handler runtime: context reading", () => {
+  it("paints the context percentage with the token readings in its tooltip", () => {
+    const harness = createRuntimeHarness();
+
+    // The message the host posts: the engine's estimate of the next prompt,
+    // against the route's window.
+    harness.dispatchMessage({
+      type: "contextUsage",
+      percent: 42.4,
+      usedTokens: 53760,
+      windowTokens: 128000,
+    });
+
+    const html = harness.getElement("status-stats").innerHTML;
+    // Rounded to a whole percent — the chip is a reading, not a gauge.
+    expect(html).toContain("Context 42%");
+    // Built with the same `toLocaleString()` the chip uses, so the assertion
+    // does not quietly depend on the machine's default locale.
+    expect(html).toContain(
+      `${(53760).toLocaleString()} of ${(128000).toLocaleString()} tokens`,
+    );
+    expect(html).not.toContain("context-full");
+  });
+
+  it("turns the reading emphatic from 80%, the same threshold the TUI uses", () => {
+    const harness = createRuntimeHarness();
+
+    harness.dispatchMessage({
+      type: "contextUsage",
+      percent: 86,
+      usedTokens: 110080,
+      windowTokens: 128000,
+    });
+
+    expect(harness.getElement("status-stats").innerHTML).toContain("Context 86%");
+    expect(harness.getElement("status-stats").innerHTML).toContain(
+      "stat-chip context context-full",
+    );
+
+    // Exactly at the threshold, not one past it: 80 is the level the TUI's
+    // information line turns consequential at, so it must be emphasised too.
+    harness.dispatchMessage({
+      type: "contextUsage",
+      percent: 80,
+      usedTokens: 102400,
+      windowTokens: 128000,
+    });
+    expect(harness.getElement("status-stats").innerHTML).toContain("context-full");
+
+    // One percent under stays quiet — otherwise the emphatic class would be
+    // repainted for every reading and stop meaning anything.
+    harness.dispatchMessage({
+      type: "contextUsage",
+      percent: 79.4,
+      usedTokens: 101632,
+      windowTokens: 128000,
+    });
+    expect(harness.getElement("status-stats").innerHTML).toContain("Context 79%");
+    expect(harness.getElement("status-stats").innerHTML).not.toContain("context-full");
+  });
+
+  it("still reports the percentage when the route cannot bound its window", () => {
+    // An engine can know how full the prompt is without proving a window size;
+    // the tooltip then drops the token arithmetic rather than inventing a
+    // denominator.
+    const harness = createRuntimeHarness();
+
+    harness.dispatchMessage({
+      type: "contextUsage",
+      percent: 12,
+      usedTokens: null,
+      windowTokens: null,
+    });
+
+    const html = harness.getElement("status-stats").innerHTML;
+    expect(html).toContain("Context 12%");
+    expect(html).toContain("Model context window: 12% used");
+    expect(html).not.toContain("tokens)");
+  });
+
+  it("drops the reading when the host says this thread has none", () => {
+    // A thread switch or a saved session has no engine behind it to measure:
+    // keeping the previous conversation's percentage would describe the wrong
+    // one.
+    const harness = createRuntimeHarness();
+    harness.dispatchMessage({
+      type: "contextUsage",
+      percent: 63,
+      usedTokens: 80640,
+      windowTokens: 128000,
+    });
+    expect(harness.getElement("status-stats").innerHTML).toContain("Context 63%");
+
+    harness.dispatchMessage({ type: "contextUsage", percent: null });
+
+    expect(harness.getElement("status-stats").innerHTML).not.toContain("Context");
+  });
+
+  it("keeps the reading beside cost and tokens rather than replacing them", () => {
+    const harness = createRuntimeHarness();
+    harness.dispatchMessage({
+      type: "sessionStats",
+      cost: "$0.12",
+      totalInputTokens: 1200,
+      totalOutputTokens: 300,
+    });
+    harness.dispatchMessage({ type: "contextUsage", percent: 7, usedTokens: 8960, windowTokens: 128000 });
+
+    const html = harness.getElement("status-stats").innerHTML;
+    expect(html).toContain("Context 7%");
+    expect(html).toContain("$0.12");
+    expect(html).toContain((1200).toLocaleString());
+  });
+});

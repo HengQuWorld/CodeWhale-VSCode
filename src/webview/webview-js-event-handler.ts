@@ -40,6 +40,10 @@ ${PROVIDER_PICKER_JS}
   var apiCapabilities = window.__wvApiCapabilities || {};
   var runtimeVersion = '';
   var sessionStats = null;
+  /** The context-window reading for the thread on screen, or null when the
+   *  engine cannot prove one. The host reads it before a send and after each
+   *  turn settles; the status bar paints it beside cost and tokens. */
+  var contextUsage = null;
   // Startup defaults for new threads, seeded by the backend's scopedDefaults
   // message. They are process-scoped, so they never ride settingsUpdated
   // (which describes the active thread) — the mode/permission dropdowns show
@@ -342,12 +346,37 @@ ${PROVIDER_PICKER_JS}
     if (indicator) indicator.remove();
   }
 
+  /** The status bar's context reading: how much of the model's window the
+   *  conversation currently occupies.
+   *
+   *  A route that cannot bound its window reports no percentage, and the chip
+   *  is omitted rather than drawing a zero the engine did not prove. The
+   *  reading turns emphatic from 80% — the same threshold the TUI's
+   *  information line uses — because a nearly full window is consequential
+   *  (the next turn may compact) without being a failure. */
+  function contextChipHtml() {
+    if (!contextUsage || typeof contextUsage.percent !== 'number') return '';
+    if (!isFinite(contextUsage.percent)) return '';
+    var pct = Math.max(0, Math.min(100, Math.round(contextUsage.percent)));
+    var used = typeof contextUsage.usedTokens === 'number' ? Number(contextUsage.usedTokens).toLocaleString() : null;
+    var window = typeof contextUsage.windowTokens === 'number' ? Number(contextUsage.windowTokens).toLocaleString() : null;
+    var title = (used !== null && window !== null)
+      ? __i18n.contextUsageTooltip.replace('{percent}', String(pct)).replace('{used}', used).replace('{window}', window)
+      : __i18n.contextUsageTooltipNoWindow.replace('{percent}', String(pct));
+    return '<span class="stat-chip context' + (pct >= 80 ? ' context-full' : '') + '" title="' +
+      __wvEscapeHtml(title) + '">' + __wvEscapeHtml(__i18n.contextUsageLabel) + ' ' + pct + '%</span>';
+  }
+
   function renderStatusStats() {
     if (!statusStatsEl) return;
     var statsHtml = '';
     if (runtimeVersion) {
       statsHtml += '<span class="stat-chip">TUI ' + __wvEscapeHtml(runtimeVersion) + '</span>';
     }
+    // Right after the version, before cost: this is the reading that decides
+    // whether the next turn still fits, so it belongs on the row that answers
+    // what this session is costing.
+    statsHtml += contextChipHtml();
     if (sessionStats && sessionStats.cost) {
       statsHtml += '<span class="stat-chip cost">' + __wvEscapeHtml(sessionStats.cost) + '</span>';
     }
@@ -1641,6 +1670,22 @@ ${PROVIDER_PICKER_JS}
         break;
       }
 
+      case 'contextUsage': {
+        // A null percentage is the host saying "no reading for this thread"
+        // (it clears on a switch and for a saved session, which has no live
+        // engine to measure). Keeping the previous number in that case would
+        // describe one conversation with another's context.
+        contextUsage = typeof msg.percent === 'number'
+          ? {
+              percent: msg.percent,
+              usedTokens: typeof msg.usedTokens === 'number' ? msg.usedTokens : null,
+              windowTokens: typeof msg.windowTokens === 'number' ? msg.windowTokens : null,
+            }
+          : null;
+        renderStatusStats();
+        break;
+      }
+
       case 'status':
         setStatusText(msg.text);
         break;
@@ -1739,6 +1784,7 @@ ${PROVIDER_PICKER_JS}
         if (st) { clearTimeout(st); window.__wvMessages.setStreamingTimeout(null); }
         setStreamingState(false, __i18n.ready);
         sessionStats = null;
+        contextUsage = null;
         renderStatusStats();
         window.__wvMessages.renderWelcome();
         // Clear sidebar Work panel state so stale data from the previous

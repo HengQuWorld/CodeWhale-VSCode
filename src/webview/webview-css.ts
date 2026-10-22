@@ -2222,6 +2222,15 @@ export function getWebviewCss(): string {
       color: var(--fg);
       font-weight: 600;
     }
+    .status-bar .stat-chip.context {
+      color: var(--muted);
+    }
+    /* A nearly full window: consequential, not an error — the same threshold
+       the TUI's info line uses for its context reading. */
+    .status-bar .stat-chip.context-full {
+      color: #f0ad4e;
+      font-weight: 600;
+    }
     .status-bar .stat-chip.cache-good {
       color: #4caf50;
     }

@@ -120,6 +120,11 @@ export interface WebviewTranslations {
   modelLabel: string;
   workspaceLabel: string;
   loadedThreadPattern: string; // "Loaded: {0}" / "已加载: {0}"
+  /** Status-bar context reading: the label before the percentage, and the two
+   *  tooltip forms — with and without a bounded window to divide by. */
+  contextUsageLabel: string;
+  contextUsageTooltip: string;
+  contextUsageTooltipNoWindow: string;
   showAllWorkspaces: string;
   filterCurrentWorkspace: string;
   approvalRequired: string;

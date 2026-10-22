@@ -197,6 +197,12 @@ interface Translations {
   threadsCountPattern: string;
   /** "Loaded: {0}" / "已加载: {0}" */
   loadedThreadPattern: string;
+  /** Status-bar context reading: the label before the percentage, and the
+   *  tooltip that spells out the token readings. `{used}` and `{window}` are
+   *  absent when the route cannot bound its window, hence the second form. */
+  contextUsageLabel: string;
+  contextUsageTooltip: string;
+  contextUsageTooltipNoWindow: string;
   /** "Show all workspaces" / "显示所有工作区" */
   showAllWorkspaces: string;
   /** "Current workspace only" / "仅当前工作区" */
@@ -704,6 +710,9 @@ const en: Translations = {
   thinkingToggle: "▶ Thinking", thinkingOpen: "▼ Thinking", thinkingClose: "▶ Thinking",
   threadsCountPattern: "{n} threads",
   loadedThreadPattern: "Loaded: {0}",
+  contextUsageLabel: "Context",
+  contextUsageTooltip: "Model context window: {percent}% used ({used} of {window} tokens)",
+  contextUsageTooltipNoWindow: "Model context window: {percent}% used",
   showAllWorkspaces: "Show all workspaces",
   filterCurrentWorkspace: "Current workspace only",
   commandMode: "/mode - Switch mode (act/plan/operate)",
@@ -1178,6 +1187,9 @@ const zhCn: Translations = {
   thinkingToggle: "▶ 思考过程", thinkingOpen: "▼ 思考过程", thinkingClose: "▶ 思考过程",
   threadsCountPattern: "{n} 个会话",
   loadedThreadPattern: "已加载: {0}",
+  contextUsageLabel: "上下文",
+  contextUsageTooltip: "模型上下文窗口：已用 {percent}%（{used} / {window} tokens）",
+  contextUsageTooltipNoWindow: "模型上下文窗口：已用 {percent}%",
   showAllWorkspaces: "显示所有工作区",
   filterCurrentWorkspace: "仅当前工作区",
   commandMode: "/mode - 切换模式 (act/plan/operate)",
@@ -1651,6 +1663,9 @@ export function webviewTranslations(tr: Translations) {
     modelLabel: tr.modelLabel,
     workspaceLabel: tr.workspaceLabel,
     loadedThreadPattern: tr.loadedThreadPattern,
+    contextUsageLabel: tr.contextUsageLabel,
+    contextUsageTooltip: tr.contextUsageTooltip,
+    contextUsageTooltipNoWindow: tr.contextUsageTooltipNoWindow,
     showAllWorkspaces: tr.showAllWorkspaces,
     filterCurrentWorkspace: tr.filterCurrentWorkspace,
     approvalRequired: tr.approvalRequired,
