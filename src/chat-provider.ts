@@ -1763,6 +1763,10 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
 
       this.sessionState.reset();
       this.viewingSessionId = sessionId;
+      // A saved session has no live engine behind it, so there is no live
+      // context-window reading to show: clear the thread's rather than keep
+      // presenting a number for a conversation that is not running.
+      this.postMessage({ type: "contextUsage", percent: null });
       this.viewingSessionWorkspace = session.metadata.workspace || null;
       // The session's own provider route, not the picker's: this session was
       // saved on it and `POST /v1/sessions/{id}/resume-thread` builds its
@@ -2205,6 +2209,10 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     this.stopBackgroundWatch(threadId);
     this.backgroundThreads.delete(threadId);
     this.sessionState.reset();
+    // The reading belongs to the thread on screen: clear the outgoing one
+    // before the new thread's posture is read, so a switch never leaves the
+    // previous conversation's percentage under a different conversation.
+    this.postMessage({ type: "contextUsage", percent: null });
 
     try {
       this.currentThread = await this.api.getThread(threadId);
@@ -2866,6 +2874,16 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       // Note what is *not* part of that state: an allow-and-remember decision.
       // It records a session grant, never a posture change (see
       // handleApprovalDecision), so this still sends the thread's own posture.
+
+      // The context reading for the turn that is about to start. Issued first
+      // and not awaited: the engine handles one operation at a time, so on an
+      // idle engine this answers in milliseconds — before the first token —
+      // and describes the prompt this turn will send. Awaiting it instead
+      // would hold up Send for as long as a busy engine takes to notice (a
+      // goal continuation this client did not start), and a chip is never
+      // worth delaying the user's message.
+      void this.refreshThreadContext(this.currentThread.id);
+
       const result = await this.api.startTurn(this.currentThread.id, wireText, {
         mode,
         model,
@@ -7446,6 +7464,14 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
           void this.refreshThreadUsage();
         }
 
+        // The next prompt's reading: once the turn has settled the engine is
+        // idle again, and its estimate now covers the answer that just
+        // landed — which is the input the next turn will send, and so the
+        // number the reasoning shows while that turn runs. Read whether or not
+        // the turn recorded usage: a failed or interrupted turn still leaves
+        // a conversation whose size the chip should describe.
+        void this.refreshThreadContext();
+
         // TUI emits turn.completed for ALL terminal turn states
         // (completed / interrupted / failed) — it never emits
         // "turn.failed" or "turn.interrupted" (see runtime_threads.rs:3492).
@@ -8332,6 +8358,49 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       this.sendSessionStats();
     } catch {
       // Best-effort refresh: keep the last known totals on failure.
+    }
+  }
+
+  /** Read the thread's context-window posture — what fraction of the model's
+   *  window the input occupies.
+   *
+   *  `GET /v1/threads/{id}/context` answers through the thread's engine, and
+   *  the engine handles one operation at a time: `SendMessage` runs the whole
+   *  turn inside the loop, so a read issued while a turn is live waits behind
+   *  that turn rather than answering. Polling during a turn is therefore
+   *  pointless, which is why the reading is taken at the two moments the
+   *  engine is between turns:
+   *
+   *  - as a send is issued, so the estimate covers the prompt that turn will
+   *    send and is on screen for the reasoning that follows;
+   *  - once a turn settles, whose estimate is the *next* prompt's.
+   *
+   *  A route that cannot bound a window reports `null`; the reading is then
+   *  omitted rather than reconstructed from turn receipts, which carry tokens
+   *  but not the window. */
+  private async refreshThreadContext(threadId?: string): Promise<void> {
+    const id = threadId ?? this.currentThread?.id;
+    if (!id || !this.apiCapabilities.threadContext) return;
+    // A turn this view is holding owns the engine: the request would queue
+    // behind it and answer with a later moment than the one it describes. The
+    // reading taken when that turn started stands.
+    if (this.currentTurnId) return;
+    try {
+      const context = await this.api.getThreadContext(id);
+      // A read that lands after a thread switch describes the conversation
+      // the user just left; the chip must describe the one on screen.
+      if (this.currentThread?.id !== id) return;
+      this.postMessage({
+        type: "contextUsage",
+        percent: context.usage_percent,
+        usedTokens: context.input_tokens,
+        windowTokens: context.window_tokens,
+      });
+    } catch (err) {
+      // Best-effort — the last reading stands — but never silent: a reading
+      // that stops arriving is otherwise indistinguishable from an engine
+      // that cannot produce one at all.
+      this.debugLog(`refreshThreadContext(${id}) failed: ${getErrorMessage(err)}`);
     }
   }
 
