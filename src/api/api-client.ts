@@ -46,6 +46,7 @@ import type {
   UsageBucket,
   UsageAggregation,
   ThreadUsageResponse,
+  ThreadContextResponse,
   AutomationStatus,
   AutomationRunStatus,
   AutomationRecord,
@@ -975,6 +976,7 @@ export class CodeWhaleApiClient {
       snapshotList,
       snapshotRestore,
       threadUsage,
+      threadContext,
       threadFileRevert,
       threadForkAtTurn,
       callChanges,
@@ -992,6 +994,11 @@ export class CodeWhaleApiClient {
       // on older runtimes yields 404 (→ false). A GET probe would invoke
       // the handler and conflate "thread not found" 404 with "no route" 404.
       this.probePath("/v1/threads/__probe__/usage", "POST"),
+      // Same POST-probe for the same reason: `/context` is GET-only, so a POST
+      // answers 405 where the route exists and 404 where it does not. A GET
+      // probe would run the handler, whose unknown-thread 404 is
+      // indistinguishable from a missing route.
+      this.probePath("/v1/threads/__probe__/context", "POST"),
       // GET-probe for the same reason in reverse: file-revert is POST-only, so
       // GET yields 405 on an engine that has it. Probing with POST would run
       // the handler and get 404 for the unknown `__probe__` thread — a false
@@ -1026,6 +1033,7 @@ export class CodeWhaleApiClient {
       snapshotList,
       snapshotRestore,
       threadUsage,
+      threadContext,
       threadFileRevert,
       threadForkAtTurn,
       callChanges,
@@ -1083,6 +1091,15 @@ export class CodeWhaleApiClient {
   async getThreadUsage(threadId: string): Promise<UsageTotals> {
     const resp = (await this.get(`/v1/threads/${threadId}/usage`)) as ThreadUsageResponse;
     return resp.totals;
+  }
+
+  /** Live context-window posture for one thread — how full the model's window
+   *  is, as a percentage and in the token readings it was derived from.
+   *  `live: false` means only the stored route resolved (no engine loaded) and
+   *  `usage_percent` is null; the caller then shows no reading rather than a
+   *  zero it cannot prove. */
+  async getThreadContext(threadId: string): Promise<ThreadContextResponse> {
+    return (await this.get(`/v1/threads/${threadId}/context`)) as ThreadContextResponse;
   }
 
   /** Fallback for runtimes without the per-thread usage endpoint: the

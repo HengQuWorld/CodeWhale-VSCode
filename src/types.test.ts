@@ -191,6 +191,7 @@ describe("types.ts - Interface structural conformance", () => {
       snapshotList: false,
       snapshotRestore: false,
       threadUsage: true,
+      threadContext: true,
       threadFileRevert: true,
       threadForkAtTurn: true,
       callChanges: true,

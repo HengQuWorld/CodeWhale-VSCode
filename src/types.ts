@@ -721,6 +721,13 @@ export interface RuntimeApiCapabilities {
    *  directly; when false it falls back to the `/v1/usage?group_by=thread`
    *  bucket, which carries USD only. */
   threadUsage: boolean;
+  /** `GET /v1/threads/{id}/context` exists (TUI ≥ the version that exports
+   *  the live context-window posture). When true the status bar shows how
+   *  full the model's context window is, read before each send and again when
+   *  a turn settles; when false the reading is omitted rather than
+   *  reconstructed from turn receipts, which carry tokens but not the
+   *  window. */
+  threadContext: boolean;
   /** `POST /v1/threads/{id}/file-revert` exists (TUI ≥ the version that added
    *  file-scoped snapshot restore). When false the Changes panel keeps the
    *  Revert button disabled with an explanation instead of falling back to
@@ -863,6 +870,37 @@ export interface UsageAggregation {
 export interface ThreadUsageResponse {
   thread_id: string;
   totals: UsageTotals;
+}
+
+/** How full the model's context window is, as the engine classifies it.
+ *  Labels mirror the runtime's `PressureLevel` (`low` / `moderate` / `high` /
+ *  `critical`); thresholds are the engine's, not the GUI's. */
+export type ContextPressure = "low" | "moderate" | "high" | "critical";
+
+/** Response of `GET /v1/threads/{id}/context`: the live context-window
+ *  posture for one thread. `input_tokens` is the engine's conservative
+ *  estimate of the next prompt; `billed_input_tokens` is the last
+ *  provider-counted prompt, when one exists. Every numeric field is nullable
+ *  because a route that cannot bound a window has no percentage to report,
+ *  and `live: false` marks an answer resolved from the stored route alone
+ *  (no engine loaded), where the token readings and the percentage are
+ *  absent. */
+export interface ThreadContextResponse {
+  thread_id: string;
+  model: string;
+  provider: string | null;
+  model_provider_id: string | null;
+  live: boolean;
+  window_tokens: number | null;
+  window_source: string | null;
+  input_tokens: number | null;
+  billed_input_tokens: number | null;
+  output_cap_tokens: number | null;
+  input_budget_ceiling: number | null;
+  available_input_tokens: number | null;
+  compaction_trigger_tokens: number | null;
+  usage_percent: number | null;
+  pressure: ContextPressure | null;
 }
 
 export type AutomationStatus = "active" | "paused";

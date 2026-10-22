@@ -997,6 +997,83 @@ describe("CodeWhaleApiClient - Usage methods", () => {
   });
 });
 
+describe("CodeWhaleApiClient - thread context posture", () => {
+  type RawResponse = { statusCode: number; data: string };
+
+  function clientStubbingRaw(
+    respond: (method: string, path: string, body: unknown) => RawResponse
+  ) {
+    const client = new CodeWhaleApiClient("http://localhost:54321");
+    const calls: { method: string; path: string; body: unknown }[] = [];
+    (client as any).requestRaw = vi.fn(
+      async (method: string, path: string, body: unknown) => {
+        calls.push({ method, path, body });
+        return respond(method, path, body);
+      }
+    );
+    return { client, calls };
+  }
+
+  it("probes the context route with POST and reports it unavailable on 404", async () => {
+    // GET-only route: a POST answers 405 where it exists and 404 where it does
+    // not. A GET probe would run the handler, whose unknown-thread 404 is
+    // indistinguishable from a missing route.
+    const { client, calls } = clientStubbingRaw(() => ({ statusCode: 404, data: "{}" }));
+
+    const caps = await client.probeRuntimeCapabilities();
+
+    expect(caps.threadContext).toBe(false);
+    expect(calls).toContainEqual({
+      method: "POST",
+      path: "/v1/threads/__probe__/context",
+      body: {},
+    });
+  });
+
+  it("treats a 405 on the POST probe as the endpoint being available", async () => {
+    const { client } = clientStubbingRaw((_method, path) =>
+      path === "/v1/threads/__probe__/context"
+        ? { statusCode: 405, data: "{}" }
+        : { statusCode: 404, data: "{}" }
+    );
+
+    const caps = await client.probeRuntimeCapabilities();
+
+    expect(caps.threadContext).toBe(true);
+  });
+
+  it("reads a thread's live context posture from the thread-scoped route", async () => {
+    const { client, calls } = clientStubbingRaw(() => ({
+      statusCode: 200,
+      data: JSON.stringify({
+        thread_id: "thread-1",
+        model: "deepseek-v4-pro",
+        provider: "deepseek",
+        model_provider_id: null,
+        live: true,
+        window_tokens: 128000,
+        window_source: "engine_active_route",
+        input_tokens: 53760,
+        billed_input_tokens: 51200,
+        output_cap_tokens: 8192,
+        input_budget_ceiling: 118784,
+        available_input_tokens: 65024,
+        compaction_trigger_tokens: 96000,
+        usage_percent: 42,
+        pressure: "moderate",
+      }),
+    }));
+
+    const context = await client.getThreadContext("thread-1");
+
+    expect(calls).toEqual([
+      { method: "GET", path: "/v1/threads/thread-1/context", body: undefined },
+    ]);
+    expect(context.usage_percent).toBe(42);
+    expect(context.window_tokens).toBe(128000);
+  });
+});
+
 describe("CodeWhaleApiClient - per-file revert", () => {
   type RawResponse = { statusCode: number; data: string };
 
