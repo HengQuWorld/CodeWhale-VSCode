@@ -429,11 +429,47 @@ describe("webview-js-input runtime: paste", () => {
     const ev = syntheticEvent({
       clipboardData: {
         items: [{ kind: "string", type: "text/plain", getAsFile: () => null }],
+        getData: (t: string) => (t === "text/plain" ? "some words" : ""),
       },
     });
     h.input.dispatch("paste", ev);
     expect(h.postMessages).toEqual([]);
     expect(ev.__calls).toEqual([]);
+  });
+
+  it("pastes the words of a copy that also carries a picture of them", () => {
+    // Copying a region of a page, a chat card or a document puts both the words
+    // and a picture of them on the clipboard. Taking the picture swallowed the
+    // text the user meant to paste: the words never arrived and a PNG of them
+    // became an attachment instead.
+    const h = createHarness();
+    const ev = syntheticEvent({
+      clipboardData: {
+        items: [
+          { kind: "string", type: "text/plain", getAsFile: () => null },
+          { kind: "file", type: "image/png", getAsFile: () => makeFile("p.png", "image/png", 5) },
+        ],
+        getData: (t: string) => (t === "text/plain" ? "已上架三个产品" : ""),
+      },
+    });
+    h.input.dispatch("paste", ev);
+    expect(ev.__calls).toEqual([]);
+    expect(h.postMessages).toEqual([]);
+  });
+
+  it("still attaches a copied image whose clipboard text is only its URL", () => {
+    // "Copy Image" puts the pixels and the src beside them; pasting that string
+    // is not what the gesture means, so the image still wins there.
+    const h = createHarness();
+    const ev = syntheticEvent({
+      clipboardData: {
+        items: [{ kind: "file", type: "image/png", getAsFile: () => makeFile("p.png", "image/png", 5) }],
+        getData: (t: string) => (t === "text/plain" ? "https://example.com/a.png" : ""),
+      },
+    });
+    h.input.dispatch("paste", ev);
+    expect(ev.__calls).toContain("preventDefault");
+    expect(h.postMessages.map((m: any) => m.type)).toEqual(["attachImage"]);
   });
 });
 

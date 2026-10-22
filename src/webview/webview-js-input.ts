@@ -496,8 +496,33 @@ export function getInputScript(tr: WebviewTranslations): string {
     reader.readAsDataURL(file);
   }
 
+  // A paste that carries words is a text paste, whatever rides beside them.
+  // Copying a region of a page, a chat card or a document often puts a picture
+  // of that region on the clipboard as well, and taking the picture swallowed
+  // the text the user meant to paste: the words never arrived, and a PNG of
+  // them appeared as an attachment instead.
+  //
+  // So the image path is only for a clipboard with no words on it — a
+  // screenshot, or an image copied on its own. The one text that still loses is
+  // the bare URL some apps put beside the pixels for "Copy Image": pasting
+  // that string is not what the gesture means.
+  function pastedText(e) {
+    try {
+      var data = e.clipboardData;
+      return data && typeof data.getData === 'function' ? (data.getData('text/plain') || '') : '';
+    } catch (err) { return ''; }
+  }
+
+  function isBareImageUrl(text) {
+    var t = String(text || '').trim();
+    if (!t || /\\s/.test(t)) return false;
+    return /^(?:https?:\\/\\/|data:image\\/|file:\\/\\/)/i.test(t);
+  }
+
   inputEl.addEventListener('paste', function(e) {
     try {
+      var text = pastedText(e);
+      if (text.trim() !== '' && !isBareImageUrl(text)) return;
       var items = e.clipboardData && e.clipboardData.items;
       if (!items) return;
       for (var i = 0; i < items.length; i++) {
@@ -508,7 +533,7 @@ export function getInputScript(tr: WebviewTranslations): string {
           if (file) sendImageFile(file);
         }
       }
-    } catch (err) { /* image paste must never break text paste */ }
+    } catch (err) { /* a paste must never break text paste */ }
   });
 
   // Drag & drop is document-level: the whole webview is a drop target, not
