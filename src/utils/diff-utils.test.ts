@@ -7,7 +7,9 @@ import {
   shortPath,
   truncate,
   stripTurnMeta,
+  isTurnMetaEnvelope,
   isInternalRuntimeHandoff,
+  isInternalRuntimeHandoffText,
   reconstructOldContent,
   reconstructOriginalContent,
   getDiffStateForIndex,
@@ -250,6 +252,55 @@ describe("stripTurnMeta", () => {
     const text = "<turn_meta>unclosed content";
     expect(stripTurnMeta(text)).toBe("<turn_meta>unclosed content");
   });
+
+  it("strips the envelope the engine appends after the prompt", () => {
+    // `core::engine::user_content_blocks` pushes the prompt first and the
+    // metadata block last, so in every live turn the envelope sits at the END.
+    // Peeling only a leading one left `Current local date: …` and the workspace
+    // path printed inside the bubble on every reload.
+    const text =
+      "这个智能体能处理视频编辑吗？\n<turn_meta>\nCurrent local date: 2026-10-19\nCurrent workspace: /w\n</turn_meta>";
+    expect(stripTurnMeta(text)).toBe("这个智能体能处理视频编辑吗？");
+  });
+
+  it("strips a trailing envelope after a blank line", () => {
+    expect(stripTurnMeta("question\n\n<turn_meta>\ndate: 2026-10-25\n</turn_meta>")).toBe("question");
+  });
+
+  it("keeps an inline quotation of the marker at the end of a prompt", () => {
+    // A person may end their own message by quoting the envelope. Only a block
+    // that starts a line and opens onto a newline (the engine's own shape) is
+    // the engine's.
+    expect(stripTurnMeta("so this <turn_meta>x</turn_meta> means what?")).toBe(
+      "so this <turn_meta>x</turn_meta> means what?"
+    );
+    expect(stripTurnMeta("why does this <turn_meta>x</turn_meta> appear")).toBe(
+      "why does this <turn_meta>x</turn_meta> appear"
+    );
+  });
+
+  it("keeps a prompt that quotes the closing tag without an envelope", () => {
+    expect(stripTurnMeta("why does </turn_meta> break it?")).toBe(
+      "why does </turn_meta> break it?"
+    );
+  });
+});
+
+describe("isTurnMetaEnvelope", () => {
+  it("recognises the engine's envelope block", () => {
+    expect(isTurnMetaEnvelope("<turn_meta>\nCurrent local date: 2026-10-25\n</turn_meta>")).toBe(
+      true
+    );
+    expect(isTurnMetaEnvelope("  <turn_meta>x</turn_meta>\n")).toBe(true);
+  });
+
+  it("rejects a prompt that merely ends with an envelope", () => {
+    // A joined `prompt + meta` string is one string, not an envelope: dropping
+    // it wholesale would delete the person's words.
+    expect(isTurnMetaEnvelope("question\n<turn_meta>date</turn_meta>")).toBe(false);
+    expect(isTurnMetaEnvelope("<turn_meta>unclosed")).toBe(false);
+    expect(isTurnMetaEnvelope("plain text")).toBe(false);
+  });
 });
 
 describe("isInternalRuntimeHandoff", () => {
@@ -308,6 +359,64 @@ describe("isInternalRuntimeHandoff", () => {
         runtimeMeta,
       ])
     ).toBe(true);
+  });
+
+  it("hides every runtime_event envelope, not only the ones named here", () => {
+    // The TUI matches the envelope prefix, not a list of kinds
+    // (`runtime_handoff::is_internal_runtime_handoff`), so a notice the engine
+    // starts emitting tomorrow is still the engine's. This client enumerated
+    // two kinds and rendered `mcp_configured_servers` / `workspace_trust` as
+    // the person's own prompt, wearing a steer badge.
+    for (const kind of [
+      "mcp_configured_servers",
+      "workspace_trust",
+      "turn_owned_children_background",
+      "extension_prompt_contributions",
+      "profile_constitution",
+    ]) {
+      expect(
+        isInternalRuntimeHandoff([
+          `<codewhale:runtime_event kind="${kind}" visibility="internal">\nbody\n</codewhale:runtime_event>`,
+          runtimeMeta,
+        ])
+      ).toBe(true);
+    }
+  });
+
+  it("keeps a real user turn that follows a runtime event", () => {
+    // A person's prompt after an internal notice is a separate user message;
+    // only the envelope-plus-runtime-provenance pair is internal.
+    expect(
+      isInternalRuntimeHandoff([
+        "<codewhale:runtime_event kind=\"mcp_configured_servers\">…</codewhale:runtime_event>",
+        "<turn_meta>\nInput provenance: external_user\n</turn_meta>",
+      ])
+    ).toBe(false);
+  });
+});
+
+describe("isInternalRuntimeHandoffText", () => {
+  const runtimeMeta = "<turn_meta>\nInput provenance: runtime (non-authoritative)\n</turn_meta>";
+
+  it("recognises the joined form a thread item stores", () => {
+    expect(
+      isInternalRuntimeHandoffText(
+        `<codewhale:runtime_event kind="mcp_configured_servers" visibility="internal">\nbody\n</codewhale:runtime_event>\n${runtimeMeta}`
+      )
+    ).toBe(true);
+  });
+
+  it("reads the metadata block without the prompt in front of it wrongly", () => {
+    // A person's prompt followed by their own turn metadata is not a runtime
+    // notice, whichever way the string was built.
+    expect(
+      isInternalRuntimeHandoffText(`what is this?\n${runtimeMeta}`)
+    ).toBe(false);
+    expect(
+      isInternalRuntimeHandoffText(
+        '<codewhale:runtime_event kind="mcp_configured_servers">body</codewhale:runtime_event>'
+      )
+    ).toBe(false);
   });
 });
 

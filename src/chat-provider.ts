@@ -51,7 +51,9 @@ import {
   parseDiffStats,
   parseDiffToSides,
   stripTurnMeta,
+  isTurnMetaEnvelope,
   isInternalRuntimeHandoff,
+  isInternalRuntimeHandoffText,
   reconstructOldContent,
   getDiffStateForIndex,
   extractRecordedEdits,
@@ -63,7 +65,12 @@ import { normalizePath, resolveRecordedFilePath } from "./utils/file-paths";
 import { loadInputHistory, pushInputHistory } from "./utils/input-history";
 import { imageBytesMatchMime, sniffImageMime } from "./utils/image-bytes";
 import { defaultTasksDir, resolveTaskArtifactPath } from "./utils/task-paths";
-import { extractCompactionSummary } from "./utils/compaction-summary";
+import {
+  extractCompactionSummary,
+  isCompactionCheckpoint,
+  compactionCheckpointBody,
+  compactionCheckpointTextBody,
+} from "./utils/compaction-summary";
 import { playCompletionSound } from "./utils/completion-sound";
 import { MAX_EAGER_HASH_BYTES, sha256OfFile } from "./utils/file-hash";
 import { t, webviewTranslations, currentLocale } from "./i18n";
@@ -103,7 +110,6 @@ function mergeThreadRecord(
     ...(updated || {}),
   };
 }
-
 
 /**
  * One pending attachment. `previewUrl` is a transient thumbnail payload: it is
@@ -1210,6 +1216,12 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         let currentThinkingBlock: ContentBlock | undefined;
         let segmentIdx = 0;
         let emittedUserBubble = false;
+        // Whether the turn carries a user-message record at all — including one
+        // this rebuild deliberately does not draw (a runtime-owned notice, a
+        // compaction checkpoint). The summary fallbacks below exist for turns
+        // with *no* user record; without this flag a filtered record made them
+        // print the engine's summary as a question and then again as an answer.
+        let sawUserItem = false;
         // A compaction is not a conversation turn: it contributes one note and
         // no question/answer pair (see the two fallbacks below).
         let isCompactionTurn = false;
@@ -1263,7 +1275,12 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
             this.messages.push({
               id: segmentIdx === 0 ? `assistant-${turn.id}` : `assistant-${turn.id}-s${segmentIdx}`,
               role: "assistant",
-              content: content || (segmentIdx === 0 ? turn.input_summary.slice(0, 100) : ""),
+              // No invented answer text. A segment whose only records are
+              // thinking or tool calls has no answer to show — and the old
+              // fallback here printed the *question* into the answer bubble,
+              // which is what a seeded compacted session looked like once its
+              // answers had been condensed into the handoff note.
+              content,
               thinking: thinking || undefined,
               toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
               blocks: blocks.length > 0 ? blocks : undefined,
@@ -1303,14 +1320,40 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
               break;
             }
             case "user_message": {
-              const text = stripTurnMeta(item.detail || item.summary || "").trim();
+              sawUserItem = true;
+              const raw = item.detail || item.summary || "";
+              // A thread's user item is one joined string, so the two
+              // runtime-owned shapes have to be recognised on text: the
+              // engine's own notices (MCP servers, background shells, the
+              // Operate contract) and the compaction checkpoint — a handoff
+              // note about the turns it replaced. Neither is something the
+              // person typed, and drawing one as a user bubble is how a resumed
+              // session opened with a wall of runtime text.
+              if (isInternalRuntimeHandoffText(raw)) break;
+              const checkpointBody = compactionCheckpointTextBody(raw);
+              if (checkpointBody !== null) {
+                this.messages.push({
+                  id: `note-compaction-${item.id}`,
+                  role: "system",
+                  content: t().contextCompacted,
+                  status: "complete",
+                  timestamp: new Date(item.started_at || turn.created_at).getTime(),
+                  compactionSummary: checkpointBody,
+                });
+                break;
+              }
+              const text = stripTurnMeta(raw).trim();
               if (!text) break;
               if (!emittedUserBubble) {
                 emittedUserBubble = true;
                 this.messages.push({
                   id: `user-${turn.id}`,
                   role: "user",
-                  content: text.slice(0, 280),
+                  // The whole prompt, never a preview: this is the transcript a
+                  // reload draws, and the live view showed every word of it.
+                  // Truncating here made a reloaded turn quietly lose the rest
+                  // of a long question (and could split a surrogate pair).
+                  content: text,
                   status: "complete",
                   timestamp: new Date(item.started_at || turn.created_at).getTime(),
                   turnIndex: this.currentBubbleTurnIndex(),
@@ -1552,11 +1595,14 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         // turns) still show the input summary as the turn's user bubble. A
         // compaction turn is excluded: that summary is the engine's label for
         // the request, and printing it would show a question nobody asked.
-        if (!isCompactionTurn && !emittedUserBubble && turn.input_summary.trim()) {
+        if (!isCompactionTurn && !sawUserItem && turn.input_summary.trim()) {
           this.messages.splice(turnStartIdx, 0, {
             id: `user-${turn.id}`,
             role: "user",
-            content: turn.input_summary.trim().slice(0, 280),
+            // Already the engine's own bounded summary (`SUMMARY_LIMIT`, cut
+            // with an ellipsis); slicing it again dropped that ellipsis and
+            // could split a surrogate pair.
+            content: turn.input_summary.trim(),
             status: "complete",
             timestamp: new Date(turn.created_at).getTime(),
             turnIndex: this.currentBubbleTurnIndex(),
@@ -1603,7 +1649,16 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
                 : {}),
             });
           }
-        } else if (!emittedErrorNote && !this.messages.slice(turnStartIdx).some((m) => m.role === "assistant")) {
+        } else if (
+          !emittedErrorNote &&
+          // Only a turn with no user record of its own is left with nothing but
+          // its summary to draw. A turn whose question is on screen and whose
+          // answer was never written (a seeded compacted history, a turn that
+          // never ran) must not answer itself: printing `input_summary` under
+          // the question invents model output nobody wrote.
+          !sawUserItem &&
+          !this.messages.slice(turnStartIdx).some((m) => m.role === "assistant")
+        ) {
           // Preserve the legacy behavior for turns with no assistant output
           // at all: emit the fallback bubble (input summary preview) rather
           // than rendering nothing for the turn.
@@ -1980,11 +2035,16 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       }
 
       if (msg.role === "user") {
-        // Consecutive user text messages are mid-turn steers (the engine
-        // appends each steered prompt as its own user message). Render each
-        // as its own bubble — the first is the turn input, later ones carry
-        // the steer badge — instead of concatenating them into one blob.
-        let isFirstUserText = true;
+        // Each user text is its own bubble, never concatenated into one blob.
+        // What this loop must *not* do is guess which of them were mid-turn
+        // steers: a saved session records a steer and a fresh turn identically
+        // (`role: "user"` plus the engine's metadata block), and a compacted
+        // history legitimately holds long runs of user prompts whose answers
+        // were condensed away — so "follows another user message" is not
+        // evidence of steering. Ranking them by that rule badged every retained
+        // prompt after the first as a steer. Authority for steering is the
+        // thread view, where a steer is its own `user_message` item inside a
+        // turn; a session document carries no such marker at all.
         while (i < rawMessages.length && rawMessages[i].role === "user") {
           const textBlocks: string[] = [];
           for (const block of rawMessages[i].content || []) {
@@ -1994,19 +2054,45 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
           }
           i++;
 
-          const combined = stripTurnMeta(textBlocks.join("\n"));
-          if (!combined.trim()) continue;
+          // The runtime-owned check reads the blocks as stored: its second
+          // signal is the provenance line in the *trailing* metadata block, so
+          // it must run before that block is dropped from the prompt below.
           if (isInternalRuntimeHandoff(textBlocks)) continue;
 
-          const isSteer = !isFirstUserText;
-          // The turn's first user text opens its group; a steer is a second
-          // user message *inside* the same turn, so it must not open one. The
-          // group is opened before the bubble is built so the bubble can carry
-          // the number the panel files it under, not the previous turn's.
-          const turnIndex = isFirstUserText
-            ? this.beginChangeTurn(combined, Date.now())
-            : this.currentChangeTurn;
-          isFirstUserText = false;
+          // A compaction's handoff note is persisted as a user-role message
+          // (strict chat templates accept no other role mid-conversation), but
+          // nobody typed it: it is the record of the turns it replaced. Drawn
+          // as a user bubble it reads as a giant prompt, so it becomes the note
+          // the thread view shows for the same event, with the whole handoff
+          // kept beneath it — collapsed, because it can run to thousands of
+          // words and is the only surviving account of those turns.
+          if (isCompactionCheckpoint(textBlocks)) {
+            this.messages.push({
+              id: `note-compaction-${this.messages.length}`,
+              role: "system",
+              content: t().contextCompacted,
+              status: "complete" as const,
+              timestamp: Date.now(),
+              compactionSummary: compactionCheckpointBody(textBlocks),
+              _realContent: true,
+            } as ChatMessage & { _realContent: boolean });
+            continue;
+          }
+
+          // A live turn's user message is stored as two text blocks: the
+          // person's prompt and the engine's `<turn_meta>` envelope appended
+          // after it. Drop the envelope per block, the way the TUI does
+          // (`message_text_for_history`), instead of joining first and peeling
+          // only a *leading* envelope — the joined form put every reloaded
+          // turn's date/workspace/posture preamble in the bubble.
+          const combined = stripTurnMeta(
+            textBlocks.filter((block) => !isTurnMetaEnvelope(block)).join("\n")
+          );
+          if (!combined.trim()) continue;
+
+          // One group per user text: without a turn record to key on, the only
+          // honest number is the bubble's own.
+          const turnIndex = this.beginChangeTurn(combined, Date.now());
 
           this.messages.push({
             id: `user-turn-${this.messages.length}`,
@@ -2014,7 +2100,6 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
             content: combined,
             status: "complete" as const,
             timestamp: Date.now(),
-            steered: isSteer || undefined,
             turnIndex,
             _realContent: true,
           } as ChatMessage & { _realContent: boolean });

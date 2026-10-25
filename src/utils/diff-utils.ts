@@ -511,15 +511,63 @@ export function truncate(s: string, max: number): string {
   return s.length > max ? s.slice(0, max - 1) + "…" : s;
 }
 
+const TURN_META_OPEN = "<turn_meta>";
+const TURN_META_CLOSE = "</turn_meta>";
+
+/**
+ * True when a whole text block is exactly one engine-owned `<turn_meta>`
+ * envelope — the block the engine appends as a user turn's final content
+ * block (`core::engine::user_content_blocks`).
+ *
+ * Per-block recognition is how the TUI reads a transcript
+ * (`message_text_for_history` applies `extract_user_prompt` to each block),
+ * and it is the only safe place to drop the envelope from a rebuild: once the
+ * blocks are joined into one string, a person's own paragraph can sit in front
+ * of it and there is no longer a boundary to trust.
+ */
+export function isTurnMetaEnvelope(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed.startsWith(TURN_META_OPEN) || !trimmed.endsWith(TURN_META_CLOSE)) {
+    return false;
+  }
+  // One open at the front, one close at the end, nothing after it. A second
+  // envelope inside the body means this block is not the engine's envelope.
+  return trimmed.indexOf(TURN_META_CLOSE) === trimmed.length - TURN_META_CLOSE.length;
+}
+
+/**
+ * Strip the engine's `<turn_meta>` envelope from a user prompt.
+ *
+ * The engine owns the block and its position is load-bearing for prompt
+ * caching: a *live* turn carries it last (appended after the prompt and any
+ * images), while older saved sessions and seeded threads can carry it first.
+ * Both ends are therefore recognized structurally — a complete envelope at the
+ * start, or one at the very end — so a person quoting `<turn_meta>` mid-prompt
+ * keeps their words. Without the trailing case every reloaded turn rendered its
+ * own metadata (`Current local date: …`, `Current workspace: …`) inside the
+ * bubble.
+ */
 export function stripTurnMeta(text: string): string {
-  const trimmed = text.trimStart();
-  if (trimmed.startsWith("<turn_meta>")) {
-    const closePos = trimmed.indexOf("</turn_meta>");
+  let body = text.trimStart();
+  if (body.startsWith(TURN_META_OPEN)) {
+    const closePos = body.indexOf(TURN_META_CLOSE);
     if (closePos !== -1) {
-      return trimmed.slice(closePos + "</turn_meta>".length).trimStart();
+      body = body.slice(closePos + TURN_META_CLOSE.length).trimStart();
     }
   }
-  return trimmed;
+  const openPos = body.lastIndexOf(TURN_META_OPEN);
+  if (openPos !== -1) {
+    const tail = body.slice(openPos);
+    // The engine writes `"<turn_meta>\n…\n</turn_meta>"` as a block of its
+    // own, so a real trailing envelope starts a line and opens onto a newline.
+    // Requiring both keeps a person's inline quotation of the marker ("so this
+    // `<turn_meta>x</turn_meta>` means…") intact.
+    const atLineStart = openPos === 0 || body[openPos - 1] === "\n";
+    if (atLineStart && tail.startsWith(`${TURN_META_OPEN}\n`) && isTurnMetaEnvelope(tail)) {
+      body = body.slice(0, openPos).trimEnd();
+    }
+  }
+  return body;
 }
 
 /**
@@ -532,22 +580,43 @@ export function stripTurnMeta(text: string): string {
  *
  * Two families match:
  *   - sub-agent / shell handoffs, whose provenance line is authoritative;
- *   - `runtime` provenance, but *only* when the payload is one of the
- *     runtime-owned envelopes (Operate contract, agent-topology checkpoint),
- *     which is exactly what the TUI recognizes structurally.
+ *   - `runtime` provenance, when the payload is a runtime-owned envelope: any
+ *     `<codewhale:runtime_event …>` (the engine's own notices — MCP servers,
+ *     workspace trust, background children, the Operate contract) or the
+ *     agent-topology checkpoint. The TUI matches the whole prefix rather than
+ *     naming each kind, so a notice the engine starts emitting tomorrow is
+ *     still the engine's and never reads as the person's prompt. Enumeration
+ *     here lagged behind it: `mcp_configured_servers` and `workspace_trust`
+ *     turns rendered as user bubbles wearing a steer badge.
  */
 export function isInternalRuntimeHandoff(blocks: string[]): boolean {
   if (blocks.length === 0) return false;
   const last = (blocks[blocks.length - 1] || "").trim();
-  if (!last.startsWith("<turn_meta>")) return false;
+  if (!last.startsWith(TURN_META_OPEN)) return false;
   if (/Input provenance:\s*(subagent_handoff|shell_completion)\b/i.test(last)) return true;
   const first = (blocks[0] || "").trim();
   return (
     /Input provenance:\s*runtime\b/i.test(last) &&
-    /^<codewhale:(runtime_event kind="operate_contract"|runtime_state kind="agent_topology")/.test(
-      first
-    )
+    /^<codewhale:(runtime_event[\s>]|runtime_state kind="agent_topology")/.test(first)
   );
+}
+
+/**
+ * The same runtime-owned test for a transcript rebuilt from *strings* rather
+ * than blocks — a thread item's `item.detail`, which the engine and the seed
+ * path both write as one joined string (`envelope + "\n" + <turn_meta>`).
+ *
+ * The trailing metadata block is split off here and handed to the block
+ * predicate, so both transcript paths answer to one rule instead of the thread
+ * path having none: a resumed session's MCP-server and background-shell notices
+ * rendered as the person's own prompt.
+ */
+export function isInternalRuntimeHandoffText(text: string): boolean {
+  const metaStart = text.lastIndexOf(TURN_META_OPEN);
+  if (metaStart === -1) return false;
+  const meta = text.slice(metaStart);
+  if (!isTurnMetaEnvelope(meta)) return false;
+  return isInternalRuntimeHandoff([text.slice(0, metaStart).trim(), meta]);
 }
 
 /**
