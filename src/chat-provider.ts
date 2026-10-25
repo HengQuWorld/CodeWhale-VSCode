@@ -111,6 +111,23 @@ function mergeThreadRecord(
   };
 }
 
+/** One prompt compared across two transcripts of the same conversation.
+ *
+ *  A saved document and the Runtime's turn items describe the same turns but
+ *  are not the same bytes: one carries the engine's metadata block inline, the
+ *  other keeps it on the item. Collapsing runs of whitespace is enough to make
+ *  the two agree on the prompt itself without pretending they are identical. */
+function promptMatchKey(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
+}
+
+/** Which of a conversation's user prompts were mid-turn steering.
+ *
+ *  `steered` is false for the turn's own opening prompt and true for every
+ *  later `user_message` item inside that turn; `undelivered` marks one the
+ *  runtime discarded before the model saw it. */
+type SteerMark = { text: string; steered: boolean; undelivered: boolean };
+
 /**
  * One pending attachment. `previewUrl` is a transient thumbnail payload: it is
  * delivered to the webview once in its own message (see
@@ -214,6 +231,12 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
    * thing that breaks the rail.
    */
   private static readonly THREAD_SUMMARY_TIMEOUT_MS = 60_000;
+
+  /** How long the optional steer-provenance read may take before a viewed
+   *  session opens without its steer badges. A badge is never worth delaying a
+   *  conversation, so this is short and the miss is silent: no marks is the same
+   *  state as a session whose thread is gone. */
+  private static readonly STEER_MARKS_TIMEOUT_MS = 5_000;
 
   /** Fetch attempts per refresh. Only a transient (connection-level) failure
    *  is retried inside `fetchThreadSummaries`; a timeout is not. */
@@ -1344,6 +1367,12 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
               }
               const text = stripTurnMeta(raw).trim();
               if (!text) break;
+              // A steer the engine never committed to the model still leaves a
+              // record: `turn.steer_dropped` flips its item to `canceled`. The
+              // words are the person's, so they stay on screen where they were
+              // typed — but drawing them as a plain steer claims the model read
+              // them, which is exactly what the runtime says did not happen.
+              const undelivered = item.status === "canceled" || undefined;
               if (!emittedUserBubble) {
                 emittedUserBubble = true;
                 this.messages.push({
@@ -1357,6 +1386,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
                   status: "complete",
                   timestamp: new Date(item.started_at || turn.created_at).getTime(),
                   turnIndex: this.currentBubbleTurnIndex(),
+                  undelivered,
                 });
               } else {
                 // Steer (TUI parity): flush the segment above it, then the
@@ -1370,6 +1400,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
                   status: "complete",
                   timestamp: new Date(item.started_at || turn.created_at).getTime(),
                   steered: true,
+                  undelivered,
                   // A steer is a second bubble inside the turn above it, so it
                   // carries that turn's number rather than opening one.
                   turnIndex: this.currentBubbleTurnIndex(),
@@ -1882,8 +1913,81 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     return this.messages[this.messages.length - 1]?.id;
   }
 
+  /**
+   * Which prompts of a saved session were mid-turn steering, from the Runtime.
+   *
+   * A saved document cannot answer this. A steer and a fresh turn are written
+   * identically — `role: "user"` plus the engine's metadata block — and a
+   * compacted history legitimately holds long runs of user prompts whose answers
+   * were condensed into the handoff note. Counting positions in that document
+   * badged eighteen real turns as steering in one transcript.
+   *
+   * The Runtime does record it: a steer is a `user_message` item inside the turn
+   * that was already running, and the turn's `input_summary`/first item is the
+   * prompt that opened it. So when the thread that owns this document is still
+   * in the store, its turn items are the authority — read, never guessed. No
+   * thread (deleted, archived away, a document from another machine) means no
+   * marks, which is the honest answer: steering is simply unknown there.
+   *
+   * Best-effort by design: this only decorates bubbles, so a Runtime that cannot
+   * answer costs the badges, never the transcript. It never rejects — the
+   * caller awaits it inside the session load, and a failed lookup must not be
+   * able to report the document as unopenable.
+   */
+  private async sessionSteerMarks(sessionId: string): Promise<SteerMark[] | null> {
+    try {
+      const threads = await this.api.listThreads({
+        limit: 200,
+        include_archived: true,
+        timeoutMs: ChatProvider.STEER_MARKS_TIMEOUT_MS,
+      });
+      const owners = (threads || [])
+        .filter((thread) => thread.session_id === sessionId)
+        // A conversation can be re-bound to a newer thread; the most recently
+        // written one holds the current turn structure.
+        .sort((a, b) => String(b.updated_at || "").localeCompare(String(a.updated_at || "")));
+      if (owners.length === 0) return null;
+
+      const detail = await this.api.getThreadDetail(owners[0].id, {
+        timeoutMs: ChatProvider.STEER_MARKS_TIMEOUT_MS,
+      });
+      const itemById = new Map(detail.items.map((item) => [item.id, item]));
+      const marks: SteerMark[] = [];
+      for (const turn of detail.turns) {
+        let opening = true;
+        for (const itemId of turn.item_ids || []) {
+          const item = itemById.get(itemId);
+          if (!item || item.kind !== "user_message") continue;
+          // Records this client does not draw are not prompts either: a
+          // runtime-owned notice or a compaction checkpoint must not consume the
+          // "first prompt" slot and turn the real question into a steer.
+          const raw = item.detail || item.summary || "";
+          if (isInternalRuntimeHandoffText(raw)) continue;
+          if (compactionCheckpointTextBody(raw) !== null) continue;
+          const text = stripTurnMeta(raw).trim();
+          if (!text) continue;
+          marks.push({
+            text,
+            steered: !opening,
+            undelivered: item.status === "canceled",
+          });
+          opening = false;
+        }
+      }
+      // Nothing to decorate: behave exactly as if there were no thread.
+      return marks.some((mark) => mark.steered) ? marks : null;
+    } catch (err) {
+      this.debugLog(`steer marks unavailable: ${getErrorMessage(err)}`);
+      return null;
+    }
+  }
+
   public async loadSessionMessages(sessionId: string): Promise<void> {
     this.parkCurrentThread();
+    // Started before the document read and awaited only where the rebuild needs
+    // it, so decoration never adds a serial round trip in front of a
+    // conversation that is ready to draw.
+    const steerMarksPromise = this.sessionSteerMarks(sessionId);
     try {
       const session = await this.api.getSession(sessionId);
       const title = session.metadata.title || "Session";
@@ -2015,6 +2119,23 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     // created in and the batch below replays that.
     this.resetChangeGroups();
     const changeTurnByCallIdx: number[] = [];
+    // Steering provenance for this document, when the Runtime still keeps the
+    // thread that owns it. Consumed in transcript order, matched by prompt text:
+    // a document that has drifted from its thread matches nothing and keeps its
+    // plain bubbles, rather than inheriting another transcript's badges.
+    const marks = await steerMarksPromise;
+    let markCursor = 0;
+    const takeSteerMark = (text: string): SteerMark | undefined => {
+      if (!marks) return undefined;
+      const want = promptMatchKey(text);
+      for (let k = markCursor; k < marks.length; k++) {
+        if (promptMatchKey(marks[k].text) === want) {
+          markCursor = k + 1;
+          return marks[k];
+        }
+      }
+      return undefined;
+    };
     while (i < rawMessages.length) {
       const msg = rawMessages[i];
 
@@ -2090,9 +2211,18 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
           );
           if (!combined.trim()) continue;
 
-          // One group per user text: without a turn record to key on, the only
-          // honest number is the bubble's own.
-          const turnIndex = this.beginChangeTurn(combined, Date.now());
+          // A steer the Runtime still remembers belongs to the turn above it,
+          // not to a new one — the same rule the thread view applies from the
+          // items themselves. Without a mark (no thread, or a document that no
+          // longer matches it) the bubble is simply its own turn.
+          const mark = takeSteerMark(combined);
+          // A mark on the document's very first prompt has no turn to belong
+          // to (the Runtime always records the opening prompt first), so it is
+          // treated as an opening turn rather than filed under group 0.
+          const isSteer = !!mark?.steered && this.currentChangeTurn > 0;
+          const turnIndex = isSteer
+            ? this.currentChangeTurn
+            : this.beginChangeTurn(combined, Date.now());
 
           this.messages.push({
             id: `user-turn-${this.messages.length}`,
@@ -2100,6 +2230,8 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
             content: combined,
             status: "complete" as const,
             timestamp: Date.now(),
+            steered: isSteer || undefined,
+            undelivered: mark?.undelivered || undefined,
             turnIndex,
             _realContent: true,
           } as ChatMessage & { _realContent: boolean });

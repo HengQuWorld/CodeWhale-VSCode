@@ -588,7 +588,7 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
     }
 
     var el = document.createElement('div');
-    el.className = 'message ' + msg.role + (msg.steered ? ' steered' : '');
+    el.className = 'message ' + msg.role + (msg.steered ? ' steered' : '') + (msg.undelivered ? ' undelivered' : '');
     el.id = 'msg-' + msg.id;
     // The space this row takes until the browser has painted it once: its
     // content-visibility: auto skips layout offscreen, and this is the
@@ -606,7 +606,12 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
     var html = '';
     if (showRole !== false) {
       html += '<div class="role">' + __wvEscapeHtml(msg.role);
-      if (msg.steered) {
+      if (msg.undelivered) {
+        // The runtime dropped this guidance before the model saw it. The words
+        // stay where they were typed, labelled for what actually happened —
+        // an unread steer badge would claim a delivery that never occurred.
+        html += ' <span class="steer-badge undelivered" title="' + __wvEscapeHtml(__i18n.steerUndeliveredTitle) + '">' + __wvEscapeHtml(__i18n.steerUndelivered) + '</span>';
+      } else if (msg.steered) {
         html += ' <span class="steer-badge" title="' + __wvEscapeHtml(__i18n.steerBadgeTitle) + '">' + __wvEscapeHtml(__i18n.steerBadge) + '</span>';
       }
       html += '</div>';

@@ -147,6 +147,9 @@ export interface WebviewTranslations {
   steerUnavailablePlaceholder: string;
   steerBadge: string;
   steerBadgeTitle: string;
+  /** Badge on guidance the runtime dropped before the model saw it. */
+  steerUndelivered: string;
+  steerUndeliveredTitle: string;
   modeLabel: string;
   permissionLabel: string;
   scopeThreadLabel: string;

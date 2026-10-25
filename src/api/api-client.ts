@@ -293,12 +293,16 @@ export class CodeWhaleApiClient {
   async listThreads(opts?: {
     limit?: number;
     include_archived?: boolean;
+    /** Overrides `DEFAULT_REQUEST_TIMEOUT_MS` for this call — for callers that
+     *  treat the answer as optional decoration and would rather open without it
+     *  than wait out a stalled engine. */
+    timeoutMs?: number;
   }): Promise<ThreadRecord[]> {
     const params = new URLSearchParams();
     if (opts?.limit) params.set("limit", String(opts.limit));
     if (opts?.include_archived) params.set("include_archived", "true");
     const qs = params.toString() ? `?${params.toString()}` : "";
-    return (await this.get(`/v1/threads${qs}`)) as ThreadRecord[];
+    return (await this.get(`/v1/threads${qs}`, opts?.timeoutMs)) as ThreadRecord[];
   }
 
   /**
@@ -639,9 +643,10 @@ export class CodeWhaleApiClient {
 
   // ── Detail ──
 
-  async getThreadDetail(threadId: string): Promise<ThreadDetailResponse> {
+  async getThreadDetail(threadId: string, opts?: { timeoutMs?: number }): Promise<ThreadDetailResponse> {
     return (await this.get(
-      `/v1/threads/${threadId}`
+      `/v1/threads/${threadId}`,
+      opts?.timeoutMs
     )) as ThreadDetailResponse;
   }
 

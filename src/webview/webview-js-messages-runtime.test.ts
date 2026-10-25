@@ -1091,3 +1091,50 @@ describe("change-card actions", () => {
     expect(harness.postMessages).toEqual([]);
   });
 });
+
+describe("addMessage steer badges", () => {
+  it("labels guidance the runtime dropped as not delivered", () => {
+    // A steer the engine discarded before the model read it is still an item
+    // in the store. Rendering it with the delivered badge promised something
+    // the runtime says did not happen, so the row carries its own label and
+    // the bubble steps out of the accent fill.
+    const { messages, messagesEl } = createHarness();
+
+    messages.addMessage({
+      id: "user-steer-dropped",
+      role: "user",
+      content: "also the docs",
+      status: "complete",
+      timestamp: 1,
+      steered: true,
+      undelivered: true,
+    });
+
+    const bubble = messagesEl.children[messagesEl.children.length - 1];
+    expect(bubble.className).toBe("message user steered undelivered");
+    expect(bubble.innerHTML).toContain("steer-badge undelivered");
+    expect(bubble.innerHTML).toContain("not delivered");
+    expect(bubble.innerHTML).not.toContain('class="steer-badge" title');
+    // The bubble is still a real user turn with a body to draw the words into,
+    // not a note: the text itself is asserted where the rebuild produces it.
+    expect(bubble.querySelector(".message-body")).toBeTruthy();
+  });
+
+  it("keeps the delivered badge on guidance the engine accepted", () => {
+    const { messages, messagesEl } = createHarness();
+
+    messages.addMessage({
+      id: "user-steer-kept",
+      role: "user",
+      content: "focus on vitest",
+      status: "complete",
+      timestamp: 1,
+      steered: true,
+    });
+
+    const bubble = messagesEl.children[messagesEl.children.length - 1];
+    expect(bubble.className).toBe("message user steered");
+    expect(bubble.innerHTML).toContain('class="steer-badge"');
+    expect(bubble.innerHTML).not.toContain("undelivered");
+  });
+});

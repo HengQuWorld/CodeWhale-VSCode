@@ -138,6 +138,11 @@ export interface ChatMessage {
   timestamp: number;
   /** True when this user message was sent as mid-turn steering (TUI steer). */
   steered?: boolean;
+  /** True when the runtime dropped this guidance before the model saw it
+   *  (`turn.steer_dropped` — the turn moved on first). The words stay on
+   *  screen where they were typed, labelled for what actually happened: a
+   *  delivered steer they are not. */
+  undelivered?: boolean;
   /** The conversation turn this bubble belongs to, numbered the way the
    *  Changes panel numbers its groups.
    *

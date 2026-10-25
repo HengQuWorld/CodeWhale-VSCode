@@ -338,6 +338,7 @@ describe("ChatProvider thread history rendering", () => {
       "third ask",
     ]);
     expect(bubbles.some((message) => message.steered)).toBe(false);
+    expect(bubbles.some((message) => message.undelivered)).toBe(false);
   });
 
   it("draws a compacted session's handoff note as a note, not as a user prompt", async () => {
@@ -843,6 +844,44 @@ describe("ChatProvider thread history rendering", () => {
     const users = provider.messages.filter((m) => m.role === "user");
     expect(users.map((m) => m.content)).toEqual(["run the tests", "focus on vitest"]);
     expect(users.some((m) => m.content.includes("<turn_meta>"))).toBe(false);
+  });
+
+  it("marks a dropped steer as not delivered, keeping the words where they were typed", async () => {
+    // `turn.steer_dropped` flips the steer's item to `canceled`: the model
+    // never read it. Rendering it as a plain steer after a reload claimed a
+    // delivery the runtime says did not happen.
+    const detail = {
+      latest_seq: 20,
+      thread: { id: "thread-1", model: "deepseek-v4-pro" },
+      turns: [
+        {
+          id: "turn-1",
+          input_summary: "run the tests",
+          created_at: "2026-08-20T10:00:00Z",
+          ended_at: "2026-08-20T10:00:10Z",
+          status: "completed",
+          item_ids: ["u1", "a1", "u2", "a2", "u3", "a3"],
+        },
+      ],
+      items: [
+        { id: "u1", kind: "user_message", summary: "run the tests", detail: "run the tests", status: "completed" },
+        { id: "a1", kind: "agent_message", summary: "Starting...", detail: "Starting...", status: "completed" },
+        { id: "u2", kind: "user_message", summary: "focus on vitest", detail: "focus on vitest", status: "completed" },
+        { id: "a2", kind: "agent_message", summary: "Focused", detail: "Focused", status: "completed" },
+        { id: "u3", kind: "user_message", summary: "also the docs", detail: "also the docs", status: "canceled" },
+        { id: "a3", kind: "agent_message", summary: "Done", detail: "Done", status: "completed" },
+      ],
+    };
+
+    const { provider } = createProvider(detail);
+
+    await (provider as any).loadHistory("thread-1");
+
+    const steers = provider.messages.filter((m) => m.role === "user" && m.steered);
+    expect(steers.map((m) => ({ content: m.content, undelivered: m.undelivered }))).toEqual([
+      { content: "focus on vitest", undelivered: undefined },
+      { content: "also the docs", undelivered: true },
+    ]);
   });
 
   it("drops the engine's metadata block from a viewed session's prompt and steer", async () => {

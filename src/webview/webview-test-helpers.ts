@@ -94,6 +94,9 @@ export function makeTr(overrides?: Partial<WebviewTranslations>): WebviewTransla
     steerUnavailablePlaceholder: "A turn is running — this engine cannot take guidance",
     steerBadge: "steer",
     steerBadgeTitle: "Sent as mid-turn steering",
+    steerUndelivered: "not delivered",
+    steerUndeliveredTitle:
+      "The turn ended before the engine committed this guidance, so the model never saw it — send it again",
     modeLabel: "Mode",
     permissionLabel: "Permission",
     scopeThreadLabel: "This thread",

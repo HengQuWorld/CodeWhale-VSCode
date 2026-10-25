@@ -238,4 +238,15 @@ describe("webview-js-messages.ts", () => {
     expect(script).toContain("__i18n.steerBadgeTitle");
     expect(script).not.toContain("__i18n.steerPlaceholder");
   });
+
+  it("labels guidance the runtime dropped as not delivered", () => {
+    // A steer the engine discarded before the model read it still has an item
+    // in the store. It must not wear the delivered badge: the row says what
+    // happened, and its tooltip says what to do about it.
+    const script = getMessagesScript(makeTr());
+    expect(script).toContain("msg.undelivered");
+    expect(script).toContain("' undelivered'");
+    expect(script).toContain("steer-badge undelivered");
+    expect(script).toContain("__i18n.steerUndeliveredTitle");
+  });
 });

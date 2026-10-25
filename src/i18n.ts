@@ -184,6 +184,9 @@ interface Translations {
   steerUnavailablePlaceholder: string;
   steerBadge: string;
   steerBadgeTitle: string;
+  /** Badge on guidance the runtime dropped before the model saw it. */
+  steerUndelivered: string;
+  steerUndeliveredTitle: string;
   engineRestarted: string;
   engineRestartFailed: string;
   engineNotRunning: string;
@@ -703,6 +706,8 @@ const en: Translations = {
   steerUnavailablePlaceholder: "A turn is running — this engine cannot take guidance",
   steerBadge: "steer",
   steerBadgeTitle: "Sent as mid-turn steering",
+  steerUndelivered: "not delivered",
+  steerUndeliveredTitle: "The turn ended before the engine committed this guidance, so the model never saw it — send it again",
   engineRestarted: "CodeWhale engine restarted",
   engineRestartFailed: "Failed to restart engine",
   engineNotRunning: "CodeWhale engine is not running",
@@ -1180,6 +1185,8 @@ const zhCn: Translations = {
   steerUnavailablePlaceholder: "本回合运行中 — 当前引擎不支持引导",
   steerBadge: "引导",
   steerBadgeTitle: "作为中途引导发送",
+  steerUndelivered: "未送达",
+  steerUndeliveredTitle: "本回合在引擎接收之前已结束，模型没有看到这段引导 — 请重新发送",
   engineRestarted: "CodeWhale 引擎已重启",
   engineRestartFailed: "重启引擎失败",
   engineNotRunning: "CodeWhale 引擎未运行",
@@ -1686,6 +1693,8 @@ export function webviewTranslations(tr: Translations) {
     steerUnavailablePlaceholder: tr.steerUnavailablePlaceholder,
     steerBadge: tr.steerBadge,
     steerBadgeTitle: tr.steerBadgeTitle,
+    steerUndelivered: tr.steerUndelivered,
+    steerUndeliveredTitle: tr.steerUndeliveredTitle,
     engineRestarted: tr.engineRestarted,
     engineRestartFailed: tr.engineRestartFailed,
     engineNotRunning: tr.engineNotRunning,

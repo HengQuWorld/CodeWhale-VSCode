@@ -977,6 +977,21 @@ export function getWebviewCss(): string {
       color: inherit;
     }
 
+    /* Guidance the runtime dropped before the model read it: the accent
+       fill promises delivery, so the bubble steps back to a warning tint and
+       the badge stops shouting. */
+    .message.user.steered.undelivered {
+      background: var(--card-bg);
+      border: 1px dashed var(--vscode-editorWarning-foreground, #d29922);
+      color: var(--fg);
+    }
+
+    .steer-badge.undelivered {
+      background: transparent;
+      border: 1px solid var(--vscode-editorWarning-foreground, #d29922);
+      color: var(--vscode-editorWarning-foreground, #d29922);
+    }
+
     .message .content {
       line-height: 1.6;
       word-wrap: break-word;
