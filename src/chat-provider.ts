@@ -158,6 +158,42 @@ interface BackgroundThreadState {
   goalChecked: boolean;
 }
 
+/** One runtime `turn.usage` receipt: a single model call's usage, priced on
+ *  the route that served it when that route could price it. */
+interface StepUsageReceipt {
+  usage?: {
+    input_tokens?: number;
+    output_tokens?: number;
+    prompt_cache_hit_tokens?: number;
+    prompt_cache_miss_tokens?: number;
+  };
+  billed_prompt_tokens?: number;
+  cost?: { usd?: number; cny?: number } | null;
+}
+
+/** A thread's running figure for the turn in flight. */
+interface LiveTurnUsage {
+  /** The turn this figure describes; a different turn starts a new figure. */
+  turnId: string | null;
+  inputTokens: number;
+  outputTokens: number;
+  cacheHitTokens: number;
+  cacheMissTokens: number;
+  costUsd: number;
+  costCny: number;
+}
+
+/** What one thread's context chip is drawn from. Every field is nullable
+ *  because a route that cannot bound its window proves none of them. */
+interface ThreadContextReading {
+  /** The engine's estimate of the prompt it would send next. */
+  inputTokens: number | null;
+  /** The prompt size the provider billed for the newest step. */
+  billedTokens: number | null;
+  /** The route's window — the only thing a percentage can be taken against. */
+  windowTokens: number | null;
+}
+
 
 export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandContext {
   public static readonly viewType = "brotherwhale.chat";
@@ -339,6 +375,28 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
    *  a message the user already has). Populated from the accepted compact call
    *  and drained when that turn ends. */
   private compactionTurns = new Set<string>();
+
+  /** Each thread's in-flight turn usage, accumulated from the runtime's
+   *  per-call `turn.usage` receipts so the status bar moves while a long
+   *  agentic turn runs instead of only when it ends.
+   *
+   *  Keyed by thread, not held as one running total, because a conversation
+   *  can be parked to the background with its turn still going: the runtime
+   *  persists a turn's usage only when the turn ends, so `GET .../usage`
+   *  cannot restore this figure. Coming back to a thread therefore resumes its
+   *  running number instead of starting again from the settled total. `turnId`
+   *  names the turn the figure belongs to, so the next turn starts fresh.
+   *
+   *  Display-only: `turn.completed` drops the entry and the settled totals
+   *  replace it, so nothing is counted twice. Never persisted. */
+  private liveTurnUsageByThread = new Map<string, LiveTurnUsage>();
+
+  /** Each thread's context-window reading: the engine's estimate taken between
+   *  turns, the provider-billed prompt of the newest step, and the route's
+   *  window. Keyed by thread for the same reason as the usage above — a parked
+   *  conversation's reading must still describe it when the view returns, and
+   *  must never describe a different one in the meantime. */
+  private contextByThread = new Map<string, ThreadContextReading>();
 
   // Convenience accessors for session state
   public get currentThread(): ThreadRecord | null { return this.sessionState.data.currentThread; }
@@ -1611,7 +1669,21 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         this.ensureAssistantPlaceholderForExternalTurn(lastTurn.id);
         this.startPeriodicTaskRefresh();
         this.postMessage({ type: "turnStarted", turnId: lastTurn.id });
+      } else {
+        // Back on an idle conversation. Any running figure still held for it
+        // describes a turn the settled totals above already include — say, one
+        // that finished after its background watch was dropped — so carrying
+        // it would count that turn twice. The context chip is not re-read here
+        // on purpose: `/context` goes through the thread's engine and would
+        // load one just to paint a chip. The thread keeps the reading it
+        // already has, which is why those readings are stored per thread.
+        this.clearLiveTurnUsage(id);
       }
+      // The running figure and the context reading are keyed by thread, so a
+      // return to a parked conversation resumes them; repaint both now rather
+      // than at the next receipt.
+      this.sendSessionStats();
+      this.publishContextUsage();
 
       // A conversation rebuilt from history keeps what it is still waiting on.
       // The runtime holds a pending approval across a view switch, but the
@@ -1764,9 +1836,10 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       this.sessionState.reset();
       this.viewingSessionId = sessionId;
       // A saved session has no live engine behind it, so there is no live
-      // context-window reading to show: clear the thread's rather than keep
-      // presenting a number for a conversation that is not running.
-      this.postMessage({ type: "contextUsage", percent: null });
+      // context-window reading to show, and no running turn to describe.
+      // Publishing against the session view (no thread) clears the chip
+      // without discarding the readings the threads themselves still own.
+      this.publishContextUsage();
       this.viewingSessionWorkspace = session.metadata.workspace || null;
       // The session's own provider route, not the picker's: this session was
       // saved on it and `POST /v1/sessions/{id}/resume-thread` builds its
@@ -2209,10 +2282,11 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     this.stopBackgroundWatch(threadId);
     this.backgroundThreads.delete(threadId);
     this.sessionState.reset();
-    // The reading belongs to the thread on screen: clear the outgoing one
-    // before the new thread's posture is read, so a switch never leaves the
-    // previous conversation's percentage under a different conversation.
-    this.postMessage({ type: "contextUsage", percent: null });
+    // The readings are keyed by thread, so the outgoing conversation keeps
+    // its own and this one shows its own: publishing now repaints for the
+    // thread being opened rather than leaving the previous thread's numbers
+    // under a different conversation.
+    this.publishContextUsage();
 
     try {
       this.currentThread = await this.api.getThread(threadId);
@@ -2895,6 +2969,14 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       this.currentTurnId = result.turn.id;
       this.setCurrentChangeTurnId(result.turn.id);
       this.activeTurnMode = { turnId: result.turn.id, mode };
+      // A new turn's figure starts at zero: the chip must not keep showing the
+      // previous turn's money while this one is being dispatched. Only when no
+      // turn is already in flight, though — a send the runtime refuses because
+      // it is busy (recovered below) must leave the running turn's figure
+      // alone, or its cost would restart mid-turn.
+      if (!this.currentTurnId) {
+        this.clearLiveTurnUsage(this.currentThread.id);
+      }
       this.postMessage({ type: "turnStarted", turnId: result.turn.id });
     } catch (err) {
       // A thread that already has a turn running is a state to recover from
@@ -5857,9 +5939,22 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         }
         break;
       }
+      case "turn.usage": {
+        // The thread is parked, not gone: keep its running figure current so
+        // returning to it shows what the turn has spent, not what the settled
+        // totals last recorded (a running turn is not in them).
+        const receipt = event.payload as StepUsageReceipt;
+        if (receipt.usage) {
+          this.accumulateStepReceipt(threadId, event.turn_id ?? null, receipt);
+        }
+        break;
+      }
       case "turn.completed": {
         st.running = false;
         st.currentTurnId = null;
+        // Its receipts are inside the turn record now; the settled totals the
+        // view fetches when it returns are the record of the price.
+        this.clearLiveTurnUsage(threadId);
         // Finishing on a thread the user is not looking at is the case the cue
         // exists for. A background watch sees the same turn record the view
         // does, so the terminal status is read the same way.
@@ -7438,6 +7533,20 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         break;
       }
 
+      case "turn.usage": {
+        // One model call's receipt. The runtime reports usage per call, not
+        // only per turn, so a long agentic turn can show what it has spent
+        // and how full the window already is instead of standing still until
+        // it ends. Everything here is display-only: `turn.completed` drops
+        // this figure and the settled totals replace it.
+        const threadId = event.thread_id || this.currentThread?.id;
+        if (!threadId) break;
+        this.accumulateStepReceipt(threadId, event.turn_id ?? null, event.payload as StepUsageReceipt);
+        this.sendSessionStats();
+        this.publishContextUsage();
+        break;
+      }
+
       case "turn.completed": {
         const pl = event.payload as { turn?: TurnRecord; recovered?: boolean };
         // A compaction turn is not a conversation turn: it must not finalize
@@ -7456,12 +7565,21 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
           this.totalInputTokens += u.input_tokens;
           this.totalOutputTokens += u.output_tokens;
           this.totalTokens += u.input_tokens + u.output_tokens;
+          // This turn's own receipts are now represented by the record above
+          // and, a moment later, by the settled totals; carrying the live
+          // sum alongside either would count the same tokens twice.
+          this.clearLiveTurnUsage(event.thread_id || this.currentThread?.id);
           // Cost comes from the TUI runtime (recorded-time provider rates),
           // not a client-side rate table. Fire-and-forget: the totals are
           // SET from the server response, so a delayed fetch can never
           // double-count, and the monotonic high-water mark keeps the
           // display stable meanwhile.
           void this.refreshThreadUsage();
+        } else {
+          // A turn that recorded nothing still ends: its provisional steps,
+          // if any, described work no settled total will ever include.
+          this.clearLiveTurnUsage(event.thread_id || this.currentThread?.id);
+          this.sendSessionStats();
         }
 
         // The next prompt's reading: once the turn has settled the engine is
@@ -7961,6 +8079,19 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
 
   private handleItemEvent(event: RuntimeEvent): void {
     const itemId = event.item_id!;
+    // Compaction rewrote the conversation, so every context reading taken
+    // before it describes a prompt that no longer exists — including this
+    // turn's billed-prompt receipts, which measured the pre-compaction input.
+    // Drop the chip rather than keep a number the engine will contradict; the
+    // reading taken when the turn settles repaints it. Checked before the
+    // compaction report below so a manual compaction (which returns early) is
+    // covered too.
+    if (
+      event.event === "item.completed" &&
+      (event.payload as { item?: { kind?: string } }).item?.kind === "context_compaction"
+    ) {
+      this.clearContextEstimate();
+    }
     // A manual compaction publishes itself as a `context_compaction` item. Its
     // outcome is the only thing that tells the user the click did something, so
     // it is handled before the assistant-routing guard below: a compaction can
@@ -8355,6 +8486,10 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       // decreases across turns or server-side undo (mirrors TUI #244).
       this.displayedCostHighWaterUsd = Math.max(this.displayedCostHighWaterUsd, this.sessionCostUsd);
       this.displayedCostHighWaterCny = Math.max(this.displayedCostHighWaterCny, this.sessionCostCny);
+      // Deliberately no clear of the running figure here: these totals cover
+      // only *settled* turns, so a turn still in flight is not inside them.
+      // Clearing belongs to `turn.completed`, which is the moment the settled
+      // totals actually supersede that turn's receipts.
       this.sendSessionStats();
     } catch {
       // Best-effort refresh: keep the last known totals on failure.
@@ -8387,15 +8522,23 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     if (this.currentTurnId) return;
     try {
       const context = await this.api.getThreadContext(id);
-      // A read that lands after a thread switch describes the conversation
-      // the user just left; the chip must describe the one on screen.
-      if (this.currentThread?.id !== id) return;
-      this.postMessage({
-        type: "contextUsage",
-        percent: context.usage_percent,
-        usedTokens: context.input_tokens,
-        windowTokens: context.window_tokens,
+      // The reading belongs to the thread it was measured for, so it is stored
+      // against that thread — a reply that lands after a switch still describes
+      // the conversation it was asked about, and is there when the view
+      // returns. Publishing is what must follow the view, not storing.
+      const previous = this.contextByThread.get(id);
+      this.contextByThread.set(id, {
+        inputTokens: typeof context.input_tokens === "number" ? context.input_tokens : null,
+        // A step receipt may already describe a newer prompt than this read
+        // (it arrived between the request and its answer); keep the larger,
+        // the same max the terminal UI's meter takes.
+        billedTokens: Math.max(
+          typeof context.billed_input_tokens === "number" ? context.billed_input_tokens : 0,
+          previous?.billedTokens ?? 0,
+        ) || null,
+        windowTokens: typeof context.window_tokens === "number" ? context.window_tokens : null,
       });
+      if (this.currentThread?.id === id) this.publishContextUsage();
     } catch (err) {
       // Best-effort — the last reading stands — but never silent: a reading
       // that stops arriving is otherwise indistinguishable from an engine
@@ -8405,10 +8548,19 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
   }
 
   private sendSessionStats(): void {
-    const totalCacheHit = this.lastCacheHitTokens;
-    const totalCacheMiss = this.lastCacheMissTokens;
+    const live = this.liveUsageForCurrentThread();
+    // While a turn runs, the per-call receipts are the only figures that have
+    // moved: the settled totals still describe the conversation through the
+    // previous turn. Sum the two so the status bar rises with the work; the
+    // settled fetch at `turn.completed` replaces this turn's contribution.
+    const liveCacheTotal = live.cacheHitTokens + live.cacheMissTokens;
+    const totalCacheHit = liveCacheTotal > 0 ? live.cacheHitTokens : this.lastCacheHitTokens;
+    const totalCacheMiss = liveCacheTotal > 0 ? live.cacheMissTokens : this.lastCacheMissTokens;
     const total = totalCacheHit + totalCacheMiss;
     const cacheHitRate = total > 0 ? (totalCacheHit / total * 100) : 0;
+    const inputTokens = this.totalInputTokens + live.inputTokens;
+    const outputTokens = this.totalOutputTokens + live.outputTokens;
+    const tokenTotal = this.totalTokens + live.inputTokens + live.outputTokens;
     const cfg = vscode.workspace.getConfiguration("brotherwhale");
     const configured = resolveCostCurrency(
       cfg.get<string>("costCurrency", "auto"),
@@ -8417,13 +8569,21 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     // Mirror the TUI's cost_display_currency: a CNY preference with no
     // native-CNY-priced spend falls back to USD rather than showing a
     // fabricated ¥0. Both figures use the monotonic high-water mark so the
-    // cost never decreases across turns or session restarts (TUI #244).
-    const currency: "usd" | "cny" = configured === "cny" && this.displayedCostHighWaterCny > 0
+    // cost never decreases across turns or session restarts (TUI #244), and
+    // the in-flight turn's provisional price is folded in the same way the
+    // terminal UI folds its pending estimate.
+    const displayedUsd = Math.max(
+      this.displayedCostHighWaterUsd,
+      this.sessionCostUsd + live.costUsd,
+    );
+    const displayedCny = Math.max(
+      this.displayedCostHighWaterCny,
+      this.sessionCostCny + live.costCny,
+    );
+    const currency: "usd" | "cny" = configured === "cny" && displayedCny > 0
       ? "cny"
       : "usd";
-    const costHighWater = currency === "cny"
-      ? this.displayedCostHighWaterCny
-      : this.displayedCostHighWaterUsd;
+    const costHighWater = currency === "cny" ? displayedCny : displayedUsd;
     let costDisplay: string;
     if (costHighWater > 0) {
       costDisplay = formatCostAmount(costHighWater, currency);
@@ -8433,7 +8593,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       // dash is honest; "<$0.0001" next to six-figure token counts would be
       // actively wrong. A genuinely empty session still shows the floor
       // marker, matching the pre-existing behavior.
-      costDisplay = this.totalTokens > 0 || this.totalInputTokens > 0 || this.totalOutputTokens > 0
+      costDisplay = tokenTotal > 0 || inputTokens > 0 || outputTokens > 0
         ? "—"
         : formatCostAmount(0, currency);
     }
@@ -8446,14 +8606,150 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       ...(total > 0 ? { cacheHitRate: cacheHitRate.toFixed(1) } : {}),
       cacheHitTokens: totalCacheHit,
       cacheMissTokens: totalCacheMiss,
-      totalInputTokens: this.totalInputTokens,
-      totalOutputTokens: this.totalOutputTokens,
+      totalInputTokens: inputTokens,
+      totalOutputTokens: outputTokens,
       // Grand total for view modes that record no input/output split; the
       // webview renders a Σ chip when the split is unavailable.
-      totalTokens: this.totalTokens,
+      totalTokens: tokenTotal,
       lastInputTokens: this.lastInputTokens,
       lastOutputTokens: this.lastOutputTokens,
     });
+  }
+
+  /** Publish the status bar's context chip for the thread on screen, from that
+   *  thread's own reading lifted to the provider-billed prompt of its newest
+   *  step — the same max the terminal UI's meter takes (#5577), so the two
+   *  surfaces cannot disagree about pressure. A thread with no reading shows
+   *  no chip: the window itself is only knowable from the engine, and a
+   *  percentage without one would be invented. */
+  private publishContextUsage(): void {
+    const id = this.currentThread?.id;
+    // A viewed session has no live engine behind it, and a view with no
+    // thread has nothing to describe.
+    if (!id || this.viewingSessionId) {
+      this.postMessage({ type: "contextUsage", percent: null });
+      return;
+    }
+    const reading = this.contextByThread.get(id);
+    if (!reading) {
+      this.postMessage({ type: "contextUsage", percent: null });
+      return;
+    }
+    // The chip takes the larger of the engine's estimate and the newest
+    // provider-billed prompt, the same rule the terminal UI's meter uses
+    // (#5577), so the two surfaces cannot disagree about pressure.
+    const used = Math.max(reading.inputTokens ?? 0, reading.billedTokens ?? 0);
+    if (reading.inputTokens === null && !reading.billedTokens) {
+      this.postMessage({ type: "contextUsage", percent: null });
+      return;
+    }
+    const window = reading.windowTokens;
+    const percent = window !== null && window > 0
+      ? Math.max(0, Math.min(100, (used / window) * 100))
+      : null;
+    this.postMessage({
+      type: "contextUsage",
+      percent,
+      usedTokens: used,
+      windowTokens: window,
+    });
+  }
+
+  /** The running figure for the thread on screen; zeros when it has none. */
+  private liveUsageForCurrentThread(): LiveTurnUsage {
+    const id = this.currentThread?.id;
+    const figure = id ? this.liveTurnUsageByThread.get(id) : undefined;
+    return figure ?? {
+      turnId: null,
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheHitTokens: 0,
+      cacheMissTokens: 0,
+      costUsd: 0,
+      costCny: 0,
+    };
+  }
+
+  /** Fold one model call's receipt into a thread's running figure, and lift
+   *  that thread's context reading to the prompt the provider billed. */
+  private accumulateStepReceipt(
+    threadId: string,
+    turnId: string | null,
+    receipt: StepUsageReceipt,
+  ): void {
+    const usage = receipt.usage;
+    if (!usage) return;
+    const input = usage.input_tokens ?? 0;
+    const output = usage.output_tokens ?? 0;
+    const hit = usage.prompt_cache_hit_tokens ?? 0;
+    const miss = usage.prompt_cache_miss_tokens ?? Math.max(0, input - hit);
+    const previous = this.liveTurnUsageByThread.get(threadId);
+    // A receipt naming a different turn is that turn's first: the previous
+    // figure described a turn that already settled.
+    const figure: LiveTurnUsage = previous && previous.turnId === turnId
+      ? previous
+      : {
+          turnId,
+          inputTokens: 0,
+          outputTokens: 0,
+          cacheHitTokens: 0,
+          cacheMissTokens: 0,
+          costUsd: 0,
+          costCny: 0,
+        };
+    figure.inputTokens += input;
+    figure.outputTokens += output;
+    figure.cacheHitTokens += hit;
+    figure.cacheMissTokens += miss;
+    // `cost` is null when the route cannot price every token class this call
+    // used. The step then contributes nothing to the live figure — the settled
+    // total stays the record of what it cost — rather than reading as free.
+    if (typeof receipt.cost?.usd === "number" && Number.isFinite(receipt.cost.usd)) {
+      figure.costUsd += receipt.cost.usd;
+    }
+    if (typeof receipt.cost?.cny === "number" && Number.isFinite(receipt.cost.cny)) {
+      figure.costCny += receipt.cost.cny;
+    }
+    this.liveTurnUsageByThread.set(threadId, figure);
+
+    const billed = typeof receipt.billed_prompt_tokens === "number"
+      ? receipt.billed_prompt_tokens
+      : input;
+    if (billed > 0) {
+      const reading = this.contextByThread.get(threadId) ?? {
+        inputTokens: null,
+        billedTokens: null,
+        windowTokens: null,
+      };
+      reading.billedTokens = Math.max(reading.billedTokens ?? 0, billed);
+      this.contextByThread.set(threadId, reading);
+    }
+  }
+
+  /** Drop the running figure for a thread. Called once the settled totals have
+   *  replaced it, and when a new turn starts. */
+  private clearLiveTurnUsage(threadId?: string | null): void {
+    const id = threadId ?? this.currentThread?.id;
+    if (id) this.liveTurnUsageByThread.delete(id);
+  }
+
+  /** Drop the readings that describe *how full* the conversation is, keeping
+   *  the window they were measured against. Compaction rewrites the messages,
+   *  so every token reading taken before it is stale — but the window belongs
+   *  to the model route, which the compaction did not change. Keeping it lets
+   *  the next step's receipt repaint a truthful percentage instead of leaving
+   *  the chip blank for the rest of a long turn. */
+  private clearContextEstimate(): void {
+    const id = this.currentThread?.id;
+    const reading = id ? this.contextByThread.get(id) : undefined;
+    if (id && reading) {
+      this.contextByThread.set(id, {
+        ...reading,
+        inputTokens: null,
+        billedTokens: null,
+      });
+    }
+    this.publishContextUsage();
   }
 
   /** The model of whatever this view is on: the open conversation's, else the

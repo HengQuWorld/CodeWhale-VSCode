@@ -161,6 +161,8 @@ describe("ChatProvider's context-window reading", () => {
     const { provider, api, postMessage } = createProvider();
     // A route with no declared window cannot produce a percentage; the host
     // forwards the null rather than inventing a zero, and the chip stays off.
+    // The provider's own prompt count is still named — it is a fact, unlike a
+    // percentage against an unknown window.
     api.getThreadContext = vi.fn(async () =>
       contextResponse({ window_tokens: null, input_tokens: null, usage_percent: null, pressure: null })
     );
@@ -171,7 +173,7 @@ describe("ChatProvider's context-window reading", () => {
       {
         type: "contextUsage",
         percent: null,
-        usedTokens: null,
+        usedTokens: 51200,
         windowTokens: null,
       },
     ]);
