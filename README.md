@@ -1,11 +1,11 @@
 # CodeWhale for VS Code — a lightweight GUI frontend for the CodeWhale agent
 
-[![Version](https://img.shields.io/badge/version-0.9.1-blue)](https://github.com/HengQuWorld/CodeWhale-VSCode)
+[![Version](https://img.shields.io/badge/version-0.9.2-blue)](https://github.com/HengQuWorld/CodeWhale-VSCode)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![CI](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/ci.yml/badge.svg)](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/ci.yml)
 [![Release](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/release.yml/badge.svg)](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/release.yml)
 [![VS Code](https://img.shields.io/badge/VS%20Code-1.85+-informational)](https://code.visualstudio.com/)
-[![VSIX](https://img.shields.io/badge/VSIX-~441%20KB-brightgreen)](https://github.com/HengQuWorld/CodeWhale-VSCode/releases)
+[![VSIX](https://img.shields.io/badge/VSIX-~455%20KB-brightgreen)](https://github.com/HengQuWorld/CodeWhale-VSCode/releases)
 [![macOS](https://img.shields.io/badge/macOS-supported-brightgreen)](#requirements)
 [![Windows](https://img.shields.io/badge/Windows-supported-brightgreen)](#requirements)
 [![Linux](https://img.shields.io/badge/Linux-supported-brightgreen)](#requirements)
@@ -21,7 +21,7 @@ The split is deliberate: **the agent stays in the engine, the ergonomics stay in
 
 | | |
 |---|---|
-| VSIX size (0.9.1) | ~441 KB |
+| VSIX size (0.9.2) | ~455 KB |
 | Runtime npm dependencies | **none** — webpack inlines the extension's own TypeScript (and `marked` for rendering) |
 | Bundled engine or model | **none** — `codewhale` is a separate native binary |
 | Duplicated agent logic | **none** — the GUI is an adapter over the engine's local runtime API |
@@ -31,19 +31,15 @@ The frontend is a webview. `ChatProvider` runs in the extension host, speaks HTT
 
 Because nothing about the agent is copied into the extension, the engine can ship new capabilities and fixes without a frontend release.
 
-### Engine compatibility for 0.9.1
+### Engine compatibility for 0.9.2
 
-0.9.1 is verified against engine **v0.10.1**, and the memory review commands need engine **v0.10.0** — the release that introduced the Context Lens routes they read; on anything older they say the routes are missing rather than reporting that you have nothing to review. Everything else it ships is client-side and works on v0.10.1 as it stands, and so does everything earlier releases were still waiting on: the Branch row, a command's own change rows in the Changes panel, moving an open conversation to another provider, undo's file rollback and the per-file Revert, user-defined providers in the picker, a fork keeping its session document and the quick thread rails all light up the moment the engine reads v0.10.1.
-
-The **MCP** panel is also not client-only: it is built on the engine's MCP management routes, and it needs engine **v0.10.0** — the release whose listing names the layer each server belongs to and carries the configuration revision every edit presents, and which has the import review at all. On an older engine the panel can list your servers but not change them.
+0.9.2 runs on engine **v0.10.2**, and most of what it ships is client-side: the conversation no longer repeats the engine's own bookkeeping, copying and pasting behave, and guidance is labelled by what actually happened to it. Three surfaces need a floor of their own — the memory review commands and the **MCP** panel arrive with engine **v0.10.0** (the release that introduced the Context Lens routes they read, and the MCP management routes whose listing names the layer each server belongs to and carries the configuration revision every edit presents), while the workspace-trust banner, the client a session reports itself as, and a second window or a second CodeWhale client on the same machine all need **v0.10.2**.
 
 What still needs a Codewhale build newer than any tagged engine release:
 
-- **Trusting a workspace from the panel** — the trust banner needs [Codewhale#6959](https://github.com/codewhale-hq/Codewhale/pull/6959), merged upstream 2026-10-14 and not yet in any tagged engine release. It is the engine half: `GET /v1/workspace/status` reporting a workspace's trust verdict and `POST /v1/workspace/trust` recording the decision. Until an engine carries it the banner stays hidden, and the rest of this extension — including the prompt for a VS Code window that is not trusted — works without it.
+- **Cost and context that move during a turn** — the status bar's live figures ride on [Codewhale#7074](https://github.com/codewhale-hq/Codewhale/pull/7074), merged upstream 2026-10-25 and not yet in any tagged engine release. It is the engine half: the usage receipt each model call emits carries that call's own price and the prompt size the provider billed. Until an engine carries it the two chips settle when the turn ends, as they did before, and the conversation itself is unaffected.
 
-- **Which client a session reports itself as** — needs [5166473](https://github.com/codewhale-hq/Codewhale/commit/5166473369fbe548cd5b518ed1e697ce9d4b706a), in Codewhale `main` since 2026-10-08 and not yet in any tagged engine release. Until an engine carries it, sessions this extension starts are counted as an anonymous `serve` rather than naming the client they belong to; the `brotherwhale.telemetry` off-switch itself works on any engine.
-
-- **A second window of this extension, or another CodeWhale client beside it** — the runtime ownership model, new in engine v0.10.1, allows one driving client per machine: a second VS Code window running this extension, or the extension alongside the TUI or any other CodeWhale client on the same machine, is refused instead of starting its own engine. The fix — one control endpoint per runtime store, one driver per workspace, so web, desktop, TUI and this extension work side by side — is [Codewhale#6924](https://github.com/codewhale-hq/Codewhale/pull/6924), merged upstream 2026-10-14 and not yet in any tagged engine release; until an engine carries it, keep to one window and one CodeWhale client on the machine.
+On engine **v0.10.1** everything above holds except the three items that need **v0.10.2**; in particular a second VS Code window running this extension, or this extension beside the TUI, is refused there — the runtime ownership model that release introduced allowed one driving client per machine until [Codewhale#6924](https://github.com/codewhale-hq/Codewhale/pull/6924) landed.
 
 On engine **v0.10.0** the rest stays as it was on 0.8.3: the Branch row is not offered (and a branch of a conversation that lost a tool call may refuse its first message), a command's change rows stop at the paths (and a session opened from the Sessions rail takes its patches from the session document rather than from the engine's own record of the call that made them), an open conversation stays on its provider, undo leaves the changed files on disk and Revert answers `409` for a snapshot that exists, a `[providers.<name>]` route is missing from the picker, a fork starts a session document of its own, and a large thread store is slow engine-side. The Skills panel dims its activation and detail view there with the reason, while listing, toggling and the install / update / remove / trust / audit actions keep working.
 
@@ -125,12 +121,12 @@ npx @vscode/vsce package --no-dependencies
 Then install the generated `.vsix` (`Extensions: Install from VSIX...`), or from a terminal:
 
 ```bash
-code --install-extension ./brotherwhale-vscode-0.9.1.vsix --force
+code --install-extension ./brotherwhale-vscode-0.9.2.vsix --force
 ```
 
 > **Trae CN users:** if `code` is not on your `PATH`, use the bundled CLI:
 > ```bash
-> "/Applications/Trae CN.app/Contents/Resources/app/bin/code" --install-extension ./brotherwhale-vscode-0.9.1.vsix --force
+> "/Applications/Trae CN.app/Contents/Resources/app/bin/code" --install-extension ./brotherwhale-vscode-0.9.2.vsix --force
 > ```
 
 ### 3. Open it
@@ -141,7 +137,7 @@ Click the **CodeWhale icon** in the activity bar. The extension starts the engin
 
 ### Chat that behaves like an agent, not a text box
 - **Streaming turns** with a collapsible thinking panel, tool-call cards that show the actual arguments (e.g. the shell command as a `$ ...` block), and per-turn `↑/↓` token chips.
-- **Mid-turn steering** — while a turn is running, pressing Enter sends guidance into that turn instead of starting a new one (mirrors the engine's steering input); the steered message is marked with a steer badge.
+- **Mid-turn steering** — while a turn is running, pressing Enter sends guidance into that turn instead of starting a new one (mirrors the engine's steering input); the steered message is marked with a steer badge, and guidance the engine discarded before the model read it says **not delivered** instead.
 - **One send/stop button** that reflects the real turn state, plus **Undo** and **Retry** for the last turn.
 - **Attachments** — `/attach`, the 📎 button, or **CodeWhale: Attach to Conversation** on a file in the Explorer's context menu; images can be pasted with `Ctrl/Cmd+V`, and a file dragged in from Finder or another window attaches the same way. (A drag that starts inside VS Code — from the Explorer tree or an editor tab — never reaches the chat webview: VS Code keeps it for its own editor-group drop target. Use the context-menu entry for those.)
 - **Message navigation rail** — dots along the right edge jump to each user message; `Ctrl/Cmd+Up` / `Ctrl/Cmd+Down` step between them.
@@ -204,7 +200,7 @@ Switch from the status bar or with `/mode` (shortcuts `1`/`2`/`3`) and `/auto`. 
 
 ### Built for the editor
 - Activity-bar container whose sidebar holds the **Sessions**, **Threads** and **Activity** tabs, the last grouping the Work, Changes, Fleet, Tasks, Agents and Skills panels. The threads panel sits beside the chat and takes its width from it rather than covering it, up to what that view can spare — the conversation keeps a column of its own however narrow the sidebar is — and closes with its ✕ button or `Esc`.
-- Status bar for engine state, mode, posture, provider, model and reasoning effort.
+- Status bar for engine state, mode, posture, provider, model and reasoning effort, plus the session's cost, its token counts and how full the model's context window is — the cost and tokens rise with each model call while a turn runs, and the context reading turns emphatic from 80%.
 - Resizable sidebar and input area; follows your VS Code theme.
 - **English and Simplified Chinese** UI, following VS Code's display language.
 
@@ -293,7 +289,7 @@ Reloading or closing the extension stops that window's Runtime and interrupts ac
 
 **Installing a VSIX**
 ```bash
-code --install-extension /path/to/brotherwhale-vscode-0.9.1.vsix --force
+code --install-extension /path/to/brotherwhale-vscode-0.9.2.vsix --force
 ```
 
 ## Privacy & data

@@ -1,5 +1,33 @@
 # Change Log
 
+## 0.9.2
+
+Everything here works on engine **v0.10.2** or newer. One reading needs a Codewhale build newer than any tagged engine release: the cost and context figures move *while* a turn runs only once the engine emits a priced usage receipt, and until then they settle when the turn ends, as before.
+
+### New Features
+
+- **The status bar says how full the context window is** — `Context 42%` sits beside the session cost and token counts, with the exact token readings on hover. From 80% it turns emphatic — the same threshold the terminal UI uses — because a nearly full window is what decides whether the next turn still fits. A route whose window cannot be bounded shows no reading rather than a zero it cannot prove.
+
+- **Cost and context follow a turn while it runs** — The status bar used to sit still for a whole turn and then jump at the end. It now rises with each model call. Coming back to a conversation that is still working shows what it has spent so far, rather than the settled total it had when you left.
+
+- **Guidance you sent mid-turn says whether the model actually read it** — When a turn ended before the engine took your guidance, the words stay where you typed them and the badge reads **not delivered**, so a turn that finished early cannot look like the model was told something it never saw.
+
+- **A reopened conversation shows its guidance again** — Saved conversations mark the prompts that went into a running turn, read from the engine's own turn records rather than guessed from position, so a compacted history no longer badges its ordinary questions.
+
+### Bug Fixes
+
+- **The engine's own notes stay out of your conversation** — Opening a saved conversation printed the bookkeeping the engine writes for the model: the date, workspace and permission lines above every prompt, a compaction's handoff note as an enormous message nobody had typed, and runtime notices attributed to you. Those blocks are recognised and kept out, while a message that merely quotes one stays yours.
+
+- **Long questions reload whole, and a condensed answer no longer repeats the question** — A reopened question was cut off at 280 characters, and a turn whose answer had been condensed into a summary printed its own question back underneath as the answer.
+
+- **Copying a reply copies it** — Copying an answer out of the conversation put the caret in the input box and copied nothing: VS Code 1.143 restores the last focused element before it replays a copy, and in this panel that element is the composer. The conversation now takes focus on a press inside it, which leaves your selection alone; buttons, links and the focusable tool blocks keep their own focus, and taking focus draws no ring.
+
+- **A paste that carries both words and a picture keeps the words** — Copying a region of a page, a card or a document often puts a picture of it on the clipboard beside the text, and the picture won. Words now paste as text, while screenshots and images copied on their own still arrive as images.
+
+### Upstream TUI PRs
+
+- [Codewhale#7074](https://github.com/codewhale-hq/Codewhale/pull/7074) — **merged 2026-10-25, not yet in any engine release.** `feat(runtime): show a turn's cost and context while it runs` — the usage receipt each model call emits now names that call's own price and the prompt size the provider billed, which is what lets the cost and context chips move during a turn instead of settling at the end.
+
 ## 0.9.1
 
 Everything here works on engine **v0.10.0** or newer. The review commands read the engine's Context Lens routes, which arrive with that release — the floor this extension already documents — and on anything older they say the routes are missing rather than reporting that you have nothing to review; `/memory show`, `search` and `get` are unaffected.

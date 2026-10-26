@@ -1,11 +1,11 @@
 # CodeWhale for VS Code —— CodeWhale 代理的轻量图形前端
 
-[![Version](https://img.shields.io/badge/version-0.9.1-blue)](https://github.com/HengQuWorld/CodeWhale-VSCode)
+[![Version](https://img.shields.io/badge/version-0.9.2-blue)](https://github.com/HengQuWorld/CodeWhale-VSCode)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![CI](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/ci.yml/badge.svg)](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/ci.yml)
 [![Release](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/release.yml/badge.svg)](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/release.yml)
 [![VS Code](https://img.shields.io/badge/VS%20Code-1.85+-informational)](https://code.visualstudio.com/)
-[![VSIX](https://img.shields.io/badge/VSIX-~441%20KB-brightgreen)](https://github.com/HengQuWorld/CodeWhale-VSCode/releases)
+[![VSIX](https://img.shields.io/badge/VSIX-~455%20KB-brightgreen)](https://github.com/HengQuWorld/CodeWhale-VSCode/releases)
 [![macOS](https://img.shields.io/badge/macOS-supported-brightgreen)](#系统要求)
 [![Windows](https://img.shields.io/badge/Windows-supported-brightgreen)](#系统要求)
 [![Linux](https://img.shields.io/badge/Linux-supported-brightgreen)](#系统要求)
@@ -21,7 +21,7 @@ CodeWhale for VS Code 是 [CodeWhale](https://github.com/Hmbown/CodeWhale) 的**
 
 | | |
 |---|---|
-| VSIX 体积（0.9.1） | 约 441 KB |
+| VSIX 体积（0.9.2） | 约 455 KB |
 | 运行时 npm 依赖 | **零** —— 扩展自身的 TypeScript（以及用于渲染的 `marked`）都被 webpack 内联 |
 | 打包的引擎或模型 | **无** —— `codewhale` 是独立的原生二进制 |
 | 重复实现的代理逻辑 | **无** —— GUI 只是引擎本地 runtime API 之上的适配层 |
@@ -31,19 +31,15 @@ CodeWhale for VS Code 是 [CodeWhale](https://github.com/Hmbown/CodeWhale) 的**
 
 正因为代理的任何一部分都没有被复制进扩展，引擎可以独立发布新能力和修复，而不需要前端跟着发版。
 
-### 0.9.1 的引擎兼容性
+### 0.9.2 的引擎兼容性
 
-0.9.1 针对引擎 **v0.10.1** 验证；记忆审阅命令需要引擎 **v0.10.0** —— 正是那个版本引入了它们读取的 Context Lens 路由，在更早的引擎上它们会说明路由缺失，而不是报告你没有可审阅的内容。其余各项都在客户端侧、在 v0.10.1 上直接生效 —— 早期版本一直在等的那些也在其中：Branch 行、Changes 面板中命令自己的变更行、把打开的会话移到另一个 provider、undo 的文件回滚与按文件 Revert、选择器里的用户自定义 provider、fork 保留会话文档、线程栏的流畅，都在引擎读到 v0.10.1 的那一刻全部点亮。
-
-**MCP** 面板同样不只在客户端：它建立在引擎的 MCP 管理路由上，需要引擎 **v0.10.0** —— 正是那个版本让清单带上每个服务器所属的层级、让每次修改都能呈上配置 revision，也是它第一次有了导入审查。在更早的引擎上，面板可以列出你的服务器，但改不动它们。
+0.9.2 运行在引擎 **v0.10.2** 上，它带来的内容大部分在客户端侧：对话里不再重复引擎写给自己的记账，复制与粘贴恢复正常，引导会按实际发生的结果标注。有三个面各自有自己的底线 —— 记忆审阅命令与 **MCP** 面板需要引擎 **v0.10.0**（正是那个版本引入了它们读取的 Context Lens 路由，以及 MCP 管理路由：清单会带上每个服务器所属的层级、每次修改都要呈上配置 revision），而工作区信任横幅、会话上报自己属于哪个客户端、以及在同机上开第二个窗口或并行另一个 CodeWhale 客户端，都需要 **v0.10.2**。
 
 以下仍需要比任何已发布引擎 tag 更新的 Codewhale 构建：
 
-- **从面板信任工作区** —— 信任横幅需要 [Codewhale#6959](https://github.com/codewhale-hq/Codewhale/pull/6959)，已于 2026-10-14 合并、尚未进入任何引擎 tag。它是引擎侧的那一半：`GET /v1/workspace/status` 报告工作区的信任结果，`POST /v1/workspace/trust` 记录决定。在引擎携带它之前，横幅不会显示；本扩展其余内容 —— 包括 VS Code 窗口本身未受信任时的提示 —— 都不依赖它。
+- **随回合推进的成本与上下文** —— 状态栏上的实时读数依赖 [Codewhale#7074](https://github.com/codewhale-hq/Codewhale/pull/7074)，已于 2026-10-25 合并、尚未进入任何已发布的引擎 tag。它是引擎侧的那一半：每次模型调用发出的用量回执会带上这次调用自己的价格，以及提供商实际计费的提示词大小。在引擎携带它之前，这两个读数会在回合结束时才落定，与之前一致；对话本身不受影响。
 
-- **会话上报自己属于哪个客户端** —— 需要 [5166473](https://github.com/codewhale-hq/Codewhale/commit/5166473369fbe548cd5b518ed1e697ce9d4b706a)，已于 2026-10-08 进入 Codewhale `main`、尚未进入任何引擎 tag。在引擎携带它之前，本扩展启动的会话会被计为匿名的 `serve`，而不是标明所属客户端；`brotherwhale.telemetry` 关闭开关本身在任何引擎上都有效。
-
-- **本扩展的第二个窗口，或与另一个 CodeWhale 客户端并用** —— 引擎 v0.10.1 引入的 runtime ownership 模型限制每台机器只能有一个驱动客户端：第二个运行本扩展的 VS Code 窗口、或本扩展与 TUI 等其他 CodeWhale 客户端同机并用，会被直接拒绝而不是启动自己的引擎。修复——每个 runtime store 独立的 control endpoint、每个工作区唯一的驱动者，让 web、desktop、TUI 与本扩展并行工作——见 [Codewhale#6924](https://github.com/codewhale-hq/Codewhale/pull/6924)，已于 2026-10-14 合并、尚未进入任何引擎 tag；在引擎携带它之前，请一次只开一个窗口、一台机器只跑一个 CodeWhale 客户端。
+在引擎 **v0.10.1** 上，以上各项都成立，只有明确需要 **v0.10.2** 的那三项例外；特别是那里会拒绝第二个运行本扩展的 VS Code 窗口、或本扩展与 TUI 并用 —— 那个版本引入的 runtime ownership 模型在 [Codewhale#6924](https://github.com/codewhale-hq/Codewhale/pull/6924) 落地之前，只允许每台机器一个驱动客户端。
 
 在引擎 **v0.10.0** 上，其余各项与 0.8.3 时期完全一致：不显示 Branch 行（从一个丢失工具调用的会话分叉出的分支，第一条消息可能失败）、命令的变更行只到路径为止（从 Sessions 栏打开的会话会用会话文档重建补丁，而不是取引擎记录的、由那次调用造成的那一份）、打开的会话不会被移动、undo 把改动留在磁盘上且 Revert 对存在的快照回答 `409`、`[providers.<name>]` 路由不出现在选择器里、fork 新建自己的会话文档、大型线程 store 在引擎侧缓慢。本版的 Skills 面板在 v0.10.0 上会把激活与详情带着原因变暗，列出、开关以及安装 / 更新 / 移除 / 信任 / 审计操作不受影响。
 
@@ -125,12 +121,12 @@ npx @vscode/vsce package --no-dependencies
 然后安装生成的 `.vsix`（`Extensions: Install from VSIX...`），或在终端执行：
 
 ```bash
-code --install-extension ./brotherwhale-vscode-0.9.1.vsix --force
+code --install-extension ./brotherwhale-vscode-0.9.2.vsix --force
 ```
 
 > **Trae CN 用户：** 如果 `code` 不在 `PATH` 中，使用自带的 CLI：
 > ```bash
-> "/Applications/Trae CN.app/Contents/Resources/app/bin/code" --install-extension ./brotherwhale-vscode-0.9.1.vsix --force
+> "/Applications/Trae CN.app/Contents/Resources/app/bin/code" --install-extension ./brotherwhale-vscode-0.9.2.vsix --force
 > ```
 
 ### 3. 打开它
@@ -141,7 +137,7 @@ code --install-extension ./brotherwhale-vscode-0.9.1.vsix --force
 
 ### 像代理、而不是像输入框的聊天
 - **流式回合**，带可折叠的思考面板；工具调用卡片会显示实际参数（例如 shell 命令以 `$ ...` 代码块呈现）；每回合带 `↑/↓` token 用量标记。
-- **回合中引导（steering）** —— 回合运行期间按 Enter 会把内容作为指引送进当前回合，而不是开启新回合（与引擎的 steering 输入一致）；被引导的消息会带一个 steer 徽标。
+- **回合中引导（steering）** —— 回合运行期间按 Enter 会把内容作为指引送进当前回合，而不是开启新回合（与引擎的 steering 输入一致）；被引导的消息会带一个 steer 徽标，而引擎在模型读到之前就丢弃的引导会标为 **未送达**。
 - **统一的发送/停止按钮**，反映真实的回合状态；并提供上一回合的 **Undo** 与 **Retry**。
 - **附件** —— `/attach`、📎 按钮，或在资源管理器中右键文件选择 **CodeWhale: 附加到对话**；截图可用 `Ctrl/Cmd+V` 粘贴，从 Finder 或其他窗口拖入的文件同样可以附加。（在 VS Code 窗口内部发起的拖拽 —— 从资源管理器文件树或编辑器标签页 —— 无法到达对话 webview：VS Code 会把它留给自己的编辑器组投放目标。这类情况请用右键菜单。）
 - **消息导航轨** —— 右侧边缘的圆点可跳转到任意用户消息；`Ctrl/Cmd+Up` / `Ctrl/Cmd+Down` 在消息间前后跳转。
@@ -204,7 +200,7 @@ code --install-extension ./brotherwhale-vscode-0.9.1.vsix --force
 
 ### 为编辑器而做
 - 活动栏容器，侧边栏包含 **Sessions**、**Threads**、**Activity** 三个标签页，最后者汇集 Work、Changes、Fleet、Tasks 与 Agents 面板。线程面板与对话并排显示，占用对话区的宽度而不是盖住它，且最多占用当前视图能匀出的宽度——侧边栏再窄，对话区也保留自己的一列；可用 ✕ 按钮或 `Esc` 收起。
-- 状态栏显示引擎状态、模式、权限、提供商、模型与思考深度。
+- 状态栏显示引擎状态、模式、权限、提供商、模型与思考深度，以及本会话的成本、token 用量和模型上下文窗口的占用 —— 回合运行中成本与 token 会随每次模型调用上升，上下文占用从 80% 起转为醒目样式。
 - 侧边栏与输入区可拖拽调整；自动跟随 VS Code 主题。
 - **英文与简体中文**界面，跟随 VS Code 的显示语言。
 
@@ -295,7 +291,7 @@ codewhale serve（引擎 —— 单独安装与升级）
 
 **安装 VSIX**
 ```bash
-code --install-extension /path/to/brotherwhale-vscode-0.9.1.vsix --force
+code --install-extension /path/to/brotherwhale-vscode-0.9.2.vsix --force
 ```
 
 ## 隐私与数据
