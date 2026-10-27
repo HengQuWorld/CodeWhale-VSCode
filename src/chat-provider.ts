@@ -34,7 +34,7 @@ import { SkillController } from "./chat-provider/skills";
 import { FleetController } from "./chat-provider/fleet";
 import { getWebviewHtml } from "./webview/webview-html";
 import { renderMarkdown } from "./utils/markdown";
-import { finalizeAssistantMessage } from "./utils/event-helpers";
+import { finalizeAssistantMessage, turnDurationMs, turnStartedAtMs } from "./utils/event-helpers";
 import { formatCostAmount, resolveCostCurrency } from "./utils/cost-calculator";
 import {
   MODE_LABELS,
@@ -404,6 +404,17 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
    *  a message the user already has). Populated from the accepted compact call
    *  and drained when that turn ends. */
   private compactionTurns = new Set<string>();
+
+  /** Turn ids already rolled into `cumulativeTurnSecs`.
+   *
+   *  A reconnecting stream can deliver a turn's completion twice — the same
+   *  replay that made `autoSaveInProgress` necessary — and adding its length
+   *  again would inflate the worked clock with seconds already counted. A turn
+   *  id is unique per conversation, so remembering the ids is what makes the
+   *  roll idempotent; `loadHistory` registers a thread's finished turns too,
+   *  so a completion replayed after a rebuild is recognised. Display-only,
+   *  never persisted, and emptied whenever the conversation's stats reset. */
+  private countedTurnSecs = new Set<string>();
 
   /** Each thread's in-flight turn usage, accumulated from the runtime's
    *  per-call `turn.usage` receipts so the status bar moves while a long
@@ -1217,6 +1228,15 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
           )
         )?.id;
 
+      // Finished work the thread already holds, summed on every rebuild so a
+      // reopened conversation states its session total without waiting for the
+      // next turn to end. Monotonic (max): the running figure may already have
+      // gone further than this thread's own turns — a resumed session's
+      // metadata, or a turn this view watched finish — and neither may roll it
+      // back.
+      let threadTurnMs = 0;
+      const countedTurnIds: string[] = [];
+
       for (const turn of detail.turns) {
         // One group per turn, so the panel's sections follow the conversation's
         // turn order after a reload. Opened before the turn's items are read:
@@ -1227,6 +1247,14 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
           new Date(turn.created_at).getTime() || undefined,
           turn.id,
         );
+        // A turn the engine still holds is not finished work: its own
+        // `duration_ms` ticks while it runs, so counting it here and again at
+        // `turn.completed` would count the same seconds twice.
+        const turnIsRunning = turn.status === "in_progress" || turn.status === "queued";
+        if (!turnIsRunning) {
+          threadTurnMs += turnDurationMs(turn) ?? 0;
+          countedTurnIds.push(turn.id);
+        }
         // A mid-turn steer splits the turn into multiple assistant segments.
         // Segment state below resets at each steer boundary so history
         // renders like the live view: assistant → steer bubble → assistant
@@ -1713,16 +1741,26 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         // finished turn before it stays branchable, which is how a person
         // branches away from a turn that is going the wrong way without
         // stopping it.
-        const turnIsRunning = turn.status === "in_progress" || turn.status === "queued";
         if (!isCompactionTurn && !turnIsRunning) {
           for (let mi = this.messages.length - 1; mi >= turnStartIdx; mi--) {
             if (this.messages[mi].role === "assistant") {
               this.messages[mi].branchTurnId = turn.id;
+              // The same bubble carries the turn's own length, so a reloaded
+              // transcript says how long the answer took without asking the
+              // engine for a second read.
+              this.messages[mi].durationMs = turnDurationMs(turn);
               break;
             }
           }
         }
       }
+
+      // The thread's finished turns are a lower bound on the session's work
+      // time; keep whichever is larger. Read before the stats refresh below,
+      // which publishes the figure. Every one of them is now accounted for, so
+      // a completion the stream replays for one of them is not rolled again.
+      this.cumulativeTurnSecs = Math.max(this.cumulativeTurnSecs, Math.round(threadTurnMs / 1000));
+      for (const turnId of countedTurnIds) this.countedTurnSecs.add(turnId);
 
       // Unconditional: the panel describes the thread that is now on screen.
       // Publishing only when something changed left the previous thread's
@@ -1754,7 +1792,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         this.currentTurnId = lastTurn.id;
         this.ensureAssistantPlaceholderForExternalTurn(lastTurn.id);
         this.startPeriodicTaskRefresh();
-        this.postMessage({ type: "turnStarted", turnId: lastTurn.id });
+        this.postMessage({ type: "turnStarted", turnId: lastTurn.id, startedAtMs: turnStartedAtMs(lastTurn) });
       } else {
         // Back on an idle conversation. Any running figure still held for it
         // describes a turn the settled totals above already include — say, one
@@ -1993,6 +2031,10 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       const title = session.metadata.title || "Session";
 
       this.sessionState.reset();
+      // A different conversation's work is not this one's: the ids that guard
+      // the worked total against a replayed completion belong to the stats
+      // that were just zeroed.
+      this.countedTurnSecs.clear();
       this.viewingSessionId = sessionId;
       // A saved session has no live engine behind it, so there is no live
       // context-window reading to show, and no running turn to describe.
@@ -2499,6 +2541,9 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     this.stopBackgroundWatch(threadId);
     this.backgroundThreads.delete(threadId);
     this.sessionState.reset();
+    // The worked total restarts with the conversation it describes, so the
+    // turns it already accounts for start from nothing here.
+    this.countedTurnSecs.clear();
     // The readings are keyed by thread, so the outgoing conversation keeps
     // its own and this one shows its own: publishing now repaints for the
     // thread being opened rather than leaving the previous thread's numbers
@@ -3194,7 +3239,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       if (!this.currentTurnId) {
         this.clearLiveTurnUsage(this.currentThread.id);
       }
-      this.postMessage({ type: "turnStarted", turnId: result.turn.id });
+      this.postMessage({ type: "turnStarted", turnId: result.turn.id, startedAtMs: turnStartedAtMs(result.turn) });
     } catch (err) {
       // A thread that already has a turn running is a state to recover from
       // rather than a send to report as failed: the prompt was refused
@@ -3367,6 +3412,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     // instead of clearing it with the view.
     this.parkCurrentThread();
     this.sessionState.reset();
+    this.countedTurnSecs.clear();
     this.postMessage({ type: "clearChat" });
     // clearChat resets the conversation, not the mode and permission chips, so
     // they would otherwise keep showing the thread that was just cleared. With
@@ -6551,7 +6597,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     // stream (a parked thread, an engine restarted under us) the turn would
     // otherwise never report its completion.
     if (!this.eventController) this.subscribeToEvents();
-    this.postMessage({ type: "turnStarted", turnId: turn.id });
+    this.postMessage({ type: "turnStarted", turnId: turn.id, startedAtMs: turnStartedAtMs(turn) });
   }
 
   /** Recover a send the engine refused for the thread's own running turn.
@@ -7772,6 +7818,13 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         // it. Drained here so the set cannot grow without bound.
         const isCompactionTurn =
           !!pl.turn?.id && this.compactionTurns.delete(pl.turn.id);
+        // The turn is over, so its length is settled: the engine measured it,
+        // and rolling it into the session's total is what makes the status
+        // bar's worked clock keep ticking across turns instead of restarting.
+        // Every terminal turn counts — a failed or interrupted one was still
+        // time the model spent, and so was a compaction — but only once, and
+        // only when the record can say how long it ran.
+        const turnDuration = this.rollTurnDuration(pl.turn);
         this.currentTurnId = null;
         if (pl.turn?.usage) {
           const u = pl.turn.usage;
@@ -7862,6 +7915,11 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         }
 
         if (!isCompactionTurn && lastMsg?.role === "assistant") {
+          // The bubble closes this turn, so it carries the turn's own length —
+          // stamped on the message this host holds as well as on the payload,
+          // so a later re-render draws the same line the finalize message
+          // just drew (the same rule `branchTurnId` follows).
+          lastMsg.durationMs = turnDuration ?? lastMsg.durationMs;
           // TUI parity (flush_active_cell): a streaming placeholder that
           // never received output (steer raced the turn end, or the model
           // returned nothing) is discarded, not finalized as an empty
@@ -7878,7 +7936,11 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
             // removeMessage alone would leave the status bar stuck on
             // "streaming".
             this.postMessage(
-              finalizeAssistantMessage(lastMsg, isTerminalError ? "error" : "complete", { usage: pl.turn?.usage }),
+              finalizeAssistantMessage(lastMsg, isTerminalError ? "error" : "complete", {
+                usage: pl.turn?.usage,
+                durationMs: lastMsg.durationMs,
+                workedSecs: this.cumulativeTurnSecs,
+              }),
             );
             this.postMessage({ type: "removeMessage", messageId: lastMsg.id });
           } else {
@@ -7892,6 +7954,15 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
               isTerminalError ? "error" : "complete",
               {
                 usage: pl.turn?.usage,
+                // The turn's own length, drawn on the meta line under the
+                // answer. Carried in the payload because the live bubble is
+                // updated from this message, not re-read from `this.messages`.
+                durationMs: lastMsg.durationMs,
+                // The session's finished work, now including this turn: the
+                // clock under the answer stops with this message, so the
+                // session reading must not wait for a stats round trip to
+                // account for the turn that just ended.
+                workedSecs: this.cumulativeTurnSecs,
                 // The row itself is drawn from this payload — without it, a
                 // turn sent in this session would offer no branch point until
                 // the conversation was reopened, which is the case where
@@ -8764,6 +8835,32 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     }
   }
 
+  /** Roll one settled turn's length into the session's worked total, once.
+   *
+   *  Idempotent by turn id: a reconnecting stream can deliver the same
+   *  `turn.completed` twice, and a rebuild registers the turns it counted from
+   *  history — either way the seconds belong in the total exactly once.
+   *
+   *  Returns the turn's length (or undefined when the record cannot say) so
+   *  the caller can stamp it on the answer that closes the turn rather than
+   *  measuring it a second time.
+   */
+  private rollTurnDuration(turn?: TurnRecord | null): number | undefined {
+    const duration = turnDurationMs(turn);
+    if (duration === undefined) return undefined;
+    if (!turn?.id) {
+      // No id to deduplicate against: the one completed turn this client can
+      // see is still work it has not counted, so it counts.
+      this.cumulativeTurnSecs += Math.round(duration / 1000);
+      return duration;
+    }
+    if (!this.countedTurnSecs.has(turn.id)) {
+      this.countedTurnSecs.add(turn.id);
+      this.cumulativeTurnSecs += Math.round(duration / 1000);
+    }
+    return duration;
+  }
+
   private sendSessionStats(): void {
     const live = this.liveUsageForCurrentThread();
     // While a turn runs, the per-call receipts are the only figures that have
@@ -8830,6 +8927,10 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       totalTokens: tokenTotal,
       lastInputTokens: this.lastInputTokens,
       lastOutputTokens: this.lastOutputTokens,
+      // Finished model work across this conversation, in whole seconds. The
+      // view adds the running turn's own elapsed time on top, which is how the
+      // worked clock ticks continuously instead of jumping at each turn end.
+      workedSecs: this.cumulativeTurnSecs,
     });
   }
 

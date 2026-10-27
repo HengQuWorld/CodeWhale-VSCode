@@ -168,6 +168,12 @@ ${PROVIDER_PICKER_JS}
         statusBarEl.classList.remove('is-streaming');
       }
     }
+    if (streaming) {
+      // A turn is live from the moment the composer says so, even when no
+      // 'turnStarted' names it (a transcript rebuilt around a running turn):
+      // the clock is anchored, not reset, so re-arming cannot restart it.
+      ensureTurnClock();
+    }
     if (statusTextEl) {
       statusTextEl.textContent = label || (streaming ? __i18n.thinking : __i18n.ready);
     }
@@ -266,6 +272,10 @@ ${PROVIDER_PICKER_JS}
       stallProbeOutstanding = false;
       window.__wvMessages.setStreaming(false);
       window.__wvMessages.setStreamingTimeout(null);
+      // This view no longer holds a turn, so it must not keep timing one: a
+      // turn announced only by its placeholder (a goal kickoff, agent mail)
+      // would otherwise be read as a continuation of the turn just given up.
+      endTurnClock();
       setStreamingState(false, __i18n.readyTimedOut);
       return;
     }
@@ -367,12 +377,142 @@ ${PROVIDER_PICKER_JS}
       __wvEscapeHtml(title) + '">' + __wvEscapeHtml(__i18n.contextUsageLabel) + ' ' + pct + '%</span>';
   }
 
+  // ── Turn clock ──
+  //
+  // Two readings, the pair the TUI's phase strip carries: how long the turn on
+  // screen has been running, and how much model work the conversation has
+  // done in total. The anchor is the engine's own 'started_at' (the host sends
+  // it with 'turnStarted'), so a turn this view adopted mid-flight is timed
+  // from when it really began rather than from when the window noticed.
+
+  /** When the turn on screen began, in epoch ms; 0 while no turn is timed. */
+  var turnClockStartMs = 0;
+  /** The one-second repaint, alive only while a turn is running. */
+  var turnClockTimer = null;
+
+  /** Finished model work across the conversation, in seconds — the host's own
+   *  monotonic total. Absent on a runtime that does not report it. */
+  function workedSecs() {
+    return sessionStats && typeof sessionStats.workedSecs === 'number' && isFinite(sessionStats.workedSecs)
+      ? Math.max(0, sessionStats.workedSecs)
+      : 0;
+  }
+
+  function turnIsLive() {
+    return !!(window.__wvMessages && window.__wvMessages.isStreaming());
+  }
+
+  /** Elapsed time of the running turn, or 0 when none is being timed. */
+  function liveTurnElapsedMs() {
+    if (!turnClockStartMs || !turnIsLive()) return 0;
+    return Math.max(0, Date.now() - turnClockStartMs);
+  }
+
+  /** The session's worked total as text, or null when it has nothing to add.
+   *
+   *  Below a minute a fresh session's total is furniture, not information (the
+   *  TUI's worked chip uses the same floor), and on a session's first turn the
+   *  two readings are the same duration — stating it twice says nothing. */
+  function workedReading(turnElapsedMs) {
+    var totalMs = workedSecs() * 1000 + Math.max(0, turnElapsedMs || 0);
+    if (totalMs < 60000) return null;
+    if (turnElapsedMs > 0 && Math.floor(totalMs / 1000) === Math.floor(turnElapsedMs / 1000)) return null;
+    var text = window.__wvFormatElapsed(totalMs);
+    return text || null;
+  }
+
+  function turnClockChipHtml() {
+    if (!turnClockStartMs || !turnIsLive()) return '';
+    var text = window.__wvFormatElapsed(liveTurnElapsedMs());
+    if (!text) return '';
+    return '<span class="stat-chip turn-clock" id="turn-clock" title="' +
+      __wvEscapeHtml(__i18n.turnElapsedTitle.replace('{duration}', text)) + '">\u23F1 ' +
+      __wvEscapeHtml(text) + '</span>';
+  }
+
+  function workedChipHtml(turnElapsedMs) {
+    var text = workedReading(turnElapsedMs);
+    if (!text) return '';
+    return '<span class="stat-chip worked" id="worked-clock" title="' +
+      __wvEscapeHtml(__i18n.sessionWorkedTooltip) + '">' +
+      __wvEscapeHtml(__i18n.sessionWorked.replace('{duration}', text)) + '</span>';
+  }
+
+  /** Repaint the clock once a second, in place.
+   *
+   *  Swapping the two chips' text keeps every other chip's tooltip alive; the
+   *  full row is redrawn only when the set of chips itself changes (the worked
+   *  reading crossing its floor) or a chip is missing. */
+  function tickTurnClock() {
+    if (!turnIsLive() || !turnClockStartMs) {
+      // Every path that lets go of a turn ends the clock at that moment, so a
+      // tick arriving here means a path did not. A re-arm always happens in the
+      // same task that dropped the flag, so a whole second with no live turn is
+      // proof there is nothing left to count: end the clock rather than let the
+      // next turn — which may be announced only by its placeholder — be timed
+      // from this one's start.
+      endTurnClock();
+      return;
+    }
+    var elapsedMs = liveTurnElapsedMs();
+    var clockEl = document.getElementById('turn-clock');
+    var workedEl = document.getElementById('worked-clock');
+    var workedText = workedReading(elapsedMs);
+    if (!clockEl || (!!workedEl !== !!workedText)) {
+      renderStatusStats();
+      return;
+    }
+    var text = window.__wvFormatElapsed(elapsedMs);
+    if (!text) return;
+    clockEl.textContent = '\u23F1 ' + text;
+    clockEl.setAttribute('title', __i18n.turnElapsedTitle.replace('{duration}', text));
+    if (workedEl && workedText) {
+      workedEl.textContent = __i18n.sessionWorked.replace('{duration}', workedText);
+    }
+  }
+
+  /** Anchor the clock on the turn the host named. The start instant is the
+   *  engine's own; absent (a queued turn) or in the future (clock skew), the
+   *  receipt time is the honest anchor. */
+  function startTurnClock(startedAtMs) {
+    var now = Date.now();
+    turnClockStartMs = (typeof startedAtMs === 'number' && isFinite(startedAtMs) && startedAtMs > 0 && startedAtMs <= now)
+      ? startedAtMs
+      : now;
+    if (!turnClockTimer) turnClockTimer = setInterval(tickTurnClock, 1000);
+    renderStatusStats();
+  }
+
+  /** Arm the clock for a turn whose start this view never heard — a
+   *  server-initiated turn, or a redraw around one. Any anchor already held for
+   *  the turn on screen is kept, so re-arming never restarts the count. */
+  function ensureTurnClock() {
+    if (!turnClockStartMs) turnClockStartMs = Date.now();
+    if (!turnClockTimer) turnClockTimer = setInterval(tickTurnClock, 1000);
+  }
+
+  /** The turn ended: forget its start so the next turn is timed from its own
+   *  beginning, and take the reading off the row. */
+  function endTurnClock() {
+    turnClockStartMs = 0;
+    if (turnClockTimer) {
+      clearInterval(turnClockTimer);
+      turnClockTimer = null;
+    }
+    renderStatusStats();
+  }
+
   function renderStatusStats() {
     if (!statusStatsEl) return;
     var statsHtml = '';
     if (runtimeVersion) {
       statsHtml += '<span class="stat-chip">TUI ' + __wvEscapeHtml(runtimeVersion) + '</span>';
     }
+    // The live readings first: how long the turn has been running and how much
+    // work the conversation has done, then context, cost and tokens.
+    var turnElapsed = liveTurnElapsedMs();
+    statsHtml += turnClockChipHtml();
+    statsHtml += workedChipHtml(turnElapsed);
     // Right after the version, before cost: this is the reading that decides
     // whether the next turn still fits, so it belongs on the row that answers
     // what this session is costing.
@@ -1235,6 +1375,11 @@ ${PROVIDER_PICKER_JS}
           armStallTimeout();
           showThinkingActivity(lastLoaded.id, __i18n.thinking);
           setStreamingState(true, __i18n.thinking);
+        } else {
+          // No trailing streaming bubble: this draw replaced the turn with
+          // history, so the view holds none. The anchor goes with it — the
+          // clock it belonged to is not the clock of whatever runs next.
+          endTurnClock();
         }
         // The rail was cleared with the container by clearTranscript; the
         // messages drawn below rebuild it through addMessage() once there are
@@ -1590,14 +1735,24 @@ ${PROVIDER_PICKER_JS}
         if (msgBodyEl) {
           msgBodyEl.querySelectorAll('.content.streaming-indicator').forEach(function(el) { el.classList.remove('streaming-indicator'); });
         }
-        if (msg.usage) {
+        if (msg.usage || typeof msg.durationMs === 'number') {
           var msgEl = document.getElementById('msg-' + msg.messageId);
-          if (msgEl) {
-            var usageEl = document.createElement('div');
-            usageEl.className = 'usage-info';
-            usageEl.textContent = '\\u2191' + (msg.usage.input_tokens || 0) + ' \\u2193' + (msg.usage.output_tokens || 0);
-            msgEl.appendChild(usageEl);
+          if (msgEl && window.__wvMessages.renderTurnMeta) {
+            // Duration and tokens share the line under the answer, drawn by
+            // the messages module so this bubble reads the same as one rebuilt
+            // from history.
+            window.__wvMessages.renderTurnMeta(msgEl, {
+              durationMs: msg.durationMs,
+              usage: msg.usage,
+            });
           }
+        }
+        if (typeof msg.workedSecs === 'number' && isFinite(msg.workedSecs)) {
+          // The turn that just ended is already inside the host's total. Adopt
+          // it with this message: the clock under the answer stops here, and
+          // waiting for the settled-stats round trip would let the session
+          // reading dip to the previous total in between.
+          sessionStats = Object.assign({}, sessionStats, { workedSecs: msg.workedSecs });
         }
         if (msg.blockHtmls && msgBodyEl) {
           for (var bhi = 0; bhi < msg.blockHtmls.length; bhi++) {
@@ -1631,6 +1786,9 @@ ${PROVIDER_PICKER_JS}
         var st = window.__wvMessages.getStreamingTimeout();
         if (st) { clearTimeout(st); window.__wvMessages.setStreamingTimeout(null); }
         hideThinkingActivity(msg.messageId);
+        // The turn is over: its settled duration now lives under the answer
+        // and the row's clock comes down.
+        endTurnClock();
         setStreamingState(false, msg.error ? __i18n.error : __i18n.ready);
         break;
       }
@@ -1645,12 +1803,18 @@ ${PROVIDER_PICKER_JS}
         window.__wvMessages.setStreaming(true);
         armStallTimeout();
         setStreamingState(true, __i18n.processing);
+        // Anchored on the engine's own start, so a turn adopted mid-flight is
+        // timed from when it began rather than from when this view heard of
+        // it. Done after setStreamingState so the fallback anchor it may have
+        // set cannot win over the engine's.
+        startTurnClock(msg.startedAtMs);
         break;
 
       case 'turnInterrupted':
         window.__wvMessages.setStreaming(false);
         var st = window.__wvMessages.getStreamingTimeout();
         if (st) { clearTimeout(st); window.__wvMessages.setStreamingTimeout(null); }
+        endTurnClock();
         setStreamingState(false, __i18n.ready);
         document.querySelectorAll('.thinking-activity').forEach(function(el) { el.remove(); });
         document.querySelectorAll('.approval-bar').forEach(function(bar) { bar.remove(); });
@@ -1665,6 +1829,10 @@ ${PROVIDER_PICKER_JS}
           totalInputTokens: msg.totalInputTokens,
           totalOutputTokens: msg.totalOutputTokens,
           totalTokens: msg.totalTokens,
+          // Finished model work across the conversation, in seconds. The row's
+          // worked reading adds the running turn to it; a runtime that does
+          // not report it leaves the chip to the turn's own clock alone.
+          workedSecs: msg.workedSecs,
         };
         renderStatusStats();
         break;
@@ -1782,6 +1950,7 @@ ${PROVIDER_PICKER_JS}
         window.__wvMessages.setStreaming(false);
         var st = window.__wvMessages.getStreamingTimeout();
         if (st) { clearTimeout(st); window.__wvMessages.setStreamingTimeout(null); }
+        endTurnClock();
         setStreamingState(false, __i18n.ready);
         sessionStats = null;
         contextUsage = null;
@@ -1825,6 +1994,9 @@ ${PROVIDER_PICKER_JS}
           window.__wvMessages.setStreaming(false);
           var st = window.__wvMessages.getStreamingTimeout();
           if (st) { clearTimeout(st); window.__wvMessages.setStreamingTimeout(null); }
+          // This error ended the turn, so the clock ends with it: the next turn
+          // is timed from its own beginning.
+          endTurnClock();
           setStreamingState(false, __i18n.error);
         }
         var errEl = document.createElement('div');

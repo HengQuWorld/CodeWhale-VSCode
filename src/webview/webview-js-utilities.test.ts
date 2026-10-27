@@ -188,3 +188,30 @@ describe("__wvBackdropClickGuard", () => {
     expect(isBackdropClick(undefined)).toBe(false);
   });
 });
+
+describe("__wvFormatElapsed", () => {
+  /** Run the utilities IIFE and hand back its window, the way the webview does. */
+  function runUtilities(): any {
+    const windowObj: Record<string, any> = {};
+    vm.runInContext(getUtilitiesScript(makeTr()), vm.createContext({ window: windowObj }));
+    return windowObj;
+  }
+
+  it("states an elapsed time the way a person reads it", () => {
+    const format = runUtilities().__wvFormatElapsed;
+    expect(format(0)).toBe("0s");
+    expect(format(12_000)).toBe("12s");
+    expect(format(192_000)).toBe("3m12s");
+    expect(format(8_040_000)).toBe("2h14m");
+  });
+
+  it("answers nothing for a value it cannot read", () => {
+    // The caller draws no reading rather than a zero it did not measure.
+    const format = runUtilities().__wvFormatElapsed;
+    expect(format(undefined)).toBe("");
+    expect(format(null)).toBe("");
+    expect(format(Number.NaN)).toBe("");
+    expect(format(-1)).toBe("");
+    expect(format("120" as any)).toBe("");
+  });
+});

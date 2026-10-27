@@ -88,6 +88,12 @@ export interface WebviewTranslations {
   thinking: string;
   streaming: string;
   processing: string;
+  /** Status bar's live turn clock, and the duration reading under a finished
+   *  answer; both are formatted and filled in by the webview. */
+  turnElapsedTitle: string;
+  turnDurationTooltip: string;
+  sessionWorked: string;
+  sessionWorkedTooltip: string;
   error: string;
   approvalAwaiting: string;
   noConversations: string;

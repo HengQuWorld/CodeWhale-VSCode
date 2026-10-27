@@ -46,6 +46,23 @@ export function getUtilitiesScript(tr: WebviewTranslations): string {
   window.__wvI18n = __i18n;
   window.__wvLocale = __locale;
 
+  function __wvPad2(n) { return (n < 10 ? '0' : '') + n; }
+
+  /** Compact elapsed time — 12s, 3m07s, 2h14m — for a running turn and for a
+   *  finished one. One formatter serves both so the status bar's clock and the
+   *  duration under an answer cannot describe the same length two ways. An
+   *  absent or nonsensical value formats to '' and the caller draws nothing. */
+  window.__wvFormatElapsed = function(ms) {
+    if (typeof ms !== 'number' || !isFinite(ms) || ms < 0) return '';
+    var total = Math.floor(ms / 1000);
+    var hours = Math.floor(total / 3600);
+    var minutes = Math.floor((total % 3600) / 60);
+    var seconds = total % 60;
+    if (hours > 0) return hours + 'h' + __wvPad2(minutes) + 'm';
+    if (minutes > 0) return minutes + 'm' + __wvPad2(seconds) + 's';
+    return seconds + 's';
+  };
+
   // ── Backdrop dismissal for the modal overlays ──
   // Every overlay here closes when the dimmed area behind its panel is clicked.
   // The click's own target cannot tell such a click from a press that merely

@@ -2271,6 +2271,15 @@ export function getWebviewCss(): string {
     .status-bar .stat-chip.tokens {
       color: var(--muted);
     }
+    /* The live turn clock — the one reading on this row that is still moving,
+       so it carries the foreground ink the cost figure does. */
+    .status-bar .stat-chip.turn-clock {
+      color: var(--fg);
+    }
+    /* Session work time: context, not a live figure. Quiet like tokens. */
+    .status-bar .stat-chip.worked {
+      color: var(--muted);
+    }
 
     /* ── Tooltip ── */
 

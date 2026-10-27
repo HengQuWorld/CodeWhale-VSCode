@@ -170,6 +170,12 @@ export interface ChatMessage {
     input_tokens: number;
     output_tokens: number;
   } | null;
+  /** How long the turn this bubble closes took, in ms — the engine's own
+   *  `TurnRecord.duration_ms`, stamped where `usage` is so a reloaded
+   *  transcript reads the same figure the live one showed. Absent while a turn
+   *  still runs (the status bar's clock ticks then) and for turns the engine
+   *  never timed (queued, recovered, or a runtime older than the field). */
+  durationMs?: number;
   /** The compaction handoff summary a note carries, when the engine has one for
    *  the thread. Rendered collapsed: it is the model's own record of the
    *  conversation before it, and it can run to thousands of words. */

@@ -46,6 +46,15 @@ interface Translations {
   thinking: string;
   streaming: string;
   processing: string;
+  /** Status bar's live clock while a turn runs; `{duration}` is the elapsed
+   *  time, filled in by the webview on each tick. */
+  turnElapsedTitle: string;
+  /** Tooltip on a finished answer's duration reading. */
+  turnDurationTooltip: string;
+  /** Status bar's session total: model work across finished turns, plus the
+   *  running turn. `{duration}` is filled in by the webview. */
+  sessionWorked: string;
+  sessionWorkedTooltip: string;
   error: string;
   /** Fallback for a failed turn the runtime recorded no reason for: the
    *  failure itself is still the user's business, so it is said rather than
@@ -635,6 +644,10 @@ const en: Translations = {
   inputPlaceholder: "Ask CodeWhale...",
   initializing: "Initializing...", ready: "Ready",
   thinking: "Thinking...", streaming: "Streaming...", processing: "Processing...",
+  turnElapsedTitle: "This turn has been running for {duration}",
+  turnDurationTooltip: "How long this turn took",
+  sessionWorked: "worked {duration}",
+  sessionWorkedTooltip: "Model work so far: finished turns plus the running one",
   error: "Error", approvalAwaiting: "⏳ Awaiting approval...", approvalRemember: "Always allow calls like this in this conversation",
   turnFailed: "The turn failed without a reported reason.",
   userInputRequired: "Input required",
@@ -1114,6 +1127,10 @@ const zhCn: Translations = {
   inputPlaceholder: "向 CodeWhale 提问...",
   initializing: "初始化中...", ready: "就绪",
   thinking: "思考中...", streaming: "输出中...", processing: "处理中...",
+  turnElapsedTitle: "本轮已运行 {duration}",
+  turnDurationTooltip: "本轮耗时",
+  sessionWorked: "已工作 {duration}",
+  sessionWorkedTooltip: "本会话的模型工作时长：已完成轮次加上当前轮次",
   error: "错误", approvalAwaiting: "⏳ 等待审批...", approvalRemember: "在本对话中始终允许此类调用",
   turnFailed: "本轮执行失败，引擎未给出原因。",
   userInputRequired: "需要输入",
@@ -1636,6 +1653,10 @@ export function webviewTranslations(tr: Translations) {
     thinking: tr.thinking,
     streaming: tr.streaming,
     processing: tr.processing,
+    turnElapsedTitle: tr.turnElapsedTitle,
+    turnDurationTooltip: tr.turnDurationTooltip,
+    sessionWorked: tr.sessionWorked,
+    sessionWorkedTooltip: tr.sessionWorkedTooltip,
     error: tr.error,
     approvalAwaiting: tr.approvalAwaiting,
     approvalRemember: tr.approvalRemember,

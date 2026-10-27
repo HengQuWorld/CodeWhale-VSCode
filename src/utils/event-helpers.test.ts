@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { safeRenderMarkdown, renderMessageBlocks, finalizeAssistantMessage } from "./event-helpers";
+import { safeRenderMarkdown, renderMessageBlocks, finalizeAssistantMessage, turnDurationMs, turnStartedAtMs } from "./event-helpers";
 import type { ChatMessage } from "./session-state";
 
 describe("event-helpers", () => {
@@ -64,6 +64,57 @@ describe("event-helpers", () => {
       const result = renderMessageBlocks(msg);
       expect(result).toHaveLength(1);
       expect(result[0].blockIdx).toBe(1);
+    });
+  });
+
+  describe("turnDurationMs", () => {
+    it("prefers the engine's own duration", () => {
+      // The runtime measured the turn; started/ended are the same fact derived,
+      // and a mismatch must not let the derivation override the measurement.
+      expect(turnDurationMs({
+        duration_ms: 192000,
+        started_at: "2026-10-27T10:00:00Z",
+        ended_at: "2026-10-27T10:00:01Z",
+      })).toBe(192000);
+    });
+
+    it("derives the length from the two ends when the field is absent", () => {
+      expect(turnDurationMs({
+        started_at: "2026-10-27T10:00:00Z",
+        ended_at: "2026-10-27T10:03:12Z",
+      })).toBe(192000);
+    });
+
+    it("answers nothing for a turn with no timing at all", () => {
+      // A queued turn has not run, and a recovered one may carry neither end:
+      // a zero would claim it took no time.
+      expect(turnDurationMs({ created_at: "2026-10-27T10:00:00Z" })).toBeUndefined();
+      expect(turnDurationMs(null)).toBeUndefined();
+      expect(turnDurationMs(undefined)).toBeUndefined();
+    });
+
+    it("ignores an unparseable timestamp rather than reporting NaN", () => {
+      expect(turnDurationMs({ started_at: "not-a-date", ended_at: "2026-10-27T10:00:00Z" })).toBeUndefined();
+    });
+
+    it("rejects an end before the start", () => {
+      expect(turnDurationMs({
+        started_at: "2026-10-27T10:03:12Z",
+        ended_at: "2026-10-27T10:00:00Z",
+      })).toBeUndefined();
+    });
+  });
+
+  describe("turnStartedAtMs", () => {
+    it("reads the engine's start instant", () => {
+      expect(turnStartedAtMs({ started_at: "2026-10-27T10:00:00Z" }))
+        .toBe(Date.parse("2026-10-27T10:00:00Z"));
+    });
+
+    it("does not fall back to creation time", () => {
+      // A queued turn's wait is not work: the caller starts its clock when the
+      // turn actually begins rather than counting the queue as model time.
+      expect(turnStartedAtMs({ created_at: "2026-10-27T10:00:00Z", started_at: null })).toBeUndefined();
     });
   });
 

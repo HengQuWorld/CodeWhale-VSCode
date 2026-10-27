@@ -15,6 +15,7 @@
 import { describe, expect, it } from "vitest";
 import vm from "node:vm";
 import { getMessagesScript } from "./webview-js-messages";
+import { getUtilitiesScript } from "./webview-js-utilities";
 import { makeTr } from "./webview-test-helpers";
 
 /** `className` is the source of truth, as it is in a browser: the scripts
@@ -262,6 +263,13 @@ function createHarness(options: { frames?: Array<() => void> } = {}) {
     },
     console,
   });
+  // The utilities module runs first, as it does in the template: the messages
+  // module formats a turn's length with the shared elapsed formatter, and a
+  // stand-in here could drift from the one that ships. The helpers the rest of
+  // this file asserts against are then put back as this harness's own stubs.
+  vm.runInContext(getUtilitiesScript(makeTr()), context);
+  windowObj.__wvEscapeHtml = (value: unknown) => String(value ?? "");
+  windowObj.__wvI18n = makeTr();
   vm.runInContext(getMessagesScript(makeTr()), context);
 
   const messagesEl = getEl("messages");
@@ -1136,5 +1144,46 @@ describe("addMessage steer badges", () => {
     expect(bubble.className).toBe("message user steered");
     expect(bubble.innerHTML).toContain('class="steer-badge"');
     expect(bubble.innerHTML).not.toContain("undelivered");
+  });
+});
+
+describe("renderTurnMeta", () => {
+  /** The quiet line under an answer that closes a turn, read off the bubble
+   *  the module actually built. */
+  function metaFor(msg: Record<string, unknown>): FakeElement | null {
+    const { messages, messagesEl } = createHarness();
+    messages.addMessage({ role: "assistant", content: "an answer", status: "complete", timestamp: 1, ...msg });
+    const bubble = messagesEl.children[messagesEl.children.length - 1];
+    return bubble.querySelector(".usage-info");
+  }
+
+  it("states the turn's own length beside what it spent", () => {
+    const meta = metaFor({
+      id: "m1",
+      usage: { input_tokens: 1200, output_tokens: 340 },
+      durationMs: 192000,
+    });
+
+    expect(meta).not.toBeNull();
+    expect(meta?.textContent).toContain("\u23F1 3m12s");
+    expect(meta?.textContent).toContain("\u21911200 \u2193340");
+    expect(meta?.getAttribute("title")).toBe("How long this turn took");
+  });
+
+  it("keeps the token chip alone when the engine timed no turn", () => {
+    // An adopted turn the runtime never measured, or one older than the field.
+    const meta = metaFor({ id: "m2", usage: { input_tokens: 10, output_tokens: 2 } });
+
+    expect(meta?.textContent).toBe("\u219110 \u21932");
+    expect(meta?.getAttribute("title")).toBeNull();
+  });
+
+  it("draws nothing at all when there is neither a length nor usage", () => {
+    expect(metaFor({ id: "m3" })).toBeNull();
+  });
+
+  it("does not draw a negative or unparseable length", () => {
+    expect(metaFor({ id: "m4", durationMs: -5, usage: { input_tokens: 1, output_tokens: 1 } })?.textContent)
+      .toBe("\u21911 \u21931");
   });
 });

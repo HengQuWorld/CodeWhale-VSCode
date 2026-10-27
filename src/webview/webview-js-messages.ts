@@ -532,6 +532,7 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
   }
 
   // ── Add Message ──
+
   function removeMessage(id) {
     var el = document.getElementById('msg-' + id);
     if (el) el.remove();
@@ -550,6 +551,41 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
       '<summary>' + __wvEscapeHtml(__i18n.compactionSummaryLabel) + '</summary>' +
       '<pre class="compaction-summary-body">' + __wvEscapeHtml(summaryText) + '</pre>' +
       '</details>';
+  }
+
+  /** The quiet line under the answer that closes a turn: how long the turn
+   *  took, then what it spent.
+   *
+   *  One home for the markup, reached from two places: addMessage (a
+   *  transcript rebuilt from history) and the event handler's messageComplete
+   *  (a turn that just ended in this session). Either half can be missing — an
+   *  adopted turn the engine never timed, a runtime that recorded no usage —
+   *  and then the line carries only what is true, or is not drawn at all. The
+   *  duration is the engine's settled figure, never a client-side estimate. */
+  function renderTurnMeta(container, msg) {
+    if (!container || !msg) return;
+    var duration = (typeof msg.durationMs === 'number' && isFinite(msg.durationMs) && msg.durationMs >= 0)
+      ? window.__wvFormatElapsed(msg.durationMs)
+      : '';
+    var tokens = msg.usage
+      ? '\u2191' + (msg.usage.input_tokens || 0) + ' \u2193' + (msg.usage.output_tokens || 0)
+      : '';
+    var parts = [];
+    if (duration) parts.push('\u23F1 ' + duration);
+    if (tokens) parts.push(tokens);
+    if (parts.length === 0) return;
+    var el = container.querySelector('.usage-info');
+    if (!el) {
+      el = document.createElement('div');
+      el.className = 'usage-info';
+      container.appendChild(el);
+    }
+    el.textContent = parts.join(' \u00B7 ');
+    if (duration) {
+      el.setAttribute('title', __i18n.turnDurationTooltip);
+    } else {
+      el.removeAttribute('title');
+    }
   }
 
   function addMessage(msg, showRole) {
@@ -685,12 +721,7 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
       }
     }
 
-    if (msg.usage) {
-      var usageEl = document.createElement('div');
-      usageEl.className = 'usage-info';
-      usageEl.textContent = '\u2191' + (msg.usage.input_tokens || 0) + ' \u2193' + (msg.usage.output_tokens || 0);
-      el.appendChild(usageEl);
-    }
+    renderTurnMeta(el, msg);
 
     // Per-turn branch action. The anchor is the runtime turn id this bubble
     // carries: only the turn's closing assistant message has one, and only a
@@ -1252,6 +1283,7 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
     renderTurnForkAction: renderTurnForkAction,
     clearPendingTurnFork: clearPendingTurnFork,
     renderCompactionSummary: renderCompactionSummary,
+    renderTurnMeta: renderTurnMeta,
   };
 
   renderWelcome();

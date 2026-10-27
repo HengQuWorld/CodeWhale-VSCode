@@ -370,8 +370,12 @@ function createRuntimeHarness() {
   // that has to see it fire — or see it *not* fire — needs to move time and
   // run whatever came due. Ids stay truthy, the way the messages module's own
   // `getStreamingTimeout()` tells an armed deadline from a cleared one.
-  let now = 0;
+  let now = 1_700_000_000_000;
   const pendingTimers = new Map<number, { at: number; fn: () => void }>();
+  // Repeating timers are kept apart from the one-shots: the status bar's turn
+  // clock is an interval, and counting it among the pending deadlines would
+  // make every assertion about an armed/cancelled stall deadline wrong.
+  const pendingIntervals = new Map<number, { every: number; next: number; fn: () => void }>();
   const context = vm.createContext({
     window: windowObj,
     document: documentObj,
@@ -383,8 +387,23 @@ function createRuntimeHarness() {
     clearTimeout: (id: unknown) => {
       if (typeof id === "number") pendingTimers.delete(id);
     },
+    setInterval: (fn: () => void, delay?: number) => {
+      timerId += 1;
+      const every = Math.max(1, typeof delay === "number" ? delay : 0);
+      pendingIntervals.set(timerId, { every, next: now + every, fn });
+      return timerId;
+    },
+    clearInterval: (id: unknown) => {
+      if (typeof id === "number") pendingIntervals.delete(id);
+    },
     console,
+    // The status bar's turn clock reads the wall clock; pointing it at the
+    // virtual one keeps its reading deterministic under advance(). A real
+    // epoch, because 0 is what the clock treats as "no turn being timed".
+    __now: () => now,
   });
+
+  vm.runInContext("Date.now = function() { return __now(); };", context);
 
   // The utilities module runs first, as it does in the template: this module
   // captures its backdrop guard, and that guard is the mechanism under test —
@@ -424,6 +443,15 @@ function createRuntimeHarness() {
       for (const [id, timer] of due) {
         pendingTimers.delete(id);
         timer.fn();
+      }
+      // Repeating timers fire for every tick the jump covers, one after the
+      // other, and stop the moment they are cleared — a cleared interval that
+      // still fired would look like the clock outliving its turn.
+      for (const [id, timer] of [...pendingIntervals.entries()]) {
+        while (timer.next <= now && pendingIntervals.has(id)) {
+          timer.next += timer.every;
+          timer.fn();
+        }
       }
     },
     pendingTimers: () => pendingTimers.size,
@@ -2284,5 +2312,230 @@ describe("webview-js-event-handler runtime: context reading", () => {
     expect(html).toContain("Context 7%");
     expect(html).toContain("$0.12");
     expect(html).toContain((1200).toLocaleString());
+  });
+});
+
+describe("webview-js-event-handler runtime: the turn clock", () => {
+  /** The status bar's chips are one innerHTML string; the clock is read off it
+   *  the way a person reads the row. */
+  function stats(harness: ReturnType<typeof createRuntimeHarness>): string {
+    return harness.getElement("status-stats").innerHTML;
+  }
+
+  it("counts from the engine's start while the turn runs", () => {
+    const harness = createRuntimeHarness();
+    // The turn began half a minute before this view heard of it (adopted).
+    harness.dispatchMessage({
+      type: "turnStarted",
+      turnId: "turn-1",
+      startedAtMs: 1_700_000_000_000 - 30_000,
+    });
+
+    expect(stats(harness)).toContain("30s");
+
+    harness.advance(45_000);
+    expect(stats(harness)).toContain("1m15s");
+  });
+
+  it("takes the clock down when the turn ends", () => {
+    const harness = createRuntimeHarness();
+    harness.dispatchMessage({ type: "turnStarted", turnId: "turn-1", startedAtMs: 1_700_000_000_000 - 90_000 });
+    expect(stats(harness)).toContain("turn-clock");
+
+    harness.dispatchMessage({
+      type: "messageComplete",
+      messageId: "a1",
+      durationMs: 90000,
+      usage: { input_tokens: 10, output_tokens: 2 },
+    });
+
+    expect(stats(harness)).not.toContain("turn-clock");
+  });
+
+  it("stops counting once the turn is over even if a tick is still armed", () => {
+    const harness = createRuntimeHarness();
+    harness.dispatchMessage({ type: "turnStarted", turnId: "turn-1", startedAtMs: 1_700_000_000_000 });
+    harness.dispatchMessage({ type: "turnInterrupted" });
+
+    harness.advance(120_000);
+
+    expect(stats(harness)).not.toContain("turn-clock");
+    expect(harness.isStreaming()).toBe(false);
+  });
+
+  it("states the session's finished work beside the running turn", () => {
+    const harness = createRuntimeHarness();
+    harness.dispatchMessage({ type: "sessionStats", cost: "$0.12", workedSecs: 120 });
+    harness.dispatchMessage({ type: "turnStarted", turnId: "turn-1", startedAtMs: 1_700_000_000_000 - 30_000 });
+
+    // 2m of finished turns plus the running 30s.
+    expect(stats(harness)).toContain("worked 2m30s");
+    expect(stats(harness)).toContain("30s");
+  });
+
+  it("stays quiet until the session has done a minute of work", () => {
+    const harness = createRuntimeHarness();
+    harness.dispatchMessage({ type: "sessionStats", cost: "$0.01", workedSecs: 40 });
+
+    expect(stats(harness)).not.toContain("worked");
+  });
+
+  it("does not repeat the turn reading as a session total", () => {
+    // A session's first turn: the two readings are the same duration, and
+    // stating it twice says nothing new.
+    const harness = createRuntimeHarness();
+    harness.dispatchMessage({ type: "turnStarted", turnId: "turn-1", startedAtMs: 1_700_000_000_000 - 75_000 });
+
+    expect(stats(harness)).toContain("1m15s");
+    expect(stats(harness)).not.toContain("worked");
+  });
+
+  it("survives a transcript rebuilt while the turn is still running", () => {
+    // The host posts 'turnStarted' before the history draw, and the draw's
+    // own reset must not leave the clock anchored at zero.
+    const harness = createRuntimeHarness();
+    harness.dispatchMessage({ type: "turnStarted", turnId: "turn-1", startedAtMs: 1_700_000_000_000 - 45_000 });
+    harness.dispatchMessage({
+      type: "loadHistory",
+      messages: [{ id: "a1", role: "assistant", content: "", status: "streaming", timestamp: 1 }],
+    });
+
+    harness.advance(15_000);
+
+    expect(stats(harness)).toContain("1m00s");
+  });
+});
+
+describe("webview-js-event-handler runtime: the settled turn lands in the worked total", () => {
+  it("accounts for the turn that just ended without waiting for a stats round trip", () => {
+    const harness = createRuntimeHarness();
+    harness.dispatchMessage({
+      type: "turnStarted",
+      turnId: "turn-1",
+      startedAtMs: 1_700_000_000_000 - 90_000,
+    });
+    // No 'sessionStats' has ever arrived: the reading has nothing but this
+    // turn, and the message that ends it is the one that settles it.
+    harness.dispatchMessage({
+      type: "messageComplete",
+      messageId: "a1",
+      durationMs: 90000,
+      workedSecs: 90,
+      usage: { input_tokens: 10, output_tokens: 2 },
+    });
+
+    const html = harness.getElement("status-stats").innerHTML;
+    expect(html).not.toContain("turn-clock");
+    expect(html).toContain("worked 1m30s");
+  });
+});
+
+describe("webview-js-event-handler runtime: a turn the view stopped holding", () => {
+  it("does not time the next turn from the one the stall deadline gave up on", () => {
+    // A silent engine gets its composer back after five minutes of silence plus
+    // the probe's grace. That turn is no longer this view's — and a turn
+    // announced only by its placeholder (a goal kickoff, agent mail) carries no
+    // start instant, so it would otherwise inherit the abandoned one and read
+    // as five minutes old the moment it began.
+    const harness = createRuntimeHarness();
+    harness.dispatchMessage({ type: "turnStarted", turnId: "turn-1", startedAtMs: 1_700_000_000_000 });
+    harness.advance(300_000);
+    harness.advance(45_000);
+    expect(harness.isStreaming()).toBe(false);
+
+    harness.dispatchMessage({
+      type: "addMessage",
+      message: { id: "a1", role: "assistant", content: "", status: "streaming", timestamp: 1 },
+    });
+    harness.advance(5_000);
+
+    const html = harness.getElement("status-stats").innerHTML;
+    expect(html).toContain("5s");
+    expect(html).not.toContain("5m");
+  });
+
+  it("keeps timing the same turn when a redraw re-arms the streaming state", () => {
+    // The other half of the contract: a re-arm is not a new turn. A history
+    // draw around a live turn must count on from the engine's start.
+    const harness = createRuntimeHarness();
+    harness.dispatchMessage({ type: "turnStarted", turnId: "turn-1", startedAtMs: 1_700_000_000_000 - 40_000 });
+    harness.dispatchMessage({
+      type: "loadHistory",
+      messages: [{ id: "a1", role: "assistant", content: "", status: "streaming", timestamp: 1 }],
+    });
+    harness.advance(20_000);
+
+    expect(harness.getElement("status-stats").innerHTML).toContain("1m00s");
+  });
+});
+
+describe("webview-js-event-handler runtime: the anchor follows the turn the view holds", () => {
+  it("forgets the anchor when a new chat clears the transcript", () => {
+    const harness = createRuntimeHarness();
+    harness.dispatchMessage({ type: "turnStarted", turnId: "turn-1", startedAtMs: 1_700_000_000_000 - 240_000 });
+    harness.dispatchMessage({ type: "clearChat" });
+
+    harness.dispatchMessage({
+      type: "addMessage",
+      message: { id: "a1", role: "assistant", content: "", status: "streaming", timestamp: 1 },
+    });
+    harness.advance(3_000);
+
+    const html = harness.getElement("status-stats").innerHTML;
+    expect(html).toContain("3s");
+    expect(html).not.toContain("4m");
+  });
+
+  it("forgets the anchor when a history draw ends on no live turn", () => {
+    const harness = createRuntimeHarness();
+    harness.dispatchMessage({ type: "turnStarted", turnId: "turn-1", startedAtMs: 1_700_000_000_000 - 240_000 });
+    harness.dispatchMessage({
+      type: "loadHistory",
+      messages: [{ id: "a1", role: "assistant", content: "done", status: "complete", timestamp: 1 }],
+    });
+
+    harness.dispatchMessage({
+      type: "addMessage",
+      message: { id: "a2", role: "assistant", content: "", status: "streaming", timestamp: 2 },
+    });
+    harness.advance(2_000);
+
+    const html = harness.getElement("status-stats").innerHTML;
+    expect(html).toContain("2s");
+    expect(html).not.toContain("4m");
+  });
+
+  it("drops a stale anchor even when a path forgets to end the clock", () => {
+    // The backstop: the flag goes down behind the module's back (no ending
+    // message), and a tick is what notices no turn is held any more.
+    const harness = createRuntimeHarness();
+    harness.dispatchMessage({ type: "turnStarted", turnId: "turn-1", startedAtMs: 1_700_000_000_000 - 240_000 });
+    harness.windowApi("__wvMessages").setStreaming(false);
+    harness.advance(1_000);
+
+    harness.dispatchMessage({
+      type: "addMessage",
+      message: { id: "a1", role: "assistant", content: "", status: "streaming", timestamp: 1 },
+    });
+    harness.advance(4_000);
+
+    expect(harness.getElement("status-stats").innerHTML).toContain("4s");
+  });
+
+  it("ends the clock on an error that ends the turn", () => {
+    const harness = createRuntimeHarness();
+    harness.dispatchMessage({ type: "turnStarted", turnId: "turn-1", startedAtMs: 1_700_000_000_000 - 90_000 });
+    harness.dispatchMessage({ type: "error", message: "provider refused" });
+
+    expect(harness.getElement("status-stats").innerHTML).not.toContain("turn-clock");
+  });
+
+  it("keeps the clock on an error that did not end the turn", () => {
+    // A goal error carries keepStreaming because the turn is still running.
+    const harness = createRuntimeHarness();
+    harness.dispatchMessage({ type: "turnStarted", turnId: "turn-1", startedAtMs: 1_700_000_000_000 - 30_000 });
+    harness.dispatchMessage({ type: "error", message: "goal failed", keepStreaming: true });
+
+    expect(harness.getElement("status-stats").innerHTML).toContain("turn-clock");
   });
 });

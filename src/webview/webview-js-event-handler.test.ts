@@ -15,6 +15,12 @@ describe("webview-js-event-handler.ts", () => {
     expect(script.endsWith("})();")).toBe(true);
   });
 
+  it("parses as a whole inline script block", () => {
+    // A syntax error anywhere in the block stops every script after it (see
+    // AGENTS.md), so the assembled module has to compile on its own.
+    expect(() => new Function(getEventHandlerScript(makeTr()))).not.toThrow();
+  });
+
   it("uses strict mode", () => {
     const script = getEventHandlerScript(makeTr());
     expect(script).toContain("'use strict'");
