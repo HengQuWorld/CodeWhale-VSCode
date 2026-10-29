@@ -416,7 +416,7 @@ export class ConfigPanel {
 </head>
 <body>
   <h1>CodeWhale Configuration</h1>
-  <p class="subtitle">Edit runtime configuration. Changes are persisted to config.toml and settings.json.</p>
+  <p class="subtitle">Edit runtime configuration. Changes are persisted to config.toml and settings.toml.</p>
 
   <div class="toolbar">
     <button id="btn-reload">Fetch from Backend</button>

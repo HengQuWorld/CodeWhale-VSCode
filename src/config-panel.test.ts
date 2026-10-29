@@ -171,3 +171,24 @@ describe("ConfigPanel provider preview", () => {
     expect(html).toContain("if (!__cwProviderVisible(p, isActive)) continue;");
   });
 });
+
+describe("ConfigPanel copy", () => {
+  it("names the two engine files this form actually persists to", () => {
+    const api = {
+      getConfig: vi.fn(async () => ({ model: "deepseek-v4-pro", provider: "deepseek" })),
+      listProviders: vi.fn(async () => ({ current: "deepseek", providers: [] })),
+      listProviderModels: vi.fn(async () => ({ provider: "deepseek", models: [] })),
+      setConfig: vi.fn(),
+      reloadConfig: vi.fn(),
+    };
+
+    ConfigPanel.createOrShow({} as any, api as any);
+    const html = vscodeState.panel.webview.html;
+
+    // The engine persists settings keys to `settings.toml` — there is no
+    // `settings.json` on its side, and the only file by that name this
+    // extension knows is VS Code's own, which this form never writes.
+    expect(html).toContain("persisted to config.toml and settings.toml");
+    expect(html).not.toContain("settings.json");
+  });
+});
