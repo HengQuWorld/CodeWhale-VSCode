@@ -365,6 +365,43 @@ export function isShellTool(toolName: string): boolean {
   return /(?:^|[_/.-])(shell|bash|sh|exec|cmd)(?:[_/.-]|$)/i.test(toolName || "");
 }
 
+/** Tools that poll or stop a background shell task rather than run anything.
+ *
+ *  Their arguments name the task and how long to wait on it, never the command
+ *  it is running, so a card built from those arguments alone says nothing about
+ *  what the task does. `ToolCallInfo.taskCommand` carries the command into that
+ *  card; these names are what decide the card has to be looked up at all. */
+export const SHELL_TASK_POLL_TOOL_NAMES = new Set(["task_shell_wait", "exec_shell_wait"]);
+
+export function isShellTaskPollTool(toolName: string): boolean {
+  const name = toolName || "";
+  return SHELL_TASK_POLL_TOOL_NAMES.has(name) || SHELL_TASK_POLL_TOOL_NAMES.has(name.toLowerCase());
+}
+
+/** The background task a call names, when it names exactly one.
+ *
+ *  A multi-task wait (`task_ids`) has no single command to show, and naming one
+ *  of them would claim the card is about that task alone. It returns `undefined`
+ *  there, so the card says only what the call itself says. */
+export function backgroundTaskIdFromInput(
+  input: Record<string, unknown> | null | undefined,
+): string | undefined {
+  const id = input?.task_id;
+  return typeof id === "string" && id !== "" ? id : undefined;
+}
+
+/** The command a shell tool call runs, when its arguments carry one. */
+export function shellCommandFromInput(
+  input: Record<string, unknown> | null | undefined,
+): string | undefined {
+  if (!input) return undefined;
+  for (const key of ["command", "cmd", "script"]) {
+    const value = input[key];
+    if (typeof value === "string" && value) return value;
+  }
+  return undefined;
+}
+
 // ── Task refresh trigger ──
 
 export const TASK_REFRESH_TOOL_NAMES = new Set([

@@ -486,7 +486,13 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
     var keys = Object.keys(input).filter(function(k) {
       return !TOOL_INPUT_META_KEYS[k] && input[k] !== null && input[k] !== undefined && input[k] !== '';
     });
-    if (keys.length === 0) return '';
+    // A poll of a background shell task names only the task id, so its own
+    // arguments say that something is running and nothing about what. The
+    // command is resolved by the host (ToolCallInfo.taskCommand) from the call
+    // that started the task or the poll's own result, and drawn here as the
+    // command line the card would show for the real thing.
+    var taskCommand = typeof tc.taskCommand === 'string' ? tc.taskCommand : '';
+    if (keys.length === 0 && taskCommand === '') return '';
 
     var commandKey = null;
     if (isShellTool(tc.name)) {
@@ -498,9 +504,10 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
       }
     }
 
+    var commandText = commandKey ? formatToolInputValue(input[commandKey]) : taskCommand;
     var html = '<div class="tool-input">';
-    if (commandKey) {
-      html += '<div class="tool-input-command" tabindex="0">$ ' + __wvEscapeHtml(formatToolInputValue(input[commandKey])) + '</div>';
+    if (commandText) {
+      html += '<div class="tool-input-command" tabindex="0">$ ' + __wvEscapeHtml(commandText) + '</div>';
     }
     for (var i = 0; i < keys.length; i++) {
       var key = keys[i];

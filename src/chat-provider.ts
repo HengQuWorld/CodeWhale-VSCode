@@ -91,6 +91,9 @@ import {
   friendlyToolName,
   isFileChangeTool,
   isShellTool,
+  isShellTaskPollTool,
+  backgroundTaskIdFromInput,
+  shellCommandFromInput,
   extractFilePath,
   extractToolNameFromSummary,
   buildApprovalSummary,
@@ -340,6 +343,18 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
    *  fetch in flight. Together they make the enrichment one request per call. */
   private shellCallsEnriched = new Set<string>();
   private shellCallsInFlight = new Set<string>();
+  /** Background shell tasks this view can name: `task_id` → the command the
+   *  task runs.
+   *
+   *  A poll (`task_shell_wait`) is called with a task id and a timeout and
+   *  nothing else, so a card built from its arguments could only say that
+   *  *some* shell task was running — a test suite, a build and a dev server
+   *  looked the same. Two calls can each teach the pairing: the call that
+   *  started the task (its input holds the command, its result the `task_id`)
+   *  and any poll of it (the engine returns both in the result metadata). A
+   *  task started before this view was watching is named from its first poll.
+   *  Keyed per transcript: task ids are only meaningful within a session. */
+  private shellTaskCommands = new Map<string, string>();
   // Guard to prevent concurrent autoSaveSession calls.  When multiple
   // turn.completed events fire in quick succession (e.g. SSE reconnection
   // replaying buffered events) and currentSessionId is null, each call
@@ -1211,6 +1226,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     try {
       const detail = await this.api.getThreadDetail(id);
       this.messages = [];
+      this.shellTaskCommands.clear();
       this.resetChangeGroups();
       this.lastEventSeq = detail.latest_seq ?? 0;
       const itemById = new Map(detail.items.map((item) => [item.id, item]));
@@ -1549,12 +1565,20 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
               }
               const tc: ToolCallInfo = {
                 name: rawName,
+                // The same label the live path gives the row, so a reloaded
+                // transcript does not fall back to the engine's raw tool name.
+                displayName: rawName ? friendlyToolName(rawName) : undefined,
                 input: toolInput,
                 output: toolOutput,
                 status: item.status === "completed" ? "complete" : "error",
                 itemId: typeof metadata.tool_use_id === "string" ? metadata.tool_use_id : item.id,
                 callId: toolCallIdFromMetadata(metadata),
               };
+              // A poll of a background task carries only its id: the command is
+              // paired here from the call that started the task, or read off
+              // the poll's own recorded result, so a reloaded card says what
+              // the task was doing instead of just naming the id.
+              this.noteShellTaskCommand(tc, metadata);
               // A turn that ran a shell command may have changed files through
               // it. Those writes are not in any `metadata.mutation` — they are
               // the difference between the restore points the engine recorded
@@ -2031,6 +2055,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       const title = session.metadata.title || "Session";
 
       this.sessionState.reset();
+      this.shellTaskCommands.clear();
       // A different conversation's work is not this one's: the ids that guard
       // the worked total against a replayed completion belong to the stats
       // that were just zeroed.
@@ -2541,6 +2566,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     this.stopBackgroundWatch(threadId);
     this.backgroundThreads.delete(threadId);
     this.sessionState.reset();
+    this.shellTaskCommands.clear();
     // The worked total restarts with the conversation it describes, so the
     // turns it already accounts for start from nothing here.
     this.countedTurnSecs.clear();
@@ -3412,6 +3438,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     // instead of clearing it with the view.
     this.parkCurrentThread();
     this.sessionState.reset();
+    this.shellTaskCommands.clear();
     this.countedTurnSecs.clear();
     this.postMessage({ type: "clearChat" });
     // clearChat resets the conversation, not the mode and permission chips, so
@@ -3670,6 +3697,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       if (this.viewingSessionId === sessionId) {
         this.viewingSessionId = null;
         this.messages = [];
+        this.shellTaskCommands.clear();
         this.postMessage({ type: "clearChat" });
         this.postMessage({ type: "status", text: "Ready" });
       }
@@ -4773,6 +4801,41 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       });
     }
     this.applyCallChanges(ids.callId);
+  }
+
+  /** Remember the command behind a background shell task, so a later poll of
+   *  it can be named. Either half may be missing — a foreground command has no
+   *  task id worth keeping, a poll result has no input command — and a partial
+   *  pair teaches nothing. */
+  private rememberShellTaskCommand(taskId: unknown, command: unknown): void {
+    if (typeof taskId !== "string" || taskId === "") return;
+    if (typeof command !== "string" || command === "") return;
+    this.shellTaskCommands.set(taskId, command);
+  }
+
+  private shellTaskCommandFor(taskId: unknown): string | undefined {
+    return typeof taskId === "string" && taskId !== ""
+      ? this.shellTaskCommands.get(taskId)
+      : undefined;
+  }
+
+  /** Read a completed call's result for a background task's command, and name
+   *  it on the call itself when that call is the task's poll.
+   *
+   *  The command is authoritative in the engine's own metadata (`command` on a
+   *  wait result) and is otherwise the input the task was started with, which
+   *  is why both are recorded. The card only learns it when a poll is the call
+   *  being drawn; a start call already shows its command as its own argument. */
+  private noteShellTaskCommand(
+    tc: ToolCallInfo,
+    metadata?: Record<string, unknown> | null
+  ): void {
+    const resultCommand = typeof metadata?.command === "string" ? metadata.command : undefined;
+    this.rememberShellTaskCommand(metadata?.task_id, resultCommand);
+    this.rememberShellTaskCommand(metadata?.task_id, shellCommandFromInput(tc.input));
+    if (!isShellTaskPollTool(tc.name)) return;
+    const command = resultCommand || this.shellTaskCommandFor(backgroundTaskIdFromInput(tc.input));
+    if (command) tc.taskCommand = command;
   }
 
   /** Record what a call's `post-tool` receipt says changed in its span, then
@@ -6903,6 +6966,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     // Switch to the new forked thread.
     this.currentThread = forked;
     this.messages = [];
+    this.shellTaskCommands.clear();
     this.resetChangeGroups();
     this.currentTurnId = null;
     this.activeItems.clear();
@@ -7053,6 +7117,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       // Switch to the new forked thread and subscribe to its events.
       this.currentThread = result.thread;
       this.messages = [];
+      this.shellTaskCommands.clear();
       this.resetChangeGroups();
       this.currentTurnId = result.turn.id;
       this.activeItems.clear();
@@ -8439,6 +8504,12 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
           };
           lastMsg.toolCalls = lastMsg.toolCalls || [];
           lastMsg.blocks = lastMsg.blocks || [];
+          // A poll of a task this view already watched start is named straight
+          // away, rather than showing "Shell task · running..." until its own
+          // result arrives — which, for a `wait`, can be the whole timeout.
+          if (isShellTaskPollTool(tc.name)) {
+            tc.taskCommand = this.shellTaskCommandFor(backgroundTaskIdFromInput(tc.input));
+          }
           const tcIdx = lastMsg.toolCalls.length;
           lastMsg.toolCalls.push(tc);
           const blockIdx = lastMsg.blocks.length;
@@ -8556,6 +8627,9 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
           if (tc) {
             tc.status = "complete";
             tc.output = pl.item?.detail || pl.item?.summary;
+            // The result is where the engine names the command behind a
+            // background task, so the poll card can say what it waited on.
+            this.noteShellTaskCommand(tc, pl.item?.metadata);
             this.postMessage({
               type: "updateToolCall",
               messageId: msg.id,
@@ -8563,6 +8637,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
               toolName: tc.name,
               status: "complete",
               output: tc.output,
+              ...(tc.taskCommand ? { taskCommand: tc.taskCommand } : {}),
             });
           }
 

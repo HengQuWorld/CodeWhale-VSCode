@@ -1382,3 +1382,40 @@ describe("pinned turn prompt", () => {
     expect(h.bar.hidden).toBe(true);
   });
 });
+
+describe("renderToolInput for a background-task poll", () => {
+  it("draws the command the task is running, above the task id it names", () => {
+    // The poll's arguments are a task id and a timeout: without the command
+    // the card says that something runs and nothing about what, which is the
+    // state the host resolves `taskCommand` out of.
+    const { messages } = createHarness();
+    const html = messages.renderToolInput({
+      name: "task_shell_wait",
+      input: { task_id: "shell_1", timeout_ms: 900000, wait: true },
+      taskCommand: "cargo build --workspace",
+    });
+
+    expect(html).toContain("$ cargo build --workspace");
+    expect(html).toContain("shell_1");
+    expect(html.indexOf("$ cargo build --workspace")).toBeLessThan(html.indexOf("task_id"));
+  });
+
+  it("keeps the call's own command first when it has one", () => {
+    const { messages } = createHarness();
+    const html = messages.renderToolInput({
+      name: "exec_shell",
+      input: { command: "npm test" },
+      taskCommand: "npm test",
+    });
+
+    expect(html).toContain("$ npm test");
+    // The same command must not be drawn twice, once as the argument and once
+    // as the resolved task command.
+    expect(html.split("$ npm test").length - 1).toBe(1);
+  });
+
+  it("draws nothing for a call with no arguments and no command", () => {
+    const { messages } = createHarness();
+    expect(messages.renderToolInput({ name: "task_shell_wait", input: {} })).toBe("");
+  });
+});

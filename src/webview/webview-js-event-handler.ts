@@ -361,6 +361,54 @@ ${PROVIDER_PICKER_JS}
     if (indicator) indicator.remove();
   }
 
+  /** What the live "working" row says about a tool call.
+   *
+   *  A card may know the command behind a background shell task even though
+   *  the call itself names only the task id; the command is what the row should
+   *  carry, because it is the answer to "what is it doing?". The row is one
+   *  line, so a multi-line command is cut at its first line and at a readable
+   *  length — the card below it still shows the command in full. */
+  function toolActivityLabel(toolCall) {
+    if (!toolCall) return '';
+    var command = typeof toolCall.taskCommand === 'string' ? toolCall.taskCommand : '';
+    if (command) {
+      var firstLine = command.split('\\n')[0].trim();
+      if (firstLine) {
+        return firstLine.length > 64 ? firstLine.slice(0, 63) + '\\u2026' : firstLine;
+      }
+    }
+    return toolCall.displayName || '';
+  }
+
+  /** Add or refresh the command line on a card whose command arrived after the
+   *  card was drawn.
+   *
+   *  A poll is started before its result is known, so the command it names can
+   *  only be read off the result — the same line the card would have drawn had
+   *  the command been known when it was rendered. */
+  function applyTaskCommandToCard(tcEl, command) {
+    var inputEl = tcEl.querySelector('.tool-input');
+    if (!inputEl) {
+      inputEl = document.createElement('div');
+      inputEl.className = 'tool-input';
+      // Directly under the header row, where renderToolInput puts it. A card
+      // drawn with no input block has no other anchor, and appending would put
+      // the command below the call's output.
+      var header = tcEl.querySelector('.tool-status') || tcEl.querySelector('.tool-name');
+      if (header) tcEl.insertBefore(inputEl, header.nextSibling);
+      else tcEl.appendChild(inputEl);
+    }
+    var cmdEl = inputEl.querySelector('.tool-input-command');
+    if (!cmdEl) {
+      cmdEl = document.createElement('div');
+      cmdEl.className = 'tool-input-command';
+      cmdEl.setAttribute('tabindex', '0');
+      inputEl.insertBefore(cmdEl, inputEl.firstChild);
+    }
+    cmdEl.textContent = '$ ' + command;
+    if (window.__wvMessages.markClippedBlocks) window.__wvMessages.markClippedBlocks(tcEl);
+  }
+
   /** The status bar's context reading: how much of the model's window the
    *  conversation currently occupies.
    *
@@ -1519,8 +1567,9 @@ ${PROVIDER_PICKER_JS}
           if (window.__wvMessages.markClippedBlocks) window.__wvMessages.markClippedBlocks(child);
           window.__wvMessages.smartScrollToBottom();
         }
-        if (msg.toolCall && msg.toolCall.displayName) {
-          updateThinkingActivityLabel(msg.messageId, msg.toolCall.displayName);
+        var activityLabel = toolActivityLabel(msg.toolCall);
+        if (activityLabel) {
+          updateThinkingActivityLabel(msg.messageId, activityLabel);
         }
         break;
       }
@@ -1537,6 +1586,12 @@ ${PROVIDER_PICKER_JS}
             else if (msg.status === 'error') { statusIcon = '\\u2717'; statusText = 'error'; }
             else if (msg.status === 'awaiting_approval') { statusIcon = '\\u26A0'; statusText = __i18n.approvalAwaiting; }
             statusSpan.textContent = statusIcon + ' ' + statusText;
+          }
+          if (typeof msg.taskCommand === 'string' && msg.taskCommand) {
+            // A background-task poll learns its command only from its result,
+            // so the card grows that line now rather than staying as bare as
+            // the call's own arguments.
+            applyTaskCommandToCard(tcEl, msg.taskCommand);
           }
           if (msg.output) {
             var outputEl = tcEl.querySelector('.tool-output');

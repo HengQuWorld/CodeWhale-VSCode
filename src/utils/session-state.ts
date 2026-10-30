@@ -30,6 +30,15 @@ export interface ToolCallInfo {
    *  `post-tool:<call_id>` workspace restore points with, so it is what a
    *  question about *this call's own* file changes has to be asked with. */
   callId?: string;
+  /** The command a background shell task is running, for the call that polls
+   *  it (`task_shell_wait`).
+   *
+   *  A poll's own arguments name only a task id, so the card could say
+   *  "Shell task · running..." and nothing about what was running — a test
+   *  suite and a dev server looked identical. The command is the one the task
+   *  was started with: the engine reports it back on the poll's result, and
+   *  the view also keeps it from the call that started the task. */
+  taskCommand?: string;
   fileChange?: FileChangeInfo;
   /** Every change a command this call ran made in its workspace span, one
    *  record per path.

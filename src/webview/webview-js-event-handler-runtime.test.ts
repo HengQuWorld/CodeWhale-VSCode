@@ -105,6 +105,21 @@ class FakeElement {
     return matches.length > 0 ? matches[0] : null;
   }
 
+  /** The two positional accessors the card-update path inserts against. A
+   *  script that inserts beside a sibling reads them, so a stand-in without
+   *  them silently appends instead — and a test of where a node lands would
+   *  pass without ever looking. */
+  get firstChild(): FakeElement | null {
+    return this.children[0] ?? null;
+  }
+
+  get nextSibling(): FakeElement | null {
+    const parent = this.parentElement;
+    if (!parent) return null;
+    const index = parent.children.indexOf(this);
+    return index >= 0 ? parent.children[index + 1] ?? null : null;
+  }
+
   closest(selector?: string): FakeElement | null {
     let node: FakeElement | null = this.parentElement;
     while (node) {
@@ -2557,5 +2572,74 @@ describe("webview-js-event-handler runtime: the anchor follows the turn the view
     harness.dispatchMessage({ type: "error", message: "goal failed", keepStreaming: true });
 
     expect(harness.getElement("status-stats").innerHTML).toContain("turn-clock");
+  });
+
+  it("grows the command line on a task card when the poll's result names it", () => {
+    // A `wait` is drawn before its result exists, so its command arrives after
+    // the card: the card has to gain that line rather than stay as bare as the
+    // task id it was drawn from.
+    const harness = createRuntimeHarness();
+    const card = harness.getElement("tc-msg-1-0");
+    card.className = "tool-call";
+    const status = new FakeElement();
+    status.className = "tool-status";
+    card.appendChild(status);
+    const inputBox = new FakeElement();
+    inputBox.className = "tool-input";
+    const taskIdRow = new FakeElement();
+    taskIdRow.className = "tool-input-row";
+    inputBox.appendChild(taskIdRow);
+    card.appendChild(inputBox);
+
+    harness.dispatchMessage({
+      type: "updateToolCall",
+      messageId: "msg-1",
+      toolCallIdx: 0,
+      status: "complete",
+      taskCommand: "cargo build --workspace",
+    });
+
+    // Above the task id it was drawn from, the position `renderToolInput` gives
+    // a command — the card reads the same whether the command was known at
+    // render time or arrived with the result.
+    expect(inputBox.children[0]?.className).toBe("tool-input-command");
+    expect(inputBox.children[0]?.textContent).toBe("$ cargo build --workspace");
+    expect(inputBox.children[1]).toBe(taskIdRow);
+
+    // A card drawn without any input block (a replay whose arguments were
+    // missing) grows the block right below its status line, not at the end of
+    // whatever else the card carries.
+    const bareCard = harness.getElement("tc-msg-2-0");
+    bareCard.className = "tool-call";
+    const bareStatus = new FakeElement();
+    bareStatus.className = "tool-status";
+    bareCard.appendChild(bareStatus);
+    const output = new FakeElement();
+    output.className = "tool-output";
+    bareCard.appendChild(output);
+
+    harness.dispatchMessage({
+      type: "updateToolCall",
+      messageId: "msg-2",
+      toolCallIdx: 0,
+      status: "complete",
+      taskCommand: "npm run test",
+    });
+
+    expect(bareCard.children[1]?.className).toBe("tool-input");
+    expect(bareCard.children[1]?.children[0]?.textContent).toBe("$ npm run test");
+    expect(bareCard.children[2]).toBe(output);
+
+    // A second result for the same card refreshes the line instead of drawing
+    // a second one.
+    harness.dispatchMessage({
+      type: "updateToolCall",
+      messageId: "msg-1",
+      toolCallIdx: 0,
+      status: "complete",
+      taskCommand: "cargo build --workspace --release",
+    });
+    expect(inputBox.children.filter((child) => child.className === "tool-input-command")).toHaveLength(1);
+    expect(inputBox.children[0]?.textContent).toBe("$ cargo build --workspace --release");
   });
 });
