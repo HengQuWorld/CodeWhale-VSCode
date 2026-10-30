@@ -88,6 +88,9 @@ class FakeElement {
   public scrollTop = 0;
   public scrollHeight = 0;
   public clientHeight = 0;
+  /** What the browser reflects the `hidden` attribute to; the pinned prompt
+   *  bar is shown and hidden through it. */
+  public hidden = false;
   public offsetWidth = 0;
   public offsetHeight = 0;
   public offsetTop = 0;
@@ -1185,5 +1188,197 @@ describe("renderTurnMeta", () => {
   it("does not draw a negative or unparseable length", () => {
     expect(metaFor({ id: "m4", durationMs: -5, usage: { input_tokens: 1, output_tokens: 1 } })?.textContent)
       .toBe("\u21911 \u21931");
+  });
+});
+
+describe("pinned turn prompt", () => {
+  /** The bar names the prompt of the turn the reader is inside once that
+   *  prompt has scrolled above the transcript's top edge. The harness has no
+   *  layout, so a row's vertical extent is set by hand (rectTop/offsetHeight). */
+  function staged() {
+    const frames: Array<() => void> = [];
+    const harness = createHarness({ frames });
+    const { messages, messagesEl, getEl } = harness;
+    const bar = getEl("turn-context");
+    const barText = getEl("turn-context-text");
+    const barTurn = getEl("turn-context-turn");
+
+    // The shipped markup carries `hidden`; the stand-in starts from nothing,
+    // so say what the template says.
+    bar.hidden = true;
+
+    // A laid-out transcript: updateNavDots re-schedules itself for as long as
+    // the container still has no scroll height (it is waiting for layout), so
+    // leaving this at 0 would turn every frame drain into an endless loop
+    // rather than a test result.
+    messagesEl.scrollHeight = 4000;
+    messagesEl.clientHeight = 600;
+
+    const runFrames = (): void => {
+      // Bounded: a frame that schedules another frame is normal, a frame that
+      // schedules itself forever is the defect this bound reports.
+      for (let i = 0; frames.length > 0; i++) {
+        if (i > 50) throw new Error("animation frames never settled");
+        frames.shift()!();
+      }
+    };
+
+    const addUser = (
+      id: string,
+      top: number,
+      height: number,
+      opts: { text?: string; turnIndex?: number; steered?: boolean } = {},
+    ): FakeElement => {
+      messages.addMessage({
+        id,
+        role: "user",
+        content: opts.text ?? "",
+        steered: opts.steered,
+        turnIndex: opts.turnIndex,
+        status: "complete",
+        timestamp: 1,
+      });
+      const el = messagesEl.children[messagesEl.children.length - 1];
+      el.rectTop = top;
+      el.offsetHeight = height;
+      if (opts.text) {
+        const body = el.querySelector(".message-body");
+        if (body) body.textContent = opts.text;
+      }
+      return el;
+    };
+
+    const scroll = (): void => {
+      // Drain whatever the addMessage calls above queued (the nav rail's own
+      // refresh) before the scroll under test asks for a pin.
+      runFrames();
+      messagesEl.dispatch("scroll");
+      runFrames();
+    };
+
+    return { ...harness, frames, runFrames, bar, barText, barTurn, addUser, scroll };
+  }
+
+  it("stays hidden while the prompt it would name is still on screen", () => {
+    const h = staged();
+    // The bubble's bottom (8 + 40) is below the container's top (0).
+    h.addUser("m1", 8, 40, { text: "first question", turnIndex: 1 });
+
+    h.scroll();
+
+    expect(h.bar.hidden).toBe(true);
+  });
+
+  it("names the turn whose prompt has scrolled above the top edge", () => {
+    const h = staged();
+    h.addUser("m1", -100, 40, { text: "Refactor the parser", turnIndex: 3 });
+
+    h.scroll();
+
+    expect(h.bar.hidden).toBe(false);
+    expect(h.barText.textContent).toBe("Refactor the parser");
+    // The Changes panel numbers turns the same way, so the reader can carry
+    // the number across.
+    expect(h.barTurn.textContent).toBe("Turn 3");
+  });
+
+  it("keeps naming the turn's opening prompt once a steer has passed", () => {
+    const h = staged();
+    h.addUser("m1", -200, 40, { text: "opening question", turnIndex: 2 });
+    h.addUser("m2", -100, 40, { text: "and also check the tests", steered: true, turnIndex: 2 });
+
+    h.scroll();
+
+    // The steer is a second bubble inside the same turn; the turn is still the
+    // one the opening prompt began.
+    expect(h.barText.textContent).toBe("opening question");
+    expect(h.barTurn.textContent).toBe("Turn 2");
+  });
+
+  it("leaves the number off when the transcript carries no turn ordinal", () => {
+    const h = staged();
+    // A viewed saved session is drawn from stored messages, not from turns.
+    h.addUser("m1", -100, 40, { text: "no turn number here" });
+
+    h.scroll();
+
+    expect(h.barText.textContent).toBe("no turn number here");
+    expect(h.barTurn.textContent).toBe("");
+  });
+
+  it("says so when the prompt carried no text at all", () => {
+    const h = staged();
+    // An attachment-only send: nothing to preview, and a blank bar would look
+    // like a rendering fault.
+    h.addUser("m1", -100, 40);
+
+    h.scroll();
+
+    expect(h.bar.hidden).toBe(false);
+    expect(h.barText.textContent).toBe("This prompt has no text");
+  });
+
+  it("jumps back to the prompt it names when clicked", () => {
+    const h = staged();
+    h.addUser("m1", -100, 40, { text: "where did it go", turnIndex: 1 });
+    h.messagesEl.scrollTop = 400;
+
+    h.scroll();
+    h.bar.dispatch("click");
+
+    // Same scroll-a-row-to-the-top move the navigation rail makes: the row's
+    // viewport offset plus the current scroll, less the 20px reading margin.
+    expect(h.messagesEl.scrollCalls[0]).toEqual({ top: 280, behavior: "smooth" });
+  });
+
+  it("lands a jump below the bar instead of underneath it", () => {
+    const h = staged();
+    // The bar floats over the transcript, so a row scrolled to the very top
+    // would be covered by it; the jump asks how tall it is and stops short.
+    h.bar.offsetHeight = 44;
+    h.addUser("m1", -100, 40, { text: "where did it go", turnIndex: 1 });
+    h.messagesEl.scrollTop = 400;
+
+    h.scroll();
+    h.bar.dispatch("click");
+
+    expect(h.messagesEl.scrollCalls[0]).toEqual({ top: 236, behavior: "smooth" });
+  });
+
+  it("drops the pin when the transcript is replaced", () => {
+    const h = staged();
+    h.addUser("m1", -100, 40, { text: "old question", turnIndex: 1 });
+    h.scroll();
+    expect(h.bar.hidden).toBe(false);
+
+    h.messages.clearTurnContext();
+
+    expect(h.bar.hidden).toBe(true);
+  });
+
+  it("lets go of a prompt that was removed from the transcript", () => {
+    const h = staged();
+    h.addUser("m1", -100, 40, { text: "withdrawn question", turnIndex: 1 });
+    h.scroll();
+    expect(h.bar.hidden).toBe(false);
+
+    // The bar names a row that is about to go away; a pin left pointing at it
+    // would jump nowhere.
+    h.messages.removeMessage("m1");
+    h.runFrames();
+
+    expect(h.bar.hidden).toBe(true);
+  });
+
+  it("says nothing about a transcript that has not been laid out", () => {
+    const h = staged();
+    h.addUser("m1", 0, 0, { text: "unmeasured", turnIndex: 1 });
+    // A hidden view measures every row at the origin, which would otherwise
+    // read as "the first prompt is already above the top".
+    h.messagesEl.clientHeight = 0;
+
+    h.scroll();
+
+    expect(h.bar.hidden).toBe(true);
   });
 });

@@ -327,6 +327,12 @@ export interface WebviewTranslations {
   changeFromCommand: string;
   /** "Turn {n}" — the header of one turn's section in the Changes panel. */
   changeTurnLabel: string;
+  /** Tooltip on the prompt pinned above the transcript: the click jumps back
+   *  to the message it names. */
+  turnPromptPinTooltip: string;
+  /** What the pinned bar says for a prompt that carried no text (an
+   *  attachment-only send), so the bar is never blank. */
+  turnPromptNoText: string;
   locateChange: string;
   locateChangeTooltip: string;
   userInputAwaiting: string;
@@ -747,6 +753,16 @@ ${css}
              press inside it, so a selection made there survives the host's
              copy (see claimTranscriptFocus in the messages script). -->
         <div id="messages" tabindex="-1"></div>
+        <!-- The prompt of the turn the reader is inside, pinned above the
+             transcript once that prompt itself has scrolled out of view (see
+             updateTurnContext in the messages script). The transcript's own
+             bubbles are never pinned: a pasted log can be taller than the
+             viewport, and pinning it whole would hide the answer it asked
+             for. Clicking the bar is the same jump a rail dot makes. -->
+        <button type="button" id="turn-context" class="turn-context" title="${tr.turnPromptPinTooltip}" hidden>
+          <span class="turn-context-turn" id="turn-context-turn"></span>
+          <span class="turn-context-text" id="turn-context-text"></span>
+        </button>
         <div id="approval-float" class="approval-float" hidden></div>
         <div id="message-nav"></div>
       </div>

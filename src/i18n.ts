@@ -308,6 +308,12 @@ interface Translations {
   /** Group header for one turn's changes in the Changes panel: "Turn 3". The
    *  number is the turn's ordinal in the session, matching the conversation. */
   changeTurnLabel: string;
+  /** Tooltip on the prompt pinned above the transcript: the click jumps back
+   *  to the message it names. */
+  turnPromptPinTooltip: string;
+  /** What the pinned bar says for a prompt that carried no text (an
+   *  attachment-only send), so the bar is never blank. */
+  turnPromptNoText: string;
   locateChange: string;
   locateChangeTooltip: string;
   viewDiff: string;
@@ -815,6 +821,8 @@ const en: Translations = {
   filesCount: "{n} file(s)",
   changeFromCommand: "from the command's workspace span",
   changeTurnLabel: "Turn {n}",
+  turnPromptPinTooltip: "Jump back to this turn's prompt",
+  turnPromptNoText: "This prompt has no text",
   locateChange: "Locate",
   locateChangeTooltip: "Jump to the tool call card that made this change",
   viewDiff: "View Diff",
@@ -1298,6 +1306,8 @@ const zhCn: Translations = {
   filesCount: "{n} 个文件",
   changeFromCommand: "来自命令的工作区快照",
   changeTurnLabel: "第 {n} 轮",
+  turnPromptPinTooltip: "跳回本轮的提示词",
+  turnPromptNoText: "本轮提示词没有文字内容",
   locateChange: "定位",
   locateChangeTooltip: "跳转到产生此变更的工具调用卡片",
   viewDiff: "查看差异",
@@ -1836,6 +1846,8 @@ export function webviewTranslations(tr: Translations) {
     filesCount: tr.filesCount,
     changeFromCommand: tr.changeFromCommand,
     changeTurnLabel: tr.changeTurnLabel,
+    turnPromptPinTooltip: tr.turnPromptPinTooltip,
+    turnPromptNoText: tr.turnPromptNoText,
     locateChange: tr.locateChange,
     locateChangeTooltip: tr.locateChangeTooltip,
     viewDiff: tr.viewDiff,

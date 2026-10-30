@@ -244,6 +244,8 @@ function makeTr(): WebviewTranslations {
     changeFromCommand: "from the command's workspace span",
     filesCount: "{n} file(s)",
     changeTurnLabel: "Turn {n}",
+    turnPromptPinTooltip: "Jump back to this turn's prompt",
+    turnPromptNoText: "This prompt has no text",
     locateChange: "Locate",
     locateChangeTooltip: "Jump to the tool call card that made this change",
     userInputAwaiting: "Input required",
@@ -519,6 +521,20 @@ describe("webview-html.ts assembler", () => {
     // order, so this adds no keyboard stop.
     expect(html).toContain('<div id="messages" tabindex="-1">');
     expect(html).not.toContain('id="messages" tabindex="0"');
+  });
+
+  it("ships the pinned turn prompt inside the transcript's wrapper, hidden", () => {
+    const html = getWebviewHtml(makeMockWebview(), makeMockExtensionUri(), makeTr());
+    // The messages script only shows and fills this bar; if the element is not
+    // in the template the whole feature is silently absent, which no runtime
+    // test can see (they hand the module its own stand-in element).
+    expect(html).toContain('id="turn-context" class="turn-context"');
+    expect(html).toContain('id="turn-context-text"');
+    expect(html).toContain('id="turn-context-turn"');
+    // Hidden in the shipped markup: nothing is pinned until a prompt has
+    // scrolled above the transcript's top edge.
+    expect(html).toMatch(/id="turn-context"[^>]*\shidden>/);
+    expect(html).toContain('title="Jump back to this turn\'s prompt"');
   });
 
   it("contains sidebar sections", () => {

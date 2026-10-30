@@ -185,6 +185,8 @@ function createRuntimeHarness() {
   let clearPendingCalls = 0;
   /** How many times the handler asked the rail to empty itself. */
   let railClearCalls = 0;
+  /** How many times the handler dropped the pinned turn prompt. */
+  let turnContextClearCalls = 0;
   const composerTextCalls: string[] = [];
   // The streaming flag is the webview's one record of "a turn is running":
   // the input routing reads it and the send/stop button follows it. The
@@ -323,6 +325,9 @@ function createRuntimeHarness() {
       clearNavDots: () => {
         railClearCalls += 1;
       },
+      clearTurnContext: () => {
+        turnContextClearCalls += 1;
+      },
     },
     __wvInput: {
       updateSendStopButton: (streaming: boolean) => {
@@ -460,6 +465,7 @@ function createRuntimeHarness() {
     hostOperationCalls,
     clearPendingCalls: () => clearPendingCalls,
     railClearCalls: () => railClearCalls,
+    turnContextClearCalls: () => turnContextClearCalls,
     composerTextCalls,
     streamingCalls,
     streamingTimers,
@@ -903,6 +909,20 @@ describe("webview-js-event-handler runtime", () => {
       messages: [{ id: "m1", role: "user", content: "hi", status: "complete", timestamp: 1 }],
     });
     expect(harness.railClearCalls()).toBe(3);
+  });
+
+  it("drops the pinned prompt with the transcript it named a row of", () => {
+    // The bar points at one user bubble by identity. A conversation replaced
+    // wholesale (new session, thread switch, session reload) leaves that
+    // bubble gone, so the bar has to go with it rather than hover over the
+    // next conversation naming something the reader can no longer reach.
+    const harness = createRuntimeHarness();
+
+    harness.dispatchMessage({ type: "clearChat" });
+    expect(harness.turnContextClearCalls()).toBe(1);
+
+    harness.dispatchMessage({ type: "loadHistory", messages: [] });
+    expect(harness.turnContextClearCalls()).toBe(2);
   });
 
   it("re-arms the running turn a rebuilt conversation still holds", () => {

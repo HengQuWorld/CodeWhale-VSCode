@@ -143,12 +143,145 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
     } else {
       userScrolledUp = true;
     }
+    scheduleTurnContextUpdate();
     if (_navScrollTimer) return;
     _navScrollTimer = setTimeout(function() {
       updateActiveDot();
       _navScrollTimer = null;
     }, 80);
   });
+
+  // ── Pinned turn prompt ──
+  //
+  // An answer can run for hundreds of lines, and once the question that asked
+  // for it has scrolled out of view nothing on screen says which turn this is.
+  // The bar at the top of the transcript names the prompt of the turn the
+  // reader is inside and jumps back to it. It is deliberately not a sticky
+  // copy of the bubble: a pasted log can be taller than the viewport, and
+  // pinning it whole would hide the answer it asked for.
+  var turnContextEl = document.getElementById('turn-context');
+  var turnContextTurnEl = document.getElementById('turn-context-turn');
+  var turnContextTextEl = document.getElementById('turn-context-text');
+  /** The prompt the bar currently names, or null while it is hidden. */
+  var _turnContextTarget = null;
+  var _turnContextFrame = 0;
+  /** The transcript's user bubbles, in document order, once queried.
+   *  Re-querying them on every scroll frame is a full walk of a transcript
+   *  that can hold thousands of rows; the three places that change the
+   *  transcript drop the cache instead. */
+  var _promptRows = null;
+
+  function promptRows() {
+    if (!_promptRows) _promptRows = messagesEl.querySelectorAll('.message.user');
+    return _promptRows;
+  }
+
+  function invalidatePromptRows() {
+    _promptRows = null;
+  }
+
+  /** A one-line reading of a prompt: its bubble's text, whitespace collapsed.
+   *  Only asked for when the bar's subject changes, never per scroll frame. */
+  function turnPromptPreview(el) {
+    if (!el) return '';
+    var body = el.querySelector ? el.querySelector('.message-body') : null;
+    var text = String((body && body.textContent) || '').replace(/\\s+/g, ' ').trim();
+    return text.length > 200 ? text.slice(0, 197) + '\\u2026' : text;
+  }
+
+  /** The prompt of the turn at the top edge: the last user bubble whose whole
+   *  box has scrolled above the transcript's top.
+   *
+   *  Rows are in document order, so their vertical extents only grow; that
+   *  makes this a binary search instead of a walk over every turn. A prompt
+   *  still (even partly) on screen needs no bar — it is its own context. */
+  function pinnedTurnPrompt() {
+    var userMsgs = promptRows();
+    if (userMsgs.length === 0) return null;
+    var containerTop = messagesEl.getBoundingClientRect().top;
+    var lo = 0, hi = userMsgs.length - 1, found = -1;
+    while (lo <= hi) {
+      var mid = (lo + hi) >> 1;
+      var rect = userMsgs[mid].getBoundingClientRect();
+      if (rect.top + rect.height <= containerTop) {
+        found = mid;
+        lo = mid + 1;
+      } else {
+        hi = mid - 1;
+      }
+    }
+    if (found < 0) return null;
+    // A steer is a second user bubble inside the same turn (see addMessage);
+    // the prompt that opened the turn is what answers "what is this answer
+    // answering?". None of the leading bubbles can be steers, so this walk
+    // always lands on one.
+    while (found > 0 && userMsgs[found].classList.contains('steered')) found--;
+    return userMsgs[found];
+  }
+
+  function updateTurnContext() {
+    if (!turnContextEl) return;
+    // Not laid out (the view is hidden): every row measures at the origin,
+    // which reads as "the first prompt is above the top". Leave the bar as it
+    // is until there is a real box to measure against.
+    if (!messagesEl.clientHeight) return;
+    var target = pinnedTurnPrompt();
+    if (target !== _turnContextTarget) {
+      _turnContextTarget = target;
+      if (target) {
+        var preview = turnPromptPreview(target);
+        if (turnContextTextEl) {
+          turnContextTextEl.textContent = preview || __i18n.turnPromptNoText;
+        }
+        if (turnContextTurnEl) {
+          var turnIndex = parseInt(target.getAttribute('data-turn-index') || '', 10);
+          // The bar and the Changes panel number a turn the same way, so a
+          // reader can carry the number across. A transcript that carries
+          // none — a viewed saved session — shows the words alone rather
+          // than a number invented here.
+          turnContextTurnEl.textContent = !isNaN(turnIndex) && turnIndex > 0
+            ? __i18n.changeTurnLabel.replace('{n}', String(turnIndex))
+            : '';
+        }
+      }
+    }
+    turnContextEl.hidden = !target;
+  }
+
+  /** Recompute on the next frame: a scroll fires many times per frame and this
+   *  reads layout. */
+  function scheduleTurnContextUpdate() {
+    if (!turnContextEl || _turnContextFrame) return;
+    _turnContextFrame = requestAnimationFrame(function() {
+      _turnContextFrame = 0;
+      updateTurnContext();
+    });
+  }
+
+  /** Drop the pin, for a transcript that was just replaced wholesale. */
+  function clearTurnContext() {
+    _turnContextTarget = null;
+    invalidatePromptRows();
+    if (turnContextEl) turnContextEl.hidden = true;
+  }
+
+  /** How much of the transcript's top the bar is covering right now.
+   *
+   *  The bar floats over the transcript rather than taking a row of its own, so
+   *  anything scrolled to the very top of the viewport would land behind it.
+   *  The jump actions ask for this and scroll that much further. */
+  function turnContextOverlayHeight() {
+    if (!turnContextEl || turnContextEl.hidden) return 0;
+    return turnContextEl.offsetHeight || 0;
+  }
+
+  if (turnContextEl) {
+    // The bar is a jump back to the prompt it names, the same move a rail dot
+    // makes.
+    turnContextEl.addEventListener('click', function() {
+      if (_turnContextTarget) scrollToMessage(_turnContextTarget);
+    });
+  }
 
   // ── Welcome Screen ──
   function renderWelcome() {
@@ -536,6 +669,9 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
   function removeMessage(id) {
     var el = document.getElementById('msg-' + id);
     if (el) el.remove();
+    // The row may have been the prompt the bar names.
+    invalidatePromptRows();
+    scheduleTurnContextUpdate();
   }
 
   /** A collapsed body for a compaction note.
@@ -589,6 +725,8 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
   }
 
   function addMessage(msg, showRole) {
+    // A new row can be the prompt the bar is about to name.
+    invalidatePromptRows();
     var welcomeEl = messagesEl.querySelector('.welcome-screen');
     if (welcomeEl) welcomeEl.remove();
 
@@ -872,6 +1010,9 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
     _clipMeasureTimer = setTimeout(function() {
       _clipMeasureTimer = null;
       markClippedBlocks();
+      // The rows moved, so which prompt is above the top edge may have
+      // changed with them.
+      scheduleTurnContextUpdate();
     }, 150);
   });
 
@@ -1191,10 +1332,13 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
     // Disable user-scrolled-up flag so smartScrollToBottom won't fight us
     userScrolledUp = false;
 
-    // Scroll the message to the top of the viewport with some padding
+    // Scroll the message to the top of the viewport with some padding. The
+    // padding clears the pinned prompt bar when it is covering that corner,
+    // so a jump never lands a row underneath it.
     var containerTop = messagesEl.getBoundingClientRect().top;
     var msgTop = el.getBoundingClientRect().top;
-    var offset = msgTop - containerTop + messagesEl.scrollTop - 20;
+    var gap = 20 + turnContextOverlayHeight();
+    var offset = msgTop - containerTop + messagesEl.scrollTop - gap;
     messagesEl.scrollTo({ top: Math.max(0, offset), behavior: 'smooth' });
 
     // A row that was never painted sits at its estimated height (see
@@ -1202,7 +1346,7 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
     // which moves it. Re-anchor once, on the frame that painted it.
     requestAnimationFrame(function() {
       var settledTop = el.getBoundingClientRect().top;
-      var settled = settledTop - messagesEl.getBoundingClientRect().top + messagesEl.scrollTop - 20;
+      var settled = settledTop - messagesEl.getBoundingClientRect().top + messagesEl.scrollTop - gap;
       if (Math.abs(settled - offset) > 4) {
         messagesEl.scrollTo({ top: Math.max(0, settled), behavior: 'auto' });
       }
@@ -1252,6 +1396,9 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
     _scheduledNavUpdate = true;
     requestAnimationFrame(function() {
       updateNavDots();
+      // The rows were just laid out (a message was added, or removed), so the
+      // prompt above the top edge may be a different one now.
+      updateTurnContext();
       _scheduledNavUpdate = false;
     });
   }
@@ -1274,6 +1421,8 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
     setUserScrolledUp: function(v) { userScrolledUp = v; },
     updateNavDots: updateNavDots,
     clearNavDots: clearNavDots,
+    updateTurnContext: updateTurnContext,
+    clearTurnContext: clearTurnContext,
     jumpToUserMessage: jumpToUserMessage,
     scrollToMessage: scrollToMessage,
     createThinkingBlock: createThinkingBlock,

@@ -115,6 +115,11 @@ ${PROVIDER_PICKER_JS}
     if (window.__wvMessages && window.__wvMessages.clearNavDots) {
       window.__wvMessages.clearNavDots();
     }
+    // The pinned prompt names a row that no longer exists; without this it
+    // would sit over the new, empty transcript until the next scroll.
+    if (window.__wvMessages && window.__wvMessages.clearTurnContext) {
+      window.__wvMessages.clearTurnContext();
+    }
     hideApprovalFloat();
   }
 

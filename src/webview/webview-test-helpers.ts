@@ -246,6 +246,8 @@ export function makeTr(overrides?: Partial<WebviewTranslations>): WebviewTransla
     changeFromCommand: "from the command's workspace span",
     filesCount: "{n} file(s)",
     changeTurnLabel: "Turn {n}",
+  turnPromptPinTooltip: "Jump back to this turn's prompt",
+  turnPromptNoText: "This prompt has no text",
     locateChange: "Locate",
     locateChangeTooltip: "Jump to the tool call card that made this change",
     userInputAwaiting: "Input required",

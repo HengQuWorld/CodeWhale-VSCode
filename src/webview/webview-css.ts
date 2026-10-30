@@ -753,6 +753,66 @@ export function getWebviewCss(): string {
       contain-intrinsic-size: auto 220px;
     }
 
+    /* ── Pinned turn prompt ──
+       Sits over the top edge of the transcript while the prompt it names is
+       above it. An overlay rather than a sticky row: the bar has its own
+       clamped height (two lines), so a pasted-log prompt cannot take the
+       viewport away from the answer it was asked to produce. Opaque, because
+       text scrolling underneath must not read through it. */
+    .turn-context {
+      position: absolute;
+      top: 6px;
+      left: 8px;
+      right: 18px; /* clear the navigation rail's dots */
+      z-index: 4;
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      padding: 6px 10px;
+      border: 1px solid var(--border);
+      border-left: 3px solid var(--brand-primary);
+      border-radius: 6px;
+      background: var(--card-bg);
+      color: var(--fg);
+      font-family: inherit;
+      font-size: 0.88em;
+      line-height: 1.5;
+      text-align: left;
+      cursor: pointer;
+      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.28);
+    }
+    /* The sheet gives the bar a display, which would otherwise beat the
+       browser's own [hidden] rule and leave it on screen at all times. */
+    .turn-context[hidden] { display: none; }
+    .turn-context:hover { border-color: var(--brand-primary); }
+    .turn-context:focus-visible {
+      outline: 1px solid var(--brand-primary-light);
+      outline-offset: 1px;
+    }
+
+    .turn-context-turn {
+      flex: 0 0 auto;
+      font-size: 0.9em;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+    /* A transcript that carries no turn ordinal (a viewed saved session) gets
+       the words alone rather than a stray gap where a number would be. */
+    .turn-context-turn:empty { display: none; }
+
+    .turn-context-text {
+      flex: 1 1 auto;
+      min-width: 0;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+      word-break: break-word;
+    }
+
     /* ── Message Navigation Rail ── */
 
     #message-nav {

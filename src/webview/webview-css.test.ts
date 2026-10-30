@@ -40,6 +40,20 @@ describe("webview-css.ts", () => {
     expect(css).not.toMatch(/#input-toolbar #btn-steer \{[^}]*margin-left: auto;/);
   });
 
+  it("keeps the pinned turn prompt clipped, opaque and off screen until needed", () => {
+    const css = getWebviewCss();
+
+    // An overlay, not a sticky copy of the bubble: its height is clamped to
+    // two lines with a line clamp, so a pasted-log prompt cannot take the
+    // viewport away from the answer it was asked for.
+    expect(css).toMatch(/\.turn-context \{[\s\S]*?position: absolute;/);
+    expect(css).toMatch(/\.turn-context \{[\s\S]*?background: var\(--card-bg\);/);
+    expect(css).toMatch(/\.turn-context-text \{[\s\S]*?-webkit-line-clamp: 2;/);
+    // The sheet gives the bar a display, which would otherwise beat the
+    // browser's own [hidden] rule and leave it covering the transcript.
+    expect(css).toContain(".turn-context[hidden] { display: none; }");
+  });
+
   it("contains CSS variable definitions", () => {
     const css = getWebviewCss();
     expect(css).toContain("--bg:");
