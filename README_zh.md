@@ -9,9 +9,10 @@
 [![macOS](https://img.shields.io/badge/macOS-supported-brightgreen)](#系统要求)
 [![Windows](https://img.shields.io/badge/Windows-supported-brightgreen)](#系统要求)
 [![Linux](https://img.shields.io/badge/Linux-supported-brightgreen)](#系统要求)
+[![HarmonyOS PC](https://img.shields.io/badge/HarmonyOS_PC-supported-brightgreen)](#系统要求)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
-CodeWhale for VS Code 是 [CodeWhale](https://github.com/Hmbown/CodeWhale) 的**图形化前端**。CodeWhale 是一个开源且持续活跃开发的编程代理，本扩展把它装进 VS Code 原生侧边栏：读取工作区、修改文件、执行命令、搜索网络、派发子代理，全程不必离开编辑器。
+CodeWhale for VS Code 是 [CodeWhale](https://github.com/codewhale-hq/Codewhale) 的**图形化前端**。CodeWhale 是一个开源且持续活跃开发的编程代理，本扩展把它装进 VS Code 原生侧边栏：读取工作区、修改文件、执行命令、搜索网络、派发子代理，全程不必离开编辑器。
 
 围绕 CodeWhale，社区为同一个引擎提供了两种界面：**TUI** 面向习惯终端的人，本 **GUI** 面向习惯编辑器的人。它们共享同一个引擎和核心 runtime 概念，但 GUI 明确是围绕编辑器工作流做的取舍，目前仍有一部分高级能力只在 TUI 中提供。
 
@@ -77,10 +78,10 @@ CodeWhale for VS Code 是 [CodeWhale](https://github.com/Hmbown/CodeWhale) 的**
 
 | 要求 | 说明 |
 |---|---|
-| **VS Code 1.85+** | 或兼容的 IDE —— 支持 Trae CN |
+| **VS Code 1.85+** | 或兼容的 IDE —— 支持 Trae CN，以及鸿蒙 PC 上的华为 CodeArts Agent |
 | **CodeWhale 引擎** | 即 `codewhale` CLI。**未随扩展打包**，需单独安装（见下） |
 | **Node.js** | 仅在从源码构建扩展、或通过 npm 安装引擎时需要 |
-| **操作系统** | macOS、Windows 或 Linux |
+| **操作系统** | macOS、Windows、Linux，或鸿蒙 PC（通过 CodeArts Agent） |
 
 ### 1. 安装引擎
 
@@ -91,7 +92,7 @@ curl -fsSL https://codewhale.net/install.sh | sh
 "$HOME/.local/bin/codewhale"
 ```
 
-Windows：从 [GitHub Releases](https://github.com/Hmbown/CodeWhale/releases/latest) 下载对应安装包。
+Windows：从 [GitHub Releases](https://github.com/codewhale-hq/Codewhale/releases/latest) 下载对应安装包。
 
 确认它在 `PATH` 中：
 
@@ -103,6 +104,8 @@ codewhale update          # 保持引擎为最新
 npm 和 Cargo 是受支持的次要安装途径（`npm install -g codewhale`）。引擎同时也是连接模型提供商的地方 —— 首次运行时用 `/provider` 和 `/model` 完成配置。
 
 > **找不到引擎？** 扩展会搜索常见位置（`~/.cargo/bin`、Homebrew 与 npm 全局 `node_modules`、`~/.local/share/codewhale`）。如果你是通过 `install.sh` 安装到 `~/.local/bin`，而 VS Code 又没有继承这个 `PATH`，请显式设置 `brotherwhale.enginePath`。
+
+> **在鸿蒙 PC 上**，引擎必须按平台构建并签名：设备只执行带签名的程序，`chmod +x` 改不了这一点。引擎仓库的[鸿蒙指南](https://github.com/codewhale-hq/Codewhale/blob/main/docs/zh_hans/HarmonyOS.md)讲了 `aarch64-unknown-linux-ohos` 交叉编译和安装；`scripts/ohos-sign-binary.sh` 把构建、strip、自签名和验签合成一步。把签好名的二进制放进 `PATH`，或用 `brotherwhale.enginePath` 指过去。在 Linux 子系统（融合开发引擎）里则直接用 Linux ARM64 版。
 
 ### 2. 安装扩展
 
@@ -128,6 +131,8 @@ code --install-extension ./brotherwhale-vscode-0.9.3.vsix --force
 > ```bash
 > "/Applications/Trae CN.app/Contents/Resources/app/bin/code" --install-extension ./brotherwhale-vscode-0.9.3.vsix --force
 > ```
+
+**方式 C —— Open VSX：** [Open VSX](https://open-vsx.org/extension/hengquworld/brotherwhale-vscode) 面向微软生态之外的编辑器提供同样的构建 —— VSCodium，以及鸿蒙 PC 上的 CodeArts（扩展面板自带一页 Open VSX）。搜 "CodeWhale" 直接安装，不必手动装 VSIX。
 
 ### 3. 打开它
 
@@ -324,13 +329,13 @@ Pull Request 请按 [CONTRIBUTING.md](CONTRIBUTING.md)（中英双语）中的�
 
 **欢迎通过 issue、discussion 和 pull request 参与反馈和贡献，中英文均可。**本扩展最好用的几个功能最初都来自社区 PR（[#9](https://github.com/HengQuWorld/CodeWhale-VSCode/pull/9)–[#12](https://github.com/HengQuWorld/CodeWhale-VSCode/pull/12)），还有很多值得做的事。
 
-- **缺陷与功能建议** —— [提交 issue](https://github.com/HengQuWorld/CodeWhale-VSCode/issues/new/choose)，缺陷与功能建议各有模板。代理引擎本身的问题（`codewhale` CLI：提示词、模型、供应商、工具）请提[上游](https://github.com/Hmbown/CodeWhale/issues)，本仓库只维护前端。
+- **缺陷与功能建议** —— [提交 issue](https://github.com/HengQuWorld/CodeWhale-VSCode/issues/new/choose)，缺陷与功能建议各有模板。代理引擎本身的问题（`codewhale` CLI：提示词、模型、供应商、工具）请提[上游](https://github.com/codewhale-hq/Codewhale/issues)，本仓库只维护前端。
 - **提问与想法** —— [Discussions](https://github.com/HengQuWorld/CodeWhale-VSCode/discussions)，适合一切不是缺陷的内容。
 - **代码** —— [CONTRIBUTING.md](CONTRIBUTING.md) 有开发环境、基本约定（代理行为归引擎，GUI 只做薄适配层）和 PR 检查清单。欢迎首次贡献者 —— 在 issue 下留言，维护者会帮你找到切入点。
 
 ## 相关项目
 
-- **[CodeWhale](https://github.com/Hmbown/CodeWhale)** —— 本扩展所承载的开源编程代理。引擎文档、发行版与提供商配置都在那里。
+- **[CodeWhale](https://github.com/codewhale-hq/Codewhale)** —— 本扩展所承载的开源编程代理。引擎文档、发行版与提供商配置都在那里。
 
 ## 贡献者
 

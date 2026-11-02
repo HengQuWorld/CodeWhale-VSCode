@@ -9,9 +9,10 @@
 [![macOS](https://img.shields.io/badge/macOS-supported-brightgreen)](#requirements)
 [![Windows](https://img.shields.io/badge/Windows-supported-brightgreen)](#requirements)
 [![Linux](https://img.shields.io/badge/Linux-supported-brightgreen)](#requirements)
+[![HarmonyOS PC](https://img.shields.io/badge/HarmonyOS_PC-supported-brightgreen)](#requirements)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
-CodeWhale for VS Code is the **graphical frontend** for [CodeWhale](https://github.com/Hmbown/CodeWhale) — an open-source, actively developed coding agent. It brings the agent into a native VS Code sidebar, so you get the full engine (reading your workspace, editing files, running commands, searching the web, delegating to sub-agents) without leaving the editor.
+CodeWhale for VS Code is the **graphical frontend** for [CodeWhale](https://github.com/codewhale-hq/Codewhale) — an open-source, actively developed coding agent. It brings the agent into a native VS Code sidebar, so you get the full engine (reading your workspace, editing files, running commands, searching the web, delegating to sub-agents) without leaving the editor.
 
 Based on CodeWhale, community effort offers two surfaces over one engine: a **TUI** for people who live in the terminal, and this **GUI** for people who live in the editor. They share the same engine and core runtime concepts, but the GUI is intentionally optimized for the editor workflow and still leaves some advanced surfaces TUI-only.
 
@@ -77,10 +78,10 @@ Keep the engine current with `codewhale update`; `codewhale --version` is the ch
 
 | Requirement | Notes |
 |---|---|
-| **VS Code 1.85+** | Or a compatible IDE — Trae CN is supported |
+| **VS Code 1.85+** | Or a compatible IDE — Trae CN, and Huawei's CodeArts Agent on HarmonyOS PC, are supported |
 | **CodeWhale engine** | The `codewhale` CLI. **Not bundled** — install it separately (below) |
 | **Node.js** | Only for building the extension from source, or installing the engine via npm |
-| **Operating system** | macOS, Windows or Linux |
+| **Operating system** | macOS, Windows, Linux, or HarmonyOS PC (through CodeArts Agent) |
 
 ### 1. Install the engine
 
@@ -91,7 +92,7 @@ curl -fsSL https://codewhale.net/install.sh | sh
 "$HOME/.local/bin/codewhale"
 ```
 
-Windows: download the matching installer from [GitHub Releases](https://github.com/Hmbown/CodeWhale/releases/latest).
+Windows: download the matching installer from [GitHub Releases](https://github.com/codewhale-hq/Codewhale/releases/latest).
 
 Verify it is on your `PATH`:
 
@@ -103,6 +104,8 @@ codewhale update          # keep the engine current
 npm and Cargo are supported as secondary packaging routes (`npm install -g codewhale`). The engine is also where you connect your model provider — configure it on first run with `/provider` and `/model`.
 
 > **Engine not found?** The extension searches the usual locations (`~/.cargo/bin`, Homebrew and npm global `node_modules`, `~/.local/share/codewhale`). If you installed via `install.sh` to `~/.local/bin` and VS Code does not inherit that `PATH`, set `brotherwhale.enginePath` explicitly.
+
+> **On HarmonyOS PC** the engine must be built and signed for the platform: a device executes only signed code, and `chmod +x` does not change that. The engine repository's [HarmonyOS guide](https://github.com/codewhale-hq/Codewhale/blob/main/docs/HarmonyOS.md) covers the `aarch64-unknown-linux-ohos` cross-build and how to install the result; `scripts/ohos-sign-binary.sh` does build, strip, self-sign and verify in one step. Put the signed binary on `PATH`, or name it with `brotherwhale.enginePath`. Inside the Linux subsystem (融合开发引擎) the ordinary Linux ARM64 install works instead.
 
 ### 2. Install the extension
 
@@ -128,6 +131,8 @@ code --install-extension ./brotherwhale-vscode-0.9.3.vsix --force
 > ```bash
 > "/Applications/Trae CN.app/Contents/Resources/app/bin/code" --install-extension ./brotherwhale-vscode-0.9.3.vsix --force
 > ```
+
+**Option C — Open VSX:** [Open VSX](https://open-vsx.org/extension/hengquworld/brotherwhale-vscode) carries the same builds for editors outside Microsoft's ecosystem — VSCodium, and CodeArts on HarmonyOS PC, whose extension panel has an Open VSX page. Search "CodeWhale" and install; no VSIX to side-load.
 
 ### 3. Open it
 
@@ -322,13 +327,13 @@ Pull requests follow the checklist in [CONTRIBUTING.md](CONTRIBUTING.md) (biling
 
 **Issues, discussions and pull requests are welcome — in English or Chinese.** Several of the best parts of this extension came from community pull requests ([#9](https://github.com/HengQuWorld/CodeWhale-VSCode/pull/9)–[#12](https://github.com/HengQuWorld/CodeWhale-VSCode/pull/12)), and there is plenty left to build.
 
-- **Bugs and feature ideas** — [open an issue](https://github.com/HengQuWorld/CodeWhale-VSCode/issues/new/choose); bug reports and feature requests each have a template. Problems in the agent engine itself (`codewhale` CLI: prompts, models, providers, tools) belong [upstream](https://github.com/Hmbown/CodeWhale/issues), not here.
+- **Bugs and feature ideas** — [open an issue](https://github.com/HengQuWorld/CodeWhale-VSCode/issues/new/choose); bug reports and feature requests each have a template. Problems in the agent engine itself (`codewhale` CLI: prompts, models, providers, tools) belong [upstream](https://github.com/codewhale-hq/Codewhale/issues), not here.
 - **Questions and ideas** — [Discussions](https://github.com/HengQuWorld/CodeWhale-VSCode/discussions), for anything that is not a bug.
 - **Code** — [CONTRIBUTING.md](CONTRIBUTING.md) has the dev setup, the ground rules (the engine owns agent behavior; the GUI stays a thin adapter), and the PR checklist. First-time contributors are welcome — comment on an issue and a maintainer will help you find a starting point.
 
 ## Related projects
 
-- **[CodeWhale](https://github.com/Hmbown/CodeWhale)** — the open-source coding agent this extension fronts. Engine docs, releases, and provider setup live there.
+- **[CodeWhale](https://github.com/codewhale-hq/Codewhale)** — the open-source coding agent this extension fronts. Engine docs, releases, and provider setup live there.
 
 ## Contributors
 
