@@ -1,11 +1,11 @@
 # CodeWhale for VS Code —— CodeWhale 代理的轻量图形前端
 
-[![Version](https://img.shields.io/badge/version-0.9.2-blue)](https://github.com/HengQuWorld/CodeWhale-VSCode)
+[![Version](https://img.shields.io/badge/version-0.9.3-blue)](https://github.com/HengQuWorld/CodeWhale-VSCode)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![CI](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/ci.yml/badge.svg)](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/ci.yml)
 [![Release](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/release.yml/badge.svg)](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/release.yml)
 [![VS Code](https://img.shields.io/badge/VS%20Code-1.85+-informational)](https://code.visualstudio.com/)
-[![VSIX](https://img.shields.io/badge/VSIX-~455%20KB-brightgreen)](https://github.com/HengQuWorld/CodeWhale-VSCode/releases)
+[![VSIX](https://img.shields.io/badge/VSIX-~467%20KB-brightgreen)](https://github.com/HengQuWorld/CodeWhale-VSCode/releases)
 [![macOS](https://img.shields.io/badge/macOS-supported-brightgreen)](#系统要求)
 [![Windows](https://img.shields.io/badge/Windows-supported-brightgreen)](#系统要求)
 [![Linux](https://img.shields.io/badge/Linux-supported-brightgreen)](#系统要求)
@@ -21,7 +21,7 @@ CodeWhale for VS Code 是 [CodeWhale](https://github.com/Hmbown/CodeWhale) 的**
 
 | | |
 |---|---|
-| VSIX 体积（0.9.2） | 约 455 KB |
+| VSIX 体积（0.9.3） | 约 467 KB |
 | 运行时 npm 依赖 | **零** —— 扩展自身的 TypeScript（以及用于渲染的 `marked`）都被 webpack 内联 |
 | 打包的引擎或模型 | **无** —— `codewhale` 是独立的原生二进制 |
 | 重复实现的代理逻辑 | **无** —— GUI 只是引擎本地 runtime API 之上的适配层 |
@@ -31,9 +31,9 @@ CodeWhale for VS Code 是 [CodeWhale](https://github.com/Hmbown/CodeWhale) 的**
 
 正因为代理的任何一部分都没有被复制进扩展，引擎可以独立发布新能力和修复，而不需要前端跟着发版。
 
-### 0.9.2 的引擎兼容性
+### 0.9.3 的引擎兼容性
 
-0.9.2 运行在引擎 **v0.10.2** 上，它带来的内容大部分在客户端侧：对话里不再重复引擎写给自己的记账，复制与粘贴恢复正常，引导会按实际发生的结果标注。有三个面各自有自己的底线 —— 记忆审阅命令与 **MCP** 面板需要引擎 **v0.10.0**（正是那个版本引入了它们读取的 Context Lens 路由，以及 MCP 管理路由：清单会带上每个服务器所属的层级、每次修改都要呈上配置 revision），而工作区信任横幅、会话上报自己属于哪个客户端、以及在同机上开第二个窗口或并行另一个 CodeWhale 客户端，都需要 **v0.10.2**。
+0.9.3 运行在引擎 **v0.10.2** 上，与 0.9.2 的底线相同，且它带来的内容全部在客户端侧：提问会钉在对话顶部，每个回答带自己的回合耗时，整段会话的累计工时也在状态栏里，后台任务卡片点名它在跑的命令，配置面板指向它真正写入的那个文件。三个各自有底线的面保持不变 —— 记忆审阅命令与 **MCP** 面板需要引擎 **v0.10.0**（正是那个版本引入了它们读取的 Context Lens 路由，以及 MCP 管理路由：清单会带上每个服务器所属的层级、每次修改都要呈上配置 revision），而工作区信任横幅、会话上报自己属于哪个客户端、以及在同机上开第二个窗口或并行另一个 CodeWhale 客户端，都需要 **v0.10.2**。
 
 以下仍需要比任何已发布引擎 tag 更新的 Codewhale 构建：
 
@@ -121,12 +121,12 @@ npx @vscode/vsce package --no-dependencies
 然后安装生成的 `.vsix`（`Extensions: Install from VSIX...`），或在终端执行：
 
 ```bash
-code --install-extension ./brotherwhale-vscode-0.9.2.vsix --force
+code --install-extension ./brotherwhale-vscode-0.9.3.vsix --force
 ```
 
 > **Trae CN 用户：** 如果 `code` 不在 `PATH` 中，使用自带的 CLI：
 > ```bash
-> "/Applications/Trae CN.app/Contents/Resources/app/bin/code" --install-extension ./brotherwhale-vscode-0.9.2.vsix --force
+> "/Applications/Trae CN.app/Contents/Resources/app/bin/code" --install-extension ./brotherwhale-vscode-0.9.3.vsix --force
 > ```
 
 ### 3. 打开它
@@ -291,7 +291,7 @@ codewhale serve（引擎 —— 单独安装与升级）
 
 **安装 VSIX**
 ```bash
-code --install-extension /path/to/brotherwhale-vscode-0.9.2.vsix --force
+code --install-extension /path/to/brotherwhale-vscode-0.9.3.vsix --force
 ```
 
 ## 隐私与数据

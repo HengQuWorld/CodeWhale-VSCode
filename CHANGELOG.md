@@ -1,5 +1,21 @@
 # Change Log
 
+## 0.9.3
+
+Everything here is client-side and works on engine **v0.10.2**, the floor 0.9.2 already names; none of it waits on an engine build.
+
+### New Features
+
+- **The question stays in view, however long the answer runs** — Once a turn's prompt has scrolled completely out of sight, a bar at the top of the conversation names it — with the turn's number where the transcript carries one — and clicking it takes you back to that message. It is two lines at most and laid over the transcript rather than taking a row of its own, so a prompt taller than the window cannot push the answer it asked for off the screen. A guided message mid-turn is a second question inside the same turn, so the bar reads back to the prompt that opened it.
+
+- **Every answer says how long its turn took** — The figure sits under the reply, and while a turn runs the status bar counts it up, so a slow turn looks slow instead of silent. The session's total model time accumulates beside it. These are the engine's own turn records, which is why reopening a conversation shows the same numbers; a turn the engine cannot time shows nothing rather than a zero, and switching conversations starts the total over.
+
+- **A background task card names the command it is running** — The card used to show only a task id and how long it was willing to wait, so there was no telling what was actually running. The command now appears on the card and on the status line above the conversation, whether the task was started in this view or was already running when you came back to it. A wait on several tasks at once still shows just their ids, since no single command would be true for that card.
+
+### Bug Fixes
+
+- **The config panel names the files it actually writes** — Its subtitle pointed at `settings.json`, which the engine never writes. It now names `settings.toml` and `config.toml`, the files your change really lands in.
+
 ## 0.9.2
 
 Everything here works on engine **v0.10.2** or newer. One reading needs a Codewhale build newer than any tagged engine release: the cost and context figures move *while* a turn runs only once the engine emits a priced usage receipt, and until then they settle when the turn ends, as before.

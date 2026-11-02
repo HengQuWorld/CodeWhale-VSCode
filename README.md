@@ -1,11 +1,11 @@
 # CodeWhale for VS Code — a lightweight GUI frontend for the CodeWhale agent
 
-[![Version](https://img.shields.io/badge/version-0.9.2-blue)](https://github.com/HengQuWorld/CodeWhale-VSCode)
+[![Version](https://img.shields.io/badge/version-0.9.3-blue)](https://github.com/HengQuWorld/CodeWhale-VSCode)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![CI](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/ci.yml/badge.svg)](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/ci.yml)
 [![Release](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/release.yml/badge.svg)](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/release.yml)
 [![VS Code](https://img.shields.io/badge/VS%20Code-1.85+-informational)](https://code.visualstudio.com/)
-[![VSIX](https://img.shields.io/badge/VSIX-~455%20KB-brightgreen)](https://github.com/HengQuWorld/CodeWhale-VSCode/releases)
+[![VSIX](https://img.shields.io/badge/VSIX-~467%20KB-brightgreen)](https://github.com/HengQuWorld/CodeWhale-VSCode/releases)
 [![macOS](https://img.shields.io/badge/macOS-supported-brightgreen)](#requirements)
 [![Windows](https://img.shields.io/badge/Windows-supported-brightgreen)](#requirements)
 [![Linux](https://img.shields.io/badge/Linux-supported-brightgreen)](#requirements)
@@ -21,7 +21,7 @@ The split is deliberate: **the agent stays in the engine, the ergonomics stay in
 
 | | |
 |---|---|
-| VSIX size (0.9.2) | ~455 KB |
+| VSIX size (0.9.3) | ~467 KB |
 | Runtime npm dependencies | **none** — webpack inlines the extension's own TypeScript (and `marked` for rendering) |
 | Bundled engine or model | **none** — `codewhale` is a separate native binary |
 | Duplicated agent logic | **none** — the GUI is an adapter over the engine's local runtime API |
@@ -31,9 +31,9 @@ The frontend is a webview. `ChatProvider` runs in the extension host, speaks HTT
 
 Because nothing about the agent is copied into the extension, the engine can ship new capabilities and fixes without a frontend release.
 
-### Engine compatibility for 0.9.2
+### Engine compatibility for 0.9.3
 
-0.9.2 runs on engine **v0.10.2**, and most of what it ships is client-side: the conversation no longer repeats the engine's own bookkeeping, copying and pasting behave, and guidance is labelled by what actually happened to it. Three surfaces need a floor of their own — the memory review commands and the **MCP** panel arrive with engine **v0.10.0** (the release that introduced the Context Lens routes they read, and the MCP management routes whose listing names the layer each server belongs to and carries the configuration revision every edit presents), while the workspace-trust banner, the client a session reports itself as, and a second window or a second CodeWhale client on the same machine all need **v0.10.2**.
+0.9.3 runs on engine **v0.10.2**, the same floor 0.9.2 names, and everything it ships is client-side: a prompt pinned above the transcript, the duration of each turn and of the session's work, a background task card that names the command it runs, and a config panel that points at the file it really writes. The three surfaces with a floor of their own are unchanged — the memory review commands and the **MCP** panel arrive with engine **v0.10.0** (the release that introduced the Context Lens routes they read, and the MCP management routes whose listing names the layer each server belongs to and carries the configuration revision every edit presents), while the workspace-trust banner, the client a session reports itself as, and a second window or a second CodeWhale client on the same machine all need **v0.10.2**.
 
 What still needs a Codewhale build newer than any tagged engine release:
 
@@ -121,12 +121,12 @@ npx @vscode/vsce package --no-dependencies
 Then install the generated `.vsix` (`Extensions: Install from VSIX...`), or from a terminal:
 
 ```bash
-code --install-extension ./brotherwhale-vscode-0.9.2.vsix --force
+code --install-extension ./brotherwhale-vscode-0.9.3.vsix --force
 ```
 
 > **Trae CN users:** if `code` is not on your `PATH`, use the bundled CLI:
 > ```bash
-> "/Applications/Trae CN.app/Contents/Resources/app/bin/code" --install-extension ./brotherwhale-vscode-0.9.2.vsix --force
+> "/Applications/Trae CN.app/Contents/Resources/app/bin/code" --install-extension ./brotherwhale-vscode-0.9.3.vsix --force
 > ```
 
 ### 3. Open it
@@ -289,7 +289,7 @@ Reloading or closing the extension stops that window's Runtime and interrupts ac
 
 **Installing a VSIX**
 ```bash
-code --install-extension /path/to/brotherwhale-vscode-0.9.2.vsix --force
+code --install-extension /path/to/brotherwhale-vscode-0.9.3.vsix --force
 ```
 
 ## Privacy & data
