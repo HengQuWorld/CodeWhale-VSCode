@@ -214,7 +214,7 @@ class FakeElement {
   }
 }
 
-function createHarness(options: { frames?: Array<() => void> } = {}) {
+function createHarness(options: { frames?: Array<() => void>; timers?: Array<() => void> } = {}) {
   const elements = new Map<string, FakeElement>();
   const getEl = (id: string): FakeElement => {
     let element = elements.get(id);
@@ -255,7 +255,12 @@ function createHarness(options: { frames?: Array<() => void> } = {}) {
   const context = vm.createContext({
     window: windowObj,
     document: documentObj,
-    setTimeout: () => 0,
+    // Timer callbacks are dropped unless a test asks to run them; the rail's
+    // scroll throttle is one of those, and a test that wants it collects it.
+    setTimeout: (callback: () => void) => {
+      options.timers?.push(callback);
+      return options.timers ? options.timers.length : 0;
+    },
     clearTimeout: () => {},
     // `addMessage` schedules its nav-dot refresh on a frame, and a jump onto a
     // row that was never painted re-anchors on the next one. Tests that wait for
@@ -537,21 +542,30 @@ describe("lazy row layout", () => {
     expect(Number(note.replace(/\D+/g, ""))).toBeGreaterThan(220);
   });
 
-  it("re-anchors a jump once the row's real height is known", () => {
+  it("lands a far jump, then re-aims it once the rows around it are painted", () => {
     const frames: Array<() => void> = [];
     const { messages, messagesEl } = createHarness({ frames });
     messages.addMessage({ id: "m1", role: "user", content: "go" });
     messages.addMessage({ id: "m2", role: "assistant", content: "x".repeat(9000) });
     const row = messagesEl.children.find((el) => el.id === "msg-m2")!;
+    messagesEl.clientHeight = 600;
 
-    // The row is far down the transcript, where it sits at its estimated height.
-    row.rectTop = 4000;
+    // A row's viewport position is its place in the transcript minus the
+    // scroll — that is what the DOM reports, and it is what lets a correction
+    // converge instead of chasing the scroll it just caused.
+    let rowTop = 4000;
+    row.getBoundingClientRect = () => ({ top: rowTop - messagesEl.scrollTop, height: 40 });
+
+    // The row is several viewports down, where it sits at its estimated height.
     messages.scrollToMessage(row);
     expect(messagesEl.scrollCalls).toHaveLength(1);
+    // A smooth scroll would travel through rows that are still estimated and
+    // come to rest wherever the layout had drifted to by then.
+    expect(messagesEl.scrollCalls[0].behavior).toBe("auto");
     const first = messagesEl.scrollCalls[0].top as number;
 
     // Painting it reveals a taller row than the estimate, which moved it.
-    row.rectTop = 4600;
+    rowTop = 4600;
     frames.splice(0).forEach((callback) => callback());
 
     expect(messagesEl.scrollCalls).toHaveLength(2);
@@ -864,6 +878,7 @@ describe("message navigation rail", () => {
       .querySelectorAll(".message.user")
       .find((el) => el.id === "msg-" + id)!;
     bubble.querySelector(".message-body")!.textContent = text;
+    return bubble;
   };
 
   /** The rail the script is drawing into, with a container that reports a
@@ -918,11 +933,18 @@ describe("message navigation rail", () => {
     expect(rail.children[0].getAttribute("data-preview")).toBe("Turn 4");
   });
 
-  it("keeps the nearest dot lit across a rebuild", () => {
+  it("keeps the mark on the turn the reader is inside across a rebuild", () => {
     const harness = createHarness();
     const rail = railOf(harness);
 
-    drawUserBubble(harness, "user-1", "the first question", 1);
+    const first = drawUserBubble(harness, "user-1", "the first question", 1);
+    // The rail reads the rows' places in the transcript. A stand-in whose rows
+    // all report 0 would claim every one of them sits at the top edge.
+    first.offsetTop = 80;
+    first.offsetHeight = 40;
+    // Drawing a bubble pins the view to the bottom (smartScrollToBottom); this
+    // is about a reader who has not moved from the top of the transcript.
+    harness.messagesEl.scrollTop = 0;
     harness.messages.updateNavDots();
     expect(rail.children[0].classList.contains("active")).toBe(true);
 
@@ -931,12 +953,59 @@ describe("message navigation rail", () => {
     // own). The marker used to be carried over from the draw before, so it
     // matched the dot about to be marked and the highlight was silently
     // dropped — it only came back once a scroll moved the nearest message.
-    // The rebuild starts from nothing now.
-    drawUserBubble(harness, "user-2", "and the second one", 2);
+    const second = drawUserBubble(harness, "user-2", "and the second one", 2);
+    second.offsetTop = 600;
+    second.offsetHeight = 40;
+    // That draw pinned the view to the bottom again; put the reader back
+    // partway down. The second prompt is still below the top edge, so the
+    // first turn is the one the rail should name.
+    harness.messagesEl.scrollTop = 500;
     harness.messages.updateNavDots();
 
     expect(rail.children).toHaveLength(2);
     expect(rail.children[0].classList.contains("active")).toBe(true);
+    expect(rail.children[1].classList.contains("active")).toBe(false);
+  });
+
+  it("re-places the dots when the rows the browser had skipped are painted", () => {
+    const timers: Array<() => void> = [];
+    const harness = createHarness({ timers });
+    const rail = railOf(harness);
+    harness.messagesEl.clientHeight = 500;
+
+    const first = drawUserBubble(harness, "user-1", "one", 1);
+    const second = drawUserBubble(harness, "user-2", "two", 2);
+    // Both rows still hold their places at the estimate the browser was given
+    // (estimateMessageHeight), because neither has been painted yet.
+    first.offsetTop = 80;
+    first.offsetHeight = 40;
+    second.offsetTop = 400;
+    second.offsetHeight = 40;
+    harness.messages.updateNavDots();
+
+    expect(rail.children[0].style.top).toBe("10%");
+    expect(rail.children[1].style.top).toBe("42%");
+
+    // Scrolling paints the second row: its real height replaced the estimate
+    // and pushed it down, and the transcript grew with it. The dots were built
+    // before any of that happened, so the place they recorded is stale.
+    harness.messagesEl.scrollHeight = 2000;
+    second.offsetTop = 900;
+    harness.messagesEl.scrollTop = 400;
+    harness.messagesEl.dispatch("scroll");
+    timers.splice(0).forEach((callback) => callback());
+
+    expect(rail.children[0].style.top).toBe("5%");
+    expect(rail.children[1].style.top).toBe("46%");
+    // 400 is still above the second prompt at 900, so the mark has not moved.
+    expect(rail.children[0].classList.contains("active")).toBe(true);
+
+    harness.messagesEl.scrollTop = 950;
+    harness.messagesEl.dispatch("scroll");
+    timers.splice(0).forEach((callback) => callback());
+
+    expect(rail.children[1].classList.contains("active")).toBe(true);
+    expect(rail.children[0].classList.contains("active")).toBe(false);
   });
 
   it("empties the rail when the transcript it mirrors is replaced", () => {
@@ -968,6 +1037,80 @@ describe("message navigation rail", () => {
     harness.messages.updateNavDots();
 
     expect(rail.children).toHaveLength(0);
+  });
+
+  it("takes the dot of a removed row with it", () => {
+    // undo and retry delete a message from the transcript. A dot left behind
+    // points at an id nothing holds: clicking it resolves to null and does
+    // nothing at all, which is what an undo looked like — a dead rail.
+    const frames: Array<() => void> = [];
+    const harness = createHarness({ frames });
+    const rail = railOf(harness);
+    drawUserBubble(harness, "user-1", "the first question", 1);
+    drawUserBubble(harness, "user-2", "the second one", 2);
+    harness.messages.updateNavDots();
+    expect(rail.children).toHaveLength(2);
+
+    harness.messages.removeMessage("user-2");
+    frames.splice(0).forEach((callback) => callback());
+
+    expect(rail.children).toHaveLength(1);
+    expect(rail.children[0].getAttribute("data-msg-id")).toBe("msg-user-1");
+  });
+
+  it("steps forward from above the first prompt instead of going nowhere", () => {
+    // A compaction note, a system line, or the transcript's own top padding
+    // puts the reader above the first prompt. "Current" is then before the
+    // first turn, which is why the rail lights dot 0 there — and the keyboard
+    // has to agree: one step back is nothing, one step forward is the first
+    // prompt. It used to default to the *last* prompt, so Ctrl+Up jumped
+    // forward and Ctrl+Down was dead.
+    const harness = createHarness();
+    const { messages, messagesEl } = harness;
+    const first = drawUserBubble(harness, "user-1", "the first question", 1);
+    first.offsetTop = 100;
+    first.rectTop = 100;
+    first.offsetHeight = 40;
+    const second = drawUserBubble(harness, "user-2", "the second one", 2);
+    second.offsetTop = 600;
+    second.rectTop = 600;
+    second.offsetHeight = 40;
+    messagesEl.scrollHeight = 2000;
+    // Drawing a bubble pins the view to the bottom; this is a reader at the top.
+    messagesEl.scrollTop = 0;
+
+    messages.jumpToUserMessage("prev");
+    expect(messagesEl.scrollCalls).toHaveLength(0);
+
+    messages.jumpToUserMessage("next");
+    expect(messagesEl.scrollCalls).toHaveLength(1);
+    expect(messagesEl.scrollCalls[0].top).toBe(80);
+  });
+
+  it("leaves the reader alone once they scroll away from a jump", () => {
+    // A jump keeps re-aiming until the transcript stops moving, because the
+    // rows it passes are being measured for the first time. The reader's own
+    // gesture ends that: correcting after it would drag them back to the row
+    // they deliberately left.
+    const frames: Array<() => void> = [];
+    const { messages, messagesEl } = createHarness({ frames });
+    messages.addMessage({ id: "m1", role: "user", content: "first", timestamp: 1 });
+    const row = messagesEl.children.find((el) => el.id === "msg-m1")!;
+    messagesEl.clientHeight = 600;
+    messagesEl.scrollHeight = 6000;
+    // A row's viewport position is its place in the transcript minus the
+    // scroll, the way the DOM reports it.
+    row.getBoundingClientRect = () => ({ top: 100 - messagesEl.scrollTop, height: 40 });
+
+    messages.scrollToMessage(row);
+    expect(messagesEl.scrollCalls).toHaveLength(1);
+
+    messagesEl.scrollTop = 1300;
+    messagesEl.dispatch("wheel", {});
+    frames.splice(0).forEach((callback) => callback());
+
+    expect(messagesEl.scrollCalls).toHaveLength(1);
+    expect(messagesEl.scrollTop).toBe(1300);
   });
 });
 

@@ -133,10 +133,12 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
     return messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight < SCROLL_BOTTOM_THRESHOLD;
   }
 
-  // Single scroll listener: maintains userScrolledUp flag and throttles
-  // navigation-dot active-state updates. (updateActiveDot is a hoisted
-  // function declaration, so it is callable here even though it is defined
-  // later in the IIFE.)
+  // Single scroll listener: maintains userScrolledUp flag, and keeps the
+  // message rail honest while the transcript moves. Scrolling is also what
+  // paints the rows the browser had skipped, so the layout under the dots
+  // changes as it goes — the rail has to be re-placed, not just re-marked.
+  // (syncNavRail is a hoisted function declaration, so it is callable here
+  // even though it is defined later in the IIFE.)
   messagesEl.addEventListener('scroll', function() {
     if (isNearBottom()) {
       userScrolledUp = false;
@@ -146,7 +148,7 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
     scheduleTurnContextUpdate();
     if (_navScrollTimer) return;
     _navScrollTimer = setTimeout(function() {
-      updateActiveDot();
+      syncNavRail();
       _navScrollTimer = null;
     }, 80);
   });
@@ -676,9 +678,12 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
   function removeMessage(id) {
     var el = document.getElementById('msg-' + id);
     if (el) el.remove();
-    // The row may have been the prompt the bar names.
+    // The row may have been the prompt the bar names, and it certainly had a
+    // dot of its own — a dot left behind here points at nothing and clicking
+    // it does nothing, which is what undo/retry looked like.
     invalidatePromptRows();
     scheduleTurnContextUpdate();
+    scheduleNavUpdate();
   }
 
   /** A collapsed body for a compaction note.
@@ -973,6 +978,9 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
       block.classList.add('open');
       el.textContent = __i18n.thinkingOpen;
     }
+    // The row just changed height, so every row below it moved — the rail's
+    // dots included.
+    scheduleNavUpdate();
   }
 
   // ── Approval Decision ──
@@ -1020,6 +1028,10 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
       // The rows moved, so which prompt is above the top edge may have
       // changed with them.
       scheduleTurnContextUpdate();
+      // They moved the rail's dots too — and a resize is also the first
+      // moment a transcript that was hidden behind a collapsed panel has a
+      // layout at all, so the rail may still be missing entirely.
+      scheduleNavUpdate();
     }, 150);
   });
 
@@ -1217,6 +1229,17 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
   var navRail = document.getElementById('message-nav');
   var navDots = [];
   var activeDotIndex = -1;
+  /** Frames spent waiting for the transcript to have a scroll height. Bounded
+   *  (see updateNavDots): a panel that is never laid out must not leave a
+   *  frame loop spinning behind it. */
+  var _navBuildWaits = 0;
+  var NAV_BUILD_WAIT_LIMIT = 60;
+
+  // Opening a compaction note (a <details>) changes how tall its row is, and
+  // every dot below it moves with it. The toggle event does not bubble, hence the
+  // capture listener; the thinking-block toggle asks for the same refresh
+  // directly (see toggleThinking).
+  messagesEl.addEventListener('toggle', function() { scheduleNavUpdate(); }, true);
 
   /** Get the plain-text preview of a user message (first ~80 chars). */
   function getUserMsgPreview(el) {
@@ -1256,6 +1279,85 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
     while (navRail.firstChild) navRail.removeChild(navRail.firstChild);
     navDots = [];
     activeDotIndex = -1;
+    // A replacement transcript is a fresh start for the wait below too.
+    _navBuildWaits = 0;
+  }
+
+  /** Light the dot of the turn the reader is inside, and only that one. */
+  function setActiveDot(idx) {
+    if (idx === activeDotIndex) return;
+    if (activeDotIndex >= 0 && navDots[activeDotIndex]) {
+      navDots[activeDotIndex].el.classList.remove('active');
+    }
+    if (idx >= 0 && navDots[idx]) {
+      navDots[idx].el.classList.add('active');
+    }
+    activeDotIndex = idx;
+  }
+
+  /** The transcript's geometry as it stands right now, read in one pass.
+   *
+   *  Each dot marks a row, and the transcript lays its rows out lazily
+   *  (content-visibility: auto — see estimateMessageHeight): a row outside the
+   *  viewport holds its place at an *estimate*, and its real height replaces
+   *  that estimate the first time it is painted, which moves every row below
+   *  it. Where a dot belongs is therefore not a fact to record once, when the
+   *  dots are built; it is a reading, taken again whenever the transcript
+   *  moves.
+   *
+   *  Read before anything is written: interleaving the two would force a
+   *  layout per dot. */
+  function measureNavRows() {
+    var tops = [];
+    var heights = [];
+    for (var i = 0; i < navDots.length; i++) {
+      var msg = navDots[i].msg;
+      tops.push(msg.offsetTop);
+      heights.push(msg.offsetHeight);
+    }
+    return {
+      tops: tops,
+      heights: heights,
+      total: messagesEl.scrollHeight,
+      scrollTop: messagesEl.scrollTop,
+    };
+  }
+
+  /** Paint the rail from that geometry: where each dot sits along it, and
+   *  which one is the turn the reader is inside.
+   *
+   *  "Inside" is the question the Ctrl+Up/Down jumps ask — the last prompt at
+   *  or above the top edge — so the lit dot is the one a keyboard step would
+   *  jump back to. (The pinned prompt bar asks it of turns rather than bubbles:
+   *  a steer is a second bubble in the same turn, and the bar names that turn.)
+   *  The rail used to ask something else entirely — nearest the viewport centre
+   *  — which in the middle of a long answer lights the *next* turn's dot while
+   *  the bar still names this one. */
+  function syncNavRail() {
+    if (!navRail || navDots.length === 0) return;
+    var shot = measureNavRows();
+    if (!shot.total) return;
+
+    for (var i = 0; i < navDots.length; i++) {
+      var pct = ((shot.tops[i] + shot.heights[i] / 2) / shot.total) * 100;
+      pct = Math.round(Math.min(98, Math.max(2, pct)) * 10) / 10;
+      // Writing a style the dot already has would still cost a style recalc,
+      // and this runs while the reader scrolls.
+      if (navDots[i].pct !== pct) {
+        navDots[i].pct = pct;
+        navDots[i].el.style.top = pct + '%';
+      }
+    }
+
+    // Rows are in document order, so their tops only grow: the first one
+    // below the top edge ends the search. The 20px slack is the same reading
+    // margin jumpToUserMessage uses, so the lit dot and the keyboard agree.
+    var activeIdx = 0;
+    for (var j = 0; j < navDots.length; j++) {
+      if (shot.tops[j] <= shot.scrollTop + 20) activeIdx = j;
+      else break;
+    }
+    setActiveDot(activeIdx);
   }
 
   /** Rebuild the navigation dots to match current user messages. */
@@ -1269,12 +1371,15 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
       return;
     }
 
-    var scrollHeight = messagesEl.scrollHeight;
-    if (scrollHeight === 0) {
-      // Layout not ready yet; retry on next frame
-      requestAnimationFrame(updateNavDots);
+    if (!messagesEl.scrollHeight) {
+      // Layout not ready yet (the panel is still being shown). Retry on a
+      // frame — a bounded number of them, because a transcript that never
+      // gets laid out would otherwise keep this loop spinning; the next
+      // scroll or resize asks again.
+      if (_navBuildWaits++ < NAV_BUILD_WAIT_LIMIT) requestAnimationFrame(updateNavDots);
       return;
     }
+    _navBuildWaits = 0;
 
     // Clear existing dots
     clearNavDots();
@@ -1283,10 +1388,9 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
       var msg = userMsgs[i];
       var dot = document.createElement('div');
       dot.className = 'msg-nav-dot';
-      // Position dot proportionally along the scroll height
-      var msgOffset = msg.offsetTop + msg.offsetHeight / 2;
-      var pct = Math.min(98, Math.max(2, (msgOffset / scrollHeight) * 100));
-      dot.style.top = pct + '%';
+      // Where it belongs is worked out by syncNavRail below — and again on
+      // every scroll, because the rows under it are laid out lazily.
+      dot.style.top = '0%';
       dot.setAttribute('data-msg-id', msg.id);
       dot.setAttribute('data-preview', navDotTooltip(msg));
       dot.setAttribute('data-index', String(i));
@@ -1298,39 +1402,40 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
       });
 
       navRail.appendChild(dot);
-      navDots.push({ el: dot, msg: msg });
+      navDots.push({ el: dot, msg: msg, pct: null });
     }
 
-    updateActiveDot();
+    syncNavRail();
   }
 
-  /** Highlight the dot whose message is nearest the viewport center. */
-  function updateActiveDot() {
-    if (!navRail || navDots.length === 0) return;
-    var viewCenter = messagesEl.scrollTop + messagesEl.clientHeight / 2;
-    var bestIdx = -1;
-    var bestDist = Infinity;
-
-    for (var i = 0; i < navDots.length; i++) {
-      var msg = navDots[i].msg;
-      var msgCenter = msg.offsetTop + msg.offsetHeight / 2;
-      var dist = Math.abs(msgCenter - viewCenter);
-      if (dist < bestDist) {
-        bestDist = dist;
-        bestIdx = i;
-      }
-    }
-
-    if (bestIdx !== activeDotIndex) {
-      if (activeDotIndex >= 0 && navDots[activeDotIndex]) {
-        navDots[activeDotIndex].el.classList.remove('active');
-      }
-      if (bestIdx >= 0 && navDots[bestIdx]) {
-        navDots[bestIdx].el.classList.add('active');
-      }
-      activeDotIndex = bestIdx;
-    }
+  /** Where a row's top should land, in the transcript's own coordinates.
+   *
+   *  The 20px reading margin, plus the pinned prompt bar when it covers that
+   *  corner, so a jump never lands a row underneath it. */
+  function scrollTargetFor(el) {
+    var gap = 20 + turnContextOverlayHeight();
+    return Math.max(
+      0,
+      el.getBoundingClientRect().top - messagesEl.getBoundingClientRect().top + messagesEl.scrollTop - gap
+    );
   }
+
+  /** The jump in flight, so a newer one can take over from it. */
+  var _jumpTarget = null;
+
+  /** Let go of the jump in flight.
+   *
+   *  A wheel or a touch gesture is the reader taking over: the settle loop is
+   *  still waiting for the transcript to stop moving, and once their gesture
+   *  ends it would "correct" them back to the row they deliberately left. A
+   *  newer jump replaces the target by itself, so only the reader's own
+   *  scrolling needs this. */
+  function abandonJump() {
+    _jumpTarget = null;
+  }
+
+  messagesEl.addEventListener('wheel', abandonJump, { passive: true });
+  messagesEl.addEventListener('touchstart', abandonJump, { passive: true });
 
   /** Flash highlight and scroll a message into view. */
   function scrollToMessage(el) {
@@ -1339,34 +1444,80 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
     // Disable user-scrolled-up flag so smartScrollToBottom won't fight us
     userScrolledUp = false;
 
-    // Scroll the message to the top of the viewport with some padding. The
-    // padding clears the pinned prompt bar when it is covering that corner,
-    // so a jump never lands a row underneath it.
-    var containerTop = messagesEl.getBoundingClientRect().top;
-    var msgTop = el.getBoundingClientRect().top;
-    var gap = 20 + turnContextOverlayHeight();
-    var offset = msgTop - containerTop + messagesEl.scrollTop - gap;
-    messagesEl.scrollTo({ top: Math.max(0, offset), behavior: 'smooth' });
-
-    // A row that was never painted sits at its estimated height (see
-    // estimateMessageHeight); scrolling to it materializes the real one,
-    // which moves it. Re-anchor once, on the frame that painted it.
-    requestAnimationFrame(function() {
-      var settledTop = el.getBoundingClientRect().top;
-      var settled = settledTop - messagesEl.getBoundingClientRect().top + messagesEl.scrollTop - gap;
-      if (Math.abs(settled - offset) > 4) {
-        messagesEl.scrollTo({ top: Math.max(0, settled), behavior: 'auto' });
-      }
-    });
+    var target = scrollTargetFor(el);
+    var distance = Math.abs(target - messagesEl.scrollTop);
+    // A far row has never been laid out, and every row a long scroll passes is
+    // measured as it is painted — so a smooth scroll set in motion now aims at
+    // an offset the transcript no longer has by the time it stops, and comes
+    // to rest short of (or past) the row it meant to show. Far jumps land at
+    // once and are then corrected; short ones are between rows that are
+    // already painted, so those can still animate.
+    var far = messagesEl.clientHeight > 0 && distance > messagesEl.clientHeight * 1.5;
+    messagesEl.scrollTo({ top: target, behavior: far ? 'auto' : 'smooth' });
+    settleJump(el, far);
 
     // Flash highlight
     el.classList.remove('jump-flash');
     void el.offsetWidth; // force reflow
     el.classList.add('jump-flash');
     setTimeout(function() { el.classList.remove('jump-flash'); }, 850);
+  }
 
-    // Update active dot after scroll settles
-    setTimeout(updateActiveDot, 400);
+  /** Re-aim a jump until the transcript stops moving under it.
+   *
+   *  Scrolling to a row changes which rows are painted, and a painted row
+   *  trades its estimated height for the real one — moving everything below
+   *  it, the row just scrolled to included. So landing is not a one-shot: this
+   *  waits until the transcript has been still, re-aims if the row has
+   *  drifted, and stops. Bounded, because a transcript whose estimates keep
+   *  changing must not keep a frame loop alive.
+   *
+   *  Correcting is only safe once the scroll has stopped: a smooth scroll is
+   *  still travelling, and snapping it would cut the animation short and land
+   *  somewhere nobody asked for. An instant jump has already arrived, so it is
+   *  corrected on the very next frame. */
+  function settleJump(el, instant) {
+    _jumpTarget = el;
+    var lastTop = null;
+    var still = 0;
+    var rounds = 0;
+    var needStill = instant ? 0 : 2;
+
+    function tick() {
+      if (_jumpTarget !== el) return; // a newer jump took over
+      // The row can be gone by now: undo or retry removes it while a jump it
+      // never knew about is still settling. A detached row measures at the
+      // origin, and correcting toward that would send the reader to the top of
+      // the conversation.
+      var rect = el.getBoundingClientRect();
+      if (rect.top === 0 && rect.height === 0) return;
+      rounds++;
+      var top = messagesEl.scrollTop;
+      if (top === lastTop) still++;
+      else still = 0;
+      lastTop = top;
+
+      var settled = still >= needStill;
+      if (settled) {
+        var want = scrollTargetFor(el);
+        if (Math.abs(want - top) > 2) {
+          messagesEl.scrollTo({ top: want, behavior: 'auto' });
+          still = 0;
+          // Corrections are finite: a handful of them, not one per estimate.
+          rounds += 8;
+          settled = false;
+        }
+      }
+
+      if (settled || rounds > 90) {
+        _jumpTarget = null;
+        syncNavRail();
+        return;
+      }
+      requestAnimationFrame(tick);
+    }
+
+    requestAnimationFrame(tick);
   }
 
   /** Jump to the previous or next user message. */
@@ -1377,7 +1528,12 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
     // Find the index of the user message closest to (at or just above)
     // the viewport top. If scrolled past all messages, use the last one.
     var scrollTop = messagesEl.scrollTop;
-    var currentIdx = userMsgs.length - 1;
+    // -1 means "above the first prompt", which is a real place to be: a
+    // compaction note, a system line, or the transcript's own top padding can
+    // sit above it. Defaulting to the last prompt instead made Ctrl+Up jump
+    // *forward* to the first one and Ctrl+Down do nothing at all — and it
+    // disagreed with the rail, which lights the first dot there.
+    var currentIdx = -1;
     for (var i = 0; i < userMsgs.length; i++) {
       if (userMsgs[i].offsetTop > scrollTop + 20) break;
       currentIdx = i;
