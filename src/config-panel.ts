@@ -315,7 +315,10 @@ export class ConfigPanel {
       --btn-bg: var(--vscode-button-background);
       --btn-fg: var(--vscode-button-foreground);
       --btn-hover: var(--vscode-button-hoverBackground);
-      --border: var(--vscode-panel-border);
+      /* Same reason as the chat sheet's --border: a theme is free to omit
+         panel.border, and then every border built on this variable is invalid
+         at computed-value time and disappears rather than thinning out. */
+      --border: var(--vscode-panel-border, var(--vscode-sideBar-border, var(--vscode-widget-border, var(--vscode-editorGroup-border, rgba(128, 128, 128, 0.35)))));
       --section-bg: var(--vscode-sideBar-background);
       --muted: var(--vscode-descriptionForeground);
       --focus: var(--vscode-focusBorder);

@@ -15,6 +15,18 @@ export const SIDEBAR_PANEL_MAX_WIDTH = 600;
 export const SIDEBAR_MIN_CHAT_WIDTH = 200;
 export const SIDEBAR_HANDLE_WIDTH = 4;
 
+/** The line that separates the panel from the conversation.
+ *
+ * Not a theme colour. `panel.border` is optional for a theme to define, and a
+ * host that leaves it out (CodeArts on HarmonyOS among them) or defines it a
+ * shade away from the background leaves the split unreadable — the boundary is
+ * the one piece of chrome the reader needs in every theme, so it carries its
+ * own neutral: 40% grey reads as a hairline on a dark sheet (#1e1e1e → #454545)
+ * and as a quiet rule on a light one (#ffffff → #cccccc). High-contrast themes
+ * are the exception and get their border colour back, below, because there the
+ * point of the line is precisely that it is loud. */
+export const SIDEBAR_DIVIDER_COLOR = "rgba(128, 128, 128, 0.4)";
+
 export function getWebviewCss(): string {
   return `
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -25,7 +37,14 @@ export function getWebviewCss(): string {
       --muted: var(--vscode-descriptionForeground);
       --accent: var(--vscode-button-background);
       --accent-hover: var(--vscode-button-hoverBackground);
-      --border: var(--vscode-panel-border);
+      /* Themes may leave a colour undefined, and then the var() substitution
+         inside --border fails: every 1px solid var(--border) is invalid at
+         computed-value time and drops to none — not to a faint line. Across
+         the sheet that is no section rules, no tab underline and no split, on
+         the themes that omit panel.border (custom hosts such as CodeArts on
+         HarmonyOS). Chain through the other border colours the workbench does
+         define, and end on a neutral that reads on light and dark alike. */
+      --border: var(--vscode-panel-border, var(--vscode-sideBar-border, var(--vscode-widget-border, var(--vscode-editorGroup-border, rgba(128, 128, 128, 0.35)))));
       --input-bg: var(--vscode-input-background);
       --input-border: var(--vscode-input-border);
       --input-fg: var(--vscode-input-foreground);
@@ -89,7 +108,11 @@ export function getWebviewCss(): string {
          share what there is — a view that narrow cannot show a split. */
       min-width: ${SIDEBAR_PANEL_MIN_WIDTH}px;
       max-width: min(${SIDEBAR_PANEL_MAX_WIDTH}px, calc(100% - ${SIDEBAR_MIN_CHAT_WIDTH + SIDEBAR_HANDLE_WIDTH}px));
-      border-right: 1px solid var(--border);
+      /* No border on the panel's right edge: the divider is drawn by the grip
+         that follows the panel, so the two panes are split by exactly one line
+         — the one the reader can also grab — instead of a themed hairline on
+         the panel edge with an unrelated grip beside it. See
+         #sidebar-resize-handle::before. */
       overflow-y: auto;
       overflow-x: hidden;
       padding: 0;
@@ -108,18 +131,47 @@ export function getWebviewCss(): string {
       background: transparent;
       position: relative;
       z-index: 10;
-      transition: background 0.15s;
     }
     /* Only available while the threads panel is open: a collapsed sidebar has
        nothing to widen, and showing the grip there would just invite a drag
-       that has no effect. */
+       that has no effect — and there is no split to mark either. */
     #threads-panel.open + #sidebar-resize-handle {
       display: block;
     }
-    #sidebar-resize-handle:hover,
-    #sidebar-resize-handle.active {
-      background: var(--vscode-panel-border, var(--border));
+    /* The split itself. It is always drawn, not only under the pointer: the two
+       panes share a background, so the line is the whole boundary, and a
+       hover-only cue cannot be found by someone who does not already know it
+       is there. Sits on whole pixels at the panel's edge (left: 0, never a
+       half-pixel centring): a 1px rule nudged by 0.5px is spread over two
+       columns and reads as a faint 2px smudge at DPR 1 — the very thing this
+       is meant to fix. Hover/drag widen the same line into the rest of the
+       4px gutter rather than repainting it, so the boundary does not move
+       under the pointer. */
+    #sidebar-resize-handle::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      left: 0;
+      width: 1px;
+      background: ${SIDEBAR_DIVIDER_COLOR};
+      transition: width 0.15s, background 0.15s;
     }
+    #sidebar-resize-handle:hover::before,
+    #sidebar-resize-handle.active::before {
+      width: 3px;
+      background: var(--vscode-focusBorder, var(--vscode-foreground, var(--fg)));
+    }
+    /* High-contrast themes are the exception to the neutral: there the line is
+       meant to be loud, and the workbench's own contrast colour says how. Keyed
+       off both the body class and the theme-kind attribute, since hosts differ
+       on which one they set. Only the colour changes — hover still widens. */
+    body.vscode-high-contrast #sidebar-resize-handle::before,
+    body.vscode-high-contrast-light #sidebar-resize-handle::before,
+    body[data-vscode-theme-kind^="vscode-high-contrast"] #sidebar-resize-handle::before {
+      background: var(--vscode-contrastBorder, var(--vscode-foreground));
+    }
+    /* The grab area reaches past the gutter without painting anything. */
     #sidebar-resize-handle::after {
       content: '';
       position: absolute;

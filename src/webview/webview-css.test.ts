@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   getWebviewCss,
+  SIDEBAR_DIVIDER_COLOR,
   SIDEBAR_HANDLE_WIDTH,
   SIDEBAR_MIN_CHAT_WIDTH,
   SIDEBAR_PANEL_MAX_WIDTH,
@@ -156,6 +157,57 @@ describe("webview-css.ts", () => {
     // The fixed ceiling on its own is what this replaced, so it is not kept
     // beside the bound that now supersedes it.
     expect(panelRule).not.toContain(`max-width: ${SIDEBAR_PANEL_MAX_WIDTH}px;`);
+  });
+
+  it("keeps a border colour that survives a theme which defines none", () => {
+    const css = getWebviewCss();
+
+    // `panel.border` is optional for a theme to contribute. With no fallback,
+    // `--border` substitutes to the guaranteed-invalid value and every
+    // `1px solid var(--border)` in the sheet is invalid at computed-value time
+    // — the borders are not faint, they are gone. That is what a host with a
+    // custom theme (CodeArts on HarmonyOS) showed: no section rules, no tab
+    // underline, no split. The chain has to end on a neutral nobody can omit.
+    expect(css).toMatch(
+      /--border: var\(--vscode-panel-border, var\(--vscode-sideBar-border, var\(--vscode-widget-border, var\(--vscode-editorGroup-border, rgba\(/,
+    );
+  });
+
+  it("draws the panel/conversation split itself, in the grip", () => {
+    const css = getWebviewCss();
+    const dividerStart = css.indexOf("#sidebar-resize-handle::before {");
+    const dividerRule = css.slice(dividerStart, css.indexOf("}", dividerStart));
+
+    // Both panes sit on the same background, so the line is the boundary; it is
+    // therefore always drawn, in a colour the sheet owns rather than one a
+    // theme can leave out or set a shade away from the background.
+    expect(dividerRule).toContain(`background: ${SIDEBAR_DIVIDER_COLOR};`);
+    expect(dividerRule).toContain("width: 1px;");
+    // No half-pixel centring: a 1px rule offset by 0.5px is split over two
+    // columns and reads as a faint 2px smudge at DPR 1, which is the symptom,
+    // not the fix. The line sits on the panel's edge at a whole pixel.
+    expect(dividerRule).toContain("left: 0;");
+    expect(dividerRule).not.toContain("margin-left");
+    // Hovering and dragging widen that same line instead of repainting the
+    // gutter, so the boundary does not move under the pointer.
+    const hoverStart = css.indexOf("#sidebar-resize-handle:hover::before,");
+    const hoverRule = css.slice(hoverStart, css.indexOf("}", hoverStart));
+    expect(hoverStart).toBeGreaterThan(-1);
+    expect(hoverRule).toContain("width: 3px;");
+    expect(hoverRule).toContain("--vscode-focusBorder");
+    // High-contrast themes get their own border colour back: there the line is
+    // meant to be loud, and a neutral grey would undo that. Both the body class
+    // and the theme-kind attribute are matched, because hosts disagree on which
+    // one they set.
+    expect(css).toContain("body.vscode-high-contrast #sidebar-resize-handle::before");
+    expect(css).toContain('body[data-vscode-theme-kind^="vscode-high-contrast"] #sidebar-resize-handle::before');
+
+    // One line, not two: the panel edge no longer carries a border of its own.
+    const panelRule = css.slice(
+      css.indexOf("#threads-panel {"),
+      css.indexOf("}", css.indexOf("#threads-panel {")),
+    );
+    expect(panelRule).not.toContain("border-right");
   });
 
   it("lets the toolbar wrap instead of laying its controls out of the view", () => {
