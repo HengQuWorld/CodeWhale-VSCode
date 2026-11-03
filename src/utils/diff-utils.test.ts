@@ -383,6 +383,34 @@ describe("isInternalRuntimeHandoff", () => {
     }
   });
 
+  it("hides the deferred-toolbox snapshot the engine writes as bare JSON", () => {
+    // A tool set that changed makes the engine append its current toolbox to
+    // the model as a JSON object with no `<codewhale:…>` envelope. A saved
+    // session therefore opened with a wall of JSON drawn as the person's own
+    // message, while the same conversation's thread — which records only real
+    // prompts — stayed clean.
+    const snapshot =
+      '{"type":"current_deferred_toolbox","active_deferred_tools":["Web","mcp_chrome-devtools_navigate_page"],"authority":"This current deferred toolbox supersedes earlier activation, eviction and unavailable notices. Tools loaded eagerly remain available. Every execution still requires current permission."}';
+    expect(isInternalRuntimeHandoff([snapshot, runtimeMeta])).toBe(true);
+  });
+
+  it("keeps a person's own JSON prompt", () => {
+    // The provenance line, not the payload alone, says who wrote the turn: a
+    // person asking about a JSON object keeps their words.
+    const quoted = '{"type":"current_deferred_toolbox","active_deferred_tools":[]}';
+    expect(
+      isInternalRuntimeHandoff([quoted, "<turn_meta>\nCurrent local date: 2026-11-03\n</turn_meta>"])
+    ).toBe(false);
+    expect(
+      isInternalRuntimeHandoff([
+        quoted,
+        "<turn_meta>\nInput provenance: external_user\n</turn_meta>",
+      ])
+    ).toBe(false);
+    // An unreadable JSON block is a person's text, not a control payload.
+    expect(isInternalRuntimeHandoff(["{\"type\":", runtimeMeta])).toBe(false);
+  });
+
   it("keeps a real user turn that follows a runtime event", () => {
     // A person's prompt after an internal notice is a separate user message;
     // only the envelope-plus-runtime-provenance pair is internal.
@@ -404,6 +432,22 @@ describe("isInternalRuntimeHandoffText", () => {
         `<codewhale:runtime_event kind="mcp_configured_servers" visibility="internal">\nbody\n</codewhale:runtime_event>\n${runtimeMeta}`
       )
     ).toBe(true);
+  });
+
+  it("recognises the toolbox snapshot in the joined form", () => {
+    // The seed path joins a message's blocks into one string, so the same
+    // snapshot reaches the string-reading path with no block boundary left —
+    // only the trailing provenance envelope marks it.
+    expect(
+      isInternalRuntimeHandoffText(
+        `{"type":"current_deferred_toolbox","active_deferred_tools":["Web"]}\n${runtimeMeta}`
+      )
+    ).toBe(true);
+    expect(
+      isInternalRuntimeHandoffText(
+        `{"type":"current_deferred_toolbox","active_deferred_tools":["Web"]}\n<turn_meta>\nInput provenance: external_user\n</turn_meta>`
+      )
+    ).toBe(false);
   });
 
   it("reads the metadata block without the prompt in front of it wrongly", () => {

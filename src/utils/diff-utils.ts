@@ -580,14 +580,15 @@ export function stripTurnMeta(text: string): string {
  *
  * Two families match:
  *   - sub-agent / shell handoffs, whose provenance line is authoritative;
- *   - `runtime` provenance, when the payload is a runtime-owned envelope: any
+ *   - `runtime` provenance, when the payload is runtime-owned: any
  *     `<codewhale:runtime_event …>` (the engine's own notices — MCP servers,
- *     workspace trust, background children, the Operate contract) or the
- *     agent-topology checkpoint. The TUI matches the whole prefix rather than
- *     naming each kind, so a notice the engine starts emitting tomorrow is
- *     still the engine's and never reads as the person's prompt. Enumeration
- *     here lagged behind it: `mcp_configured_servers` and `workspace_trust`
- *     turns rendered as user bubbles wearing a steer badge.
+ *     workspace trust, background children, the Operate contract), the
+ *     agent-topology checkpoint, or a bare JSON control snapshot. The TUI
+ *     matches the whole prefix rather than naming each kind, so a notice the
+ *     engine starts emitting tomorrow is still the engine's and never reads as
+ *     the person's prompt. Enumeration here lagged behind it:
+ *     `mcp_configured_servers` and `workspace_trust` turns rendered as user
+ *     bubbles wearing a steer badge.
  */
 export function isInternalRuntimeHandoff(blocks: string[]): boolean {
   if (blocks.length === 0) return false;
@@ -597,8 +598,40 @@ export function isInternalRuntimeHandoff(blocks: string[]): boolean {
   const first = (blocks[0] || "").trim();
   return (
     /Input provenance:\s*runtime\b/i.test(last) &&
-    /^<codewhale:(runtime_event[\s>]|runtime_state kind="agent_topology")/.test(first)
+    (/^<codewhale:(runtime_event[\s>]|runtime_state kind="agent_topology")/.test(first) ||
+      isRuntimeControlSnapshot(first))
   );
+}
+
+/**
+ * True for the engine's bare-JSON control payloads — the shape it uses when the
+ * model must read a message as data rather than as prose.
+ *
+ * The deferred-toolbox snapshot is the one the transcript holds:
+ * `{"type":"current_deferred_toolbox","active_deferred_tools":[…],"authority":…}`,
+ * written before a request whose tool set changed (docs/TOOL_SURFACE.md,
+ * "Conversation toolbox cache"). It carries the same
+ * `runtime (non-authoritative)` provenance as the envelopes above but no
+ * `<codewhale:…>` wrapper, so the prefix test alone left a wall of JSON in a
+ * saved conversation, attributed to the person.
+ *
+ * Gated on the discriminator rather than on the one type name written today, so
+ * the sibling snapshots the engine may add share this rule instead of each
+ * needing its own. The provenance line is the safety half: no prompt the person
+ * typed carries it, so a person quoting the same JSON keeps their turn.
+ */
+function isRuntimeControlSnapshot(text: string): boolean {
+  if (!text.startsWith("{")) return false;
+  try {
+    const payload: unknown = JSON.parse(text);
+    return (
+      typeof payload === "object" &&
+      payload !== null &&
+      typeof (payload as { type?: unknown }).type === "string"
+    );
+  } catch {
+    return false;
+  }
 }
 
 /**

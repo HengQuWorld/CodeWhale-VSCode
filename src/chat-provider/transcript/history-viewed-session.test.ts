@@ -548,3 +548,73 @@ describe("a viewed session the engine still holds as a thread", () => {
     }
   });
 });
+
+describe("a viewed session's deferred-toolbox snapshot", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const runtimeMeta =
+    "<turn_meta>\nCurrent local date: 2026-11-03\nInput provenance: runtime (non-authoritative)\n</turn_meta>";
+  const promptMeta =
+    "<turn_meta>\nCurrent local date: 2026-11-03\nCurrent workspace: /tmp/ws\n</turn_meta>";
+  const snapshot = JSON.stringify({
+    type: "current_deferred_toolbox",
+    active_deferred_tools: ["Web", "mcp_chrome-devtools_navigate_page"],
+    authority:
+      "This current deferred toolbox supersedes earlier activation, eviction and " +
+      "unavailable notices. Tools loaded eagerly remain available. Every " +
+      "execution still requires current permission.",
+  });
+  /** A turn the person typed: their words, then the engine's plain metadata. */
+  const asked = (text: string) => [text, promptMeta].map((block) => ({ type: "text", text: block }));
+  /** A turn the engine wrote for the model: its payload, then runtime provenance. */
+  const injected = (text: string) =>
+    [text, runtimeMeta].map((block) => ({ type: "text", text: block }));
+
+  it("does not draw the engine's toolbox snapshot as the person's message", async () => {
+    // A toolbox change is written to the model as a bare JSON control object
+    // under `runtime (non-authoritative)` provenance. It carries no
+    // `<codewhale:…>` envelope, so the runtime-notice filter missed it and a
+    // saved conversation opened with a wall of JSON attributed to the person —
+    // while the same conversation's thread, which records only real prompts,
+    // stayed clean.
+    const session = {
+      metadata: { id: "sess-toolbox", title: "toolbox", total_tokens: 10 },
+      messages: [
+        { role: "user", content: asked("research the ecosystem") },
+        { role: "assistant", content: [{ type: "text", text: "on it" }] },
+        { role: "user", content: injected(snapshot) },
+        { role: "assistant", content: [{ type: "text", text: "still on it" }] },
+      ],
+    };
+
+    const { provider } = createProvider(session);
+    await provider.loadSessionMessages("sess-toolbox");
+
+    const users = provider.messages.filter((m) => m.role === "user");
+    expect(users.map((m) => m.content)).toEqual(["research the ecosystem"]);
+    expect(
+      provider.messages.some((m) => m.content.includes("current_deferred_toolbox"))
+    ).toBe(false);
+  });
+
+  it("keeps a prompt that is itself a JSON object", async () => {
+    // The snapshot is recognised by its provenance and payload shape together,
+    // so a person asking about their own JSON keeps their turn.
+    const prompt = '{"type":"current_deferred_toolbox","active_deferred_tools":[]}';
+    const session = {
+      metadata: { id: "sess-json-prompt", title: "json prompt", total_tokens: 10 },
+      messages: [
+        { role: "user", content: asked(prompt) },
+        { role: "assistant", content: [{ type: "text", text: "that is a snapshot shape" }] },
+      ],
+    };
+
+    const { provider } = createProvider(session);
+    await provider.loadSessionMessages("sess-json-prompt");
+
+    const users = provider.messages.filter((m) => m.role === "user");
+    expect(users.map((m) => m.content)).toEqual([prompt]);
+  });
+});
