@@ -1,5 +1,17 @@
 # Change Log
 
+## 0.9.4
+
+Everything here is client-side and works on engine **v0.10.2**, the floor 0.9.3 already names; nothing waits on an engine build.
+
+### Bug Fixes
+
+- **The engine's tool notes stay out of your conversation** — Reopening a saved conversation could open with a wall of JSON in a bubble of its own, as though you had typed it: the engine's note about which deferred tools are loaded. Those notes are now recognised and kept out, while the same JSON pasted and asked about remains your message.
+
+- **A visible line between the sidebar and the conversation** — On themes that do not define the panel border colour (CodeArts on HarmonyOS PC among them), the sidebar and the chat ran together with no boundary, and the section rules inside the sidebar vanished too. The divider is now drawn by the separator between the panes in a colour that does not depend on the theme, always visible, thickening under the pointer without moving; the settings panel had the same hole and is fixed the same way.
+
+- **The navigation rail's dots sit on their messages again** — The dots along the conversation's right edge drifted away from the messages they mark, and clicking one landed somewhere else entirely. Dots are now placed from the layout as it settles, the lit dot names the turn you are actually reading, and a click more than a screen and a half away lands immediately and corrects itself once the scroll stops. Removing a message (undo, retry) takes its dot with it.
+
 ## 0.9.3
 
 Everything here is client-side and works on engine **v0.10.2**, the floor 0.9.2 already names; none of it waits on an engine build.
