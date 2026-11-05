@@ -80,6 +80,10 @@
       {
         "command": "brotherwhale.attachToChat",
         "title": "%commands.attachToChat.title%"
+      },
+      {
+        "command": "brotherwhale.attachTerminalSelectionToChat",
+        "title": "%commands.attachTerminalSelection.title%"
       }
     ],
     "menus": {
@@ -101,6 +105,13 @@
         {
           "command": "brotherwhale.attachToChat",
           "when": "false"
+        }
+      ],
+      "terminal/context": [
+        {
+          "command": "brotherwhale.attachTerminalSelectionToChat",
+          "when": "terminalTextSelected",
+          "group": "2_chat@1"
         }
       ]
     },

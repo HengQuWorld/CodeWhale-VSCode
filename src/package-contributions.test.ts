@@ -113,6 +113,39 @@ describe("package.json Explorer context-menu contribution", () => {
   });
 });
 
+describe("package.json terminal context-menu contribution", () => {
+  const ATTACH_COMMAND = "brotherwhale.attachTerminalSelectionToChat";
+
+  it("contributes the attach-terminal-selection command with a localised title", () => {
+    const command = pkg.contributes.commands.find(
+      (c) => c.command === ATTACH_COMMAND
+    );
+
+    expect(command?.title).toBe("%commands.attachTerminalSelection.title%");
+  });
+
+  it("puts it on the terminal's context menu, only when text is selected", () => {
+    const entry = pkg.contributes.menus["terminal/context"].find(
+      (m) => m.command === ATTACH_COMMAND
+    );
+
+    expect(entry?.group).toBe("2_chat@1");
+    // `terminalTextSelected` is the context key VS Code itself maintains for
+    // the terminal's selection — with no selection the menu entry must not
+    // appear at all rather than showing and warning on click.
+    expect(entry?.when).toBe("terminalTextSelected");
+  });
+
+  it("names the command in both nls files", () => {
+    for (const file of ["package.nls.json", "package.nls.zh-cn.json"]) {
+      const nls = JSON.parse(
+        fs.readFileSync(path.resolve(process.cwd(), file), "utf8")
+      ) as Record<string, string>;
+      expect(nls["commands.attachTerminalSelection.title"], file).toBeTruthy();
+    }
+  });
+});
+
 describe("webview stays free of the settings button", () => {
   it("has no #btn-config markup, handler, or styles left behind", () => {
     const files = [

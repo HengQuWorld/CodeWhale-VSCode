@@ -1978,6 +1978,27 @@ ${PROVIDER_PICKER_JS}
         }
         break;
 
+      case 'appendInputText': {
+        // Terminal-selection attach and friends: the text lands *after*
+        // whatever draft is already in the box, never over it — the user's
+        // half-typed guidance is worth more than the quoted block.
+        const appendText = msg.text || '';
+        if (appendText && inputEl) {
+          const current = inputEl.value || '';
+          const joined = current
+            ? current.replace(/\\s+$/, '') + '\\n\\n' + appendText
+            : appendText;
+          if (window.__wvInput && window.__wvInput.setComposerText) {
+            window.__wvInput.setComposerText(joined);
+          } else {
+            inputEl.value = joined;
+          }
+          inputEl.focus();
+          inputEl.setSelectionRange(inputEl.value.length, inputEl.value.length);
+        }
+        break;
+      }
+
       case 'attachmentsChanged':
         window.__wvInput.setCurrentAttachments(msg.attachments || []);
         window.__wvInput.renderAttachments();

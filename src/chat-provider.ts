@@ -2731,6 +2731,53 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     this.handleAttachPaths(paths);
   }
 
+  /**
+   * Attach the terminal's current selection (the terminal context menu's
+   * `brotherwhale.attachTerminalSelectionToChat`).
+   *
+   * VS Code has no API for reading a terminal selection, so the host copies it
+   * through the clipboard: the user's clipboard is saved, emptied, and restored
+   * around `workbench.action.terminal.copySelection`, so the only observable
+   * side effect of the menu action is the text landing in the composer. If
+   * nothing was selected the clipboard comes back empty and the action is a
+   * no-op with a warning instead of attaching stale clipboard content.
+   *
+   * Like the Explorer attach, the chat is revealed first — the point of the
+   * action is seeing what was attached — and the text is appended to whatever
+   * draft is already in the composer rather than replacing it.
+   */
+  public async handleTerminalSelectionAttach(): Promise<void> {
+    const savedClipboard = await vscode.env.clipboard.readText();
+    try {
+      await vscode.env.clipboard.writeText("");
+      await vscode.commands.executeCommand(
+        "workbench.action.terminal.copySelection"
+      );
+    } catch {
+      /* No active terminal or the copy was refused — the read below reports
+       * the empty selection through the same path as a real no-op. */
+    }
+    let selection = "";
+    try {
+      selection = (await vscode.env.clipboard.readText()).trim();
+    } finally {
+      await vscode.env.clipboard.writeText(savedClipboard);
+    }
+
+    if (!selection) {
+      void vscode.window.showWarningMessage(
+        "CodeWhale: no terminal selection to attach."
+      );
+      return;
+    }
+
+    await this.revealChatView();
+    this.postMessage({
+      type: "appendInputText",
+      text: "```\n" + selection + "\n```",
+    });
+  }
+
   /** Bring the chat into view, so anything the host attaches on the user's
    *  behalf is visible where the next send will pick it up. The container
    *  command is the documented way in and the view's own focus command only

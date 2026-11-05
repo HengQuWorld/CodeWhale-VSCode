@@ -62,6 +62,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     )
   );
 
+  // The terminal's context menu. VS Code exposes no API for reading a
+  // terminal's selection, so the selection is captured by having the host
+  // copy it (clipboard round-trip, restored afterwards) inside the provider —
+  // see handleTerminalSelectionAttach.
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      "brotherwhale.attachTerminalSelectionToChat",
+      () => chatProvider.handleTerminalSelectionAttach()
+    )
+  );
+
   // The two startup defaults this panel's dropdowns write can also be changed
   // from the VS Code settings editor, another window, or the config panel.
   // Those changes arrive here and nowhere else, so the chips and the "New

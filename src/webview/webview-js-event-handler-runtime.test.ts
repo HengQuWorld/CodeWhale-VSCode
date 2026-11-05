@@ -1151,6 +1151,24 @@ describe("webview-js-event-handler runtime", () => {
     expect(harness.getElement("input").focusCount).toBe(1);
   });
 
+  it("appends host-attached terminal selection after the current draft", () => {
+    const harness = createRuntimeHarness();
+
+    // `appendInputText` is the terminal-selection context-menu attach: the
+    // quoted block must land after the user's half-typed draft, not over it,
+    // and the draft's trailing whitespace must not leave a gap.
+    harness.getElement("input").value = "focus on tests  ";
+    harness.dispatchMessage({
+      type: "appendInputText",
+      text: "```\nerror line\n```",
+    });
+
+    expect(harness.composerTextCalls).toEqual([
+      "focus on tests\n\n```\nerror line\n```",
+    ]);
+    expect(harness.getElement("input").focusCount).toBe(1);
+  });
+
   it("renders the plan-approve action only when messageComplete carries planApproval", () => {
     const harness = createRuntimeHarness();
 
