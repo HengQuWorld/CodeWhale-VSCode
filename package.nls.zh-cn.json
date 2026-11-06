@@ -1,7 +1,7 @@
 {
   "displayName": "CodeWhale",
   "description": "基于 CodeWhale 引擎的 AI 编程智能体",
-  "viewsContainers.activitybar.title": "CodeWhale",
+  "viewsContainers.activitybar.title": "CodeWhale 智能体",
   "views.chat.name": "CodeWhale 智能体",
   "commands.openChat.title": "CodeWhale: 打开智能体",
   "commands.newThread.title": "CodeWhale: 新建智能体会话",

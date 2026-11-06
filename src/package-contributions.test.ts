@@ -146,6 +146,27 @@ describe("package.json terminal context-menu contribution", () => {
   });
 });
 
+describe("package.json view title composition", () => {
+  // VSCode composes a single-view container's panel title as
+  // `${containerTitle}: ${viewName}` — unless the two are identical, in which
+  // case it shows just the name. A container title like "CodeWhale" next to a
+  // view named "CodeWhale Agent" renders the ugly "CodeWhale: CodeWhale
+  // Agent" the panel used to show.
+  const TITLE_KEY = "viewsContainers.activitybar.title";
+  const NAME_KEY = "views.chat.name";
+
+  it("gives the single-view container the same title as its view", () => {
+    for (const file of ["package.nls.json", "package.nls.zh-cn.json"]) {
+      const nls = JSON.parse(
+        fs.readFileSync(path.resolve(process.cwd(), file), "utf8")
+      ) as Record<string, string>;
+      expect(nls[TITLE_KEY], file).toBeTruthy();
+      expect(nls[NAME_KEY], file).toBeTruthy();
+      expect(nls[TITLE_KEY], file).toBe(nls[NAME_KEY]);
+    }
+  });
+});
+
 describe("webview stays free of the settings button", () => {
   it("has no #btn-config markup, handler, or styles left behind", () => {
     const files = [
