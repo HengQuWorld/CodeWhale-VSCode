@@ -40,11 +40,15 @@ CodeWhale for VS Code 是 [CodeWhale](https://github.com/codewhale-hq/Codewhale)
 
 - **随回合推进的成本与上下文** —— 状态栏上的实时读数依赖 [Codewhale#7074](https://github.com/codewhale-hq/Codewhale/pull/7074)，已于 2026-10-25 合并、尚未进入任何已发布的引擎 tag。它是引擎侧的那一半：每次模型调用发出的用量回执会带上这次调用自己的价格，以及提供商实际计费的提示词大小。在引擎携带它之前，这两个读数会在回合结束时才落定，与之前一致；对话本身不受影响。
 
+- **收到工作区漂移通知的会话无法 undo、fork 与 retry** —— 当引擎向某个会话追加过工作区、技能或记忆的漂移通知（`<context_update>`）后，那条会话就再也切不开了：第一条通知之后的每次 undo、fork 与 retry 都以 "Cannot identify an exact saved-history boundary" 拒绝。引擎侧的修复是 [Codewhale#7234](https://github.com/codewhale-hq/Codewhale/pull/7234)，2026-11-06 提交上游。在已发布引擎携带它之前，带漂移通知的会话保持完整；没有通知的会话切割正常。
+
 在引擎 **v0.10.1** 上，以上各项都成立，只有明确需要 **v0.10.2** 的那三项例外；特别是那里会拒绝第二个运行本扩展的 VS Code 窗口、或本扩展与 TUI 并用 —— 那个版本引入的 runtime ownership 模型在 [Codewhale#6924](https://github.com/codewhale-hq/Codewhale/pull/6924) 落地之前，只允许每台机器一个驱动客户端。
 
 在引擎 **v0.10.0** 上，其余各项与 0.8.3 时期完全一致：不显示 Branch 行（从一个丢失工具调用的会话分叉出的分支，第一条消息可能失败）、命令的变更行只到路径为止（从 Sessions 栏打开的会话会用会话文档重建补丁，而不是取引擎记录的、由那次调用造成的那一份）、打开的会话不会被移动、undo 把改动留在磁盘上且 Revert 对存在的快照回答 `409`、`[providers.<name>]` 路由不出现在选择器里、fork 新建自己的会话文档、大型线程 store 在引擎侧缓慢。本版的 Skills 面板在 v0.10.0 上会把激活与详情带着原因变暗，列出、开关以及安装 / 更新 / 移除 / 信任 / 审计操作不受影响。
 
 用 `codewhale update` 保持引擎最新，用 `codewhale --version` 确认版本。
+
+引擎升级对它碰过的数据是单向的。更新的 `codewhale` 在运行中会把底层数据向前迁移 —— turn 记录迁到当前 schema、各工作区的 sub-agent 状态迁到 `v3` —— 旧二进制随即拒绝打开新引擎写过的内容（例如 `Turn schema v6 is newer than supported v5`）。因此把引擎二进制换回去不是回滚：测试预发布引擎请用运行数据的副本，正式安装的引擎交给 `codewhale update` 向前走。
 
 ## 预览
 

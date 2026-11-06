@@ -1,5 +1,13 @@
 # Change Log
 
+## Unreleased
+
+Works on the same engine floor as 0.9.4 (**v0.10.2**); nothing here waits on an engine build.
+
+### Bug Fixes
+
+- **Undo no longer reads a served route as missing** — the runtime-capability probe treated every 404 as "no such route", and an engine that grew a GET preview on the previously POST-only patch-undo route answered the probe from its handler, whose unknown-thread 404 grayed Undo with "the runtime does not support patch-undo" although the endpoint worked. A 404 carrying the engine's error envelope now counts as the route existing; only a bare 404 means missing.
+
 ## 0.9.4
 
 Everything here is client-side and works on engine **v0.10.2**, the floor 0.9.3 already names; nothing waits on an engine build.

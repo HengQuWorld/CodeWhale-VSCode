@@ -40,11 +40,15 @@ What still needs a Codewhale build newer than any tagged engine release:
 
 - **Cost and context that move during a turn** — the status bar's live figures ride on [Codewhale#7074](https://github.com/codewhale-hq/Codewhale/pull/7074), merged upstream 2026-10-25 and not yet in any tagged engine release. It is the engine half: the usage receipt each model call emits carries that call's own price and the prompt size the provider billed. Until an engine carries it the two chips settle when the turn ends, as they did before, and the conversation itself is unaffected.
 
+- **Undo, fork and retry on conversations that received workspace drift notices** — an engine that has told a conversation about workspace, skills or memory drift (a `<context_update>` append) leaves that conversation unable to cut: every undo, fork and retry past the first notice refused with "Cannot identify an exact saved-history boundary". The engine half is [Codewhale#7234](https://github.com/codewhale-hq/Codewhale/pull/7234), opened upstream 2026-11-06. Until a tagged engine carries it, a conversation with a drift notice keeps its turns whole; conversations without one cut normally.
+
 On engine **v0.10.1** everything above holds except the three items that need **v0.10.2**; in particular a second VS Code window running this extension, or this extension beside the TUI, is refused there — the runtime ownership model that release introduced allowed one driving client per machine until [Codewhale#6924](https://github.com/codewhale-hq/Codewhale/pull/6924) landed.
 
 On engine **v0.10.0** the rest stays as it was on 0.8.3: the Branch row is not offered (and a branch of a conversation that lost a tool call may refuse its first message), a command's change rows stop at the paths (and a session opened from the Sessions rail takes its patches from the session document rather than from the engine's own record of the call that made them), an open conversation stays on its provider, undo leaves the changed files on disk and Revert answers `409` for a snapshot that exists, a `[providers.<name>]` route is missing from the picker, a fork starts a session document of its own, and a large thread store is slow engine-side. The Skills panel dims its activation and detail view there with the reason, while listing, toggling and the install / update / remove / trust / audit actions keep working.
 
 Keep the engine current with `codewhale update`; `codewhale --version` is the check.
+
+An engine upgrade is one-way on the data it touches. A newer `codewhale` migrates what it runs on forward as it goes — turn records to their current schema, per-workspace sub-agent state to `v3` — and an older binary then refuses to open what the newer one wrote (for example `Turn schema v6 is newer than supported v5`). Swapping the engine binary back is therefore not a rollback: test a pre-release engine against a copy of your runtime data, and let `codewhale update` keep the installed engine moving forward.
 
 ## Preview
 
