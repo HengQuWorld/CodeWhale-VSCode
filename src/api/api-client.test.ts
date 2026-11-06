@@ -1118,6 +1118,27 @@ describe("CodeWhaleApiClient - per-file revert", () => {
     expect(caps.threadFileRevert).toBe(true);
   });
 
+  it("reads a handler's JSON error envelope on a 404 as the route existing", async () => {
+    // Engines grew GET previews on previously POST-only routes (patch-undo),
+    // so a GET probe now runs the handler, whose unknown-thread 404 carries
+    // the engine's error envelope. Only a bare 404 — no envelope — means
+    // the route itself is missing.
+    const { client } = clientStubbingRaw((_method, path) =>
+      path === "/v1/threads/__probe__/patch-undo"
+        ? {
+            statusCode: 404,
+            data: JSON.stringify({
+              error: { message: "Thread not found: __probe__", status: 404 },
+            }),
+          }
+        : { statusCode: 404, data: "" }
+    );
+
+    const caps = await client.probeRuntimeCapabilities();
+
+    expect(caps.threadPatchUndo).toBe(true);
+  });
+
   it("posts a per-file revert to the thread-scoped file-revert route", async () => {
     const { client, calls } = clientStubbingRaw(() => ({
       statusCode: 200,

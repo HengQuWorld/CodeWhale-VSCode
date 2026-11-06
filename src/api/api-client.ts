@@ -1563,8 +1563,22 @@ export class CodeWhaleApiClient {
       // For 404, return false; for other errors (401, 405, 500), still
       // return true since the endpoint exists (just requires auth, has a
       // different method, or has an internal error).
-      const { statusCode } = await this.requestRaw(method, path, method === "POST" ? {} : undefined);
-      return statusCode !== 404;
+      //
+      // A 404 needs one more look before meaning "no route": the router
+      // answers an unknown route with an empty body, while a probe that
+      // reached a handler gets the engine's JSON error envelope back
+      // ("Thread not found: __probe__"). Engines grew GET previews on
+      // previously POST-only routes (patch-undo), so reading every 404 as
+      // "no route" disabled buttons a runtime actually serves.
+      const { statusCode, data } = await this.requestRaw(method, path, method === "POST" ? {} : undefined);
+      if (statusCode !== 404) {
+        return true;
+      }
+      try {
+        return Boolean(JSON.parse(data)?.error);
+      } catch {
+        return false;
+      }
     } catch {
       return false;
     }
