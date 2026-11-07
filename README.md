@@ -1,11 +1,11 @@
 # CodeWhale for VS Code — a lightweight GUI frontend for the CodeWhale agent
 
-[![Version](https://img.shields.io/badge/version-0.9.4-blue)](https://github.com/HengQuWorld/CodeWhale-VSCode)
+[![Version](https://img.shields.io/badge/version-0.9.5-blue)](https://github.com/HengQuWorld/CodeWhale-VSCode)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![CI](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/ci.yml/badge.svg)](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/ci.yml)
 [![Release](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/release.yml/badge.svg)](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/release.yml)
 [![VS Code](https://img.shields.io/badge/VS%20Code-1.85+-informational)](https://code.visualstudio.com/)
-[![VSIX](https://img.shields.io/badge/VSIX-~467%20KB-brightgreen)](https://github.com/HengQuWorld/CodeWhale-VSCode/releases)
+[![VSIX](https://img.shields.io/badge/VSIX-~495%20KB-brightgreen)](https://github.com/HengQuWorld/CodeWhale-VSCode/releases)
 [![macOS](https://img.shields.io/badge/macOS-supported-brightgreen)](#requirements)
 [![Windows](https://img.shields.io/badge/Windows-supported-brightgreen)](#requirements)
 [![Linux](https://img.shields.io/badge/Linux-supported-brightgreen)](#requirements)
@@ -22,7 +22,7 @@ The split is deliberate: **the agent stays in the engine, the ergonomics stay in
 
 | | |
 |---|---|
-| VSIX size (0.9.4) | ~472 KB |
+| VSIX size (0.9.5) | ~495 KB |
 | Runtime npm dependencies | **none** — webpack inlines the extension's own TypeScript (and `marked` for rendering) |
 | Bundled engine or model | **none** — `codewhale` is a separate native binary |
 | Duplicated agent logic | **none** — the GUI is an adapter over the engine's local runtime API |
@@ -32,15 +32,15 @@ The frontend is a webview. `ChatProvider` runs in the extension host, speaks HTT
 
 Because nothing about the agent is copied into the extension, the engine can ship new capabilities and fixes without a frontend release.
 
-### Engine compatibility for 0.9.4
+### Engine compatibility for 0.9.5
 
-0.9.4 runs on engine **v0.10.2**, the same floor 0.9.3 names, and everything it ships is client-side: a transcript that keeps the engine's tool notes out of your messages, a divider between the sidebar and the conversation that no longer depends on the theme, and a navigation rail whose dots track the messages they mark. The three surfaces with a floor of their own are unchanged — the memory review commands and the **MCP** panel arrive with engine **v0.10.0** (the release that introduced the Context Lens routes they read, and the MCP management routes whose listing names the layer each server belongs to and carries the configuration revision every edit presents), while the workspace-trust banner, the client a session reports itself as, and a second window or a second CodeWhale client on the same machine all need **v0.10.2**.
+0.9.5 runs on engine **v0.10.2**, the same floor 0.9.4 names, and everything it ships is client-side: a failure cue that lets you hear a turn end badly, terminal text that joins the conversation from a right-click, and the view renamed to CodeWhale Agent. The three surfaces with a floor of their own are unchanged — the memory review commands and the **MCP** panel arrive with engine **v0.10.0** (the release that introduced the Context Lens routes they read, and the MCP management routes whose listing names the layer each server belongs to and carries the configuration revision every edit presents), while the workspace-trust banner, the client a session reports itself as, and a second window or a second CodeWhale client on the same machine all need **v0.10.2**.
 
 What still needs a Codewhale build newer than any tagged engine release:
 
 - **Cost and context that move during a turn** — the status bar's live figures ride on [Codewhale#7074](https://github.com/codewhale-hq/Codewhale/pull/7074), merged upstream 2026-10-25 and not yet in any tagged engine release. It is the engine half: the usage receipt each model call emits carries that call's own price and the prompt size the provider billed. Until an engine carries it the two chips settle when the turn ends, as they did before, and the conversation itself is unaffected.
 
-- **Undo, fork and retry on conversations that received workspace drift notices** — an engine that has told a conversation about workspace, skills or memory drift (a `<context_update>` append) leaves that conversation unable to cut: every undo, fork and retry past the first notice refused with "Cannot identify an exact saved-history boundary". The engine half is [Codewhale#7234](https://github.com/codewhale-hq/Codewhale/pull/7234), opened upstream 2026-11-06. Until a tagged engine carries it, a conversation with a drift notice keeps its turns whole; conversations without one cut normally.
+- **Undo, fork and retry on conversations that received workspace drift notices** — an engine that has told a conversation about workspace, skills or memory drift (a `<context_update>` append) leaves that conversation unable to cut: every undo, fork and retry past the first notice refused with "Cannot identify an exact saved-history boundary". The engine half is [Codewhale#7234](https://github.com/codewhale-hq/Codewhale/pull/7234), merged upstream 2026-11-07 and not yet in a tagged engine release. Until a tagged engine carries it, a conversation with a drift notice keeps its turns whole; conversations without one cut normally.
 
 On engine **v0.10.1** everything above holds except the three items that need **v0.10.2**; in particular a second VS Code window running this extension, or this extension beside the TUI, is refused there — the runtime ownership model that release introduced allowed one driving client per machine until [Codewhale#6924](https://github.com/codewhale-hq/Codewhale/pull/6924) landed.
 
@@ -128,12 +128,12 @@ npx @vscode/vsce package --no-dependencies
 Then install the generated `.vsix` (`Extensions: Install from VSIX...`), or from a terminal:
 
 ```bash
-code --install-extension ./brotherwhale-vscode-0.9.4.vsix --force
+code --install-extension ./brotherwhale-vscode-0.9.5.vsix --force
 ```
 
 > **Trae CN users:** if `code` is not on your `PATH`, use the bundled CLI:
 > ```bash
-> "/Applications/Trae CN.app/Contents/Resources/app/bin/code" --install-extension ./brotherwhale-vscode-0.9.4.vsix --force
+> "/Applications/Trae CN.app/Contents/Resources/app/bin/code" --install-extension ./brotherwhale-vscode-0.9.5.vsix --force
 > ```
 
 **Option C — Open VSX:** [Open VSX](https://open-vsx.org/extension/hengquworld/brotherwhale-vscode) carries the same builds for editors outside Microsoft's ecosystem — VSCodium, and CodeArts on HarmonyOS PC, whose extension panel has an Open VSX page. Search "CodeWhale" and install; no VSIX to side-load.
@@ -298,7 +298,7 @@ Reloading or closing the extension stops that window's Runtime and interrupts ac
 
 **Installing a VSIX**
 ```bash
-code --install-extension /path/to/brotherwhale-vscode-0.9.4.vsix --force
+code --install-extension /path/to/brotherwhale-vscode-0.9.5.vsix --force
 ```
 
 ## Privacy & data

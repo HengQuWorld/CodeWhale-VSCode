@@ -1,12 +1,22 @@
 # Change Log
 
-## Unreleased
+## 0.9.5
 
 Works on the same engine floor as 0.9.4 (**v0.10.2**); nothing here waits on an engine build.
 
+### New Features
+
+- **A turn that fails makes itself heard** — A turn that ends in failure — a dead network, a refused key — used to end in silence. It now plays its own harsh, buzzy cue, while the success chime became the softer falling-fifth tone, so you hear which kind of ending a turn had without reading the transcript. A turn you interrupted stays silent, and turns ending at the same moment are still heard once.
+
+- **Terminal text joins the conversation in two clicks** — Select text in a terminal, right-click, and **Attach Terminal Selection** adds it to the composer as a quoted block, appended after anything already typed. The entry only appears when something is actually selected, and your clipboard is left untouched.
+
+### Improvements
+
+- **The view is named for what it does** — The sidebar view now reads **CodeWhale Agent** (Chinese: "CodeWhale 智能体") instead of "Chat" — in its title and in the commands that open it — so the panel says this is an agent that does real work, not just a chat window. Where the view docks into the bottom panel it is labelled just "CodeWhale Agent" rather than VS Code's doubled "CodeWhale: CodeWhale Agent".
+
 ### Bug Fixes
 
-- **Undo no longer reads a served route as missing** — the runtime-capability probe treated every 404 as "no such route", and an engine that grew a GET preview on the previously POST-only patch-undo route answered the probe from its handler, whose unknown-thread 404 grayed Undo with "the runtime does not support patch-undo" although the endpoint worked. A 404 carrying the engine's error envelope now counts as the route existing; only a bare 404 means missing.
+- **Undo no longer reads a served route as missing** — The runtime-capability probe treated every 404 as "no such route", and an engine that grew a GET preview on the previously POST-only patch-undo route answered the probe from its handler, whose unknown-thread 404 grayed Undo with "the runtime does not support patch-undo" although the endpoint worked. A 404 carrying the engine's error envelope now counts as the route existing; only a bare 404 means missing.
 
 ## 0.9.4
 
