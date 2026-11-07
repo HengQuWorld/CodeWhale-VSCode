@@ -1,7 +1,7 @@
 /**
- * The completion cue's gates and its delivery.
+ * The ending cues' gates and their delivery.
  *
- * What matters here is that the cue is *stoppable and quiet when it should be*:
+ * What matters here is that a cue is *stoppable and quiet when it should be*:
  * the user's setting wins over everything, a burst of finished turns is one
  * sound rather than a rattle, a path this host cannot vouch for is silence, and
  * a machine without a player costs nothing but a false. Every test gets a fresh
@@ -51,6 +51,7 @@ const ANY_CUE = "/ext/media/completion-chime.wav";
  */
 let extensionDir = "";
 let cue = "";
+let failureCue = "";
 
 beforeEach(() => {
   state.enabled = true;
@@ -64,7 +65,9 @@ beforeEach(() => {
   extensionDir = fs.mkdtempSync(path.join(os.tmpdir(), "completion-cue-ext-"));
   fs.mkdirSync(path.join(extensionDir, "media"), { recursive: true });
   fs.writeFileSync(path.join(extensionDir, "media", "completion-chime.wav"), "");
+  fs.writeFileSync(path.join(extensionDir, "media", "failure-chime.wav"), "");
   cue = path.join(extensionDir, "media", "completion-chime.wav");
+  failureCue = path.join(extensionDir, "media", "failure-chime.wav");
 });
 
 afterEach(() => {
@@ -274,5 +277,72 @@ describe("playCompletionSound", () => {
     });
 
     expect(playCompletionSound(extensionDir, { ...HOST, nowMs: 1_000 })).toBe(false);
+  });
+});
+
+describe("playFailureSound", () => {
+  it("hands the player the failure cue, not the success cue", async () => {
+    const { playFailureSound } = await freshModule();
+
+    expect(playFailureSound(extensionDir, { ...HOST, nowMs: 1_000 })).toBe(true);
+    expect(state.spawn).toHaveBeenCalledExactlyOnceWith("/usr/bin/afplay", [failureCue], {
+      stdio: "ignore",
+      windowsHide: true,
+    });
+  });
+
+  it("stays silent when the failure cue is not on disk, and still rings the success cue", async () => {
+    const { playFailureSound, playCompletionSound } = await freshModule();
+    fs.rmSync(path.join(extensionDir, "media", "failure-chime.wav"));
+
+    // The same vouching rule as the success cue, applied to the failure cue's
+    // own file: an ending whose sound is missing costs a silent skip, and a
+    // missing failure cue says nothing about the success cue.
+    expect(playFailureSound(extensionDir, { ...HOST, nowMs: 1_000 })).toBe(false);
+    expect(playCompletionSound(extensionDir, { ...HOST, nowMs: 2_000 })).toBe(true);
+    expect(state.spawn).toHaveBeenCalledTimes(1);
+  });
+
+  it("is gated by the same setting as the success cue", async () => {
+    const { playFailureSound } = await freshModule();
+    state.enabled = false;
+
+    expect(playFailureSound(extensionDir, { ...HOST, nowMs: 1_000 })).toBe(false);
+    expect(state.spawn).not.toHaveBeenCalled();
+  });
+
+  it("shares the floor with the success cue, in both directions", async () => {
+    const { COMPLETION_SOUND_MIN_INTERVAL_MS, playCompletionSound, playFailureSound } = await freshModule();
+    const host = { ...HOST, nowMs: 10_000 };
+
+    // Success first, failure inside the floor: one moment is one sound.
+    expect(playCompletionSound(extensionDir, host)).toBe(true);
+    expect(
+      playFailureSound(extensionDir, { ...host, nowMs: 10_000 + COMPLETION_SOUND_MIN_INTERVAL_MS - 1 }),
+    ).toBe(false);
+    expect(
+      playFailureSound(extensionDir, { ...host, nowMs: 10_000 + COMPLETION_SOUND_MIN_INTERVAL_MS }),
+    ).toBe(true);
+    expect(state.spawn).toHaveBeenCalledTimes(2);
+
+    // And the failure cue takes the slot just as a success cue would.
+    state.spawn.mockClear();
+    expect(playCompletionSound(extensionDir, { ...host, nowMs: 30_000 })).toBe(true);
+    expect(
+      playCompletionSound(extensionDir, { ...host, nowMs: 30_000 + COMPLETION_SOUND_MIN_INTERVAL_MS - 1 }),
+    ).toBe(false);
+    expect(
+      playFailureSound(extensionDir, { ...host, nowMs: 30_000 + COMPLETION_SOUND_MIN_INTERVAL_MS }),
+    ).toBe(true);
+    expect(state.spawn).toHaveBeenCalledTimes(2);
+  });
+
+  it("survives a spawn that throws, like the success cue", async () => {
+    const { playFailureSound } = await freshModule();
+    state.spawn.mockImplementation(() => {
+      throw new Error("EMFILE");
+    });
+
+    expect(playFailureSound(extensionDir, { ...HOST, nowMs: 1_000 })).toBe(false);
   });
 });

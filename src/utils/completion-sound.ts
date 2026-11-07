@@ -8,7 +8,11 @@
  * Delivery mirrors the TUI's own audio dispatch (`crates/tui/src/notify/audio.rs`):
  * a bundled WAV handed to the platform's player, best-effort and out of band, so
  * a machine with no player costs a silent skip and never the turn that just
- * ended. The cue itself is an original two-note chime — see `media/README.md`.
+ * ended. The cues are original additive synthesis — see `media/README.md`: the
+ * success cue is a clean falling fifth (A5→D5), the failure cue for a turn
+ * that failed — a dead network among other causes — two urgent, buzzy blips
+ * (minor-second clusters), so the endings are told apart by shape before the
+ * user has read a word of the transcript.
  *
  * The cue is that bundled file and nothing else: it is played from the
  * extension's own absolute path only while the file is really there, because a
@@ -25,12 +29,20 @@ import * as vscode from "vscode";
 /** VS Code setting that gates the cue: `brotherwhale.completionSound`. */
 export const COMPLETION_SOUND_SETTING = "completionSound";
 
-/** The bundled cue, relative to the extension root. */
+/** The cue for a turn that finished successfully, relative to the extension root. */
 export const COMPLETION_SOUND_FILE = "completion-chime.wav";
+
+/** The cue for a turn that ended in failure, relative to the extension root. */
+export const FAILURE_SOUND_FILE = "failure-chime.wav";
+
+/** Which ending a cue announces. */
+export type CompletionCueKind = "completed" | "failed";
 
 /**
  * Two turns finishing together — a parked thread and the one being watched —
- * must not stack into a rattle. The TUI's own event sound policy carries the
+ * must not stack into a rattle. The floor is shared by both cues: a success
+ * chime and a failure cue arriving in the same instant are still one moment
+ * for the listener. The TUI's own event sound policy carries the
  * same floor (`notifications.event_sound.min_interval_ms`).
  */
 export const COMPLETION_SOUND_MIN_INTERVAL_MS = 1000;
@@ -56,6 +68,10 @@ export function completionSoundEnabled(): boolean {
  * Windows goes through PowerShell because Node has no audio API of its own and
  * `SoundPlayer` is the one WAV player present on every Windows install;
  * `PlaySync` blocks, which is what a throwaway child process is for.
+ *
+ * Both cues share the one recipe — additive synthesis; the success cue is a
+ * clean falling fifth (A5→D5), the failure cue two urgent buzzy blips —
+ * so they differ by shape, not by player.
  */
 export function completionSoundCommands(
   platform: NodeJS.Platform,
@@ -112,8 +128,8 @@ function commandIsRunnable(command: string): boolean {
 }
 
 /**
- * The bundled cue's absolute path, or undefined when this host cannot vouch for
- * the file.
+ * A bundled cue's absolute path, or undefined when this host cannot vouch for
+ * the file. Defaults to the success cue; the failure cue is named explicitly.
  *
  * A cue is *this extension's own* file and nothing else, so two things have to
  * hold before a player is even considered: `extensionPath` is the absolute
@@ -129,11 +145,11 @@ function commandIsRunnable(command: string): boolean {
  * full run on the machine of whoever ran it). Silence is the only safe answer
  * for a path we cannot vouch for.
  */
-export function bundledCuePath(extensionPath: string): string | undefined {
+export function bundledCuePath(extensionPath: string, file: string = COMPLETION_SOUND_FILE): string | undefined {
   if (!extensionPath || !path.isAbsolute(extensionPath)) return undefined;
-  const file = path.join(extensionPath, "media", COMPLETION_SOUND_FILE);
+  const cue = path.join(extensionPath, "media", file);
   try {
-    return fs.existsSync(file) ? file : undefined;
+    return fs.existsSync(cue) ? cue : undefined;
   } catch {
     return undefined;
   }
@@ -152,7 +168,8 @@ export interface CompletionSoundHost {
 }
 
 /**
- * Play the cue for a finished turn. Returns true when a player was started.
+ * Play the success cue for a finished turn. Returns true when a player was
+ * started.
  *
  * Silent no-ops: the setting is off, the extension path names no cue we can
  * vouch for (see `bundledCuePath`), the last cue is still within the floor, or
@@ -162,15 +179,39 @@ export function playCompletionSound(
   extensionPath: string,
   host: CompletionSoundHost = {},
 ): boolean {
+  return playTurnEndSound(extensionPath, COMPLETION_SOUND_FILE, host);
+}
+
+/**
+ * Play the failure cue for a turn that ended in failure — a dead network, a
+ * refused key, anything that made the turn fail rather than finish. The same
+ * gates as the success cue: the setting, the path, the shared floor, the
+ * player. Only the file differs, and with it the shape the listener hears:
+ * urgent, buzzy blips instead of a clean fall.
+ */
+export function playFailureSound(
+  extensionPath: string,
+  host: CompletionSoundHost = {},
+): boolean {
+  return playTurnEndSound(extensionPath, FAILURE_SOUND_FILE, host);
+}
+
+/** One delivery for both cues: gate, vouch for the path, take the floor's
+ *  slot, and hand the file to the platform player out of band. */
+function playTurnEndSound(
+  extensionPath: string,
+  file: string,
+  host: CompletionSoundHost,
+): boolean {
   const { nowMs = Date.now(), platform = process.platform, isRunnable } = host;
   if (!completionSoundEnabled()) return false;
   // Settled before the floor and before any player is looked up: a path this
   // host cannot vouch for is not a cue, so nothing downstream has to reason
   // about it (and no PATH walk is spent on it).
-  const file = bundledCuePath(extensionPath);
-  if (!file) return false;
+  const cue = bundledCuePath(extensionPath, file);
+  if (!cue) return false;
   if (nowMs - lastPlayedMs < COMPLETION_SOUND_MIN_INTERVAL_MS) return false;
-  const resolved = resolveSoundCommand(platform, file, isRunnable);
+  const resolved = resolveSoundCommand(platform, cue, isRunnable);
   if (!resolved) return false;
   // Take the slot before spawning: a burst of completions is throttled whether
   // or not the player itself turns out to work.

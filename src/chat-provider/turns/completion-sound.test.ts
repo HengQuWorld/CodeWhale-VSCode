@@ -1,23 +1,28 @@
 /**
- * When the host rings the completion cue.
+ * When the host rings an ending cue.
  *
  * The cue is played by `utils/completion-sound` (which owns the setting, the
  * floor between cues, the path it is willing to vouch for and the platform
- * player); what these tests pin is the *timing*: a finished turn rings, a turn
- * that failed or was interrupted does not, a compaction pass is not a
- * conversation turn and does not ring, and a turn finishing on a thread the
- * view is not on rings too — that last case is what the cue is for.
+ * player); what these tests pin is the *timing*: a finished turn rings the
+ * success chime, a turn that failed rings the failure cue — a dead network must
+ * be heard, not read — a turn the user interrupted themselves stays silent, a
+ * compaction pass is not a conversation turn and does not ring, a turn whose
+ * ending the runtime recovered is history and does not ring, and a turn
+ * ending on a thread the view is not on rings too — that last case is what
+ * the cue is for.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../../utils/completion-sound", () => ({
   playCompletionSound: vi.fn(() => true),
+  playFailureSound: vi.fn(() => true),
 }));
 
 import { ChatProvider } from "../../chat-provider";
-import { playCompletionSound } from "../../utils/completion-sound";
+import { playCompletionSound, playFailureSound } from "../../utils/completion-sound";
 
 const cue = playCompletionSound as unknown as ReturnType<typeof vi.fn>;
+const failCue = playFailureSound as unknown as ReturnType<typeof vi.fn>;
 const EXTENSION_PATH = "/ext";
 
 function createProvider(extensionPath: string | null = EXTENSION_PATH) {
@@ -69,6 +74,7 @@ function turnCompleted(turnId: string, status: string, extra: Record<string, unk
 
 beforeEach(() => {
   cue.mockClear();
+  failCue.mockClear();
 });
 
 describe("the cue for the conversation being watched", () => {
@@ -78,6 +84,7 @@ describe("the cue for the conversation being watched", () => {
     (provider as any).handleRuntimeEvent(turnCompleted("turn-1", "completed"));
 
     expect(cue).toHaveBeenCalledExactlyOnceWith(EXTENSION_PATH);
+    expect(failCue).not.toHaveBeenCalled();
   });
 
   it("is never asked for when the host has no extension path", () => {
@@ -91,32 +98,41 @@ describe("the cue for the conversation being watched", () => {
     (provider as any).handleRuntimeEvent(turnCompleted("turn-1", "completed"));
 
     expect(cue).not.toHaveBeenCalled();
+    expect(failCue).not.toHaveBeenCalled();
   });
 
-  it("stays silent when the turn failed", () => {
+  it("rings the failure cue when the turn failed", () => {
     const { provider } = createProvider();
 
+    // The turn died — a dead network, a refused key — and the transcript
+    // says so, but the user may have looked away: the failure is the one
+    // ending that must not pass in silence.
     (provider as any).handleRuntimeEvent(turnCompleted("turn-1", "failed"));
 
+    expect(failCue).toHaveBeenCalledExactlyOnceWith(EXTENSION_PATH);
     expect(cue).not.toHaveBeenCalled();
   });
 
   it("stays silent when the turn was interrupted", () => {
     const { provider } = createProvider();
 
+    // The user ended this turn themselves; no cue is owed.
     (provider as any).handleRuntimeEvent(turnCompleted("turn-1", "interrupted"));
 
     expect(cue).not.toHaveBeenCalled();
+    expect(failCue).not.toHaveBeenCalled();
   });
 
-  it("stays silent for a turn whose completion the runtime recovered", () => {
+  it("stays silent for a turn whose ending the runtime recovered", () => {
     const { provider } = createProvider();
 
     // The turn was already terminal on disk when the runtime started again:
     // its ending is history, not something that just happened.
     (provider as any).handleRuntimeEvent(turnCompleted("turn-old", "completed", { recovered: true }));
+    (provider as any).handleRuntimeEvent(turnCompleted("turn-old", "failed", { recovered: true }));
 
     expect(cue).not.toHaveBeenCalled();
+    expect(failCue).not.toHaveBeenCalled();
   });
 
   it("stays silent for a compaction pass, which is not a conversation turn", async () => {
@@ -124,10 +140,24 @@ describe("the cue for the conversation being watched", () => {
     (api as any).compactThread = vi.fn(async () => ({ thread: { id: "thread-1" }, turn: { id: "turn_compact" } }));
     await (provider as any).handleCompact();
     cue.mockClear();
+    failCue.mockClear();
 
     (provider as any).handleRuntimeEvent(turnCompleted("turn_compact", "completed"));
 
     expect(cue).not.toHaveBeenCalled();
+    expect(failCue).not.toHaveBeenCalled();
+  });
+
+  it("stays silent when a compaction pass fails", () => {
+    const { provider } = createProvider();
+
+    // The compaction marker is drained by the terminal event, so a failed
+    // compaction is armed the same way `handleCompact` arms a completed one.
+    (provider as any).compactionTurns.add("turn_compact-2");
+    (provider as any).handleRuntimeEvent(turnCompleted("turn_compact-2", "failed"));
+
+    expect(cue).not.toHaveBeenCalled();
+    expect(failCue).not.toHaveBeenCalled();
   });
 });
 
@@ -162,18 +192,32 @@ describe("the cue for a thread the view is not on", () => {
     (provider as any).handleBackgroundEvent("thread-b", backgroundEvent("completed"));
 
     expect(cue).toHaveBeenCalledExactlyOnceWith(EXTENSION_PATH);
+    expect(failCue).not.toHaveBeenCalled();
   });
 
-  it("stays silent when a parked thread's turn failed", () => {
+  it("rings the failure cue when a parked thread's turn failed", () => {
     const { provider } = createProvider();
     watchBackground(provider);
 
+    // A parked thread dying in the background is exactly the ending the user
+    // is not there to see; the failure cue is what carries the news.
     (provider as any).handleBackgroundEvent("thread-b", backgroundEvent("failed"));
 
+    expect(failCue).toHaveBeenCalledExactlyOnceWith(EXTENSION_PATH);
     expect(cue).not.toHaveBeenCalled();
   });
 
-  it("stays silent for a recovered completion on a parked thread", () => {
+  it("stays silent when a parked thread's turn was interrupted", () => {
+    const { provider } = createProvider();
+    watchBackground(provider);
+
+    (provider as any).handleBackgroundEvent("thread-b", backgroundEvent("interrupted"));
+
+    expect(cue).not.toHaveBeenCalled();
+    expect(failCue).not.toHaveBeenCalled();
+  });
+
+  it("stays silent for a recovered ending on a parked thread", () => {
     const { provider } = createProvider();
     watchBackground(provider);
 
@@ -181,7 +225,12 @@ describe("the cue for a thread the view is not on", () => {
       "thread-b",
       backgroundEvent("completed", { recovered: true }),
     );
+    (provider as any).handleBackgroundEvent(
+      "thread-b",
+      backgroundEvent("failed", { recovered: true }),
+    );
 
     expect(cue).not.toHaveBeenCalled();
+    expect(failCue).not.toHaveBeenCalled();
   });
 });

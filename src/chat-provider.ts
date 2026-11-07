@@ -71,7 +71,11 @@ import {
   compactionCheckpointBody,
   compactionCheckpointTextBody,
 } from "./utils/compaction-summary";
-import { playCompletionSound } from "./utils/completion-sound";
+import {
+  playCompletionSound,
+  playFailureSound,
+  type CompletionCueKind,
+} from "./utils/completion-sound";
 import { MAX_EAGER_HASH_BYTES, sha256OfFile } from "./utils/file-hash";
 import { t, webviewTranslations, currentLocale } from "./i18n";
 import { composeSkillTurnPrompt } from "./utils/skill-activation";
@@ -566,20 +570,22 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
   }
 
   /**
-   * The audible "a turn finished" cue for a turn observed from the host — the
+   * The audible "a turn ended" cue for a turn observed from the host — the
    * one being watched or a parked one whose watch is reporting. The setting,
    * the floor between cues and the platform player all live in
-   * `utils/completion-sound`.
+   * `utils/completion-sound`. A completed turn rings the success chime, a
+   * failed one the failure cue, so the kind of ending is audible at once.
    *
    * A provider with no extension URI asks for nothing. The alternative — a
    * stand-in empty path — is what let a test-harness provider play the chime
    * for real: the player resolves a relative path against the process's own
    * working directory, and this repository's working directory holds the cue.
    */
-  private playCompletionCue(): void {
+  private playCompletionCue(kind: CompletionCueKind = "completed"): void {
     const extensionPath = this.extensionUri?.fsPath;
     if (!extensionPath) return;
-    playCompletionSound(extensionPath);
+    if (kind === "failed") playFailureSound(extensionPath);
+    else playCompletionSound(extensionPath);
   }
 
   private debugLog(msg: string): void {
@@ -6330,10 +6336,16 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         this.clearLiveTurnUsage(threadId);
         // Finishing on a thread the user is not looking at is the case the cue
         // exists for. A background watch sees the same turn record the view
-        // does, so the terminal status is read the same way.
+        // does, so the terminal status is read the same way: a completed turn
+        // rings the success chime, a failed one the failure cue. An
+        // interrupted turn stays silent — the user stopped it themselves — and
+        // a recovered ending is history, not news.
         const bgPayload = event.payload as { turn?: TurnRecord; recovered?: boolean };
-        if ((bgPayload.turn?.status ?? "completed") === "completed" && !bgPayload.recovered) {
+        const bgStatus = bgPayload.turn?.status ?? "completed";
+        if (!bgPayload.recovered && bgStatus === "completed") {
           this.playCompletionCue();
+        } else if (!bgPayload.recovered && bgStatus === "failed") {
+          this.playCompletionCue("failed");
         }
         void this.autoSaveSessionForThread(threadId);
         if (st.goalChecked && st.goal) void this.refreshBackgroundGoal(threadId);
@@ -8016,14 +8028,20 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         this.pendingApprovals.clear();
         this.activeItems.clear();
 
-        // The cue belongs to work that finished: a turn that failed or was
-        // interrupted already says so in the transcript, a compaction pass is
-        // not a conversation turn, and a turn whose completion the runtime
-        // *recovered* (it died before publishing one) is history, not news.
-        // TUI parity — `notification_delivery.rs` prepares a sound only for a
-        // freshly completed `RuntimeTurnStatus::Completed` turn.
+        // The cue belongs to an ending that just happened. A completed turn
+        // rings the success chime; a failed one — a dead network, a refused
+        // key — rings the failure cue, so the user hears which kind of
+        // ending it was. An interrupted turn stays silent: the user ended it
+        // themselves. A compaction pass is not a conversation turn, and a
+        // turn whose ending the runtime *recovered* (it died before
+        // publishing one) is history, not news. TUI parity —
+        // `notification_delivery.rs` prepares a sound only for a freshly
+        // completed `RuntimeTurnStatus::Completed` turn; the failure cue is
+        // the GUI's addition.
         if (turnStatus === "completed" && !isCompactionTurn && !pl.recovered) {
           this.playCompletionCue();
+        } else if (turnStatus === "failed" && !isCompactionTurn && !pl.recovered) {
+          this.playCompletionCue("failed");
         }
 
         if (!isCompactionTurn && lastMsg?.role === "assistant") {
