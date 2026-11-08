@@ -105,13 +105,23 @@ codewhale --version
 codewhale update          # 保持引擎为最新
 ```
 
-npm 和 Cargo 是受支持的次要安装途径（`npm install -g codewhale`）。引擎同时也是连接模型提供商的地方 —— 首次运行时用 `/provider` 和 `/model` 完成配置。
+npm 和 Cargo 是受支持的次要安装途径（`npm install -g codewhale`）。引擎同时也是模型提供商连接的存放处 —— 下面的第 2 步用一条命令即可完成。
 
 > **找不到引擎？** 扩展会搜索常见位置（`~/.cargo/bin`、Homebrew 与 npm 全局 `node_modules`、`~/.local/share/codewhale`）。如果你是通过 `install.sh` 安装到 `~/.local/bin`，而 VS Code 又没有继承这个 `PATH`，请显式设置 `brotherwhale.enginePath`。
 
 > **在鸿蒙 PC 上**，引擎必须按平台构建并签名：设备只执行带签名的程序，`chmod +x` 改不了这一点。引擎仓库的[鸿蒙指南](https://github.com/codewhale-hq/Codewhale/blob/main/docs/zh_hans/HarmonyOS.md)讲了 `aarch64-unknown-linux-ohos` 交叉编译和安装；`scripts/ohos-sign-binary.sh` 把构建、strip、自签名和验签合成一步。把签好名的二进制放进 `PATH`，或用 `brotherwhale.enginePath` 指过去。在 Linux 子系统（融合开发引擎）里则直接用 Linux ARM64 版。
 
-### 2. 安装扩展
+### 2. 配置 API key
+
+不熟悉 CodeWhale 的 TUI？跳过它 —— 在普通终端里用一条命令，把 provider key 存进引擎（也就是本扩展）读取的本地凭据存储：
+
+```bash
+codewhale auth set --provider deepseek
+```
+
+按提示粘贴 DeepSeek API key —— 输入不会回显。用 `codewhale auth status --provider deepseek` 验证；单独执行 `codewhale auth status` 会列出引擎认识的全部 provider 路线。key 只保存在引擎本地凭据存储中；如果更喜欢交互方式，TUI 里的 `/provider` 和 `/model` 写的是同一个地方。key 配好后，扩展的默认模型（`deepseek-v4-pro`）开箱即用 —— 随时可在聊天输入框用 `/model` 切换。
+
+### 3. 安装扩展
 
 **方式 A —— VS Code 插件市场：** 在扩展面板（`Cmd/Ctrl+Shift+X`）搜索 "CodeWhale" 并安装。
 
@@ -138,7 +148,7 @@ code --install-extension ./brotherwhale-vscode-0.9.5.vsix --force
 
 **方式 C —— Open VSX：** [Open VSX](https://open-vsx.org/extension/hengquworld/brotherwhale-vscode) 面向微软生态之外的编辑器提供同样的构建 —— VSCodium，以及鸿蒙 PC 上的 CodeArts（扩展面板自带一页 Open VSX）。搜 "CodeWhale" 直接安装，不必手动装 VSIX。
 
-### 3. 打开它
+### 4. 打开它
 
 点击活动栏中的 **CodeWhale 图标**。扩展会按需为你的工作区启动引擎、做健康检查，并在状态栏显示 **Ready**。第一条消息最慢，之后引擎会被复用。
 
@@ -254,6 +264,15 @@ code --install-extension ./brotherwhale-vscode-0.9.5.vsix --force
 | `brotherwhale.costCurrency` | `"auto"` | `auto` 跟随界面语言（中文 → CNY，否则 USD），也可强制 `usd` / `cny`。没有原生 CNY 价格时回退到 USD |
 | `brotherwhale.completionSound` | `true` | 一轮对话跑完时发出提示音 —— 正在看的会话与后台线程都包括。失败或中断的轮次不发声；同一时刻完成的轮次只响一次 |
 | `brotherwhale.telemetry` | `true` | 让本窗口启动的引擎统计匿名用量。application 作用域；具体收集内容由引擎负责（见[用量统计](#用量统计)） |
+
+### 推荐设置
+
+有两项引擎侧开关默认关闭：在聊天输入框执行 `/config` 打开配置面板，把它们打开：
+
+- **Allow Shell → `true`** —— 允许代理执行 shell 命令。不开的话，需要终端的任务无法运行。
+- **Auto Compact → `true`** —— 上下文接近上限时自动压缩会话，而不是中途停下来等手动压缩。
+
+想让会话不被逐步审批打断，把聊天面板姿态下拉里的 permission 切到 **Full Access**；也可以用 `brotherwhale.defaultPermissionPosture` 把它设为新会话的默认值。默认姿态 Ask 会对每个受控操作请求批准；Auto-Review 则让代理继续执行、由 runtime 事后审查。Full Access 完全不再弹审批 —— 请在你信任的工作区使用。
 
 ## 工作原理
 

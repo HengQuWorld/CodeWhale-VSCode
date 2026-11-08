@@ -105,13 +105,23 @@ codewhale --version
 codewhale update          # keep the engine current
 ```
 
-npm and Cargo are supported as secondary packaging routes (`npm install -g codewhale`). The engine is also where you connect your model provider — configure it on first run with `/provider` and `/model`.
+npm and Cargo are supported as secondary packaging routes (`npm install -g codewhale`). The engine is also where your model-provider connection lives — step 2 below wires it up with a single command.
 
 > **Engine not found?** The extension searches the usual locations (`~/.cargo/bin`, Homebrew and npm global `node_modules`, `~/.local/share/codewhale`). If you installed via `install.sh` to `~/.local/bin` and VS Code does not inherit that `PATH`, set `brotherwhale.enginePath` explicitly.
 
 > **On HarmonyOS PC** the engine must be built and signed for the platform: a device executes only signed code, and `chmod +x` does not change that. The engine repository's [HarmonyOS guide](https://github.com/codewhale-hq/Codewhale/blob/main/docs/HarmonyOS.md) covers the `aarch64-unknown-linux-ohos` cross-build and how to install the result; `scripts/ohos-sign-binary.sh` does build, strip, self-sign and verify in one step. Put the signed binary on `PATH`, or name it with `brotherwhale.enginePath`. Inside the Linux subsystem (融合开发引擎) the ordinary Linux ARM64 install works instead.
 
-### 2. Install the extension
+### 2. Configure your API key
+
+Unfamiliar with the CodeWhale TUI? Skip it — one command in a plain terminal stores your provider key where the engine (and therefore this extension) reads it:
+
+```bash
+codewhale auth set --provider deepseek
+```
+
+Paste your DeepSeek API key when prompted — the input is hidden. Verify with `codewhale auth status --provider deepseek`; `codewhale auth status` on its own lists every provider route the engine knows. Keys stay in the engine's local credential store, and if you ever prefer the interactive route, the TUI's `/provider` and `/model` write to the same place. With a key in place the extension's default model (`deepseek-v4-pro`) works out of the box — switch models any time with `/model` in the chat input.
+
+### 3. Install the extension
 
 **Option A — VS Code Marketplace:** search for "CodeWhale" in the Extensions panel (`Cmd/Ctrl+Shift+X`) and click Install.
 
@@ -138,7 +148,7 @@ code --install-extension ./brotherwhale-vscode-0.9.5.vsix --force
 
 **Option C — Open VSX:** [Open VSX](https://open-vsx.org/extension/hengquworld/brotherwhale-vscode) carries the same builds for editors outside Microsoft's ecosystem — VSCodium, and CodeArts on HarmonyOS PC, whose extension panel has an Open VSX page. Search "CodeWhale" and install; no VSIX to side-load.
 
-### 3. Open it
+### 4. Open it
 
 Click the **CodeWhale icon** in the activity bar. The extension starts the engine on demand for your workspace, health-checks it, and reports **Ready** in the status bar. The first message is the slowest — after that the engine is reused.
 
@@ -254,6 +264,15 @@ Search for `brotherwhale` in VS Code settings (`Cmd/Ctrl+,`).
 | `brotherwhale.costCurrency` | `"auto"` | `auto` follows the UI language (Chinese → CNY, otherwise USD), or force `usd` / `cny`. Falls back to USD when no native CNY price exists |
 | `brotherwhale.completionSound` | `true` | Play a chime when a turn finishes — in the conversation you are reading or in a background thread. Failed and interrupted turns stay silent, and turns finishing at the same moment are heard once |
 | `brotherwhale.telemetry` | `true` | Let the engine this window starts count anonymous usage. Application-scoped; what is collected is the engine's concern (see [Usage reporting](#usage-reporting)) |
+
+### Recommended settings
+
+Two engine-side options ship switched off; open the config panel with `/config` in the chat input and flip them on:
+
+- **Allow Shell → `true`** — lets the agent run shell commands. Without it, tasks that need the terminal cannot run.
+- **Auto Compact → `true`** — compacts the thread automatically as it approaches the context limit, instead of stopping mid-task when the context fills up.
+
+To keep a session flowing without approving every gated step, switch the permission posture to **Full Access** in the posture dropdown of the chat panel — or make it the default for new threads with `brotherwhale.defaultPermissionPosture`. The default posture, Ask, needs your approval for every gated action; Auto-Review lets the agent proceed while the runtime reviews risky steps. Full Access runs with no approval prompts at all, so use it in workspaces you trust.
 
 ## How it works
 
