@@ -19,6 +19,10 @@ import {
   loadMessageQueue,
   migrateThreadQueue,
 } from "../../utils/message-queue";
+import {
+  loadLastThreadId,
+  saveLastThreadId,
+} from "../../utils/last-thread";
 
 const realHome = process.env.HOME;
 const WS = "/queue-ws";
@@ -141,5 +145,99 @@ describe("message queue persistence", () => {
     const entries = loadMessageQueue(WS)["thread-a"];
     expect(entries.map((p) => p.text)).toEqual(["good one", "rescued without id"]);
     expect(entries[1].id).not.toBe("");
+  });
+});
+
+describe("queued attachments on disk", () => {
+  it("carries attachments through a save/load round trip", () => {
+    enqueuePrompt(WS, "thread-a", "attach this", [
+      { path: "/tmp/report.pdf", name: "report.pdf", kind: "file" },
+      { path: "/tmp/shot.png", name: "shot.png", kind: "image" },
+    ]);
+    const parked = loadMessageQueue(WS)["thread-a"][0];
+    expect(parked.attachments).toHaveLength(2);
+    expect(parked.attachments![0]).toEqual({
+      path: "/tmp/report.pdf",
+      name: "report.pdf",
+      kind: "file",
+    });
+  });
+
+  it("reads legacy records without attachments as attachment-free", () => {
+    fs.mkdirSync(path.dirname(queueFilePath()), { recursive: true });
+    fs.writeFileSync(
+      queueFilePath(),
+      JSON.stringify({ "thread-a": [{ id: "q-old", text: "from before attachments", ts: 1 }] })
+    );
+    const parked = loadMessageQueue(WS)["thread-a"][0];
+    expect(parked.attachments).toBeUndefined();
+  });
+
+  it("drops unusable attachment rows but keeps the memo", () => {
+    fs.mkdirSync(path.dirname(queueFilePath()), { recursive: true });
+    fs.writeFileSync(
+      queueFilePath(),
+      JSON.stringify({
+        "thread-a": [
+          {
+            id: "q-1",
+            text: "memo",
+            ts: 1,
+            attachments: [{ path: "/tmp/ok.txt" }, { name: "no path" }, "junk"],
+          },
+        ],
+      })
+    );
+    const parked = loadMessageQueue(WS)["thread-a"][0];
+    expect(parked.attachments).toHaveLength(1);
+    expect(parked.attachments![0].path).toBe("/tmp/ok.txt");
+    // An all-unusable list reads as no attachments.
+    fs.writeFileSync(
+      queueFilePath(),
+      JSON.stringify({ "thread-a": [{ id: "q-2", text: "memo", attachments: ["junk"] }] })
+    );
+    expect(loadMessageQueue(WS)["thread-a"][0].attachments).toBeUndefined();
+  });
+
+  it("a plain enqueue stays attachment-free", () => {
+    enqueuePrompt(WS, "thread-a", "no files here");
+    expect(loadMessageQueue(WS)["thread-a"][0].attachments).toBeUndefined();
+  });
+});
+
+describe("last-thread record", () => {
+  it("records and reads back the thread a workspace had open", () => {
+    expect(loadLastThreadId(WS)).toBeNull();
+    saveLastThreadId(WS, "thr_abc");
+    expect(loadLastThreadId(WS)).toBe("thr_abc");
+    // A different workspace does not inherit it.
+    expect(loadLastThreadId("/other-ws")).toBeNull();
+  });
+
+  it("a null save clears the record — reopening comes back to the view on screen", () => {
+    saveLastThreadId(WS, "thr_abc");
+    saveLastThreadId(WS, null);
+    expect(loadLastThreadId(WS)).toBeNull();
+  });
+
+  it("reads a corrupt record as no thread", () => {
+    fs.mkdirSync(path.join(process.env.HOME!, ".codewhale", "last-thread"), {
+      recursive: true,
+    });
+    fs.writeFileSync(
+      path.join(
+        process.env.HOME!,
+        ".codewhale",
+        "last-thread",
+        `${workspaceHistoryKey(WS)}.json`
+      ),
+      "{broken"
+    );
+    expect(loadLastThreadId(WS)).toBeNull();
+  });
+
+  it("clearing a workspace with no record is a no-op", () => {
+    saveLastThreadId(WS, null);
+    expect(loadLastThreadId(WS)).toBeNull();
   });
 });

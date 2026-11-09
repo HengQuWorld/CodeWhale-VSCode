@@ -16,6 +16,8 @@ export function getInputScript(tr: WebviewTranslations): string {
   var attachBtn = document.getElementById('btn-attach');
   var queueBtn = document.getElementById('btn-queue');
   var queueStrip = document.getElementById('message-queue');
+  var queueHeadEl = document.getElementById('mq-head');
+  var queueToggleBtn = document.getElementById('mq-toggle');
   var queueTitleEl = document.getElementById('mq-title');
   var queueClearBtn = document.getElementById('mq-clear');
   var queueItemsEl = document.getElementById('mq-items');
@@ -438,15 +440,40 @@ export function getInputScript(tr: WebviewTranslations): string {
   // ── Queued memos (TUI /queue parity) ──
   // The host owns the queue (disk-persisted, per thread) and posts the list;
   // this only renders it and asks the host to act. Parking takes the box's
-  // text only — attachments stay in the box, because the memo is its
-  // instruction, not whatever files happen to be attached today.
+  // text and its attachments — the memo is what the box holds, the same
+  // pair a send would have taken.
   var queueItems = [];
   var queueActionLabel = (__i18n && __i18n.queueAction) || 'Queue as memo';
+  // Folded-or-open is the user's remembered choice, like the sidebar's:
+  // only 'true' / 'false' count, anything else reads as no choice and the
+  // list opens.
+  var queueCollapsed = (function() {
+    try {
+      return window.localStorage.getItem('codewhale:queueCollapsed') === 'true';
+    } catch (e) { return false; }
+  })();
 
   function queuePreview(text) {
     var head = (String(text).split('\\n')[0] || '').trim();
     if (head.length > 80) head = head.slice(0, 79) + '…';
     return head;
+  }
+
+  function setQueueCollapsed(collapsed) {
+    queueCollapsed = !!collapsed;
+    try {
+      window.localStorage.setItem('codewhale:queueCollapsed', queueCollapsed ? 'true' : 'false');
+    } catch (e) { /* storage unavailable: the choice just won't survive */ }
+    if (queueToggleBtn) {
+      var label = queueCollapsed
+        ? ((__i18n && __i18n.queueExpand) || 'Expand the queue')
+        : ((__i18n && __i18n.queueCollapse) || 'Collapse the queue');
+      queueToggleBtn.textContent = queueCollapsed ? '▸' : '▾';
+      queueToggleBtn.setAttribute('title', label);
+      queueToggleBtn.setAttribute('aria-label', label);
+      queueToggleBtn.setAttribute('aria-expanded', queueCollapsed ? 'false' : 'true');
+    }
+    if (queueStrip) queueStrip.classList.toggle('is-collapsed', queueCollapsed);
   }
 
   function renderMessageQueue(items) {
@@ -465,9 +492,16 @@ export function getInputScript(tr: WebviewTranslations): string {
     var html = '';
     queueItems.forEach(function(item, idx) {
       var id = __wvEscapeHtml(item.id);
+      // Attachments ride the memo: a count chip names them on hover.
+      var atts = Array.isArray(item.attachments) ? item.attachments : [];
+      var clip = '';
+      if (atts.length > 0) {
+        var names = atts.map(function(a) { return (a && (a.name || a.path)) || ''; }).join('\\n');
+        clip = ' <span class="mq-clip" title="' + __wvEscapeHtml(names) + '">📎' + atts.length + '</span>';
+      }
       html += '<div class="mq-item" data-id="' + id + '">' +
         '<span class="mq-index">' + (idx + 1) + '</span>' +
-        '<span class="mq-text" title="' + __wvEscapeHtml(item.text) + '">' + __wvEscapeHtml(queuePreview(item.text)) + '</span>' +
+        '<span class="mq-text" title="' + __wvEscapeHtml(item.text) + '">' + __wvEscapeHtml(queuePreview(item.text)) + clip + '</span>' +
         '<span class="mq-actions">' +
         '<button type="button" class="mq-act mq-run" data-id="' + id + '" title="' + __wvEscapeHtml(runTitle) + '" aria-label="' + __wvEscapeHtml(runTitle) + '">▶</button>' +
         '<button type="button" class="mq-act mq-edit" data-id="' + id + '" title="' + __wvEscapeHtml(editTitle) + '" aria-label="' + __wvEscapeHtml(editTitle) + '">✎</button>' +
@@ -476,6 +510,19 @@ export function getInputScript(tr: WebviewTranslations): string {
     });
     queueItemsEl.innerHTML = html;
     queueStrip.hidden = false;
+    // Reapply the remembered fold: the class decides what shows, the
+    // toggle's glyph and title come back with it.
+    setQueueCollapsed(queueCollapsed);
+  }
+
+  if (queueHeadEl) {
+    // The head is the fold control (the sidebar's pattern): the toggle — or
+    // the title beside it — folds and opens; the ✕ beside them still
+    // clears. Delegated once, never re-bound by repaints.
+    queueHeadEl.addEventListener('click', function(e) {
+      if (e.target && e.target.closest && e.target.closest('#mq-clear')) return;
+      setQueueCollapsed(!queueCollapsed);
+    });
   }
 
   function updateQueueButtonState() {

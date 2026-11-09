@@ -216,6 +216,12 @@ interface Translations {
   queueCleared: string;
   /** The clicked memo is gone (a stale panel, a second window). */
   queueNotFound: string;
+  /** The strip's fold control, both states. */
+  queueCollapse: string;
+  queueExpand: string;
+  /** A memo's stored attachment file is gone when it runs or loads back;
+   *  `{files}` names what was left out. */
+  queueAttachmentMissing: string;
   /** Badge on guidance the runtime dropped before the model saw it. */
   steerUndelivered: string;
   steerUndeliveredTitle: string;
@@ -757,6 +763,9 @@ const en: Translations = {
   queueAlreadyEmpty: "Queue already empty.",
   queueCleared: "Cleared {n} queued memo(s).",
   queueNotFound: "That queued memo is no longer in the queue — the list may have changed.",
+  queueCollapse: "Collapse the queue",
+  queueExpand: "Expand the queue",
+  queueAttachmentMissing: "Attached file(s) no longer found and left out: {files}",
   steerBadge: "steer",
   steerBadgeTitle: "Sent as mid-turn steering",
   steerUndelivered: "not delivered",
@@ -1253,6 +1262,9 @@ const zhCn: Translations = {
   queueAlreadyEmpty: "队列备忘已为空。",
   queueCleared: "已清空 {n} 条队列备忘。",
   queueNotFound: "这条队列备忘已不在队列中——列表可能已刷新。",
+  queueCollapse: "收起队列",
+  queueExpand: "展开队列",
+  queueAttachmentMissing: "以下附件文件已找不到，已跳过：{files}",
   steerBadge: "引导",
   steerBadgeTitle: "作为中途引导发送",
   steerUndelivered: "未送达",
@@ -1778,6 +1790,9 @@ export function webviewTranslations(tr: Translations) {
     queueAlreadyEmpty: tr.queueAlreadyEmpty,
     queueCleared: tr.queueCleared,
     queueNotFound: tr.queueNotFound,
+    queueCollapse: tr.queueCollapse,
+    queueExpand: tr.queueExpand,
+    queueAttachmentMissing: tr.queueAttachmentMissing,
     steerBadge: tr.steerBadge,
     steerBadgeTitle: tr.steerBadgeTitle,
     steerUndelivered: tr.steerUndelivered,

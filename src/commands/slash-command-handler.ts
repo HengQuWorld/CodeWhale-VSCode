@@ -28,7 +28,7 @@ import {
   type TuiMode,
 } from "../utils/modes";
 import { formatError, getErrorMessage } from "../utils/error-handler";
-import type { QueuedPrompt } from "../utils/message-queue";
+import { DRAFT_QUEUE_KEY, type QueuedPrompt } from "../utils/message-queue";
 import type { CodeWhaleApiClient, CodeWhaleEngine, ThreadRecord, TaskSummary, ProviderEntry, SkillEntry, MemoryLensAction, MemoryLensEntry, MemoryLensSnapshot } from "../types";
 
 // ── Context interface for dependency injection ──
@@ -138,6 +138,9 @@ export interface SlashCommandContext {
    *  thread on screen, or the draft bucket when no thread is open, and each
    *  republishes the panel's list as a side effect. */
   queuedPromptList(): QueuedPrompt[];
+  /** Every thread's parked memos for this workspace — `/queue list`'s
+   *  cross-conversation summary when the current view has none. */
+  queuedPromptsByThread(): Record<string, QueuedPrompt[]>;
   handleQueuePrompt(text: string): void;
   handleRunQueuedPrompt(id: string): Promise<void>;
   handleEditQueuedPrompt(id: string): void;
@@ -153,6 +156,12 @@ type CommandHandler = (ctx: SlashCommandContext, args: string) => Promise<void>;
 
 function notAvailable(ctx: SlashCommandContext): void {
   ctx.postMessage({ type: "info", message: t().commandNotAvailableInGui });
+}
+
+/** One scannable line for a memo: its first line, capped. */
+function queuePreviewLine(text: string): string {
+  const head = text.split("\n")[0].trim();
+  return head.length > 80 ? head.slice(0, 79) + "…" : head;
 }
 
 // ── Helper: get config shortcut ──
@@ -2356,18 +2365,40 @@ async function handleQueue(ctx: SlashCommandContext, args: string): Promise<void
   if (!arg || sub === "list" || sub === "ls" || sub === "show") {
     const prompts = ctx.queuedPromptList();
     if (prompts.length === 0) {
+      // A fresh window has no thread, and "queue empty" would be a lie
+      // while memos wait in the conversations they were written for. Sum
+      // those up instead, with where to find them.
+      const byThread = ctx.queuedPromptsByThread();
+      const others = Object.entries(byThread)
+        .filter(([key, list]) => key !== DRAFT_QUEUE_KEY && list.length > 0)
+        .map(([key, list]) => {
+          const previews = list
+            .slice(0, 3)
+            .map((p: QueuedPrompt) => queuePreviewLine(p.text))
+            .join(" / ");
+          const more = list.length > 3 ? ` (+${list.length - 3} more)` : "";
+          return `  ${key.slice(0, 18)}… (${list.length}): ${previews}${more}`;
+        });
+      if (others.length === 0) {
+        ctx.postMessage({
+          type: "info",
+          message:
+            "Queue empty. Park a prompt with the composer's queue button (or `/queue add <text>`) — it runs only when you choose, and it survives window reloads.",
+        });
+        return;
+      }
       ctx.postMessage({
         type: "info",
-        message:
-          "Queue empty. Park a prompt with the composer's queue button (or `/queue add <text>`) — it runs only when you choose, and it survives window reloads.",
+        message: `Nothing parked for the current view, but memos are waiting in other conversations:\n\n${others.join("\n")}\n\nOpen the conversation from the Threads rail to run, edit or drop its memos — the queue strip travels with it.`,
       });
       return;
     }
     const lines = prompts.map((p: QueuedPrompt, i: number) => {
-      const head = p.text.split("\n")[0].trim();
-      const preview = head.length > 80 ? head.slice(0, 79) + "…" : head;
+      const attachments = (p.attachments ?? []).length;
+      const head = queuePreviewLine(p.text);
       const when = p.ts > 0 ? new Date(p.ts).toLocaleString() : "(no ts)";
-      return `  ${i + 1}. [${when}] ${preview}`;
+      const clip = attachments > 0 ? ` 📎${attachments}` : "";
+      return `  ${i + 1}. [${when}]${clip} ${head}`;
     });
     ctx.postMessage({
       type: "info",

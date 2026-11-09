@@ -3003,7 +3003,22 @@ export function getWebviewCss(): string {
       display: flex;
       align-items: center;
       gap: 6px;
+      cursor: pointer;
     }
+    /* The fold control (▾/▸) and the title beside it both fold; the ✕
+       beside them still clears. */
+    .mq-toggle {
+      flex: none;
+      background: none;
+      border: none;
+      color: inherit;
+      cursor: pointer;
+      opacity: 0.6;
+      font-size: 11px;
+      line-height: 1;
+      padding: 0 2px;
+    }
+    .mq-toggle:hover { opacity: 1; }
     .mq-title {
       flex: 1;
       min-width: 0;
@@ -3012,6 +3027,14 @@ export function getWebviewCss(): string {
       white-space: nowrap;
       font-weight: 600;
       opacity: 0.85;
+    }
+    /* The list folded away leaves the head as the only thing to click —
+       the same shape the Activity sections use. */
+    #message-queue.is-collapsed #mq-items { display: none; }
+    .mq-clip {
+      opacity: 0.7;
+      margin-left: 4px;
+      font-size: 10px;
     }
     .mq-clear {
       background: none;

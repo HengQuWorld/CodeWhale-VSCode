@@ -76,7 +76,7 @@ describe("queue as memo (provider)", () => {
     postMessage.mockClear();
     await provider.handleRunQueuedPrompt(id);
 
-    expect(send).toHaveBeenCalledWith("memo one", { queued: true });
+    expect(send).toHaveBeenCalledWith("memo one", { queued: true, attachments: [] });
     expect(lastQueue(postMessage)).toHaveLength(0);
     expect(loadMessageQueue(WS)[DRAFT_QUEUE_KEY]).toBeUndefined();
   });
@@ -213,5 +213,113 @@ describe("queue as memo (provider)", () => {
     expect(queue["new-thread"].map((p: any) => p.text)).toEqual([
       "memo of a lost thread",
     ]);
+  });
+});
+
+describe("queued memos with attachments (provider)", () => {
+  /** A real file, so the rebuild's stat check passes. */
+  function tempFile(name: string, bytes = 32): string {
+    const file = path.join(process.env.HOME!, name);
+    fs.writeFileSync(file, Buffer.alloc(bytes, 0x41));
+    return file;
+  }
+
+  function parkWithAttachment(provider: any, text: string, filePath: string): any {
+    (provider as any).currentAttachments = [
+      { id: "att-1", kind: "file", path: filePath, name: path.basename(filePath) },
+    ];
+    provider.handleQueuePrompt(text);
+    return loadMessageQueue(WS)[DRAFT_QUEUE_KEY][0];
+  }
+
+  it("parking takes the composer's attachments with the text", () => {
+    const { provider, postMessage } = createProvider();
+    const file = tempFile("brief.txt");
+    const parked = parkWithAttachment(provider as any, "review the brief", file);
+
+    expect(parked.attachments).toHaveLength(1);
+    expect(parked.attachments![0].path).toBe(file);
+    // The box let go of them, the same optimism a send has.
+    const lists = messagesOfType(postMessage, "attachmentsChanged");
+    expect(lists[lists.length - 1].attachments).toHaveLength(0);
+    expect((provider as any).currentAttachments).toHaveLength(0);
+  });
+
+  it("running dispatches the memo with its attachments re-read from disk", async () => {
+    const { provider, postMessage } = createProvider();
+    const file = tempFile("brief.txt");
+    const parked = parkWithAttachment(provider as any, "review the brief", file);
+
+    const send = vi.fn(async (_text: string, _opts?: any) => true);
+    (provider as any).handleSendMessage = send;
+    postMessage.mockClear();
+    await provider.handleRunQueuedPrompt(parked.id);
+
+    const opts = send.mock.calls[0]![1] as any;
+    expect(opts.queued).toBe(true);
+    expect(opts.attachments).toHaveLength(1);
+    expect(opts.attachments[0].path).toBe(file);
+    // The composer's (empty) attachment list was never touched by a memo
+    // dispatch: no attachmentsChanged was posted for it.
+    expect(messagesOfType(postMessage, "attachmentsChanged")).toHaveLength(0);
+  });
+
+  it("busy steering carries the memo's attachments, not the box's", async () => {
+    const { provider } = createProvider();
+    const file = tempFile("shot.png");
+    const parked = parkWithAttachment(provider as any, "look at this", file);
+
+    (provider as any).currentTurnId = "turn-1";
+    (provider as any).apiCapabilities.turnSteer = true;
+    const steer = vi.fn(async (_text: string, _atts?: any) => true);
+    (provider as any).handleSteer = steer;
+    await provider.handleRunQueuedPrompt(parked.id);
+
+    expect((steer.mock.calls[0]![1] as any[]).map((a: any) => a.path)).toEqual([file]);
+  });
+
+  it("a stored file gone missing is named and skipped, memo still runs", async () => {
+    const { provider, postMessage } = createProvider();
+    const parked = parkWithAttachment(
+      provider as any,
+      "the file will vanish",
+      path.join(process.env.HOME!, "deleted.txt")
+    );
+    // Nothing to stat: the file never existed.
+
+    const send = vi.fn(async (_text: string, _opts?: any) => true);
+    (provider as any).handleSendMessage = send;
+    postMessage.mockClear();
+    await provider.handleRunQueuedPrompt(parked.id);
+
+    expect((send.mock.calls[0]![1] as any).attachments).toHaveLength(0);
+    const infos = messagesOfType(postMessage, "info").map((m) => m.message);
+    expect(infos.some((s) => String(s).includes("deleted.txt"))).toBe(true);
+  });
+
+  it("editing hands the attachments back to the composer with the text", () => {
+    const { provider, postMessage } = createProvider();
+    const file = tempFile("shot.png");
+    const parked = parkWithAttachment(provider as any, "tweak and send", file);
+    postMessage.mockClear();
+
+    provider.handleEditQueuedPrompt(parked.id);
+
+    expect((provider as any).currentAttachments.map((a: any) => a.path)).toEqual([file]);
+    const lists = messagesOfType(postMessage, "attachmentsChanged");
+    expect(lists.length).toBeGreaterThan(0);
+  });
+
+  it("a refused dispatch re-parks with the same attachment list", async () => {
+    const { provider } = createProvider();
+    const file = tempFile("brief.txt");
+    const parked = parkWithAttachment(provider as any, "will fail", file);
+
+    (provider as any).handleSendMessage = vi.fn(async () => false);
+    await provider.handleRunQueuedPrompt(parked.id);
+
+    const reParked = loadMessageQueue(WS)[DRAFT_QUEUE_KEY][0];
+    expect(reParked.text).toBe("will fail");
+    expect(reParked.attachments?.map((a) => a.path)).toEqual([file]);
   });
 });

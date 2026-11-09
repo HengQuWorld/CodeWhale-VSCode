@@ -466,6 +466,9 @@ function makeTr(): WebviewTranslations {
     queueAlreadyEmpty: "Queue already empty.",
     queueCleared: "Cleared {n} queued memo(s).",
     queueNotFound: "That queued memo is no longer in the queue — the list may have changed.",
+    queueCollapse: "Collapse the queue",
+    queueExpand: "Expand the queue",
+    queueAttachmentMissing: "Attached file(s) no longer found and left out: {files}",
   };
 }
 

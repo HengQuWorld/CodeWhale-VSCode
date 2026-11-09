@@ -21,7 +21,8 @@ import * as fs from "fs";
 import * as path from "path";
 import { workspaceHistoryKey } from "./input-history";
 
-/** One parked prompt: what the user queued, and when they queued it. */
+/** One parked prompt: what the user queued, when, and the attachments that
+ *  rode with it. */
 export interface QueuedPrompt {
   /** Stable identity the panel's buttons and the slash command address. */
   id: string;
@@ -29,6 +30,20 @@ export interface QueuedPrompt {
   /** Epoch ms, stamped at enqueue time. Display-only; sorting stays
    *  insertion-ordered like the TUI's VecDeque, oldest first. */
   ts: number;
+  /** Attachments parked with the prompt. Stored by path — the prompt
+   *  re-reads the files when it runs, so the queue file stays small and a
+   *  moved file degrades to a named miss instead of a stale copy. */
+  attachments?: QueuedAttachment[];
+}
+
+/** The on-disk shape of one parked attachment: where the file lives, what
+ *  to call it, and the kind that decides its prompt line
+ *  (`[Attached image: …]` vs `@path`). No preview bytes — those are
+ *  regenerated from the file when the memo is loaded back. */
+export interface QueuedAttachment {
+  path: string;
+  name: string;
+  kind: string;
 }
 
 /** The per-thread bucket prompts park into before any thread exists. */
@@ -61,7 +76,7 @@ function normalizeEntries(raw: unknown): QueuedPrompt[] {
   if (!Array.isArray(raw)) return [];
   return raw
     .filter(
-      (e): e is { id?: unknown; text?: unknown; ts?: unknown } =>
+      (e): e is { id?: unknown; text?: unknown; ts?: unknown; attachments?: unknown } =>
         typeof e === "object" && e !== null
     )
     .filter((e) => typeof e.text === "string" && e.text.trim().length > 0)
@@ -69,7 +84,29 @@ function normalizeEntries(raw: unknown): QueuedPrompt[] {
       id: typeof e.id === "string" && e.id ? e.id : newPromptId(),
       text: (e.text as string).trim(),
       ts: typeof e.ts === "number" && Number.isFinite(e.ts) ? e.ts : 0,
+      attachments: normalizeAttachments(e.attachments),
     }));
+}
+
+/** Pre-attachment records (no field, or a non-array) read as "no
+ *  attachments"; entries with only unusable rows keep the others. */
+function normalizeAttachments(raw: unknown): QueuedAttachment[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const kept = raw
+    .filter(
+      (a): a is Record<string, unknown> =>
+        typeof a === "object" && a !== null &&
+        typeof a.path === "string" && a.path.length > 0
+    )
+    .map((a) => ({
+      path: a.path as string,
+      name:
+        typeof a.name === "string" && a.name
+          ? a.name
+          : (a.path as string).split("/").pop() || (a.path as string),
+      kind: typeof a.kind === "string" && a.kind ? a.kind : "file",
+    }));
+  return kept.length > 0 ? kept : undefined;
 }
 
 /** Reads every thread's queue for a workspace. Empty map when nothing (or
@@ -121,16 +158,23 @@ function saveThreadQueue(
 
 /** Appends a prompt to a thread's queue (oldest first, TUI parity). Empty or
  *  whitespace-only text is dropped — parking nothing must not create an
- *  entry the panel then offers to run. Returns that thread's queue. */
+ *  entry the panel then offers to run. Attachments ride along by path (an
+ *  empty list parks as a plain prompt). Returns that thread's queue. */
 export function enqueuePrompt(
   workspace: string,
   threadKey: string,
-  text: string
+  text: string,
+  attachments: QueuedAttachment[] = []
 ): QueuedPrompt[] {
   const trimmed = text.trim();
   if (!trimmed) return loadThreadQueue(workspace, threadKey);
   const entries = loadThreadQueue(workspace, threadKey);
-  entries.push({ id: newPromptId(), text: trimmed, ts: Date.now() });
+  entries.push({
+    id: newPromptId(),
+    text: trimmed,
+    ts: Date.now(),
+    attachments: attachments.length > 0 ? attachments : undefined,
+  });
   const overflow = entries.length - MESSAGE_QUEUE_LIMIT;
   if (overflow > 0) entries.splice(0, overflow);
   saveThreadQueue(workspace, threadKey, entries);

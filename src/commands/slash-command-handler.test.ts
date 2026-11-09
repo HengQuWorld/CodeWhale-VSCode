@@ -405,6 +405,7 @@ function createContext(overrides: Partial<SlashCommandContext> = {}): SlashComma
     handleRetryLastTurn: vi.fn(async () => undefined),
     handleAttachFile: vi.fn(async () => undefined),
     queuedPromptList: vi.fn(() => []),
+    queuedPromptsByThread: vi.fn(() => ({})),
     handleQueuePrompt: vi.fn(),
     handleRunQueuedPrompt: vi.fn(async () => undefined),
     handleEditQueuedPrompt: vi.fn(),
@@ -1149,6 +1150,65 @@ describe("SlashCommandHandler - Dispatcher Pattern", () => {
       expect(ctx.handleRunQueuedPrompt).not.toHaveBeenCalled();
       const err = postMessage.mock.calls.map((c) => c[0]).find((m) => m.type === "error");
       expect(err.message).toContain("1..2");
+    });
+
+    it("a fresh window with memos in other threads gets a summary, not a lie", async () => {
+      const postMessage = vi.fn();
+      const ctx = createContext({
+        queuedPromptList: () => [],
+        queuedPromptsByThread: () => ({
+          ":draft": [],
+          "thr_1a165a06ddc74f86": [
+            { id: "q-a", text: "first in old thread", ts: 1 },
+            { id: "q-b", text: "second in old thread", ts: 2 },
+          ],
+        }),
+        postMessage,
+      });
+      const handler = new SlashCommandHandler(ctx);
+
+      await handler.handle("/queue", "list");
+
+      const info = postMessage.mock.calls.map((c) => c[0]).find((m) => m.type === "info");
+      expect(info.message).toContain("waiting in other conversations");
+      // The id is truncated for scannability; enough to recognise it.
+      expect(info.message).toContain("thr_1a165a06ddc74f…");
+      expect(info.message).toContain("first in old thread");
+      // And it points the way in: the numbered actions stay thread-scoped.
+      expect(info.message).toContain("Threads rail");
+    });
+
+    it("a really-empty workspace still says queue empty", async () => {
+      const postMessage = vi.fn();
+      const ctx = createContext({
+        queuedPromptList: () => [],
+        queuedPromptsByThread: () => ({}),
+        postMessage,
+      });
+      const handler = new SlashCommandHandler(ctx);
+
+      await handler.handle("/queue", "list");
+
+      const info = postMessage.mock.calls.map((c) => c[0]).find((m) => m.type === "info");
+      expect(info.message).toContain("Queue empty");
+    });
+
+    it("memo rows carry an attachment count", async () => {
+      const postMessage = vi.fn();
+      const ctx = createContext({
+        queuedPromptList: () => [
+          { id: "q-1", text: "memo with files", ts: 1, attachments: [{ path: "/tmp/a.txt", name: "a.txt", kind: "file" }] },
+          { id: "q-2", text: "plain memo", ts: 2 },
+        ],
+        postMessage,
+      });
+      const handler = new SlashCommandHandler(ctx);
+
+      await handler.handle("/queue", "list");
+
+      const info = postMessage.mock.calls.map((c) => c[0]).find((m) => m.type === "info");
+      expect(info.message).toContain("📎1");
+      expect(info.message).toContain("plain memo");
     });
 
     it("an unknown subcommand prints the usage", async () => {

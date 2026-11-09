@@ -167,6 +167,9 @@ export interface WebviewTranslations {
   queueAlreadyEmpty: string;
   queueCleared: string;
   queueNotFound: string;
+  queueCollapse: string;
+  queueExpand: string;
+  queueAttachmentMissing: string;
   /** Badge on guidance the runtime dropped before the model saw it. */
   steerUndelivered: string;
   steerUndeliveredTitle: string;
@@ -810,7 +813,8 @@ ${css}
       <div id="input-area">
         <div id="slash-menu"></div>
         <div id="message-queue" hidden>
-          <div class="mq-head">
+          <div class="mq-head" id="mq-head">
+            <button type="button" class="mq-toggle" id="mq-toggle" title="${tr.queueCollapse}" aria-label="${tr.queueCollapse}" aria-expanded="true">▾</button>
             <span class="mq-title" id="mq-title"></span>
             <button type="button" class="mq-clear" id="mq-clear" title="${tr.queueClear}" aria-label="${tr.queueClear}">✕</button>
           </div>
