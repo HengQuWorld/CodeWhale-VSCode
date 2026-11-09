@@ -43,7 +43,7 @@ const COMMANDS: SlashCommand[] = [
   { name: "/mcp", desc: "Manage MCP servers", category: "config", availability: "full", helpText: "/mcp - Open the MCP panel (list, add, enable/disable, connect, review imports). /mcp list prints the configured servers here." },
   { name: "/network", desc: "Manage network rules", category: "config", availability: "unavailable", helpText: "Not available: Network rules are managed by VSCode's proxy settings. Configure via VSCode Settings > Proxy." },
   { name: "/provider", desc: "Switch API provider", category: "config", availability: "full", helpText: "/provider - Show provider info" },
-  { name: "/queue", desc: "Manage message queue", category: "core", availability: "unavailable", helpText: "Not available: Message queue is a TUI-specific feature for managing pending drafts." },
+  { name: "/queue", desc: "Queue memos to run later", category: "core", availability: "full", helpText: "/queue [list|add <text>|run <n>|edit <n>|drop <n>|clear] - Park prompts as memos and run each when you choose (TUI /queue parity). The queue strip next to the composer has the same actions; parked memos survive window reloads and follow their conversation." },
   { name: "/stash", desc: "Stash/restore messages", category: "core", availability: "unavailable", helpText: "Not available: Stash is a TUI-specific feature for parking draft messages." },
   { name: "/hooks", desc: "Manage hooks", category: "core", availability: "unavailable", helpText: "Not available: Hooks are TUI-specific lifecycle callbacks. Configure via ~/.deepseek/config.toml." },
   { name: "/subagents", desc: "List sub-agents", category: "core", availability: "unavailable", helpText: "Not available: Sub-agent management requires TUI's runtime environment." },

@@ -2019,6 +2019,15 @@ ${PROVIDER_PICKER_JS}
         window.__wvInput.setInputHistory(Array.isArray(msg.entries) ? msg.entries : []);
         break;
 
+      case 'messageQueue':
+        // The parked-memo strip: the host owns the queue (per thread,
+        // disk-persisted) and republishes the list after every mutation and
+        // thread switch; this only repaints from it.
+        if (window.__wvInput && window.__wvInput.renderMessageQueue) {
+          window.__wvInput.renderMessageQueue(Array.isArray(msg.items) ? msg.items : []);
+        }
+        break;
+
       case 'clearChat':
         showContinueSession(false);
         window.__wvSidebar.closeTaskDetail();

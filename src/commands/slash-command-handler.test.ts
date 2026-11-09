@@ -105,8 +105,9 @@ const mockCommandRegistry = vi.hoisted(() => [
 
 vi.mock("./slash-commands", () => ({
   isCommandAvailableInGui: vi.fn((name: string) => {
-    // Default: most commands are available
-    const unavailable = ["/theme", "/share", "/network", "/queue", "/stash", "/hooks", "/subagents", "/agent", "/statusline", "/cycles", "/cycle", "/recall", "/relay", "/lsp", "/review", "/rlm", "/verbose", "/profile", "/translate"];
+    // Default: most commands are available. /queue is full since the GUI
+    // gained its own queue strip (TUI /queue parity).
+    const unavailable = ["/theme", "/share", "/network", "/stash", "/hooks", "/subagents", "/agent", "/statusline", "/cycles", "/cycle", "/recall", "/relay", "/lsp", "/review", "/rlm", "/verbose", "/profile", "/translate"];
     if (unavailable.includes(name)) return "unavailable";
     return "full";
   }),
@@ -403,6 +404,12 @@ function createContext(overrides: Partial<SlashCommandContext> = {}): SlashComma
     handleUndoLastTurn: vi.fn(async () => undefined),
     handleRetryLastTurn: vi.fn(async () => undefined),
     handleAttachFile: vi.fn(async () => undefined),
+    queuedPromptList: vi.fn(() => []),
+    handleQueuePrompt: vi.fn(),
+    handleRunQueuedPrompt: vi.fn(async () => undefined),
+    handleEditQueuedPrompt: vi.fn(),
+    handleDropQueuedPrompt: vi.fn(),
+    handleClearQueuedPrompts: vi.fn(),
     installSkill: vi.fn(async () => undefined),
     mutateSkill: vi.fn(async () => undefined),
     auditSkill: vi.fn(async () => undefined),
@@ -1064,6 +1071,95 @@ describe("SlashCommandHandler - Dispatcher Pattern", () => {
       await handler.handle("/attach", "");
 
       expect(ctx.handleAttachFile).toHaveBeenCalledOnce();
+    });
+  });
+
+  // ── /queue ──
+
+  describe("/queue", () => {
+    const twoMemos = () => [
+      { id: "q-1", text: "first memo", ts: 1 },
+      { id: "q-2", text: "second memo", ts: 2 },
+    ];
+
+    it("lists the parked memos numbered oldest-first", async () => {
+      const postMessage = vi.fn();
+      const ctx = createContext({ queuedPromptList: () => twoMemos(), postMessage });
+      const handler = new SlashCommandHandler(ctx);
+
+      await handler.handle("/queue", "list");
+
+      const info = postMessage.mock.calls.map((c) => c[0]).find((m) => m.type === "info");
+      expect(info.message).toContain("2 queued memo(s)");
+      // 1-based, oldest first — the same numbering the TUI prints.
+      expect(info.message).toContain("1. ");
+      expect(info.message.indexOf("first memo")).toBeLessThan(info.message.indexOf("second memo"));
+    });
+
+    it("empty queue says so instead of printing a header", async () => {
+      const postMessage = vi.fn();
+      const ctx = createContext({ queuedPromptList: () => [], postMessage });
+      const handler = new SlashCommandHandler(ctx);
+
+      await handler.handle("/queue", "");
+
+      const info = postMessage.mock.calls.map((c) => c[0]).find((m) => m.type === "info");
+      expect(info.message).toContain("Queue empty");
+    });
+
+    it("add parks the rest of the line as the memo text", async () => {
+      const ctx = createContext();
+      const handler = new SlashCommandHandler(ctx);
+
+      await handler.handle("/queue", "add run the migration check");
+
+      expect(ctx.handleQueuePrompt).toHaveBeenCalledWith("run the migration check");
+    });
+
+    it("run/edit/drop address the 1-based number", async () => {
+      const ctx = createContext({ queuedPromptList: () => twoMemos() });
+      const handler = new SlashCommandHandler(ctx);
+
+      await handler.handle("/queue", "run 2");
+      expect(ctx.handleRunQueuedPrompt).toHaveBeenCalledWith("q-2");
+
+      await handler.handle("/queue", "edit 1");
+      expect(ctx.handleEditQueuedPrompt).toHaveBeenCalledWith("q-1");
+
+      await handler.handle("/queue", "drop 2");
+      expect(ctx.handleDropQueuedPrompt).toHaveBeenCalledWith("q-2");
+    });
+
+    it("clear delegates", async () => {
+      const ctx = createContext();
+      const handler = new SlashCommandHandler(ctx);
+
+      await handler.handle("/queue", "clear");
+
+      expect(ctx.handleClearQueuedPrompts).toHaveBeenCalledOnce();
+    });
+
+    it("a number out of range is an error, not a silent no-op", async () => {
+      const postMessage = vi.fn();
+      const ctx = createContext({ queuedPromptList: () => twoMemos(), postMessage });
+      const handler = new SlashCommandHandler(ctx);
+
+      await handler.handle("/queue", "run 3");
+
+      expect(ctx.handleRunQueuedPrompt).not.toHaveBeenCalled();
+      const err = postMessage.mock.calls.map((c) => c[0]).find((m) => m.type === "error");
+      expect(err.message).toContain("1..2");
+    });
+
+    it("an unknown subcommand prints the usage", async () => {
+      const postMessage = vi.fn();
+      const ctx = createContext({ postMessage });
+      const handler = new SlashCommandHandler(ctx);
+
+      await handler.handle("/queue", "explode");
+
+      const err = postMessage.mock.calls.map((c) => c[0]).find((m) => m.type === "error");
+      expect(err.message).toContain("Usage: /queue");
     });
   });
 

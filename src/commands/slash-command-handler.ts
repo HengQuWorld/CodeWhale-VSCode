@@ -28,6 +28,7 @@ import {
   type TuiMode,
 } from "../utils/modes";
 import { formatError, getErrorMessage } from "../utils/error-handler";
+import type { QueuedPrompt } from "../utils/message-queue";
 import type { CodeWhaleApiClient, CodeWhaleEngine, ThreadRecord, TaskSummary, ProviderEntry, SkillEntry, MemoryLensAction, MemoryLensEntry, MemoryLensSnapshot } from "../types";
 
 // ── Context interface for dependency injection ──
@@ -133,6 +134,15 @@ export interface SlashCommandContext {
   handleUndoLastTurn(): Promise<void>;
   handleRetryLastTurn(): Promise<void>;
   handleAttachFile(): Promise<void>;
+  /** The queued-memo operations (TUI /queue parity). All of them act on the
+   *  thread on screen, or the draft bucket when no thread is open, and each
+   *  republishes the panel's list as a side effect. */
+  queuedPromptList(): QueuedPrompt[];
+  handleQueuePrompt(text: string): void;
+  handleRunQueuedPrompt(id: string): Promise<void>;
+  handleEditQueuedPrompt(id: string): void;
+  handleDropQueuedPrompt(id: string): void;
+  handleClearQueuedPrompts(): void;
 }
 
 // ── Handler type ──
@@ -2331,6 +2341,89 @@ async function handleRestore(ctx: SlashCommandContext, args: string): Promise<vo
   }
 }
 
+/** `/queue` — park prompts as memos and run each when the user chooses.
+ *
+ *  TUI parity (`commands/groups/core/queue.rs`): numbered oldest-first like
+ *  the TUI's `/queue list`, with `run`/`edit`/`drop`/`clear` addressing one
+ *  entry by its 1-based number. The queue strip next to the composer is the
+ *  same state in panel form; both stay in step because they call the same
+ *  provider methods. */
+async function handleQueue(ctx: SlashCommandContext, args: string): Promise<void> {
+  const arg = args.trim();
+  const sub = arg.split(/\s+/)[0]?.toLowerCase() ?? "";
+  const rest = arg.slice(sub.length).trim();
+
+  if (!arg || sub === "list" || sub === "ls" || sub === "show") {
+    const prompts = ctx.queuedPromptList();
+    if (prompts.length === 0) {
+      ctx.postMessage({
+        type: "info",
+        message:
+          "Queue empty. Park a prompt with the composer's queue button (or `/queue add <text>`) — it runs only when you choose, and it survives window reloads.",
+      });
+      return;
+    }
+    const lines = prompts.map((p: QueuedPrompt, i: number) => {
+      const head = p.text.split("\n")[0].trim();
+      const preview = head.length > 80 ? head.slice(0, 79) + "…" : head;
+      const when = p.ts > 0 ? new Date(p.ts).toLocaleString() : "(no ts)";
+      return `  ${i + 1}. [${when}] ${preview}`;
+    });
+    ctx.postMessage({
+      type: "info",
+      message: `${prompts.length} queued memo(s):\n\n${lines.join("\n")}\n\nRun one with /queue run <n>; the panel next to the composer has the same actions.`,
+    });
+    return;
+  }
+
+  if (sub === "add") {
+    if (!rest) {
+      ctx.postMessage({ type: "error", message: "Usage: /queue add <text>" });
+      return;
+    }
+    ctx.handleQueuePrompt(rest);
+    return;
+  }
+
+  if (sub === "clear") {
+    ctx.handleClearQueuedPrompts();
+    return;
+  }
+
+  const numbered = sub === "run" || sub === "edit" || sub === "drop" || sub === "remove" || sub === "rm";
+  if (numbered) {
+    const prompts = ctx.queuedPromptList();
+    const idx = parseInt(rest, 10);
+    if (!Number.isInteger(idx) || idx < 1 || idx > prompts.length) {
+      ctx.postMessage({
+        type: "error",
+        message: prompts.length === 0
+          ? "Queue empty — nothing to address."
+          : `Queue number out of range: 1..${prompts.length}. See /queue list.`,
+      });
+      return;
+    }
+    const id = prompts[idx - 1].id;
+    if (sub === "run") {
+      await ctx.handleRunQueuedPrompt(id);
+    } else if (sub === "edit") {
+      // Replace-the-composer semantics, same as the TUI's /queue edit: the
+      // memo is loaded into the box and off the queue. (The panel's edit
+      // button appends instead when the box already has text — that
+      // guard lives where the box's content is visible.)
+      ctx.handleEditQueuedPrompt(id);
+    } else {
+      ctx.handleDropQueuedPrompt(id);
+    }
+    return;
+  }
+
+  ctx.postMessage({
+    type: "error",
+    message: "Usage: /queue [list|add <text>|run <n>|edit <n>|drop <n>|clear]",
+  });
+}
+
 const HANDLERS: Record<string, CommandHandler> = {
   "/mode": handleMode,
   "/auto": handleAuto,
@@ -2379,6 +2472,7 @@ const HANDLERS: Record<string, CommandHandler> = {
   "/note": handleNote,
   "/memory": handleMemory,
   "/restore": handleRestore,
+  "/queue": handleQueue,
 };
 
 // ── Handler class ──

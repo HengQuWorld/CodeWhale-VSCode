@@ -14,6 +14,11 @@ export function getInputScript(tr: WebviewTranslations): string {
   var sendStopBtn = document.getElementById('btn-send-stop');
   var steerBtn = document.getElementById('btn-steer');
   var attachBtn = document.getElementById('btn-attach');
+  var queueBtn = document.getElementById('btn-queue');
+  var queueStrip = document.getElementById('message-queue');
+  var queueTitleEl = document.getElementById('mq-title');
+  var queueClearBtn = document.getElementById('mq-clear');
+  var queueItemsEl = document.getElementById('mq-items');
   var attachmentsArea = document.getElementById('attachments-area');
   var slashMenuEl = document.getElementById('slash-menu');
   var newThreadBtn = document.getElementById('btn-new-thread');
@@ -289,6 +294,9 @@ export function getInputScript(tr: WebviewTranslations): string {
     setButtonCapabilityState(retryBtn, !!apiCapabilities.retryLastTurn, retryDefaultTitle, __i18n.retryUnsupportedTooltip);
     updateInputPlaceholder();
     updateSteerButtonState();
+    // The queue button's first paint: parked-nothing is dim until text
+    // arrives, the same way the steer button starts.
+    updateQueueButtonState();
   }
 
   // ── Input placeholder ──
@@ -424,6 +432,89 @@ export function getInputScript(tr: WebviewTranslations): string {
   function setComposerText(value) {
     inputEl.value = value;
     updateSteerButtonState();
+    updateQueueButtonState();
+  }
+
+  // ── Queued memos (TUI /queue parity) ──
+  // The host owns the queue (disk-persisted, per thread) and posts the list;
+  // this only renders it and asks the host to act. Parking takes the box's
+  // text only — attachments stay in the box, because the memo is its
+  // instruction, not whatever files happen to be attached today.
+  var queueItems = [];
+  var queueActionLabel = (__i18n && __i18n.queueAction) || 'Queue as memo';
+
+  function queuePreview(text) {
+    var head = (String(text).split('\\n')[0] || '').trim();
+    if (head.length > 80) head = head.slice(0, 79) + '…';
+    return head;
+  }
+
+  function renderMessageQueue(items) {
+    queueItems = Array.isArray(items) ? items : [];
+    if (!queueStrip || !queueItemsEl || !queueTitleEl) return;
+    if (queueItems.length === 0) {
+      queueItemsEl.innerHTML = '';
+      queueStrip.hidden = true;
+      return;
+    }
+    var titleTpl = (__i18n && __i18n.queueTitle) || 'Queued memos ({n})';
+    queueTitleEl.textContent = titleTpl.replace('{n}', String(queueItems.length));
+    var runTitle = (__i18n && __i18n.queueRunTitle) || 'Run now';
+    var editTitle = (__i18n && __i18n.queueEditTitle) || 'Load into the composer';
+    var dropTitle = (__i18n && __i18n.queueDropTitle) || 'Remove from queue';
+    var html = '';
+    queueItems.forEach(function(item, idx) {
+      var id = __wvEscapeHtml(item.id);
+      html += '<div class="mq-item" data-id="' + id + '">' +
+        '<span class="mq-index">' + (idx + 1) + '</span>' +
+        '<span class="mq-text" title="' + __wvEscapeHtml(item.text) + '">' + __wvEscapeHtml(queuePreview(item.text)) + '</span>' +
+        '<span class="mq-actions">' +
+        '<button type="button" class="mq-act mq-run" data-id="' + id + '" title="' + __wvEscapeHtml(runTitle) + '" aria-label="' + __wvEscapeHtml(runTitle) + '">▶</button>' +
+        '<button type="button" class="mq-act mq-edit" data-id="' + id + '" title="' + __wvEscapeHtml(editTitle) + '" aria-label="' + __wvEscapeHtml(editTitle) + '">✎</button>' +
+        '<button type="button" class="mq-act mq-drop" data-id="' + id + '" title="' + __wvEscapeHtml(dropTitle) + '" aria-label="' + __wvEscapeHtml(dropTitle) + '">✕</button>' +
+        '</span></div>';
+    });
+    queueItemsEl.innerHTML = html;
+    queueStrip.hidden = false;
+  }
+
+  function updateQueueButtonState() {
+    if (!queueBtn) return;
+    // Armed by text: parking nothing would create an entry that cannot run.
+    // Marked unavailable rather than disabled (setButtonCapabilityState), so
+    // the tooltip still explains what the button is for.
+    var armed = !!inputEl.value.trim();
+    setButtonCapabilityState(queueBtn, armed, queueActionLabel, queueActionLabel);
+  }
+
+  if (queueItemsEl) {
+    queueItemsEl.addEventListener('click', function(e) {
+      var btn = e.target && e.target.closest ? e.target.closest('.mq-act') : null;
+      if (!btn) return;
+      var id = btn.getAttribute('data-id');
+      if (!id) return;
+      if (btn.classList.contains('mq-run')) {
+        // The moment is the user's to pick; the host decides where the
+        // dispatch goes (new turn, or a steer into the running one).
+        vscode.postMessage({ type: 'queuedRun', id: id });
+      } else if (btn.classList.contains('mq-edit')) {
+        var memo = null;
+        for (var i = 0; i < queueItems.length; i++) {
+          if (queueItems[i].id === id) { memo = queueItems[i]; break; }
+        }
+        if (!memo) return;
+        // The box's existing text is the user's: a draft, or words a refused
+        // send handed back. When there is any, the memo is appended below it
+        // rather than overwriting — and the merged text travels with the
+        // request, because only this side knows what the box holds. The host
+        // puts exactly this text back through setInputText.
+        var existing = inputEl.value;
+        var finalText = existing.trim() ? (existing + '\\n\\n' + memo.text) : memo.text;
+        vscode.postMessage({ type: 'queuedEdit', id: id, text: finalText });
+      } else if (btn.classList.contains('mq-drop')) {
+        vscode.postMessage({ type: 'queuedDrop', id: id });
+      }
+    });
   }
 
   // ── Event listeners ──
@@ -441,6 +532,24 @@ export function getInputScript(tr: WebviewTranslations): string {
     sendMessage();
   });
   attachBtn.addEventListener('click', function() { vscode.postMessage({ type: 'attachFile' }); });
+
+  // Park the box's text as a queued memo. The optimistic clear mirrors the
+  // send button: the host's info message and the strip repainting are the
+  // acknowledgement. An empty box never reaches the host — the button is
+  // already dim over it.
+  if (queueBtn) {
+    queueBtn.addEventListener('click', function() {
+      var text = inputEl.value.trim();
+      if (!text) return;
+      vscode.postMessage({ type: 'queueMessage', text: text });
+      setComposerText('');
+    });
+  }
+  if (queueClearBtn) {
+    queueClearBtn.addEventListener('click', function() {
+      vscode.postMessage({ type: 'queuedClear' });
+    });
+  }
 
   // The armed-skill chip's ✕ disarms. The host holds the armed state, so this
   // only asks — the chip is repainted from the host's own acknowledgement.
@@ -792,6 +901,7 @@ export function getInputScript(tr: WebviewTranslations): string {
     // Typing is what arms the steer button: the text is the thing it sends.
     // (An attachment arms it too — see updateSteerButtonState.)
     updateSteerButtonState();
+    updateQueueButtonState();
   });
 
   // Marked unavailable rather than disabled (see setButtonCapabilityState), so
@@ -826,6 +936,7 @@ export function getInputScript(tr: WebviewTranslations): string {
   window.__wvInput = {
     applyApiCapabilities: applyApiCapabilities,
     renderAttachments: renderAttachments,
+    renderMessageQueue: renderMessageQueue,
     getCurrentAttachments: function() { return currentAttachments; },
     setCurrentAttachments: function(v) {
       currentAttachments = v;

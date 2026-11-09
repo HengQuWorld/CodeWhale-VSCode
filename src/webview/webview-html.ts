@@ -153,6 +153,20 @@ export interface WebviewTranslations {
   steerUnavailablePlaceholder: string;
   steerBadge: string;
   steerBadgeTitle: string;
+  /** Composer's queue button, the strip's title/clear and row buttons, and
+   *  the host's queue info messages — the parked-memo feature (TUI /queue
+   *  parity). The host posts the strip's rows; the webview only renders. */
+  queueAction: string;
+  queueTitle: string;
+  queueClear: string;
+  queueRunTitle: string;
+  queueEditTitle: string;
+  queueDropTitle: string;
+  queueQueuedInfo: string;
+  queueBusyKept: string;
+  queueAlreadyEmpty: string;
+  queueCleared: string;
+  queueNotFound: string;
   /** Badge on guidance the runtime dropped before the model saw it. */
   steerUndelivered: string;
   steerUndeliveredTitle: string;
@@ -795,6 +809,13 @@ ${css}
       <div id="input-resize-handle" title="Drag to resize input area"></div>
       <div id="input-area">
         <div id="slash-menu"></div>
+        <div id="message-queue" hidden>
+          <div class="mq-head">
+            <span class="mq-title" id="mq-title"></span>
+            <button type="button" class="mq-clear" id="mq-clear" title="${tr.queueClear}" aria-label="${tr.queueClear}">✕</button>
+          </div>
+          <div id="mq-items"></div>
+        </div>
         <div id="skill-armed" class="skill-armed" hidden>
           <span class="skill-armed-glyph">🧩</span>
           <span class="skill-armed-label" id="skill-armed-label"></span>
@@ -805,6 +826,9 @@ ${css}
           <textarea id="input" placeholder="${tr.inputPlaceholder}" rows="1"></textarea>
           <div id="input-toolbar">
             <button id="btn-attach" title="${tr.attachFiles}">📎</button>
+            <button id="btn-queue" title="${tr.queueAction}" aria-label="${tr.queueAction}">
+              <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path fill="currentColor" d="M4.98 4a.5.5 0 0 0-.39.188L1.54 8H6a.5.5 0 0 1 .5.5 1.5 1.5 0 1 0 3 0A.5.5 0 0 1 10 8h4.46l-3.05-3.812A.5.5 0 0 0 11.02 4H4.98z"/><path fill="currentColor" d="M1 9v4.5A1.5 1.5 0 0 0 2.5 15h11a1.5 1.5 0 0 0 1.5-1.5V9H12.5a2.5 2.5 0 0 1-2.45 2h-3.1A2.5 2.5 0 0 1 4.5 9H1z"/></svg>
+            </button>
             <div class="input-actions">
               <button id="btn-steer" class="btn-steer" data-tooltip="${tr.steerAction}" aria-label="${tr.steerAction}">
                 <svg class="btn-icon-steer" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M3.2 11h9.9l-3.2-3.2L11.3 6.4 16.9 12l-5.6 5.6-1.4-1.4 3.2-3.2H3.2z"/><rect x="18.4" y="5" width="2.1" height="14" rx="1.05" fill="currentColor"/></svg>

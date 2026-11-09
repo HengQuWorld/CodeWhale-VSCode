@@ -193,6 +193,29 @@ interface Translations {
   steerUnavailablePlaceholder: string;
   steerBadge: string;
   steerBadgeTitle: string;
+  /** Composer's queue button: what parking does, and that nothing runs
+   *  until the user picks the moment (TUI /queue parity). */
+  queueAction: string;
+  /** Queue strip title; `{n}` is the parked count, filled in by the webview. */
+  queueTitle: string;
+  /** The strip's clear-all button. */
+  queueClear: string;
+  /** Row buttons: run this memo now / load it back into the composer /
+   *  take it off the queue. */
+  queueRunTitle: string;
+  queueEditTitle: string;
+  queueDropTitle: string;
+  /** Posted when a prompt is parked; `{n}` is the queue's new length. */
+  queueQueuedInfo: string;
+  /** A ▶ on a memo while a turn runs on an engine without steer support:
+   *  the memo stays parked, and the message says what the way out is. */
+  queueBusyKept: string;
+  /** Clear clicked on an already-empty queue. */
+  queueAlreadyEmpty: string;
+  /** Clear that dropped some memos; `{n}` is how many. */
+  queueCleared: string;
+  /** The clicked memo is gone (a stale panel, a second window). */
+  queueNotFound: string;
   /** Badge on guidance the runtime dropped before the model saw it. */
   steerUndelivered: string;
   steerUndeliveredTitle: string;
@@ -723,6 +746,17 @@ const en: Translations = {
   steerAction: "Guide this turn (Enter)",
   steerNeedsText: "Type a message to guide the running turn",
   steerUnavailablePlaceholder: "A turn is running — this engine cannot take guidance",
+  queueAction: "Queue as memo — runs only when you choose",
+  queueTitle: "Queued memos ({n}) — nothing runs until you pick",
+  queueClear: "Clear all queued memos",
+  queueRunTitle: "Run now",
+  queueEditTitle: "Load into the composer",
+  queueDropTitle: "Remove from queue",
+  queueQueuedInfo: "Parked as a queued memo — nothing runs until you choose ({n} waiting).",
+  queueBusyKept: "A turn is still running and this engine cannot take mid-turn guidance, so the memo stays queued. Run it after the turn ends — or stop the turn first.",
+  queueAlreadyEmpty: "Queue already empty.",
+  queueCleared: "Cleared {n} queued memo(s).",
+  queueNotFound: "That queued memo is no longer in the queue — the list may have changed.",
   steerBadge: "steer",
   steerBadgeTitle: "Sent as mid-turn steering",
   steerUndelivered: "not delivered",
@@ -1208,6 +1242,17 @@ const zhCn: Translations = {
   steerAction: "引导当前回合（Enter）",
   steerNeedsText: "输入内容后可引导当前回合",
   steerUnavailablePlaceholder: "本回合运行中 — 当前引擎不支持引导",
+  queueAction: "压入队列备忘——由你决定何时执行",
+  queueTitle: "队列备忘（{n}）——选择执行前不会运行",
+  queueClear: "清空全部队列备忘",
+  queueRunTitle: "立即执行",
+  queueEditTitle: "放回输入框",
+  queueDropTitle: "从队列移除",
+  queueQueuedInfo: "已压入队列备忘——在你选择执行前不会运行（共 {n} 条）。",
+  queueBusyKept: "回合仍在运行，当前引擎不支持回合中引导——备忘保留在队列。等回合结束后执行，或先停止回合。",
+  queueAlreadyEmpty: "队列备忘已为空。",
+  queueCleared: "已清空 {n} 条队列备忘。",
+  queueNotFound: "这条队列备忘已不在队列中——列表可能已刷新。",
   steerBadge: "引导",
   steerBadgeTitle: "作为中途引导发送",
   steerUndelivered: "未送达",
@@ -1722,6 +1767,17 @@ export function webviewTranslations(tr: Translations) {
     steerAction: tr.steerAction,
     steerNeedsText: tr.steerNeedsText,
     steerUnavailablePlaceholder: tr.steerUnavailablePlaceholder,
+    queueAction: tr.queueAction,
+    queueTitle: tr.queueTitle,
+    queueClear: tr.queueClear,
+    queueRunTitle: tr.queueRunTitle,
+    queueEditTitle: tr.queueEditTitle,
+    queueDropTitle: tr.queueDropTitle,
+    queueQueuedInfo: tr.queueQueuedInfo,
+    queueBusyKept: tr.queueBusyKept,
+    queueAlreadyEmpty: tr.queueAlreadyEmpty,
+    queueCleared: tr.queueCleared,
+    queueNotFound: tr.queueNotFound,
     steerBadge: tr.steerBadge,
     steerBadgeTitle: tr.steerBadgeTitle,
     steerUndelivered: tr.steerUndelivered,

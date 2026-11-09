@@ -204,7 +204,9 @@ describe("isCommandAvailableInGui", () => {
     expect(isCommandAvailableInGui("/skills")).toBe("full");
     expect(isCommandAvailableInGui("/skill")).toBe("full");
     expect(isCommandAvailableInGui("/network")).toBe("unavailable");
-    expect(isCommandAvailableInGui("/queue")).toBe("unavailable");
+    // /queue became full when the GUI gained its own queue strip (TUI parity):
+    // the composer's queue button and panel implement it host-side.
+    expect(isCommandAvailableInGui("/queue")).toBe("full");
     expect(isCommandAvailableInGui("/stash")).toBe("unavailable");
     expect(isCommandAvailableInGui("/hooks")).toBe("unavailable");
     expect(isCommandAvailableInGui("/subagents")).toBe("unavailable");
@@ -292,8 +294,10 @@ describe("Unavailable command reasons", () => {
     expect(help).toContain("Not available");
   });
 
-  it("queue/stash: message queue is TUI-specific", () => {
-    expect(getCommandHelpText("/queue")).toContain("Not available");
+  it("queue: available in GUI; stash stays TUI-specific", () => {
+    // /queue is backed by the composer's queue strip; its helpText documents
+    // the subcommands instead of a refusal.
+    expect(getCommandHelpText("/queue")).toContain("/queue [list|add <text>|run <n>|edit <n>|drop <n>|clear]");
     expect(getCommandHelpText("/stash")).toContain("Not available");
   });
 

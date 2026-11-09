@@ -1,5 +1,11 @@
 # Change Log
 
+## Unreleased
+
+### New Features
+
+- **Queue a message as a memo; run it when you choose** — The composer has a new queue button beside 📎 that parks the typed prompt instead of sending it, and a strip above the composer lists everything parked for the current conversation. Nothing in the queue runs by itself: each memo carries ▶ (run now), ✎ (load back into the composer, appended below whatever you have typed) and ✕ (remove), plus a clear-all. Running a memo while a turn is in flight guides that turn when the engine supports steering, and otherwise tells you it stays parked. Memos are saved per conversation under `~/.codewhale/message-queue/`, survive window reloads, and memos parked before the first send follow the conversation that send creates. The `/queue` slash command (`list` / `add` / `run` / `edit` / `drop` / `clear`) drives the same queue from the composer, and is no longer reported as TUI-only. (TUI /queue parity; `/stash` remains TUI-specific.)
+
 ## 0.9.5
 
 Works on the same engine floor as 0.9.4 (**v0.10.2**); nothing here waits on an engine build.

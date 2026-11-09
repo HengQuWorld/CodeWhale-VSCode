@@ -63,6 +63,15 @@ import {
 } from "./utils/diff-utils";
 import { normalizePath, resolveRecordedFilePath } from "./utils/file-paths";
 import { loadInputHistory, pushInputHistory } from "./utils/input-history";
+import {
+  DRAFT_QUEUE_KEY,
+  clearThreadQueue,
+  dequeuePrompt,
+  enqueuePrompt,
+  loadMessageQueue,
+  migrateThreadQueue,
+  type QueuedPrompt,
+} from "./utils/message-queue";
 import { imageBytesMatchMime, sniffImageMime } from "./utils/image-bytes";
 import { defaultTasksDir, resolveTaskArtifactPath } from "./utils/task-paths";
 import {
@@ -752,6 +761,32 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
           pushInputHistory(this.currentWorkspaceKey(), msg.text);
         }
         break;
+      case "queueMessage":
+        // Park the composer's text as a queued memo the user runs when they
+        // choose (TUI /queue parity). The box was cleared optimistically; the
+        // attachments in it stay — the memo is its text, not the box's files.
+        if (typeof msg.text === "string") this.handleQueuePrompt(msg.text);
+        break;
+      case "queuedRun":
+        // The user picking the moment: dispatch one parked memo now.
+        if (typeof msg.id === "string") await this.handleRunQueuedPrompt(msg.id);
+        break;
+      case "queuedEdit":
+        // The webview may send the text it wants in the box (its own draft
+        // with the memo appended below it); only it knows what the box holds.
+        if (typeof msg.id === "string") {
+          this.handleEditQueuedPrompt(
+            msg.id,
+            typeof msg.text === "string" ? msg.text : undefined
+          );
+        }
+        break;
+      case "queuedDrop":
+        if (typeof msg.id === "string") this.handleDropQueuedPrompt(msg.id);
+        break;
+      case "queuedClear":
+        this.handleClearQueuedPrompts();
+        break;
       case "webviewReady":
         try {
           // A question from the webview that just went away can never be
@@ -769,6 +804,8 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
           // Its input history went with it: hand back the disk copy so ↑/↓
           // walk the same entries after a reload as before.
           this.postInputHistory();
+          // Same for the parked memos: the queue outlives the panel.
+          this.postMessageQueue();
           await this.api.ensureReady();
           await this.syncWebviewState();
         } catch (err) {
@@ -2489,6 +2526,9 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       message: `Viewing session: ${title.slice(0, 80)}\n${msgCount} messages | ${session.metadata.total_tokens.toLocaleString()} tokens${costStr}${modelStr}\n\nStart typing to resume this session and continue the conversation.`
     });
     this.postMessage({ type: "sessionLoaded", sessionId: session.metadata.id });
+    // A viewed session has no thread: the strip switches to the draft bucket,
+    // the memos a resumed conversation inherits — not the previous thread's.
+    this.postMessageQueue();
     // The Work panel's goal slot is thread-scoped and this view has no thread
     // yet, so it is re-pushed here the way the new-chat path does it: the slot
     // is reset by the sessionLoaded handler, and this replaces the previous
@@ -2632,6 +2672,9 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       // resumed session, undo's and retry's forked threads — which makes this
       // the one place the change has to be published.
       this.postCurrentSettings();
+      // The queue strip follows the conversation: this thread's parked memos
+      // replace the previous thread's, the same way the chips do.
+      this.postMessageQueue();
       this.postMessage({
         type: "status",
         text: `Thread ${threadId.slice(0, 12)}: ${this.messages.length} messages`,
@@ -2846,6 +2889,157 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       type: "inputHistory",
       entries: loadInputHistory(this.currentWorkspaceKey()),
     });
+  }
+
+  // ── Queued memos (TUI /queue parity) ──
+  // Prompts the user parked instead of sending, dispatched only when they
+  // pick the moment: ▶ in the panel runs one now, `/queue run <n>` does it
+  // from the box. Parked before the first send they live under the draft
+  // bucket and migrate onto the thread that send creates.
+
+  /** Which bucket the queue actions address: the thread on screen, or the
+   *  draft bucket while no thread exists (new chat, viewed saved session). */
+  private queueThreadKey(): string {
+    return this.currentThread?.id ?? DRAFT_QUEUE_KEY;
+  }
+
+  private messageQueueFor(threadKey: string): QueuedPrompt[] {
+    return loadMessageQueue(this.currentWorkspaceKey())[threadKey] ?? [];
+  }
+
+  /** The queue strip's only feed: after every mutation, and whenever the
+   *  thread on screen changes, the webview repaints from this. */
+  private postMessageQueue(): void {
+    this.postMessage({
+      type: "messageQueue",
+      items: this.messageQueueFor(this.queueThreadKey()),
+    });
+  }
+
+  /** Park the composer's text. No-op on empty text — parking nothing must
+   *  not create an entry the panel then offers to run. */
+  public handleQueuePrompt(text: string): void {
+    if (!text.trim()) return;
+    enqueuePrompt(this.currentWorkspaceKey(), this.queueThreadKey(), text);
+    this.postMessage({
+      type: "info",
+      message: t().queueQueuedInfo.replace("{n}", String(this.messageQueueFor(this.queueThreadKey()).length)),
+    });
+    this.postMessageQueue();
+  }
+
+  /** The user picking the moment for one parked memo. Where it goes is the
+   *  same choice a composer send makes today, decided by the same state:
+   *
+   *  - Idle: a normal send (new turn on the current thread).
+   *  - Turn running and the engine takes guidance: a steer into that turn —
+   *    the TUI's SendQueuedNow promotes the oldest parked message into the
+   *    active turn the same way.
+   *  - Turn running, no guidance support: nothing to dispatch into, so the
+   *    memo stays parked. That is the point of the queue — the user picks
+   *    another moment (wait, or stop the turn) instead of losing it.
+   *
+   *  A refused dispatch re-parks the memo; the composer's own text and
+   *  attachments are never touched by any of these paths, because the memo
+   *  is not the box's content. */
+  public async handleRunQueuedPrompt(id: string): Promise<void> {
+    const key = this.queueThreadKey();
+    const item = this.messageQueueFor(key).find((p) => p.id === id);
+    if (!item) {
+      // The list moved under the click (a run from two panels, a stale
+      // repaint). Say so instead of silently doing nothing.
+      this.postMessage({ type: "error", message: t().queueNotFound });
+      return;
+    }
+
+    const busy = this.currentTurnId !== null;
+    if (busy && !this.apiCapabilities.turnSteer) {
+      this.postMessage({ type: "info", message: t().queueBusyKept });
+      return;
+    }
+
+    // Off the queue before dispatching, so a success cannot double-run it
+    // through a second click in the in-flight window. The requeue below is
+    // the failure path.
+    dequeuePrompt(this.currentWorkspaceKey(), key, id);
+    this.postMessageQueue();
+
+    let dispatched = false;
+    if (busy) {
+      dispatched = await this.handleSteer(item.text, []);
+    } else {
+      dispatched = await this.handleSendMessage(item.text, { queued: true });
+    }
+    if (!dispatched) {
+      // Back where it was: a memo again, not a lost one. The thread key is
+      // re-read — a dispatch that had to create the thread first moved the
+      // queue's bucket mid-flight.
+      enqueuePrompt(this.currentWorkspaceKey(), this.queueThreadKey(), item.text);
+      this.postMessageQueue();
+    }
+  }
+
+  /** Load a parked memo back into the composer and take it off the queue.
+   *  `requestedText` is what the panel wants in the box: the memo itself,
+   *  or the memo appended below the box's own content when that had text.
+   *  The merge is decided in the webview because the box's live content is
+   *  the webview's business; from here the text is simply handed back the
+   *  same way a refused send hands text back. */
+  public handleEditQueuedPrompt(id: string, requestedText?: string): void {
+    const key = this.queueThreadKey();
+    const item = this.messageQueueFor(key).find((p) => p.id === id);
+    if (!item) {
+      this.postMessage({ type: "error", message: t().queueNotFound });
+      return;
+    }
+    dequeuePrompt(this.currentWorkspaceKey(), key, id);
+    this.postMessage({
+      type: "setInputText",
+      text:
+        typeof requestedText === "string" && requestedText
+          ? requestedText
+          : item.text,
+    });
+    this.postMessageQueue();
+  }
+
+  /** Remove one parked memo. The list repainting is the feedback; a miss
+   *  says so rather than repainting an unchanged list. */
+  public handleDropQueuedPrompt(id: string): void {
+    const remaining = dequeuePrompt(this.currentWorkspaceKey(), this.queueThreadKey(), id);
+    if (remaining === null) {
+      this.postMessage({ type: "error", message: t().queueNotFound });
+      return;
+    }
+    this.postMessageQueue();
+  }
+
+  /** Drop every parked memo of the thread on screen. Reports the count the
+   *  way the TUI's `/stash clear` does, so the user knows what they deleted. */
+  public handleClearQueuedPrompts(): void {
+    const dropped = clearThreadQueue(this.currentWorkspaceKey(), this.queueThreadKey());
+    if (dropped === 0) {
+      this.postMessage({ type: "info", message: t().queueAlreadyEmpty });
+      return;
+    }
+    this.postMessage({ type: "info", message: t().queueCleared.replace("{n}", String(dropped)) });
+    this.postMessageQueue();
+  }
+
+  /** The current thread's parked memos, for `/queue list`'s numbered view. */
+  public queuedPromptList(): QueuedPrompt[] {
+    return this.messageQueueFor(this.queueThreadKey());
+  }
+
+  /** Move the draft bucket's memos onto the thread that just came into
+   *  being, so memos parked before the first send follow the conversation
+   *  they were written for. Called from both thread-creation sites in the
+   *  send path (a fresh thread, and the recovery that replaces a thread the
+   *  engine no longer has). */
+  private migrateQueuedPromptsInto(threadId: string, previousKey: string | null): void {
+    const fromKey = previousKey ?? DRAFT_QUEUE_KEY;
+    const migrated = migrateThreadQueue(this.currentWorkspaceKey(), fromKey, threadId);
+    if (migrated.length > 0) this.postMessageQueue();
   }
 
   /** Re-announce every live thumbnail, for a webview that just reloaded and
@@ -3130,12 +3324,29 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     return text.trim() ? text.trimEnd() + "\n" + lines : lines;
   }
 
-  private async handleSendMessage(text: string): Promise<void> {
-    if (!text.trim() && this.currentAttachments.length === 0) return;
+  /** Send the composer's text as a new turn.
+   *
+   *  `opts.queued` marks a dispatch of a parked memo (the queue panel's ▶ or
+   *  `/queue run`): the memo is self-contained, so the box's attachments
+   *  stay in the box, and a refused send re-parks the memo instead of
+   *  dropping its text back into the composer. Resolves `false` when the
+   *  turn did not start — the queue caller uses that to re-park; composer
+   *  callers ignore the value as before.
+   *
+   *  Returns whether the send reached the engine (turn started). */
+  private async handleSendMessage(
+    text: string,
+    opts?: { queued?: boolean }
+  ): Promise<boolean> {
+    const queued = opts?.queued === true;
+    const composerAttachments = queued ? [] : this.currentAttachments;
+    if (!text.trim() && composerAttachments.length === 0) return false;
 
-    const attachments = [...this.currentAttachments];
-    this.currentAttachments = [];
-    this.postAttachmentsChanged();
+    const attachments = [...composerAttachments];
+    if (!queued) {
+      this.currentAttachments = [];
+      this.postAttachmentsChanged();
+    }
 
     // The optimistic user bubble is created inside the try block below, but a
     // refusal has to retract that exact bubble by id — so the id is minted
@@ -3184,6 +3395,9 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
           auto_approve: autoApprove,
           trust_mode: posture === "full_access",
         });
+        // Memos parked before any thread existed were waiting under the draft
+        // bucket; this is the thread they were written for.
+        this.migrateQueuedPromptsInto(this.currentThread.id, null);
         this.forgetSessionBinding();
         this.subscribeToEvents();
         this.refreshSessionList();
@@ -3253,6 +3467,9 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
           auto_approve: posture === "full_access",
           trust_mode: posture === "full_access",
         });
+        // The old thread's bucket would be orphaned by the replacement: its
+        // parked memos follow the conversation to the new id.
+        this.migrateQueuedPromptsInto(this.currentThread.id, replaced.id);
         this.forgetSessionBinding();
         this.subscribeToEvents();
         this.refreshSessionList();
@@ -3326,13 +3543,15 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       // the user. See `recoverRefusedSend`.
       const recovered =
         this.isActiveTurnRefusal(err) &&
-        (await this.recoverRefusedSend(userMsgId, text, attachments));
-      if (recovered) return;
+        (await this.recoverRefusedSend(userMsgId, text, attachments, { queued }));
+      if (recovered) return false;
       this.postMessage({
         type: "error",
         message: formatError("Failed to send message", err),
       });
+      return false;
     }
+    return true;
   }
 
   /** The mode a turn ran in. The runtime records it on the turn itself, which
@@ -3369,25 +3588,33 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
    *  Attachments the user put in the composer go with it: the prompt's
    *  `[Attached image: …]` lines are what the engine expands into image
    *  blocks, so guidance carrying a screenshot reaches the model as one. */
-  private async handleSteer(text: string): Promise<void> {
+  private async handleSteer(
+    text: string,
+    attachmentsOverride?: AttachmentRecord[]
+  ): Promise<boolean> {
     const trimmed = text.trim();
     // The composer's attachments ride the guidance exactly as they ride a
     // send — mid-turn guidance is often the picture itself ("this is what I
     // mean", "the error is here"). Read before anything can clear them, and
     // handed back untouched if the engine refuses the steer. An
     // attachment-only steer is a steer: the send path already accepts one.
-    const attachments = [...this.currentAttachments];
-    if (!trimmed && attachments.length === 0) return;
+    // A queued memo's dispatch passes an explicit [] — the memo is its text,
+    // and the box's own attachments are not its business.
+    const attachments =
+      attachmentsOverride !== undefined
+        ? [...attachmentsOverride]
+        : [...this.currentAttachments];
+    if (!trimmed && attachments.length === 0) return false;
 
     const thread = this.currentThread;
     const turnId = this.currentTurnId;
     if (!thread || !turnId) {
       this.postMessage({ type: "error", message: t().steerNoActiveTurn });
-      return;
+      return false;
     }
     if (!this.apiCapabilities.turnSteer) {
       this.postMessage({ type: "error", message: t().steerUnsupported });
-      return;
+      return false;
     }
 
     // The wire prompt carries the attachment lines; the bubble below carries
@@ -3398,8 +3625,9 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
 
     // The composer lets go of the attachments as soon as the guidance leaves
     // it — the same optimism a send makes, so a second click cannot send the
-    // same picture twice. A refused steer hands them back below.
-    if (attachments.length > 0) {
+    // same picture twice. A refused steer hands them back below. A dispatch
+    // from the queue never touched them, so it never hands them back.
+    if (attachmentsOverride === undefined && attachments.length > 0) {
       this.currentAttachments = [];
       this.postAttachmentsChanged();
     }
@@ -3417,14 +3645,18 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       // attachments with them — TUI parity (`dispatch.rs` restores the failed
       // steer plus anything unattempted, "so nothing is lost"), and the same
       // recovery a refused send already gets. The steer button re-arms with
-      // the restored text.
-      this.restoreComposerText(trimmed);
-      this.restoreComposerAttachments(attachments);
+      // the restored text. A queued memo's dispatch never took the box's
+      // content, so it has nothing to hand back — the caller re-parks the
+      // memo from the false this returns.
+      if (attachmentsOverride === undefined) {
+        this.restoreComposerText(trimmed);
+        this.restoreComposerAttachments(attachments);
+      }
       this.postMessage({
         type: "error",
         message: formatError(t().steerFailed, err),
       });
-      return;
+      return false;
     }
 
     const steerMsg: ChatMessage = {
@@ -3484,6 +3716,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       this.messages.push(nextMsg);
       this.postMessage({ type: "addMessage", message: nextMsg });
     }
+    return true;
   }
 
   private async handleNewThread(): Promise<void> {
@@ -3499,6 +3732,9 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     // no active thread this republishes the startup defaults — what the new
     // thread actually inherits, which is what the chips should describe.
     this.postCurrentSettings();
+    // No thread on screen: the strip shows the draft bucket, the memos a new
+    // conversation inherits once its first send creates the thread.
+    this.postMessageQueue();
     // Clear stale sidebar data
     this.postMessage({ type: "taskList", tasks: [] });
     this.postMessage({ type: "agentRunList", runs: [] });
@@ -6739,7 +6975,8 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
   private async recoverRefusedSend(
     userMsgId: string,
     text: string,
-    attachments: readonly AttachmentRecord[]
+    attachments: readonly AttachmentRecord[],
+    opts?: { queued?: boolean }
   ): Promise<boolean> {
     // Read the running turn before touching the transcript: this await is the
     // window in which the turn can still finish, and the retraction below is
@@ -6752,8 +6989,15 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       this.postMessage({ type: "removeMessage", messageId: userMsgId });
     }
     this.retractRefusedChangeTurn();
-    this.restoreComposerText(text);
-    this.restoreComposerAttachments(attachments);
+    // A queued memo the engine refused (a turn appeared in the dispatch
+    // window) is not composer text: putting it in the box would both clobber
+    // what the user is typing and strand it there as a duplicate of the
+    // still-parked entry. The queue caller re-parks it from the `false` this
+    // returns.
+    if (opts?.queued !== true) {
+      this.restoreComposerText(text);
+      this.restoreComposerAttachments(attachments);
+    }
 
     if (!turn) return false;
     this.adoptActiveTurn(turn);

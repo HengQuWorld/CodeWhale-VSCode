@@ -2982,6 +2982,106 @@ export function getWebviewCss(): string {
       opacity: 1;
     }
 
+    /* ── Queued memos (TUI /queue parity) ──
+       A strip above the composer, in the same visual family as the
+       armed-skill chip: a bordered list of parked prompts, each with its
+       three actions. Rows scroll inside the strip, so a long queue cannot
+       push the composer itself out of the panel. */
+    #message-queue {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      margin: 0 0 2px;
+      padding: 5px 6px;
+      font-size: 11px;
+      border: 1px solid rgba(128,128,128,0.3);
+      border-radius: 4px;
+      background: rgba(128,128,128,0.08);
+    }
+    #message-queue[hidden] { display: none; }
+    .mq-head {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .mq-title {
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-weight: 600;
+      opacity: 0.85;
+    }
+    .mq-clear {
+      background: none;
+      border: none;
+      color: inherit;
+      cursor: pointer;
+      opacity: 0.6;
+      font-size: 11px;
+      line-height: 1;
+      padding: 0 2px;
+    }
+    .mq-clear:hover { opacity: 1; }
+    #mq-items {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      max-height: 96px;
+      overflow-y: auto;
+    }
+    .mq-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 2px 0;
+    }
+    .mq-index {
+      flex: none;
+      min-width: 1.4em;
+      text-align: right;
+      opacity: 0.55;
+      font-variant-numeric: tabular-nums;
+    }
+    .mq-text {
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      cursor: default;
+    }
+    .mq-actions { flex: none; display: flex; gap: 2px; }
+    .mq-act {
+      background: none;
+      border: none;
+      color: inherit;
+      cursor: pointer;
+      opacity: 0.6;
+      font-size: 11px;
+      line-height: 1;
+      padding: 2px 4px;
+      border-radius: 3px;
+    }
+    .mq-act:hover { opacity: 1; background: rgba(128,128,128,0.18); }
+    .mq-act.mq-run:hover { color: var(--brand-primary); }
+
+    /* The composer's queue button sits beside 📎 and shares its sizing via
+       the #btn-attach rule; only the icon size and the parked-nothing dim
+       state are its own. The dim state mirrors the toolbar's
+       is-unavailable look — the hover is where the tooltip lives, so the
+       button stays clickable-looking while inert. */
+    #input-toolbar #btn-queue .svg,
+    #input-toolbar #btn-queue svg { display: block; width: 13px; height: 13px; }
+    #input-toolbar #btn-queue.is-unavailable {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    #input-toolbar #btn-queue.is-unavailable:hover {
+      background: var(--brand-primary);
+    }
+
     /* ── Agent Card (sidebar) ── */
 
     .agent-card {

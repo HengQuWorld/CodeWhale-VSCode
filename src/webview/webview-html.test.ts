@@ -455,6 +455,17 @@ function makeTr(): WebviewTranslations {
     workspaceTrustAction: "Trust this workspace",
     workspaceTrustTerminalAction: "Do it in the terminal",
     workspaceTrustDismiss: "Hide",
+    queueAction: "Queue as memo — runs only when you choose",
+    queueTitle: "Queued memos ({n}) — nothing runs until you pick",
+    queueClear: "Clear all queued memos",
+    queueRunTitle: "Run now",
+    queueEditTitle: "Load into the composer",
+    queueDropTitle: "Remove from queue",
+    queueQueuedInfo: "Parked as a queued memo — nothing runs until you choose ({n} waiting).",
+    queueBusyKept: "A turn is still running and this engine cannot take mid-turn guidance, so the memo stays queued. Run it after the turn ends — or stop the turn first.",
+    queueAlreadyEmpty: "Queue already empty.",
+    queueCleared: "Cleared {n} queued memo(s).",
+    queueNotFound: "That queued memo is no longer in the queue — the list may have changed.",
   };
 }
 
