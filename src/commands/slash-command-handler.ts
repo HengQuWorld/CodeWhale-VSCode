@@ -134,12 +134,9 @@ export interface SlashCommandContext {
   handleUndoLastTurn(): Promise<void>;
   handleRetryLastTurn(): Promise<void>;
   handleAttachFile(): Promise<void>;
-  /** The queued-memo operations (TUI /queue parity). All of them act on the
-   *  thread on screen, or the draft bucket when no thread is open, and each
-   *  republishes the panel's list as a side effect. */
-  queuedPromptList(): QueuedPrompt[];
-  /** Every thread's parked memos for this workspace — `/queue list`'s
-   *  cross-conversation summary when the current view has none. */
+  /** Every bucket's parked memos for this workspace — `/queue list`'s
+   *  whole-workspace view (the strip beside the composer already shows the
+   *  current conversation's). */
   queuedPromptsByThread(): Record<string, QueuedPrompt[]>;
   handleQueuePrompt(text: string): void;
   handleRunQueuedPrompt(id: string): Promise<void>;
@@ -2363,69 +2360,56 @@ async function handleQueue(ctx: SlashCommandContext, args: string): Promise<void
   const rest = arg.slice(sub.length).trim();
 
   if (!arg || sub === "list" || sub === "ls" || sub === "show") {
-    const prompts = ctx.queuedPromptList();
-    if (prompts.length === 0) {
-      // A fresh window has no thread, and "queue empty" would be a lie
-      // while memos wait in the conversations they were written for. Sum
-      // those up instead, with where to find them.
-      const byThread = ctx.queuedPromptsByThread();
-      const holding = Object.entries(byThread).filter(
-        ([key, list]) => key !== DRAFT_QUEUE_KEY && list.length > 0
-      );
-      if (holding.length === 0) {
-        ctx.postMessage({
-          type: "info",
-          message:
-            "Queue empty. Park a prompt with the composer's queue button (or `/queue add <text>`) — it runs only when you choose, and it survives window reloads.",
-        });
-        return;
-      }
-
-      // Display titles, not raw ids: the title is what the Threads rail
-      // shows, and it is what the user recognises. A stalled or ancient
-      // engine must not hold the answer hostage — rows fall back to the
-      // thread id.
-      const titleById = new Map<string, string>();
-      try {
-        const records = await ctx.api.listThreads({ limit: 200, timeoutMs: 5000 });
-        for (const rec of records) {
-          if (rec?.id) titleById.set(rec.id, rec.title || rec.id);
-        }
-      } catch {
-        // Titles are decoration; the ids degrade fine.
-      }
-
-      // One message, one clickable row per conversation: the webview opens
-      // it with the same loadThread the rail's items use, and the queue
-      // strip travels with the switch (the host republishes on threadLoaded).
+    // Always the whole-workspace view. The strip beside the composer
+    // already shows the current conversation's memos — repeating them here
+    // adds nothing — so this is the one place that answers "what is
+    // waiting, and where". Every bucket with memos gets a row:
+    // conversations by their rail title, and the not-yet-sent draft bucket
+    // by name. A click opens that conversation; the draft row opens a new
+    // chat, where those memos wait.
+    const byThread = ctx.queuedPromptsByThread();
+    const holding = Object.entries(byThread).filter(([, list]) => list.length > 0);
+    if (holding.length === 0) {
       ctx.postMessage({
-        type: "queueThreadList",
-        header: t().queueThreadListHeader.replace(
-          "{n}",
-          String(holding.length)
-        ),
-        threads: holding.map(([key, list]) => ({
-          id: key,
-          title: titleById.get(key) || key,
-          count: list.length,
-          previews: list
-            .slice(0, 3)
-            .map((p: QueuedPrompt) => queuePreviewLine(p.text)),
-          lastTs: list[list.length - 1].ts,
-        })),
+        type: "info",
+        message:
+          "Queue empty. Park a prompt with the composer's queue button (or `/queue add <text>`) — it runs only when you choose, and it survives window reloads.",
       });
       return;
     }
-    const lines = prompts.map((p: QueuedPrompt, i: number) => {
-      const attachments = (p.attachments ?? []).length;
-      const head = queuePreviewLine(p.text);
-      const when = p.ts > 0 ? new Date(p.ts).toLocaleString() : "(no ts)";
-      const clip = attachments > 0 ? ` 📎${attachments}` : "";
-      return `  ${i + 1}. [${when}]${clip} ${head}`;
-    });
+
+    // Display titles, not raw ids: the title is what the Threads rail
+    // shows, and it is what the user recognises. A stalled or ancient
+    // engine must not hold the answer hostage — rows fall back to the
+    // thread id.
+    const titleById = new Map<string, string>();
+    try {
+      const records = await ctx.api.listThreads({ limit: 200, timeoutMs: 5000 });
+      for (const rec of records) {
+        if (rec?.id) titleById.set(rec.id, rec.title || rec.id);
+      }
+    } catch {
+      // Titles are decoration; the ids degrade fine.
+    }
+
     ctx.postMessage({
-      type: "info",
-      message: `${prompts.length} queued memo(s):\n\n${lines.join("\n")}\n\nRun one with /queue run <n>; the panel next to the composer has the same actions.`,
+      type: "queueThreadList",
+      header: t().queueThreadListHeader.replace("{n}", String(holding.length)),
+      threads: holding.map(([key, list]) => ({
+        // The webview routes a draft row to a new chat and a thread row to
+        // loadThread; the id names which one.
+        kind: key === DRAFT_QUEUE_KEY ? "draft" : "thread",
+        id: key,
+        title:
+          key === DRAFT_QUEUE_KEY
+            ? t().queueDraftTitle
+            : titleById.get(key) || key,
+        count: list.length,
+        previews: list
+          .slice(0, 3)
+          .map((p: QueuedPrompt) => queuePreviewLine(p.text)),
+        lastTs: list[list.length - 1].ts,
+      })),
     });
     return;
   }
@@ -2446,7 +2430,11 @@ async function handleQueue(ctx: SlashCommandContext, args: string): Promise<void
 
   const numbered = sub === "run" || sub === "edit" || sub === "drop" || sub === "remove" || sub === "rm";
   if (numbered) {
-    const prompts = ctx.queuedPromptList();
+    // The numbered actions stay scoped to the view on screen — the same
+    // queue the strip shows, numbered the same way — so a number always
+    // means the same memo the panel row does.
+    const currentKey = ctx.currentThread?.id ?? DRAFT_QUEUE_KEY;
+    const prompts = ctx.queuedPromptsByThread()[currentKey] ?? [];
     const idx = parseInt(rest, 10);
     if (!Number.isInteger(idx) || idx < 1 || idx > prompts.length) {
       ctx.postMessage({

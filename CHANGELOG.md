@@ -10,7 +10,7 @@
 
 - **The queue strip folds** — The strip's header is a fold control (the sidebar's pattern): ▾/▸ hides the list but keeps the count, and the choice — like the panel's other remembered choices — survives window reloads.
 
-- **`/queue list` opens the conversation it names** — The cross-conversation summary used to be prose telling you to go find the Threads rail. It is now a card in the conversation: one row per conversation holding memos, named by its rail title (not its raw id) with the memo count and a first-line preview — and clicking a row opens that conversation, where the queue strip is waiting.
+- **`/queue list` opens the conversation it names** — The command is always the whole-workspace view now: the strip beside the composer already shows the current conversation's memos, so repeating them added nothing. The card lists one row per conversation holding memos — named by its rail title (not its raw id), with the memo count and a first-line preview — plus a row for the not-yet-sent draft bucket that opens a new chat. Clicking a row opens that conversation, where the queue strip is waiting; the numbered `run`/`edit`/`drop` arguments stay scoped to the view on screen, so a number always means the same memo its panel row does.
 
 ## 0.9.5
 

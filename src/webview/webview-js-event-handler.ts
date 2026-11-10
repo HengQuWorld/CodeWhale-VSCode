@@ -2040,7 +2040,7 @@ ${PROVIDER_PICKER_JS}
         qtlThreads.forEach(function(th) {
           var previews = Array.isArray(th.previews) ? th.previews : [];
           var tip = previews.join('\\n');
-          qtlRows += '<button type="button" class="queue-thread-row" data-thread-id="' + __wvEscapeHtml(th.id) + '" title="' + __wvEscapeHtml(tip) + '">' +
+          qtlRows += '<button type="button" class="queue-thread-row" data-kind="' + __wvEscapeHtml(th.kind || 'thread') + '" data-thread-id="' + __wvEscapeHtml(th.id) + '" title="' + __wvEscapeHtml(tip) + '">' +
             '<span class="qtr-title">' + __wvEscapeHtml(th.title || th.id) + '</span>' +
             '<span class="qtr-meta">📎 ' + Number(th.count || 0) + '</span>' +
             '<span class="qtr-preview">' + __wvEscapeHtml(previews[0] || '') + '</span>' +
@@ -2052,6 +2052,12 @@ ${PROVIDER_PICKER_JS}
         qtl.addEventListener('click', function(e) {
           var row = e.target && e.target.closest ? e.target.closest('.queue-thread-row') : null;
           if (!row) return;
+          // A draft row opens a new chat — that is the conversation those
+          // memos are waiting for; a thread row opens that conversation.
+          if (row.getAttribute('data-kind') === 'draft') {
+            vscode.postMessage({ type: 'newThread' });
+            return;
+          }
           var threadId = row.getAttribute('data-thread-id');
           if (!threadId) return;
           vscode.postMessage({ type: 'loadThread', threadId: threadId });

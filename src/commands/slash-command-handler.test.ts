@@ -78,6 +78,7 @@ vi.mock("../i18n", () => ({
   t: vi.fn(() => ({
     commandNotAvailableInGui: "This command is not available in GUI mode.",
     queueThreadListHeader: "Memos waiting in {n} other conversation(s) — click one to open it",
+    queueDraftTitle: "New chat (draft)",
   })),
   currentLocale: vi.fn(() => "en"),
 }));
@@ -407,7 +408,6 @@ function createContext(overrides: Partial<SlashCommandContext> = {}): SlashComma
     handleUndoLastTurn: vi.fn(async () => undefined),
     handleRetryLastTurn: vi.fn(async () => undefined),
     handleAttachFile: vi.fn(async () => undefined),
-    queuedPromptList: vi.fn(() => []),
     queuedPromptsByThread: vi.fn(() => ({})),
     handleQueuePrompt: vi.fn(),
     handleRunQueuedPrompt: vi.fn(async () => undefined),
@@ -1086,23 +1086,44 @@ describe("SlashCommandHandler - Dispatcher Pattern", () => {
       { id: "q-2", text: "second memo", ts: 2 },
     ];
 
-    it("lists the parked memos numbered oldest-first", async () => {
+    it("list is always the whole-workspace view, draft bucket included", async () => {
       const postMessage = vi.fn();
-      const ctx = createContext({ queuedPromptList: () => twoMemos(), postMessage });
+      const ctx = createContext({
+        queuedPromptsByThread: () => ({
+          ":draft": [
+            { id: "q-d1", text: "parked before any send", ts: 1 },
+          ],
+          "thr_1": [
+            { id: "q-t1", text: "first memo", ts: 2 },
+            { id: "q-t2", text: "second memo", ts: 3 },
+          ],
+        }),
+        api: {
+          ...createContext().api,
+          listThreads: vi.fn(async () => [{ id: "thr_1", title: "作业队列调研" }]),
+        } as any,
+        postMessage,
+      });
       const handler = new SlashCommandHandler(ctx);
 
       await handler.handle("/queue", "list");
 
-      const info = postMessage.mock.calls.map((c) => c[0]).find((m) => m.type === "info");
-      expect(info.message).toContain("2 queued memo(s)");
-      // 1-based, oldest first — the same numbering the TUI prints.
-      expect(info.message).toContain("1. ");
-      expect(info.message.indexOf("first memo")).toBeLessThan(info.message.indexOf("second memo"));
+      const card = postMessage.mock.calls.map((c) => c[0]).find((m) => m.type === "queueThreadList");
+      expect(card).toBeDefined();
+      expect(card.threads).toHaveLength(2);
+      // The draft bucket is its own row: those memos belong to the chat the
+      // next send will create, and the row opens it.
+      const draftRow = card.threads.find((t: any) => t.kind === "draft");
+      expect(draftRow.title).toBe("New chat (draft)");
+      expect(draftRow.count).toBe(1);
+      const threadRow = card.threads.find((t: any) => t.kind === "thread");
+      expect(threadRow.title).toBe("作业队列调研");
+      expect(threadRow.count).toBe(2);
     });
 
     it("empty queue says so instead of printing a header", async () => {
       const postMessage = vi.fn();
-      const ctx = createContext({ queuedPromptList: () => [], postMessage });
+      const ctx = createContext({ queuedPromptsByThread: () => ({}), postMessage });
       const handler = new SlashCommandHandler(ctx);
 
       await handler.handle("/queue", "");
@@ -1120,8 +1141,14 @@ describe("SlashCommandHandler - Dispatcher Pattern", () => {
       expect(ctx.handleQueuePrompt).toHaveBeenCalledWith("run the migration check");
     });
 
-    it("run/edit/drop address the 1-based number", async () => {
-      const ctx = createContext({ queuedPromptList: () => twoMemos() });
+    it("run/edit/drop address the 1-based number of the view on screen", async () => {
+      const ctx = createContext({
+        currentThread: { id: "thr_1" } as any,
+        queuedPromptsByThread: () => ({
+          "thr_1": twoMemos(),
+          "thr_other": [{ id: "q-x", text: "not mine", ts: 9 }],
+        }),
+      });
       const handler = new SlashCommandHandler(ctx);
 
       await handler.handle("/queue", "run 2");
@@ -1145,7 +1172,11 @@ describe("SlashCommandHandler - Dispatcher Pattern", () => {
 
     it("a number out of range is an error, not a silent no-op", async () => {
       const postMessage = vi.fn();
-      const ctx = createContext({ queuedPromptList: () => twoMemos(), postMessage });
+      const ctx = createContext({
+        currentThread: { id: "thr_1" } as any,
+        queuedPromptsByThread: () => ({ "thr_1": twoMemos() }),
+        postMessage,
+      });
       const handler = new SlashCommandHandler(ctx);
 
       await handler.handle("/queue", "run 3");
@@ -1158,7 +1189,6 @@ describe("SlashCommandHandler - Dispatcher Pattern", () => {
     it("a fresh window with memos in other threads gets a clickable card, not a dead-end", async () => {
       const postMessage = vi.fn();
       const ctx = createContext({
-        queuedPromptList: () => [],
         queuedPromptsByThread: () => ({
           ":draft": [],
           "thr_1a165a06ddc74f86": [
@@ -1193,7 +1223,6 @@ describe("SlashCommandHandler - Dispatcher Pattern", () => {
     it("a thread the listing never answered still shows, by id", async () => {
       const postMessage = vi.fn();
       const ctx = createContext({
-        queuedPromptList: () => [],
         queuedPromptsByThread: () => ({
           "thr_9999": [{ id: "q-x", text: "orphaned thread memo", ts: 1 }],
         }),
@@ -1211,7 +1240,6 @@ describe("SlashCommandHandler - Dispatcher Pattern", () => {
     it("a really-empty workspace still says queue empty", async () => {
       const postMessage = vi.fn();
       const ctx = createContext({
-        queuedPromptList: () => [],
         queuedPromptsByThread: () => ({}),
         postMessage,
       });
@@ -1223,22 +1251,25 @@ describe("SlashCommandHandler - Dispatcher Pattern", () => {
       expect(info.message).toContain("Queue empty");
     });
 
-    it("memo rows carry an attachment count", async () => {
+    it("the card's rows carry the memo count", async () => {
       const postMessage = vi.fn();
       const ctx = createContext({
-        queuedPromptList: () => [
-          { id: "q-1", text: "memo with files", ts: 1, attachments: [{ path: "/tmp/a.txt", name: "a.txt", kind: "file" }] },
-          { id: "q-2", text: "plain memo", ts: 2 },
-        ],
+        queuedPromptsByThread: () => ({
+          "thr_1": [
+            { id: "q-1", text: "memo with files", ts: 1, attachments: [{ path: "/tmp/a.txt", name: "a.txt", kind: "file" }] },
+            { id: "q-2", text: "plain memo", ts: 2 },
+          ],
+        }),
+        api: { ...createContext().api, listThreads: vi.fn(async () => []) } as any,
         postMessage,
       });
       const handler = new SlashCommandHandler(ctx);
 
       await handler.handle("/queue", "list");
 
-      const info = postMessage.mock.calls.map((c) => c[0]).find((m) => m.type === "info");
-      expect(info.message).toContain("📎1");
-      expect(info.message).toContain("plain memo");
+      const card = postMessage.mock.calls.map((c) => c[0]).find((m) => m.type === "queueThreadList");
+      expect(card.threads[0].count).toBe(2);
+      expect(card.threads[0].previews).toContain("plain memo");
     });
 
     it("an unknown subcommand prints the usage", async () => {

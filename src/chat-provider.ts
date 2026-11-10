@@ -3142,14 +3142,10 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
   }
 
   /** The current thread's parked memos, for `/queue list`'s numbered view. */
-  public queuedPromptList(): QueuedPrompt[] {
-    return this.messageQueueFor(this.queueThreadKey());
-  }
-
-  /** Every thread's parked memos for this workspace, for `/queue list`'s
-   *  cross-conversation summary: a fresh window has no thread, and "empty"
-   *  would be a lie while memos wait in the conversations they were
-   *  written for. */
+  /** Every bucket's parked memos for this workspace, for `/queue list`'s
+   *  whole-workspace view: the strip beside the composer already shows the
+   *  current conversation's memos, so the command is the one place that
+   *  answers "what is waiting, and where". */
   public queuedPromptsByThread(): Record<string, QueuedPrompt[]> {
     return loadMessageQueue(this.currentWorkspaceKey());
   }

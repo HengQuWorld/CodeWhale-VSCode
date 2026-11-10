@@ -472,6 +472,7 @@ export function makeTr(overrides?: Partial<WebviewTranslations>): WebviewTransla
     queueExpand: "Expand the queue",
     queueAttachmentMissing: "Attached file(s) no longer found and left out: {files}",
     queueThreadListHeader: "Memos waiting in {n} other conversation(s) — click one to open it",
+    queueDraftTitle: "New chat (draft)",
     ...overrides,
   };
 }
