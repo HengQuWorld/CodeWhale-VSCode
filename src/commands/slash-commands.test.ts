@@ -3,6 +3,7 @@ import {
   SlashCommandRegistry,
   categorizeCommand,
   isCommandAvailableInGui,
+  getCommand,
   getCommandHelpText,
 } from "./slash-commands";
 
@@ -61,7 +62,13 @@ describe("SlashCommandRegistry", () => {
       const names = commands.map((c) => c.name);
       expect(names).toContain("/skills");
       expect(names).toContain("/skill");
-      expect(names).toContain("/review");
+    });
+
+    it("registers /new alongside the other conversation starters", () => {
+      const names = registry.getAllCommands().map((c) => c.name);
+      expect(names).toContain("/new");
+      expect(isCommandAvailableInGui("/new")).toBe("full");
+      expect(getCommandHelpText("/new")).toContain("Start a new conversation");
     });
 
     it("includes advanced commands", () => {
@@ -74,7 +81,7 @@ describe("SlashCommandRegistry", () => {
       expect(names).toContain("/stash");
       expect(names).toContain("/hooks");
       expect(names).toContain("/subagents");
-      expect(names).toContain("/agent");
+      expect(names).toContain("/automation");
       expect(names).toContain("/rlm");
     });
   });
@@ -104,15 +111,17 @@ describe("SlashCommandRegistry", () => {
       expect(names).toContain("/mode");
     });
 
-    it("matches /re to reasoning, rename, relay, recall, restore, review, rlm", () => {
+    it("matches /re to reasoning, rename, relay, restore, rlm", () => {
       const results = registry.filterCommands("/re");
       const names = results.map((c) => c.name);
       expect(names).toContain("/reasoning");
       expect(names).toContain("/rename");
       expect(names).toContain("/relay");
-      expect(names).toContain("/recall");
       expect(names).toContain("/restore");
-      expect(names).toContain("/review");
+      // /recall and /review are gone from the registry: stale TUI commands and
+      // a command the engine catalog now answers at run time.
+      expect(names).not.toContain("/recall");
+      expect(names).not.toContain("/review");
     });
   });
 
@@ -162,7 +171,6 @@ describe("categorizeCommand", () => {
   it("categorizes skills commands", () => {
     expect(categorizeCommand("/skills")).toBe("skills");
     expect(categorizeCommand("/skill")).toBe("skills");
-    expect(categorizeCommand("/review")).toBe("skills");
   });
 });
 
@@ -208,12 +216,12 @@ describe("isCommandAvailableInGui", () => {
     // the composer's queue button and panel implement it host-side.
     expect(isCommandAvailableInGui("/queue")).toBe("full");
     expect(isCommandAvailableInGui("/stash")).toBe("unavailable");
-    expect(isCommandAvailableInGui("/hooks")).toBe("unavailable");
-    expect(isCommandAvailableInGui("/subagents")).toBe("unavailable");
-    expect(isCommandAvailableInGui("/agent")).toBe("unavailable");
-    expect(isCommandAvailableInGui("/cycles")).toBe("unavailable");
-    expect(isCommandAvailableInGui("/cycle")).toBe("unavailable");
-    expect(isCommandAvailableInGui("/recall")).toBe("unavailable");
+    // /hooks and /subagents became full when the GUI gained read-only
+    // handlers over the engine's own routes. /agent, /cycles, /cycle and
+    // /recall left the registry: stale TUI commands, or engine-owned surface
+    // the run-time catalog answers instead.
+    expect(isCommandAvailableInGui("/hooks")).toBe("full");
+    expect(isCommandAvailableInGui("/subagents")).toBe("full");
     expect(isCommandAvailableInGui("/relay")).toBe("unavailable");
     expect(isCommandAvailableInGui("/rlm")).toBe("unavailable");
     expect(isCommandAvailableInGui("/lsp")).toBe("unavailable");
@@ -301,22 +309,19 @@ describe("Unavailable command reasons", () => {
     expect(getCommandHelpText("/stash")).toContain("Not available");
   });
 
-  it("hooks: hooks are TUI-specific", () => {
-    expect(getCommandHelpText("/hooks")).toContain("Not available");
+  it("hooks: read-only listing over the engine's own route", () => {
+    expect(getCommandHelpText("/hooks")).toContain("List the engine's configured hooks");
   });
 
-  it("subagents/agent: sub-agent management is TUI-specific", () => {
-    expect(getCommandHelpText("/subagents")).toContain("Not available");
-    expect(getCommandHelpText("/agent")).toContain("Not available");
+  it("subagents: read-only run listing; /agent left to the engine catalog", () => {
+    expect(getCommandHelpText("/subagents")).toContain("List delegated agent runs");
+    expect(getCommand("/agent")).toBeUndefined();
   });
 
-  it("cycles/cycle: cycle management is TUI-specific", () => {
-    expect(getCommandHelpText("/cycles")).toContain("Not available");
-    expect(getCommandHelpText("/cycle")).toContain("Not available");
-  });
-
-  it("recall: archive recall is TUI-specific", () => {
-    expect(getCommandHelpText("/recall")).toContain("Not available");
+  it("cycles/cycle/recall: stale TUI commands left the registry", () => {
+    expect(getCommand("/cycles")).toBeUndefined();
+    expect(getCommand("/cycle")).toBeUndefined();
+    expect(getCommand("/recall")).toBeUndefined();
   });
 
   it("relay: agent relay is TUI-specific", () => {

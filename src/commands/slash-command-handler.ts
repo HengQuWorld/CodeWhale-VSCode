@@ -29,7 +29,7 @@ import {
 } from "../utils/modes";
 import { formatError, getErrorMessage } from "../utils/error-handler";
 import { DRAFT_QUEUE_KEY, type QueuedPrompt } from "../utils/message-queue";
-import type { CodeWhaleApiClient, CodeWhaleEngine, ThreadRecord, TaskSummary, ProviderEntry, SkillEntry, MemoryLensAction, MemoryLensEntry, MemoryLensSnapshot } from "../types";
+import type { CodeWhaleApiClient, CodeWhaleEngine, ThreadRecord, TaskSummary, ProviderEntry, SkillEntry, EngineCommandEntry, MemoryLensAction, MemoryLensEntry, MemoryLensSnapshot } from "../types";
 
 // ── Context interface for dependency injection ──
 
@@ -129,6 +129,9 @@ export interface SlashCommandContext {
    * webview. Both the Goal panel and the Work panel's goal title read from it. */
   refreshGoal(): Promise<void>;
   loadSessionMessages(sessionId: string): Promise<void>;
+  /** Start the conversation a `/new` asks for — the same flow the webview's
+   *  New-chat button drives (createThread + rebind + announce). */
+  startNewThread(): Promise<void>;
   handleInterrupt(): Promise<void>;
   handleCompact(): Promise<void>;
   handleUndoLastTurn(): Promise<void>;
@@ -436,13 +439,17 @@ async function handleModels(ctx: SlashCommandContext, _args: string): Promise<vo
 }
 
 async function handleReasoning(ctx: SlashCommandContext, args: string): Promise<void> {
-  const effort = args.trim().toLowerCase();
-  if (["auto", "off", "low", "medium", "high", "max"].includes(effort)) {
+  // The value set is the engine's own effort ladder. `none` is the engine's
+  // accepted spelling for `off`, so it is stored canonically: a GUI-written
+  // "none" would read back as "off" in the TUI and look like a drift.
+  const spelling = args.trim().toLowerCase();
+  const effort = spelling === "none" ? "off" : spelling;
+  if (["auto", "off", "minimal", "low", "medium", "high", "xhigh", "ultra", "max"].includes(effort)) {
     await cfg().update("reasoningEffort", effort, vscode.ConfigurationTarget.Global);
     ctx.postMessage({ type: "settingsUpdated", mode: normalizeMode(ctx.currentThread?.mode || cfg().get<string>("defaultMode", "agent")), posture: effectivePosture(ctx), model: ctx.getCurrentModel(), reasoningEffort: effort });
     ctx.postMessage({ type: "info", message: `Reasoning effort changed to ${effort}` });
   } else {
-    ctx.postMessage({ type: "info", message: `Current reasoning effort: ${cfg().get<string>("reasoningEffort", "auto")}\nUsage: /reasoning [auto|off|low|medium|high|max]` });
+    ctx.postMessage({ type: "info", message: `Current reasoning effort: ${cfg().get<string>("reasoningEffort", "auto")}\nUsage: /reasoning [auto|off|minimal|low|medium|high|xhigh|ultra|max]` });
   }
 }
 
@@ -1033,7 +1040,7 @@ async function handleHelp(ctx: SlashCommandContext, _args: string): Promise<void
 /auto - Switch the permission posture to Auto-Review
 /model [name] - Switch model
 /models - List available models
-/reasoning [auto|off|low|medium|high|max] - Set reasoning effort
+/reasoning [auto|off|minimal|low|medium|high|xhigh|ultra|max] - Set reasoning effort
 /config - Open VSCode settings
 /settings - Show current settings
 /clear - Clear chat
@@ -1050,6 +1057,10 @@ async function handleHelp(ctx: SlashCommandContext, _args: string): Promise<void
 /skill <name> [on|off] - Enable or disable a skill
 /memory - Manage native memory (show/search/get/remember/clear)
 /restore [N] - List snapshots or revert workspace files (requires trust mode)
+/new - Start a new conversation
+/hooks - List the engine's configured hooks
+/automation - Manage scheduled automations (/jobs is background shell jobs now)
+/subagents - List delegated agent runs
 /init - Open settings for initialization
 /mcp - Open the MCP server panel (/mcp list to print the servers)
 /provider - Show provider info
@@ -1058,17 +1069,37 @@ async function handleHelp(ctx: SlashCommandContext, _args: string): Promise<void
 /exit - Close sidebar
 
 Commands with limited support in GUI:
-/task, /jobs, /note, /undo, /retry, /share,
-/goal, /network, /queue, /stash, /hooks, /subagents,
-/agent, /attach, /anchor, /sessions, /load, /cycles,
-/cycle, /recall, /relay, /lsp, /review,
-/rlm, /change, /cache, /system,
+/task, /note, /undo, /retry, /share,
+/goal, /network, /queue, /stash,
+/attach, /anchor, /sessions, /load,
+/relay, /lsp, /rlm, /change, /cache, /system,
 /edit, /diff, /logout, /tokens, /cost, /home
 
 Not available in GUI (run it to see why):
-/verbose, /profile, /translate
+/verbose, /profile, /translate` + await engineCommandHelpSection(ctx) });
+}
 
-Use the TUI for full command support.` });
+/** `/help`'s live tail: the engine commands this GUI neither handles nor
+ *  explains, read from `GET /v1/commands` so the section tracks the engine
+ *  build instead of this file. An unreachable engine leaves the help exactly
+ *  what the GUI ships. */
+async function engineCommandHelpSection(ctx: SlashCommandContext): Promise<string> {
+  try {
+    await ctx.api.ensureReady();
+    const commands = await ctx.api.listCommands(ctx.currentThread?.id);
+    const guiHandled = new Set(Object.keys(HANDLERS));
+    const lines: string[] = [];
+    for (const entry of commands) {
+      if (entry.hidden || entry.shadowed_by) continue;
+      if (entry.kind !== "builtin") continue;
+      if (guiHandled.has(`/${entry.name}`) || getCommand(`/${entry.name}`)) continue;
+      lines.push(`/${entry.name}${entry.usage ? ` — ${entry.usage}` : ""}`);
+    }
+    if (lines.length === 0) return "";
+    return `\n\nEngine commands with no GUI handler yet (they run in the CodeWhale terminal):\n${lines.join("\n")}`;
+  } catch {
+    return "";
+  }
 }
 
 async function handleUndo(ctx: SlashCommandContext, _args: string): Promise<void> {
@@ -1686,16 +1717,16 @@ async function handleDiff(ctx: SlashCommandContext, _args: string): Promise<void
   }
 }
 
-async function handleJobs(ctx: SlashCommandContext, args: string): Promise<void> {
-  const jobsArg = args.trim().toLowerCase();
-  const jobsParts = jobsArg.split(/\s+/);
-  const jobsSub = jobsParts[0] || "list";
-  const jobsId = jobsParts[1] || "";
+async function handleAutomations(ctx: SlashCommandContext, args: string): Promise<void> {
+  const automationArg = args.trim().toLowerCase();
+  const automationParts = automationArg.split(/\s+/);
+  const automationSub = automationParts[0] || "list";
+  const automationId = automationParts[1] || "";
 
   try {
     await ctx.api.ensureReady();
 
-    if (jobsSub === "list" || jobsSub === "") {
+    if (automationSub === "list" || automationSub === "") {
       const automations = await ctx.api.listAutomations();
 
       if (automations && automations.length > 0) {
@@ -1712,16 +1743,16 @@ async function handleJobs(ctx: SlashCommandContext, args: string): Promise<void>
 
         ctx.postMessage({
           type: "info",
-          message: `Automations (${automations.length}):\n${lines.join("\n")}\n\nUsage: /jobs show <id> | /jobs run <id> | /jobs pause <id> | /jobs resume <id> | /jobs history <id>`
+          message: `Automations (${automations.length}):\n${lines.join("\n")}\n\nUsage: /automation show <id> | /automation run <id> | /automation pause <id> | /automation resume <id> | /automation history <id>`
         });
       } else {
         ctx.postMessage({
           type: "info",
-          message: `No automations found.\n\nAutomations are scheduled tasks that run automatically.\nCreate via TUI or use the automations API.\nUsage: /jobs list`
+          message: `No automations found.\n\nAutomations are scheduled tasks that run automatically.\nCreate via TUI or use the automations API.\nUsage: /automation list`
         });
       }
-    } else if (jobsSub === "show" && jobsId) {
-      const automation = await ctx.api.getAutomation(jobsId);
+    } else if (automationSub === "show" && automationId) {
+      const automation = await ctx.api.getAutomation(automationId);
       const nextRun = automation.next_run_at
         ? new Date(automation.next_run_at).toLocaleString()
         : "Not scheduled";
@@ -1740,28 +1771,28 @@ async function handleJobs(ctx: SlashCommandContext, args: string): Promise<void>
   Prompt: ${automation.prompt.slice(0, 200)}${automation.prompt.length > 200 ? "..." : ""}
   Workspaces: ${automation.cwds.length > 0 ? automation.cwds.join(", ") : "N/A"}
 
-Usage: /jobs run ${automation.id.slice(0, 8)} | /jobs pause ${automation.id.slice(0, 8)} | /jobs history ${automation.id.slice(0, 8)}`
+Usage: /automation run ${automation.id.slice(0, 8)} | /automation pause ${automation.id.slice(0, 8)} | /automation history ${automation.id.slice(0, 8)}`
       });
-    } else if (jobsSub === "run" && jobsId) {
-      const automation = await ctx.api.runAutomation(jobsId);
+    } else if (automationSub === "run" && automationId) {
+      const automation = await ctx.api.runAutomation(automationId);
       ctx.postMessage({
         type: "info",
         message: `Automation triggered: ${automation.name} (${automation.id.slice(0, 8)})\nStatus: ${automation.status}\nThe automation will execute according to its schedule.`
       });
-    } else if (jobsSub === "pause" && jobsId) {
-      const automation = await ctx.api.pauseAutomation(jobsId);
+    } else if (automationSub === "pause" && automationId) {
+      const automation = await ctx.api.pauseAutomation(automationId);
       ctx.postMessage({
         type: "info",
-        message: `Automation paused: ${automation.name} (${automation.id.slice(0, 8)})\nStatus: ${automation.status}\nUse /jobs resume ${automation.id.slice(0, 8)} to resume.`
+        message: `Automation paused: ${automation.name} (${automation.id.slice(0, 8)})\nStatus: ${automation.status}\nUse /automation resume ${automation.id.slice(0, 8)} to resume.`
       });
-    } else if (jobsSub === "resume" && jobsId) {
-      const automation = await ctx.api.resumeAutomation(jobsId);
+    } else if (automationSub === "resume" && automationId) {
+      const automation = await ctx.api.resumeAutomation(automationId);
       ctx.postMessage({
         type: "info",
         message: `Automation resumed: ${automation.name} (${automation.id.slice(0, 8)})\nStatus: ${automation.status}\nNext run: ${automation.next_run_at ? new Date(automation.next_run_at).toLocaleString() : "Not scheduled"}`
       });
-    } else if (jobsSub === "history" && jobsId) {
-      const runs = await ctx.api.listAutomationRuns(jobsId, { limit: 10 });
+    } else if (automationSub === "history" && automationId) {
+      const runs = await ctx.api.listAutomationRuns(automationId, { limit: 10 });
 
       if (runs && runs.length > 0) {
         const lines = runs.map((r) => {
@@ -1777,20 +1808,20 @@ Usage: /jobs run ${automation.id.slice(0, 8)} | /jobs pause ${automation.id.slic
 
         ctx.postMessage({
           type: "info",
-          message: `Automation runs (${runs.length}):\n${lines.join("\n")}\n\nUsage: /jobs history <id>`
+          message: `Automation runs (${runs.length}):\n${lines.join("\n")}\n\nUsage: /automation history <id>`
         });
       } else {
         ctx.postMessage({
           type: "info",
-          message: `No run history found for automation ${jobsId}.\n\nThe automation may not have executed yet.`
+          message: `No run history found for automation ${automationId}.\n\nThe automation may not have executed yet.`
         });
       }
     } else {
-      ctx.postMessage({ type: "error", message: `Usage: /jobs list | /jobs show <id> | /jobs run <id> | /jobs pause <id> | /jobs resume <id> | /jobs history <id>` });
+      ctx.postMessage({ type: "error", message: `Usage: /automation list | /automation show <id> | /automation run <id> | /automation pause <id> | /automation resume <id> | /automation history <id>` });
     }
   } catch (err) {
     if (getErrorMessage(err).includes("not found")) {
-      ctx.postMessage({ type: "error", message: `Automation '${jobsId}' not found. Use /jobs list to see available automations.` });
+      ctx.postMessage({ type: "error", message: `Automation '${automationId}' not found. Use /automation list to see available automations.` });
     } else {
       ctx.postMessage({ type: "error", message: formatError("Failed to manage automations", err) });
     }
@@ -2245,6 +2276,171 @@ async function handleMemory(ctx: SlashCommandContext, args: string): Promise<voi
   }
 }
 
+/** `/new` — the conversation button as a command. Same flow, one entry:
+ *  a new thread on the startup route, the view rebound to it. */
+async function handleNew(ctx: SlashCommandContext, _args: string): Promise<void> {
+  await ctx.startNewThread();
+}
+
+/** `/hooks` — read-only listing of the engine's configured hooks (`GET
+ *  /v1/hooks`), the same table the TUI's `/hooks list` renders. Editing
+ *  hooks stays where they live: the TUI and the config file. */
+async function handleHooks(ctx: SlashCommandContext, _args: string): Promise<void> {
+  try {
+    await ctx.api.ensureReady();
+    const result = await ctx.api.listHooks(ctx.currentThread?.id);
+    if (!result.enabled) {
+      ctx.postMessage({
+        type: "info",
+        message: `Hooks are disabled in this engine's config (${result.workspace}).\nEnable them in the TUI (/hooks) or the config file.`,
+      });
+      return;
+    }
+    if (result.hooks.length === 0) {
+      ctx.postMessage({
+        type: "info",
+        message: `No hooks configured for ${result.workspace}.\nHooks live in the engine config and trusted plugins; /hooks lists them once configured.`,
+      });
+      return;
+    }
+    const lines = result.hooks.map((hook) => {
+      const name = hook.name ? ` "${hook.name}"` : "";
+      const flags = [hook.source, hook.background ? "background" : "foreground"];
+      return `  [${hook.event}]${name} ${hook.command}\n    (${flags.join(", ")}, timeout ${hook.timeout_secs}s)`;
+    });
+    const problems = result.problems.length
+      ? `\nProblems at load:\n${result.problems.map((p) => `  - ${p}`).join("\n")}`
+      : "";
+    ctx.postMessage({
+      type: "info",
+      message: `Hooks (${result.hooks.length}):\n${lines.join("\n")}${problems}`,
+    });
+  } catch (err) {
+    ctx.postMessage({ type: "error", message: formatError("Failed to list hooks", err) });
+  }
+}
+
+/** `/subagents` — the delegated agent runs, read-only (`GET /v1/agent-runs`).
+ *  Spawning stays with the agent itself (TUI `/agent`), which no HTTP route
+ *  exposes; listing is the half the GUI can truthfully answer. */
+async function handleSubagents(ctx: SlashCommandContext, _args: string): Promise<void> {
+  try {
+    await ctx.api.ensureReady();
+    const result = await ctx.api.listAgentRuns();
+    const runs = result.runs ?? [];
+    if (runs.length === 0) {
+      ctx.postMessage({ type: "info", message: "No agent runs in this session." });
+      return;
+    }
+    const lines = runs.map((run) => {
+      const who = run.spec?.session_name || run.spec?.worker_id || run.spec?.run_id || "?";
+      const role = run.spec?.role ? ` [${run.spec.role}]` : "";
+      const objective = (run.spec?.objective || "").slice(0, 60);
+      const note = run.latest_message || run.result_summary || run.error || "";
+      return `  ${who}${role} (${run.status}) ${objective}\n    ${note.slice(0, 100)}`;
+    });
+    ctx.postMessage({
+      type: "info",
+      message: `Agent runs (${runs.length}):\n${lines.join("\n")}\n\nSpawning a sub-agent (/agent <task>) runs in the CodeWhale terminal.`,
+    });
+  } catch (err) {
+    ctx.postMessage({ type: "error", message: formatError("Failed to list agent runs", err) });
+  }
+}
+
+/** `/jobs` — background shell jobs (TUI /jobs parity), over `GET /v1/jobs`.
+ *  The automations this command used to mean live at `/automation` now, the
+ *  TUI's own spelling. `poll`/`wait`/`stdin` are interactive surfaces and
+ *  stay in the TUI; list, show, and cancel are the read/stop half. */
+async function handleShellJobs(ctx: SlashCommandContext, args: string): Promise<void> {
+  const parts = args.trim().split(/\s+/).filter(Boolean);
+  const sub = (parts[0] ?? "").toLowerCase();
+  const rest = parts.slice(1).join(" ");
+  const targetsJob = sub === "show" || sub === "cancel" || sub === "kill" || sub === "stop";
+  const usage = "Usage: /jobs [list] | /jobs show <id> | /jobs cancel <id>";
+
+  // `show`/`cancel` without an id must never fall back to "the first job":
+  // an empty prefix matches every id, and cancelling the wrong job is not
+  // recoverable.
+  if (targetsJob && !rest) {
+    ctx.postMessage({ type: "error", message: `Usage: /jobs ${sub === "show" ? "show" : "cancel"} <id>` });
+    return;
+  }
+
+  try {
+    await ctx.api.ensureReady();
+    const { jobs } = await ctx.api.listJobs();
+
+    if (!sub || sub === "list" || sub === "ls") {
+      if (jobs.length === 0) {
+        ctx.postMessage({
+          type: "info",
+          message: "No background jobs.\nJobs appear when the agent (or you) backgrounds a shell command.",
+        });
+        return;
+      }
+      const lines = jobs.map((job) => {
+        // The engine serializes ShellStatus in PascalCase ("Running");
+        // compare case-insensitively so the cue does not depend on that.
+        const status = String(job.status).toLowerCase();
+        const icon = job.stale ? "·" : status === "running" ? "⟳" : status === "failed" ? "✗" : "✓";
+        const cmd = job.command.split("\n")[0].slice(0, 60);
+        return `  ${icon} ${job.job_id.slice(0, 8)} [${status}${job.exit_code !== null && job.exit_code !== undefined ? ` exit ${job.exit_code}` : ""}] ${cmd}\n    (${job.owner}, thread ${job.thread_id.slice(0, 8)}, ${(job.elapsed_ms / 1000).toFixed(1)}s)`;
+      });
+      ctx.postMessage({
+        type: "info",
+        message: `Background jobs (${jobs.length}):\n${lines.join("\n")}\n\n${usage}`,
+      });
+      return;
+    }
+
+    if (!targetsJob) {
+      ctx.postMessage({
+        type: "info",
+        message: `${usage}\n(poll, wait, and stdin stay in the TUI — they stream a live job)`,
+      });
+      return;
+    }
+
+    const job = jobs.find(
+      (candidate) =>
+        candidate.job_id === rest ||
+        candidate.job_id.startsWith(rest) ||
+        candidate.id === rest
+    );
+    if (!job) {
+      ctx.postMessage({
+        type: "error",
+        message: `No job matches '${rest}'. /jobs lists what is tracked.`,
+      });
+      return;
+    }
+    const status = String(job.status).toLowerCase();
+
+    if (sub === "show") {
+      const tails = [
+        job.stdout_tail ? `stdout:\n${job.stdout_tail}` : "",
+        job.stderr_tail ? `stderr:\n${job.stderr_tail}` : "",
+      ]
+        .filter(Boolean)
+        .join("\n");
+      ctx.postMessage({
+        type: "info",
+        message: `Job ${job.job_id.slice(0, 8)} [${status}] ${job.command}\ncwd: ${job.cwd}\n${tails || "(no output yet)"}`,
+      });
+      return;
+    }
+
+    await ctx.api.killThreadJob(job.thread_id, job.job_id);
+    ctx.postMessage({
+      type: "info",
+      message: `Job ${job.job_id.slice(0, 8)} killed.`,
+    });
+  } catch (err) {
+    ctx.postMessage({ type: "error", message: formatError("Job error", err) });
+  }
+}
+
 // ── Command registry (dispatcher map) ──
 
 const RESTORE_DEFAULT_LIST_LIMIT = 20;
@@ -2509,12 +2705,16 @@ const HANDLERS: Record<string, CommandHandler> = {
   "/system": handleSystem,
   "/edit": handleEdit,
   "/diff": handleDiff,
-  "/jobs": handleJobs,
   "/logout": handleLogout,
   "/note": handleNote,
   "/memory": handleMemory,
   "/restore": handleRestore,
   "/queue": handleQueue,
+  "/new": handleNew,
+  "/hooks": handleHooks,
+  "/automation": handleAutomations,
+  "/subagents": handleSubagents,
+  "/jobs": handleShellJobs,
 };
 
 // ── Handler class ──
@@ -2541,9 +2741,136 @@ export class SlashCommandHandler {
         // the misleading "Unknown command".
         this.ctx.postMessage({ type: "info", message: `${known.name}: ${known.helpText}` });
       } else {
-        this.ctx.postMessage({ type: "error", message: `Unknown command: ${command}. Type /help for available commands.` });
+        await this.handleEngineCommand(command, args);
       }
     }
+  }
+
+  /** Fall a locally-unknown command through to the engine's live command
+   *  catalog (`GET /v1/commands`).
+   *
+   *  Three outcomes: a plugin (`extension`) command executes through
+   *  `POST /v1/threads/{id}/commands` — the one command surface the engine
+   *  exposes remotely — and its text comes back here; a builtin or user
+   *  template command answers with its usage and where it runs, because the
+   *  engine owns the spelling but only the terminal host executes those
+   *  today; and a name the engine does not know either stays the classic
+   *  unknown-command error. */
+  private async handleEngineCommand(command: string, args: string): Promise<void> {
+    const name = command.replace(/^\//, "").toLowerCase();
+    let commands: EngineCommandEntry[];
+    try {
+      await this.ctx.api.ensureReady();
+      commands = await this.ctx.api.listCommands(this.ctx.currentThread?.id);
+    } catch (err) {
+      this.ctx.postMessage({
+        type: "error",
+        message: `Unknown command: ${command}. Type /help for available commands.\n(Engine command catalog unavailable: ${getErrorMessage(err)})`,
+      });
+      return;
+    }
+    const entry = commands.find(
+      (candidate) => candidate.name === name || candidate.aliases.includes(name)
+    );
+    if (!entry) {
+      this.ctx.postMessage({
+        type: "error",
+        message: `Unknown command: ${command}. Type /help for available commands.`,
+      });
+      return;
+    }
+    if (entry.kind === "extension") {
+      if (!this.ctx.currentThread) {
+        this.ctx.postMessage({
+          type: "error",
+          message: `/${entry.name} is a plugin command and runs inside a conversation — open a thread first.`,
+        });
+        return;
+      }
+      if (!entry.registration_id) {
+        this.ctx.postMessage({
+          type: "error",
+          message: `/${entry.name} needs to be re-resolved against this conversation; run it again.`,
+        });
+        return;
+      }
+      const workspace =
+        this.ctx.currentThread.workspace ||
+        vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ||
+        "";
+      try {
+        const result = await this.ctx.api.runThreadCommand(this.ctx.currentThread.id, {
+          name: entry.name,
+          args,
+          registrationId: entry.registration_id,
+          expectedWorkspace: workspace,
+        });
+        this.ctx.postMessage({
+          type: "info",
+          message: result.text || `/${entry.name}: ${result.status}`,
+        });
+      } catch (err) {
+        this.ctx.postMessage({ type: "error", message: formatError(`/${entry.name} failed`, err) });
+      }
+      return;
+    }
+    // builtin | user: the engine owns the spelling. Builtins execute against
+    // the thread when the engine exposes the builtin route; a 404 from an
+    // older engine (or a command with no conversation to run in) falls back
+    // to describing where the command runs.
+    if (entry.kind === "builtin") {
+      const informative = () => {
+        const lines: string[] = [`/${entry.name} — engine command (builtin)`];
+        if (entry.usage) lines.push(`Usage: ${entry.usage}`);
+        if (entry.summary) lines.push(entry.summary);
+        lines.push(
+          "This command runs in the CodeWhale terminal (TUI); this engine build has no remote builtin route for it yet."
+        );
+        this.ctx.postMessage({ type: "info", message: lines.join("\n") });
+      };
+
+      if (!this.ctx.currentThread) {
+        informative();
+        return;
+      }
+      try {
+        const result = await this.ctx.api.runBuiltinCommand(
+          this.ctx.currentThread.id,
+          entry.name,
+          args || undefined
+        );
+        this.ctx.postMessage({
+          type: result.is_error ? "error" : "info",
+          message: result.text || `/${entry.name}: ok`,
+        });
+        if (!result.text_only) {
+          this.ctx.postMessage({
+            type: "info",
+            message: `/${entry.name} also asked the terminal host for an action this panel cannot perform.`,
+          });
+        }
+      } catch (err) {
+        if (/API error 404\b/.test(getErrorMessage(err))) {
+          informative();
+          return;
+        }
+        // A new-enough engine refused with a reason — surface that reason.
+        this.ctx.postMessage({
+          type: "error",
+          message: formatError(`/${entry.name} failed`, err),
+        });
+      }
+      return;
+    }
+
+    // user template commands expand in the terminal host.
+    const lines: string[] = [`/${entry.name} — engine command (user)`];
+    if (entry.usage) lines.push(`Usage: ${entry.usage}`);
+    if (entry.summary) lines.push(entry.summary);
+    lines.push(
+      "User commands expand a stored template in the CodeWhale terminal (TUI)."
+    );
+    this.ctx.postMessage({ type: "info", message: lines.join("\n") });
   }
 }
 

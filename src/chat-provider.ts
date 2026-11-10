@@ -2,7 +2,8 @@ import * as vscode from "vscode";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
-import { SlashCommandHandler, type SlashCommandContext } from "./commands/slash-command-handler";
+import { SlashCommandHandler, HANDLERS, type SlashCommandContext } from "./commands/slash-command-handler";
+import { getCommand } from "./commands/slash-commands";
 import {
   CodeWhaleApiClient,
   CodeWhaleEngine,
@@ -829,6 +830,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
           void this.refreshGoal();
           void this.refreshSkillList();
           void this.refreshMcpServers();
+          void this.postCommandCatalog();
         }
         break;
       case "retryThreadList":
@@ -1063,6 +1065,9 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     // a reloaded webview does not paint an empty panel until the next sidebar
     // refresh happens to fire.
     void this.refreshMcpServers();
+    // The slash menu's engine tail has the same reason to be re-asked here:
+    // it lives in the webview, which just lost its copy.
+    void this.postCommandCatalog();
     this.postArmedSkill();
 
     if (this.currentThread?.id) {
@@ -4311,6 +4316,42 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
   /** Push the current skill inventory to the webview's Skills panel. */
   public async refreshSkillList(): Promise<void> {
     return this.skills.refreshSkillList();
+  }
+
+  /** The `/new` command's engine: the same flow the webview's New-chat
+   *  button drives, exposed to the slash-command context. */
+  public async startNewThread(): Promise<void> {
+    return this.handleNewThread();
+  }
+
+  /** Push the engine's command-catalog tail to the webview's slash menu: the
+   *  commands the GUI neither handles nor lists, so typing "/" completes the
+   *  engine's own surface (unhandled builtins, plugin commands, user `.md`
+   *  commands) instead of only what this extension ships. Same channel the
+   *  skill inventory rides; a failure keeps the shipped list. */
+  private async postCommandCatalog(): Promise<void> {
+    try {
+      await this.api.ensureReady();
+      const commands = await this.api.listCommands(this.currentThread?.id ?? undefined);
+      const menu = commands
+        .filter(
+          (entry) =>
+            !entry.hidden &&
+            !entry.shadowed_by &&
+            !HANDLERS[`/${entry.name}`] &&
+            !getCommand(`/${entry.name}`)
+        )
+        .map((entry) => ({
+          name: `/${entry.name}`,
+          desc: entry.summary || entry.usage || "",
+          category: "engine",
+          empty: entry.show_in_empty_discovery,
+        }));
+      this.postMessage({ type: "commandCatalog", commands: menu });
+    } catch {
+      // An engine without a catalog (older runtime) is not an error the
+      // composer should surface; the shipped menu stays.
+    }
   }
 
   public async setSkillEnabled(name: string, enabled: boolean): Promise<void> {

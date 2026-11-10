@@ -111,7 +111,7 @@ vi.mock("./slash-commands", () => ({
   isCommandAvailableInGui: vi.fn((name: string) => {
     // Default: most commands are available. /queue is full since the GUI
     // gained its own queue strip (TUI /queue parity).
-    const unavailable = ["/theme", "/share", "/network", "/stash", "/hooks", "/subagents", "/agent", "/statusline", "/cycles", "/cycle", "/recall", "/relay", "/lsp", "/review", "/rlm", "/verbose", "/profile", "/translate"];
+    const unavailable = ["/theme", "/share", "/network", "/stash", "/statusline", "/relay", "/lsp", "/rlm", "/verbose", "/profile", "/translate"];
     if (unavailable.includes(name)) return "unavailable";
     return "full";
   }),
@@ -303,6 +303,31 @@ function createContext(overrides: Partial<SlashCommandContext> = {}): SlashComma
         refresh_required: true,
         already_sent_context_cannot_be_retracted: true,
       })),
+      listCommands: vi.fn(async () => []),
+      listHooks: vi.fn(async () => ({
+        workspace: "/workspace",
+        enabled: true,
+        hooks: [],
+        problems: [],
+      })),
+      listJobs: vi.fn(async () => ({ jobs: [] })),
+      killThreadJob: vi.fn(async () => undefined),
+      listAgentRuns: vi.fn(async () => ({ runs: [] })),
+      runBuiltinCommand: vi.fn(async () => ({
+        name: "system",
+        text: "engine answered",
+        is_error: false,
+        text_only: true,
+      })),
+      runThreadCommand: vi.fn(async () => ({
+        operation_key: "gui-op-1",
+        name: "demo-plugin-cmd",
+        origin: "plugin",
+        status: "completed",
+        text: "plugin command output",
+        extension: {},
+        idempotent_replay: false,
+      })),
       listSkills: vi.fn(async () => ({
         directory: "/home/user/.codewhale/skills",
         directories: ["/home/user/.codewhale/skills"],
@@ -408,6 +433,7 @@ function createContext(overrides: Partial<SlashCommandContext> = {}): SlashComma
     handleUndoLastTurn: vi.fn(async () => undefined),
     handleRetryLastTurn: vi.fn(async () => undefined),
     handleAttachFile: vi.fn(async () => undefined),
+    startNewThread: vi.fn(async () => undefined),
     queuedPromptsByThread: vi.fn(() => ({})),
     handleQueuePrompt: vi.fn(),
     handleRunQueuedPrompt: vi.fn(async () => undefined),
@@ -496,6 +522,20 @@ describe("SlashCommandHandler - Dispatcher Pattern", () => {
       for (const cmd of expectedCommands) {
         expect(HANDLERS[cmd], `Missing handler for ${cmd}`).toBeDefined();
       }
+    });
+
+    it("every handler is registered as available in the real registry", async () => {
+      // The dispatcher consults the static registry before running a handler:
+      // a handler whose command is missing there is silently answered with
+      // "not available in GUI". This suite mocks the registry, so read the
+      // shipped one to catch a handler that was added without its row.
+      const real = await vi.importActual<typeof import("./slash-commands")>(
+        "./slash-commands"
+      );
+      const missing = Object.keys(HANDLERS).filter(
+        (name) => real.isCommandAvailableInGui(name) === "unavailable"
+      );
+      expect(missing).toEqual([]);
     });
 
     it("every handler in HANDLERS is a function", () => {
@@ -2023,13 +2063,13 @@ describe("SlashCommandHandler - Dispatcher Pattern", () => {
 
   // ── /jobs ──
 
-  describe("/jobs", () => {
+  describe("/automation (the automations flow /jobs used to own)", () => {
     it("lists automations with 'list' subcommand", async () => {
       const postMessage = vi.fn();
       const ctx = createContext({ postMessage });
       const handler = new SlashCommandHandler(ctx);
 
-      await handler.handle("/jobs", "list");
+      await handler.handle("/automation", "list");
 
       expect(ctx.api.listAutomations).toHaveBeenCalled();
     });
@@ -2039,7 +2079,7 @@ describe("SlashCommandHandler - Dispatcher Pattern", () => {
       const ctx = createContext({ postMessage });
       const handler = new SlashCommandHandler(ctx);
 
-      await handler.handle("/jobs", "show auto-1");
+      await handler.handle("/automation", "show auto-1");
 
       expect(ctx.api.getAutomation).toHaveBeenCalledWith("auto-1");
     });
@@ -2049,7 +2089,7 @@ describe("SlashCommandHandler - Dispatcher Pattern", () => {
       const ctx = createContext({ postMessage });
       const handler = new SlashCommandHandler(ctx);
 
-      await handler.handle("/jobs", "run auto-1");
+      await handler.handle("/automation", "run auto-1");
 
       expect(ctx.api.runAutomation).toHaveBeenCalledWith("auto-1");
     });
@@ -2059,7 +2099,7 @@ describe("SlashCommandHandler - Dispatcher Pattern", () => {
       const ctx = createContext({ postMessage });
       const handler = new SlashCommandHandler(ctx);
 
-      await handler.handle("/jobs", "pause auto-1");
+      await handler.handle("/automation", "pause auto-1");
 
       expect(ctx.api.pauseAutomation).toHaveBeenCalledWith("auto-1");
     });
@@ -2069,7 +2109,7 @@ describe("SlashCommandHandler - Dispatcher Pattern", () => {
       const ctx = createContext({ postMessage });
       const handler = new SlashCommandHandler(ctx);
 
-      await handler.handle("/jobs", "resume auto-1");
+      await handler.handle("/automation", "resume auto-1");
 
       expect(ctx.api.resumeAutomation).toHaveBeenCalledWith("auto-1");
     });
@@ -2079,7 +2119,7 @@ describe("SlashCommandHandler - Dispatcher Pattern", () => {
       const ctx = createContext({ postMessage });
       const handler = new SlashCommandHandler(ctx);
 
-      await handler.handle("/jobs", "history auto-1");
+      await handler.handle("/automation", "history auto-1");
 
       expect(ctx.api.listAutomationRuns).toHaveBeenCalledWith("auto-1", { limit: 10 });
     });
@@ -2089,7 +2129,7 @@ describe("SlashCommandHandler - Dispatcher Pattern", () => {
       const ctx = createContext({ postMessage });
       const handler = new SlashCommandHandler(ctx);
 
-      await handler.handle("/jobs", "invalid");
+      await handler.handle("/automation", "invalid");
 
       expect(postMessage).toHaveBeenCalledWith(
         expect.objectContaining({ type: "error", message: expect.stringContaining("Usage") })
@@ -3224,6 +3264,493 @@ describe("SlashCommandHandler - Dispatcher Pattern", () => {
         type: "info",
         message: expect.stringContaining("/skill <name> [task]"),
       });
+    });
+  });
+
+  // ── Engine command fall-through ──
+
+  describe("Engine command fall-through", () => {
+    /** One catalog row as `GET /v1/commands` returns it. */
+    function catalogEntry(overrides: Record<string, unknown> = {}) {
+      return {
+        name: "fleet",
+        aliases: [] as string[],
+        summary: "Fleet control surface",
+        usage: "/fleet [members|setup|teams|workers|help]",
+        subcommands: [],
+        takes_arguments: false,
+        requires_argument: false,
+        requires_required_argument: false,
+        composer_wants_trailing_space: false,
+        palette_runs_directly: true,
+        show_in_empty_discovery: true,
+        kind: "builtin",
+        binding: "host",
+        discovery: "primary",
+        hidden: false,
+        ...overrides,
+      };
+    }
+
+    /** A context whose catalog and runtime-command mocks are the test's own,
+     *  wired through the same overrides the other suites use. */
+    function fallThroughContext(opts: {
+      catalog?: unknown[];
+      catalogError?: Error;
+      runThreadCommand?: ReturnType<typeof vi.fn>;
+      runBuiltinCommand?: ReturnType<typeof vi.fn>;
+      currentThread?: Record<string, unknown> | null;
+    } = {}) {
+      const postMessage = vi.fn();
+      const runThreadCommand =
+        opts.runThreadCommand ??
+        vi.fn(async () => ({
+          operation_key: "gui-op-1",
+          name: "demo-plugin-cmd",
+          origin: "plugin",
+          status: "completed",
+          text: "plugin command output",
+          extension: {},
+          idempotent_replay: false,
+        }));
+      const runBuiltinCommand =
+        opts.runBuiltinCommand ??
+        vi.fn(async () => ({
+          name: "system",
+          text: "engine answered",
+          is_error: false,
+          text_only: true,
+        }));
+      const listCommands = opts.catalogError
+        ? vi.fn(async () => {
+            throw opts.catalogError;
+          })
+        : vi.fn(async () => opts.catalog ?? []);
+      const ctx = createContext({
+        api: {
+          ...createContext().api,
+          listCommands,
+          runThreadCommand,
+          runBuiltinCommand,
+        } as any,
+        currentThread: (opts.currentThread ?? null) as any,
+        postMessage,
+      });
+      return { ctx, postMessage, listCommands, runThreadCommand, runBuiltinCommand };
+    }
+
+    it("keeps the classic unknown-command error when the catalog does not know the name either", async () => {
+      const { ctx, postMessage } = fallThroughContext({ catalog: [] });
+      await new SlashCommandHandler(ctx).handle("/nonexistent", "");
+      expect(postMessage).toHaveBeenCalledWith({
+        type: "error",
+        message: "Unknown command: /nonexistent. Type /help for available commands.",
+      });
+    });
+
+    it("runs a plugin (extension) command through the runtime endpoint and posts its text", async () => {
+      const { ctx, postMessage } = fallThroughContext({
+        catalog: [
+          catalogEntry({
+            name: "demo-plugin-cmd",
+            kind: "extension",
+            binding: "extension",
+            origin: "plugin:demo",
+            registration_id: "abc123",
+          }),
+        ],
+        currentThread: { id: "thread-1", workspace: "/workspace" },
+      });
+      await new SlashCommandHandler(ctx).handle("/demo-plugin-cmd", "arg text");
+
+      expect(ctx.api.runThreadCommand).toHaveBeenCalledWith("thread-1", {
+        name: "demo-plugin-cmd",
+        args: "arg text",
+        registrationId: "abc123",
+        expectedWorkspace: "/workspace",
+      });
+      const infoMsg = postMessage.mock.calls.find(
+        (c: any) => c[0].type === "info" && c[0].message === "plugin command output"
+      );
+      expect(infoMsg).toBeDefined();
+    });
+
+    it("answers a builtin engine command with usage and the terminal note, without executing it", async () => {
+      const { ctx, postMessage } = fallThroughContext({ catalog: [catalogEntry()] });
+      await new SlashCommandHandler(ctx).handle("/fleet", "");
+
+      expect(ctx.api.runThreadCommand).not.toHaveBeenCalled();
+      const infoMsg = postMessage.mock.calls.find(
+        (c: any) =>
+          c[0].type === "info" &&
+          c[0].message.includes("/fleet [members|setup|teams|workers|help]")
+      );
+      expect(infoMsg).toBeDefined();
+      expect(infoMsg![0].message).toContain("terminal");
+    });
+
+    it("says the catalog was unreachable when the engine does not answer", async () => {
+      const { ctx, postMessage } = fallThroughContext({
+        catalogError: new Error("API error 500: no catalog"),
+      });
+      await new SlashCommandHandler(ctx).handle("/nonexistent", "");
+
+      const errMsg = postMessage.mock.calls.find((c: any) => c[0].type === "error");
+      expect(errMsg).toBeDefined();
+      expect(errMsg![0].message).toContain("Engine command catalog unavailable");
+    });
+
+    it("refuses a plugin command with no conversation to run it in", async () => {
+      const { ctx, postMessage } = fallThroughContext({
+        catalog: [
+          catalogEntry({
+            name: "demo-plugin-cmd",
+            kind: "extension",
+            binding: "extension",
+            registration_id: "abc123",
+          }),
+        ],
+        currentThread: null,
+      });
+      await new SlashCommandHandler(ctx).handle("/demo-plugin-cmd", "");
+
+      expect(ctx.api.runThreadCommand).not.toHaveBeenCalled();
+      const errMsg = postMessage.mock.calls.find((c: any) => c[0].type === "error");
+      expect(errMsg![0].message).toContain("open a thread first");
+    });
+
+    it("resolves engine aliases to the canonical command", async () => {
+      const { ctx, postMessage } = fallThroughContext({
+        catalog: [
+          catalogEntry({ name: "workflow", aliases: ["wf"], usage: "/workflow [objective]" }),
+        ],
+      });
+      await new SlashCommandHandler(ctx).handle("/wf", "");
+
+      const infoMsg = postMessage.mock.calls.find((c: any) => c[0].type === "info");
+      expect(infoMsg![0].message).toContain("/workflow — engine command (builtin)");
+    });
+
+    it("starts a new conversation on /new", async () => {
+      const ctx = createContext();
+      await new SlashCommandHandler(ctx).handle("/new", "");
+
+      expect(ctx.startNewThread).toHaveBeenCalled();
+    });
+
+    it("lists configured hooks read-only", async () => {
+      const ctx = createContext();
+      (ctx.api.listHooks as any).mockResolvedValue({
+        workspace: "/workspace",
+        enabled: true,
+        hooks: [
+          {
+            name: "notify",
+            event: "turn.completed",
+            command: "say done",
+            background: true,
+            timeout_secs: 30,
+            source: "global",
+          },
+        ],
+        problems: ["one bad hook was skipped"],
+      });
+      await new SlashCommandHandler(ctx).handle("/hooks", "");
+
+      const infoMsg = (ctx.postMessage as any).mock.calls.find((c: any) => c[0].type === "info");
+      expect(infoMsg![0].message).toContain("turn.completed");
+      expect(infoMsg![0].message).toContain("one bad hook was skipped");
+    });
+
+    it("says hooks are disabled instead of listing none", async () => {
+      const ctx = createContext();
+      (ctx.api.listHooks as any).mockResolvedValue({
+        workspace: "/workspace",
+        enabled: false,
+        hooks: [],
+        problems: [],
+      });
+      await new SlashCommandHandler(ctx).handle("/hooks", "");
+
+      const infoMsg = (ctx.postMessage as any).mock.calls.find((c: any) => c[0].type === "info");
+      expect(infoMsg![0].message).toContain("disabled");
+    });
+
+    it("lists background shell jobs and resolves a cancel by job id prefix", async () => {
+      const ctx = createContext();
+      (ctx.api.listJobs as any).mockResolvedValue({
+        jobs: [
+          {
+            id: "call-1",
+            job_id: "job-abcdef123456",
+            command: "npm test",
+            cwd: "/workspace",
+            status: "running",
+            background: true,
+            exit_code: null,
+            elapsed_ms: 4200,
+            stdout_tail: "",
+            stderr_tail: "",
+            stdin_available: false,
+            stale: false,
+            thread_id: "thread-9",
+            owner: "agent",
+          },
+        ],
+      });
+      const handler = new SlashCommandHandler(ctx);
+      await handler.handle("/jobs", "");
+      const listMsg = (ctx.postMessage as any).mock.calls.find((c: any) => c[0].type === "info");
+      expect(listMsg![0].message).toContain("npm test");
+
+      await handler.handle("/jobs", "cancel job-abc");
+      expect(ctx.api.killThreadJob).toHaveBeenCalledWith("thread-9", "job-abcdef123456");
+    });
+
+    it("refuses /jobs cancel with no id instead of matching the first job", async () => {
+      const ctx = createContext();
+      (ctx.api.listJobs as any).mockResolvedValue({
+        jobs: [
+          {
+            id: "call-1",
+            job_id: "job-abcdef123456",
+            command: "npm test",
+            cwd: "/workspace",
+            status: "Running",
+            background: true,
+            exit_code: null,
+            elapsed_ms: 4200,
+            stdout_tail: "",
+            stderr_tail: "",
+            stdin_available: false,
+            stale: false,
+            thread_id: "thread-9",
+            owner: "agent",
+          },
+        ],
+      });
+      const handler = new SlashCommandHandler(ctx);
+      await handler.handle("/jobs", "cancel");
+
+      // An empty prefix would match every job; the guard keeps it from
+      // killing one the user never named.
+      expect(ctx.api.killThreadJob).not.toHaveBeenCalled();
+      const errMsg = (ctx.postMessage as any).mock.calls.find((c: any) => c[0].type === "error");
+      expect(errMsg![0].message).toContain("/jobs cancel <id>");
+    });
+
+    it("renders a PascalCase engine status and an unknown job id honestly", async () => {
+      const ctx = createContext();
+      (ctx.api.listJobs as any).mockResolvedValue({
+        jobs: [
+          {
+            id: "call-1",
+            job_id: "job-abcdef123456",
+            command: "npm test",
+            cwd: "/workspace",
+            status: "Running",
+            background: true,
+            exit_code: null,
+            elapsed_ms: 4200,
+            stdout_tail: "",
+            stderr_tail: "",
+            stdin_available: false,
+            stale: false,
+            thread_id: "thread-9",
+            owner: "agent",
+          },
+        ],
+      });
+      const handler = new SlashCommandHandler(ctx);
+      await handler.handle("/jobs", "");
+      const listMsg = (ctx.postMessage as any).mock.calls.find((c: any) => c[0].type === "info");
+      expect(listMsg![0].message).toContain("[running]");
+      expect(listMsg![0].message).toContain("⟳");
+
+      await handler.handle("/jobs", "show job-zzz");
+      const errMsg = (ctx.postMessage as any).mock.calls.find((c: any) => c[0].type === "error");
+      expect(errMsg![0].message).toContain("No job matches");
+    });
+
+    it("sends /automation down the automations flow /jobs used to own", async () => {
+      const ctx = createContext();
+      await new SlashCommandHandler(ctx).handle("/automation", "list");
+
+      // The automations handler is reached through the same code path: a
+      // listAutomations call is its fingerprint.
+      expect(ctx.api.listAutomations).toHaveBeenCalled();
+    });
+
+    it("accepts the engine's full effort set on /reasoning", async () => {
+      const ctx = createContext();
+      const handler = new SlashCommandHandler(ctx);
+      await handler.handle("/reasoning", "xhigh");
+      expect(vscodeState.configValues.get("reasoningEffort")).toBe("xhigh");
+
+      // `none` is the engine's alias for `off`; storing it verbatim would
+      // read back as "off" in the TUI and look like the two surfaces disagree.
+      await handler.handle("/reasoning", "none");
+      expect(vscodeState.configValues.get("reasoningEffort")).toBe("off");
+
+      await handler.handle("/reasoning", "ultra");
+      expect(vscodeState.configValues.get("reasoningEffort")).toBe("ultra");
+    });
+
+    it("still rejects a reasoning value the engine does not know", async () => {
+      const ctx = createContext();
+      await new SlashCommandHandler(ctx).handle("/reasoning", "blast");
+
+      expect(vscodeState.configValues.get("reasoningEffort")).toBe("auto");
+      const infoMsg = (ctx.postMessage as any).mock.calls.find(
+        (c: any) => c[0].type === "info" && c[0].message.includes("xhigh")
+      );
+      expect(infoMsg).toBeDefined();
+    });
+
+    it("lists delegated agent runs read-only", async () => {
+      const ctx = createContext();
+      (ctx.api.listAgentRuns as any).mockResolvedValue({
+        runs: [
+          {
+            spec: {
+              worker_id: "w-1",
+              run_id: "r-1",
+              parent_run_id: null,
+              session_name: "reviewer",
+              objective: "review the diff",
+              role: "reviewer",
+            },
+            status: "completed",
+            latest_message: "found two issues",
+            result_summary: null,
+            error: null,
+          },
+        ],
+      });
+      await new SlashCommandHandler(ctx).handle("/subagents", "");
+
+      const infoMsg = (ctx.postMessage as any).mock.calls.find((c: any) => c[0].type === "info");
+      expect(infoMsg![0].message).toContain("reviewer");
+      expect(infoMsg![0].message).toContain("found two issues");
+    });
+
+    it("executes a builtin engine command through the builtin route when one is open", async () => {
+      // /modeldb: a real engine builtin the GUI neither handles nor lists —
+      // /system would never reach the fall-through (the GUI owns it).
+      const { ctx, runBuiltinCommand, postMessage } = fallThroughContext({
+        catalog: [
+          {
+            name: "modeldb",
+            aliases: [],
+            summary: "System prompt",
+            usage: "/system",
+            subcommands: [],
+            takes_arguments: false,
+            requires_argument: false,
+            requires_required_argument: false,
+            composer_wants_trailing_space: false,
+            palette_runs_directly: true,
+            show_in_empty_discovery: true,
+            kind: "builtin",
+            binding: "host",
+            hidden: false,
+          },
+        ],
+        currentThread: { id: "thread-1", workspace: "/workspace" },
+      });
+      (runBuiltinCommand as any).mockResolvedValue({
+        name: "modeldb",
+        text: "model database: 3 routes",
+        is_error: false,
+        text_only: true,
+      });
+      await new SlashCommandHandler(ctx).handle("/modeldb", "");
+
+      expect(runBuiltinCommand).toHaveBeenCalledWith("thread-1", "modeldb", undefined);
+      const infoMsg = postMessage.mock.calls.find(
+        (c: any) => c[0].type === "info" && c[0].message === "model database: 3 routes"
+      );
+      expect(infoMsg).toBeDefined();
+    });
+
+    it("falls back to the descriptive answer on an engine without the builtin route", async () => {
+      const { ctx, runBuiltinCommand, postMessage } = fallThroughContext({
+        catalog: [
+          {
+            name: "fleet",
+            aliases: [],
+            summary: "Fleet control surface",
+            usage: "/fleet [members|setup|teams|workers|help]",
+            subcommands: [],
+            takes_arguments: false,
+            requires_argument: false,
+            requires_required_argument: false,
+            composer_wants_trailing_space: false,
+            palette_runs_directly: true,
+            show_in_empty_discovery: true,
+            kind: "builtin",
+            binding: "host",
+            hidden: false,
+          },
+        ],
+        currentThread: { id: "thread-1", workspace: "/workspace" },
+      });
+      (runBuiltinCommand as any).mockRejectedValue(
+        new Error("API error 404: no remotely executable builtin command 'fleet'")
+      );
+      await new SlashCommandHandler(ctx).handle("/fleet", "");
+
+      const infoMsg = postMessage.mock.calls.find(
+        (c: any) => c[0].type === "info" && c[0].message.includes("/fleet [members|setup|teams|workers|help]")
+      );
+      expect(infoMsg).toBeDefined();
+      expect(infoMsg![0].message).toContain("no remote builtin route");
+    });
+
+    it("surfaces a new-enough engine's refusal reason instead of the fallback", async () => {
+      const { ctx, runBuiltinCommand, postMessage } = fallThroughContext({
+        catalog: [
+          {
+            name: "advisor",
+            aliases: [],
+            summary: "Advisor telemetry",
+            usage: "/advisor [on|off|status]",
+            subcommands: [],
+            takes_arguments: false,
+            requires_argument: false,
+            requires_required_argument: false,
+            composer_wants_trailing_space: false,
+            palette_runs_directly: true,
+            show_in_empty_discovery: true,
+            kind: "builtin",
+            binding: "host",
+            hidden: false,
+          },
+        ],
+        currentThread: { id: "thread-1", workspace: "/workspace" },
+      });
+      (runBuiltinCommand as any).mockRejectedValue(
+        new Error("API error 409: this thread has no live context estimate yet; send a message first")
+      );
+      await new SlashCommandHandler(ctx).handle("/advisor", "");
+
+      const errMsg = postMessage.mock.calls.find((c: any) => c[0].type === "error");
+      expect(errMsg).toBeDefined();
+      expect(errMsg![0].message).toContain("no live context estimate");
+    });
+
+    it("appends the engine-only builtin list to /help, skipping commands the GUI owns", async () => {
+      const { ctx, postMessage } = fallThroughContext({
+        catalog: [catalogEntry(), catalogEntry({ name: "clear" })],
+      });
+      await new SlashCommandHandler(ctx).handle("/help", "");
+
+      const infoMsg = postMessage.mock.calls.find(
+        (c: any) => c[0].type === "info" && String(c[0].message).includes("Engine commands")
+      );
+      expect(infoMsg).toBeDefined();
+      expect(infoMsg![0].message).toContain("/fleet — /fleet [members|setup|teams|workers|help]");
+      expect(infoMsg![0].message).not.toContain("/clear — ");
     });
   });
 });
