@@ -222,6 +222,9 @@ interface Translations {
   /** A memo's stored attachment file is gone when it runs or loads back;
    *  `{files}` names what was left out. */
   queueAttachmentMissing: string;
+  /** /queue list's cross-conversation summary header; `{n}` is how many
+   *  conversations hold memos. */
+  queueThreadListHeader: string;
   /** Badge on guidance the runtime dropped before the model saw it. */
   steerUndelivered: string;
   steerUndeliveredTitle: string;
@@ -766,6 +769,7 @@ const en: Translations = {
   queueCollapse: "Collapse the queue",
   queueExpand: "Expand the queue",
   queueAttachmentMissing: "Attached file(s) no longer found and left out: {files}",
+  queueThreadListHeader: "Memos waiting in {n} other conversation(s) — click one to open it",
   steerBadge: "steer",
   steerBadgeTitle: "Sent as mid-turn steering",
   steerUndelivered: "not delivered",
@@ -1265,6 +1269,7 @@ const zhCn: Translations = {
   queueCollapse: "收起队列",
   queueExpand: "展开队列",
   queueAttachmentMissing: "以下附件文件已找不到，已跳过：{files}",
+  queueThreadListHeader: "{n} 个其他会话中有待执行的备忘——点击打开",
   steerBadge: "引导",
   steerBadgeTitle: "作为中途引导发送",
   steerUndelivered: "未送达",
@@ -1793,6 +1798,7 @@ export function webviewTranslations(tr: Translations) {
     queueCollapse: tr.queueCollapse,
     queueExpand: tr.queueExpand,
     queueAttachmentMissing: tr.queueAttachmentMissing,
+    queueThreadListHeader: tr.queueThreadListHeader,
     steerBadge: tr.steerBadge,
     steerBadgeTitle: tr.steerBadgeTitle,
     steerUndelivered: tr.steerUndelivered,

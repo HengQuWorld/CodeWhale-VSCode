@@ -2369,17 +2369,10 @@ async function handleQueue(ctx: SlashCommandContext, args: string): Promise<void
       // while memos wait in the conversations they were written for. Sum
       // those up instead, with where to find them.
       const byThread = ctx.queuedPromptsByThread();
-      const others = Object.entries(byThread)
-        .filter(([key, list]) => key !== DRAFT_QUEUE_KEY && list.length > 0)
-        .map(([key, list]) => {
-          const previews = list
-            .slice(0, 3)
-            .map((p: QueuedPrompt) => queuePreviewLine(p.text))
-            .join(" / ");
-          const more = list.length > 3 ? ` (+${list.length - 3} more)` : "";
-          return `  ${key.slice(0, 18)}… (${list.length}): ${previews}${more}`;
-        });
-      if (others.length === 0) {
+      const holding = Object.entries(byThread).filter(
+        ([key, list]) => key !== DRAFT_QUEUE_KEY && list.length > 0
+      );
+      if (holding.length === 0) {
         ctx.postMessage({
           type: "info",
           message:
@@ -2387,9 +2380,39 @@ async function handleQueue(ctx: SlashCommandContext, args: string): Promise<void
         });
         return;
       }
+
+      // Display titles, not raw ids: the title is what the Threads rail
+      // shows, and it is what the user recognises. A stalled or ancient
+      // engine must not hold the answer hostage — rows fall back to the
+      // thread id.
+      const titleById = new Map<string, string>();
+      try {
+        const records = await ctx.api.listThreads({ limit: 200, timeoutMs: 5000 });
+        for (const rec of records) {
+          if (rec?.id) titleById.set(rec.id, rec.title || rec.id);
+        }
+      } catch {
+        // Titles are decoration; the ids degrade fine.
+      }
+
+      // One message, one clickable row per conversation: the webview opens
+      // it with the same loadThread the rail's items use, and the queue
+      // strip travels with the switch (the host republishes on threadLoaded).
       ctx.postMessage({
-        type: "info",
-        message: `Nothing parked for the current view, but memos are waiting in other conversations:\n\n${others.join("\n")}\n\nOpen the conversation from the Threads rail to run, edit or drop its memos — the queue strip travels with it.`,
+        type: "queueThreadList",
+        header: t().queueThreadListHeader.replace(
+          "{n}",
+          String(holding.length)
+        ),
+        threads: holding.map(([key, list]) => ({
+          id: key,
+          title: titleById.get(key) || key,
+          count: list.length,
+          previews: list
+            .slice(0, 3)
+            .map((p: QueuedPrompt) => queuePreviewLine(p.text)),
+          lastTs: list[list.length - 1].ts,
+        })),
       });
       return;
     }

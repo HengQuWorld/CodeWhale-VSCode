@@ -10,6 +10,8 @@
 
 - **The queue strip folds** — The strip's header is a fold control (the sidebar's pattern): ▾/▸ hides the list but keeps the count, and the choice — like the panel's other remembered choices — survives window reloads.
 
+- **`/queue list` opens the conversation it names** — The cross-conversation summary used to be prose telling you to go find the Threads rail. It is now a card in the conversation: one row per conversation holding memos, named by its rail title (not its raw id) with the memo count and a first-line preview — and clicking a row opens that conversation, where the queue strip is waiting.
+
 ## 0.9.5
 
 Works on the same engine floor as 0.9.4 (**v0.10.2**); nothing here waits on an engine build.

@@ -2028,6 +2028,39 @@ ${PROVIDER_PICKER_JS}
         }
         break;
 
+      case 'queueThreadList': {
+        // The /queue list cross-conversation summary: one clickable row per
+        // conversation holding parked memos. A click opens that thread via
+        // the same message the rail's items send, and the queue strip
+        // travels with the switch (the host republishes on threadLoaded).
+        var qtl = document.createElement('div');
+        qtl.className = 'system-message queue-thread-card';
+        var qtlRows = '';
+        var qtlThreads = Array.isArray(msg.threads) ? msg.threads : [];
+        qtlThreads.forEach(function(th) {
+          var previews = Array.isArray(th.previews) ? th.previews : [];
+          var tip = previews.join('\\n');
+          qtlRows += '<button type="button" class="queue-thread-row" data-thread-id="' + __wvEscapeHtml(th.id) + '" title="' + __wvEscapeHtml(tip) + '">' +
+            '<span class="qtr-title">' + __wvEscapeHtml(th.title || th.id) + '</span>' +
+            '<span class="qtr-meta">📎 ' + Number(th.count || 0) + '</span>' +
+            '<span class="qtr-preview">' + __wvEscapeHtml(previews[0] || '') + '</span>' +
+            '<span class="qtr-open">›</span>' +
+            '</button>';
+        });
+        qtl.innerHTML = '<span class="msg-label note">' + __wvEscapeHtml(__i18n.note) + '</span><span class="msg-body">' + __wvEscapeHtml(msg.header || '') + '</span>' +
+          (qtlRows ? '<div class="queue-thread-rows">' + qtlRows + '</div>' : '');
+        qtl.addEventListener('click', function(e) {
+          var row = e.target && e.target.closest ? e.target.closest('.queue-thread-row') : null;
+          if (!row) return;
+          var threadId = row.getAttribute('data-thread-id');
+          if (!threadId) return;
+          vscode.postMessage({ type: 'loadThread', threadId: threadId });
+        });
+        messagesEl.appendChild(qtl);
+        window.__wvMessages.smartScrollToBottom();
+        break;
+      }
+
       case 'clearChat':
         showContinueSession(false);
         window.__wvSidebar.closeTaskDetail();

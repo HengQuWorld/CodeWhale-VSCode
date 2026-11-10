@@ -75,7 +75,10 @@ vi.mock("child_process", () => ({
 // ── Mock i18n ──
 
 vi.mock("../i18n", () => ({
-  t: vi.fn(() => ({ commandNotAvailableInGui: "This command is not available in GUI mode." })),
+  t: vi.fn(() => ({
+    commandNotAvailableInGui: "This command is not available in GUI mode.",
+    queueThreadListHeader: "Memos waiting in {n} other conversation(s) — click one to open it",
+  })),
   currentLocale: vi.fn(() => "en"),
 }));
 
@@ -1152,7 +1155,7 @@ describe("SlashCommandHandler - Dispatcher Pattern", () => {
       expect(err.message).toContain("1..2");
     });
 
-    it("a fresh window with memos in other threads gets a summary, not a lie", async () => {
+    it("a fresh window with memos in other threads gets a clickable card, not a dead-end", async () => {
       const postMessage = vi.fn();
       const ctx = createContext({
         queuedPromptList: () => [],
@@ -1163,19 +1166,46 @@ describe("SlashCommandHandler - Dispatcher Pattern", () => {
             { id: "q-b", text: "second in old thread", ts: 2 },
           ],
         }),
+        api: {
+          ...createContext().api,
+          // Rows show the rail's titles, not raw ids — that is what the
+          // user recognises; a stalled engine degrades to ids.
+          listThreads: vi.fn(async () => [
+            { id: "thr_1a165a06ddc74f86", title: "作业队列调研" },
+          ]),
+        } as any,
         postMessage,
       });
       const handler = new SlashCommandHandler(ctx);
 
       await handler.handle("/queue", "list");
 
-      const info = postMessage.mock.calls.map((c) => c[0]).find((m) => m.type === "info");
-      expect(info.message).toContain("waiting in other conversations");
-      // The id is truncated for scannability; enough to recognise it.
-      expect(info.message).toContain("thr_1a165a06ddc74f…");
-      expect(info.message).toContain("first in old thread");
-      // And it points the way in: the numbered actions stay thread-scoped.
-      expect(info.message).toContain("Threads rail");
+      const card = postMessage.mock.calls.map((c) => c[0]).find((m) => m.type === "queueThreadList");
+      expect(card).toBeDefined();
+      expect(card.threads).toHaveLength(1);
+      expect(card.threads[0].title).toBe("作业队列调研");
+      expect(card.threads[0].count).toBe(2);
+      expect(card.threads[0].previews[0]).toContain("first in old thread");
+      // The webview opens the thread with the same message the rail sends.
+      expect(card.threads[0].id).toBe("thr_1a165a06ddc74f86");
+    });
+
+    it("a thread the listing never answered still shows, by id", async () => {
+      const postMessage = vi.fn();
+      const ctx = createContext({
+        queuedPromptList: () => [],
+        queuedPromptsByThread: () => ({
+          "thr_9999": [{ id: "q-x", text: "orphaned thread memo", ts: 1 }],
+        }),
+        api: { ...createContext().api, listThreads: vi.fn(async () => []) } as any,
+        postMessage,
+      });
+      const handler = new SlashCommandHandler(ctx);
+
+      await handler.handle("/queue", "list");
+
+      const card = postMessage.mock.calls.map((c) => c[0]).find((m) => m.type === "queueThreadList");
+      expect(card.threads[0].title).toBe("thr_9999");
     });
 
     it("a really-empty workspace still says queue empty", async () => {

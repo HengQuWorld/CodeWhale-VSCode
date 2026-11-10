@@ -170,6 +170,7 @@ export interface WebviewTranslations {
   queueCollapse: string;
   queueExpand: string;
   queueAttachmentMissing: string;
+  queueThreadListHeader: string;
   /** Badge on guidance the runtime dropped before the model saw it. */
   steerUndelivered: string;
   steerUndeliveredTitle: string;

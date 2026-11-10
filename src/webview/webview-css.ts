@@ -3031,6 +3031,52 @@ export function getWebviewCss(): string {
     /* The list folded away leaves the head as the only thing to click —
        the same shape the Activity sections use. */
     #message-queue.is-collapsed #mq-items { display: none; }
+    /* /queue list's cross-conversation summary: one row per conversation
+       holding parked memos, the whole row a button that opens it. */
+    .queue-thread-card .queue-thread-rows {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      margin-top: 4px;
+    }
+    .queue-thread-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      width: 100%;
+      text-align: left;
+      background: none;
+      border: 1px solid transparent;
+      border-radius: 4px;
+      color: inherit;
+      cursor: pointer;
+      font-size: 11px;
+      line-height: 1.4;
+      padding: 3px 6px;
+      min-width: 0;
+    }
+    .queue-thread-row:hover {
+      background: rgba(128,128,128,0.14);
+      border-color: rgba(128,128,128,0.3);
+    }
+    .qtr-title {
+      flex: none;
+      max-width: 45%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-weight: 600;
+    }
+    .qtr-meta { flex: none; opacity: 0.7; }
+    .qtr-preview {
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      opacity: 0.75;
+    }
+    .qtr-open { flex: none; opacity: 0.5; }
     .mq-clip {
       opacity: 0.7;
       margin-left: 4px;
