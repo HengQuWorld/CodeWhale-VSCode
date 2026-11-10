@@ -274,6 +274,8 @@ interface Translations {
   commandWorkspace: string;
   commandTask: string;
   commandJobs: string;
+  commandAutomation: string;
+  commandNew: string;
   commandNote: string;
   commandMemory: string;
   commandTrust: string;
@@ -299,9 +301,6 @@ interface Translations {
   commandAnchor: string;
   commandSessions: string;
   commandLoad: string;
-  commandCycles: string;
-  commandCycle: string;
-  commandRecall: string;
   commandRelay: string;
   commandInit: string;
   commandLsp: string;
@@ -808,7 +807,9 @@ const en: Translations = {
   commandHome: "/home - Show dashboard",
   commandWorkspace: "/workspace - Set workspace",
   commandTask: "/task - Manage tasks",
-  commandJobs: "/jobs - Manage background jobs (partial: TUI runtime only)",
+  commandJobs: "/jobs [list] | show <id> | cancel <id> - Background shell jobs",
+  commandAutomation: "/automation - Manage scheduled automations",
+  commandNew: "/new - Start a new conversation",
   commandNote: "/note <text> | add | list | remove <n> | clear | path - Manage workspace notes",
   commandMemory: "/memory [show|pending|search <query>|get <id>|remember <note>|approve <id>|reject <id>|forget <id>|clear <scope>] - Manage the native memory store",
   commandTrust: "/trust - Manage trust settings",
@@ -834,9 +835,6 @@ const en: Translations = {
   commandAnchor: "/anchor <text> | list | remove <n> - Manage compaction anchors",
   commandSessions: "/sessions - Manage sessions",
   commandLoad: "/load - Load a session",
-  commandCycles: "/cycles - List cycles",
-  commandCycle: "/cycle - Show cycle details",
-  commandRecall: "/recall - Recall from archive",
   commandRelay: "/relay - Relay to next agent",
   commandInit: "/init - Initialize project config",
   commandLsp: "/lsp - LSP settings",
@@ -1309,7 +1307,9 @@ const zhCn: Translations = {
   commandHome: "/home - 显示仪表盘",
   commandWorkspace: "/workspace - 设置工作区",
   commandTask: "/task - 管理任务",
-  commandJobs: "/jobs - 管理后台任务（部分支持：需TUI运行时）",
+  commandJobs: "/jobs [list] | show <id> | cancel <id> - 后台 shell 作业",
+  commandAutomation: "/automation - 管理定时自动化任务",
+  commandNew: "/new - 开始新会话",
   commandNote: "/note <文本> | add | list | remove <n> | clear | path - 管理工作区笔记",
   commandMemory: "/memory [show|pending|search <查询>|get <id>|remember <笔记>|approve <id>|reject <id>|forget <id>|clear <范围>] - 管理原生记忆库",
   commandTrust: "/trust - 管理信任设置",
@@ -1335,9 +1335,6 @@ const zhCn: Translations = {
   commandAnchor: "/anchor <文本> | list | remove <n> - 管理压缩锚点",
   commandSessions: "/sessions - 管理会话",
   commandLoad: "/load - 加载会话",
-  commandCycles: "/cycles - 列出周期",
-  commandCycle: "/cycle - 显示周期详情",
-  commandRecall: "/recall - 从归档中恢复",
   commandRelay: "/relay - 传递给下一个代理",
   commandInit: "/init - 初始化项目配置",
   commandLsp: "/lsp - LSP 设置",
@@ -1869,6 +1866,8 @@ export function webviewTranslations(tr: Translations) {
     commandWorkspace: tr.commandWorkspace,
     commandTask: tr.commandTask,
     commandJobs: tr.commandJobs,
+    commandAutomation: tr.commandAutomation,
+    commandNew: tr.commandNew,
     commandNote: tr.commandNote,
     commandMemory: tr.commandMemory,
     commandTrust: tr.commandTrust,
@@ -1894,9 +1893,6 @@ export function webviewTranslations(tr: Translations) {
     commandAnchor: tr.commandAnchor,
     commandSessions: tr.commandSessions,
     commandLoad: tr.commandLoad,
-    commandCycles: tr.commandCycles,
-    commandCycle: tr.commandCycle,
-    commandRecall: tr.commandRecall,
     commandRelay: tr.commandRelay,
     commandInit: tr.commandInit,
     commandLsp: tr.commandLsp,

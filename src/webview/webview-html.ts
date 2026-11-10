@@ -246,6 +246,8 @@ export interface WebviewTranslations {
   commandWorkspace: string;
   commandTask: string;
   commandJobs: string;
+  commandAutomation: string;
+  commandNew: string;
   commandNote: string;
   commandMemory: string;
   commandTrust: string;
@@ -271,9 +273,6 @@ export interface WebviewTranslations {
   commandAnchor: string;
   commandSessions: string;
   commandLoad: string;
-  commandCycles: string;
-  commandCycle: string;
-  commandRecall: string;
   commandRelay: string;
   commandInit: string;
   commandLsp: string;

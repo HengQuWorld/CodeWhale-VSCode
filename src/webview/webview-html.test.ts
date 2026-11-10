@@ -13,7 +13,7 @@ vi.mock("vscode", () => ({
 
 function makeTr(): WebviewTranslations {
   return {
-    locale: "en",
+    commandAutomation: "/automation", commandNew: "/new", locale: "en",
     history: "History",
     threads: "Threads",
     sessions: "Sessions",
@@ -188,9 +188,6 @@ function makeTr(): WebviewTranslations {
     commandAnchor: "/anchor",
     commandSessions: "/sessions",
     commandLoad: "/load",
-    commandCycles: "/cycles",
-    commandCycle: "/cycle",
-    commandRecall: "/recall",
     commandRelay: "/relay",
     commandInit: "/init",
     commandLsp: "/lsp",

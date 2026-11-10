@@ -16,6 +16,8 @@ import type { WebviewTranslations } from "./webview-html";
 export function makeTr(overrides?: Partial<WebviewTranslations>): WebviewTranslations {
   return {
     locale: "en",
+    commandAutomation: "/automation - Manage scheduled automations",
+    commandNew: "/new - Start a new conversation",
     history: "History",
     threads: "Threads",
     sessions: "Sessions",
@@ -190,9 +192,6 @@ export function makeTr(overrides?: Partial<WebviewTranslations>): WebviewTransla
     commandAnchor: "/anchor",
     commandSessions: "/sessions",
     commandLoad: "/load",
-    commandCycles: "/cycles",
-    commandCycle: "/cycle",
-    commandRecall: "/recall",
     commandRelay: "/relay",
     commandInit: "/init",
     commandLsp: "/lsp",

@@ -1277,6 +1277,14 @@ ${PROVIDER_PICKER_JS}
         }
         break;
 
+      case 'commandCatalog':
+        // The engine's command tail (what the GUI neither handles nor
+        // lists), for slash-menu completion of the engine's own surface.
+        if (window.__wvInput && window.__wvInput.setEngineCommands) {
+          window.__wvInput.setEngineCommands(msg.commands || []);
+        }
+        break;
+
       case 'skillArmed': {
         // The host owns the armed skill; this only paints the composer chip.
         // A null name is the disarm (sent back after the arming was consumed

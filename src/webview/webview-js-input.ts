@@ -92,6 +92,11 @@ export function getInputScript(tr: WebviewTranslations): string {
   // inventory (the same list the Skills panel renders), so the menu offers the
   // names this engine actually resolves rather than a guessed catalog.
   var skillNames = [];
+  // The engine's command tail (unhandled builtins, plugin commands, user
+  // commands), pushed by the host so "/" completes the engine's own surface.
+  // 'empty' mirrors the engine's show_in_empty_discovery: engine rows marked
+  // false stay out of the bare "/" menu but match a typed filter.
+  var engineCommands = [];
 
   var slashCommands = [
     { name: '/mode', desc: '${tr.commandMode}', category: 'config' },
@@ -100,6 +105,7 @@ export function getInputScript(tr: WebviewTranslations): string {
     { name: '/reasoning', desc: '${tr.commandReasoning}', category: 'config' },
     { name: '/config', desc: '${tr.commandConfig}', category: 'config' },
     { name: '/settings', desc: '${tr.commandSettings}', category: 'config' },
+    { name: '/new', desc: '${tr.commandNew}', category: 'session' },
     { name: '/clear', desc: '${tr.commandClear}', category: 'core' },
     { name: '/interrupt', desc: '${tr.commandInterrupt}', category: 'core' },
     { name: '/help', desc: '${tr.commandHelp}', category: 'core' },
@@ -116,6 +122,7 @@ export function getInputScript(tr: WebviewTranslations): string {
     { name: '/workspace', desc: '${tr.commandWorkspace}', category: 'config' },
     { name: '/task', desc: '${tr.commandTask}', category: 'core' },
     { name: '/jobs', desc: '${tr.commandJobs}', category: 'core' },
+    { name: '/automation', desc: '${tr.commandAutomation}', category: 'core' },
     { name: '/note', desc: '${tr.commandNote}', category: 'core' },
     { name: '/memory', desc: '${tr.commandMemory}', category: 'core' },
     { name: '/trust', desc: '${tr.commandTrust}', category: 'config' },
@@ -141,9 +148,6 @@ export function getInputScript(tr: WebviewTranslations): string {
     { name: '/anchor', desc: '${tr.commandAnchor}', category: 'core' },
     { name: '/sessions', desc: '${tr.commandSessions}', category: 'session' },
     { name: '/load', desc: '${tr.commandLoad}', category: 'session' },
-    { name: '/cycles', desc: '${tr.commandCycles}', category: 'session' },
-    { name: '/cycle', desc: '${tr.commandCycle}', category: 'session' },
-    { name: '/recall', desc: '${tr.commandRecall}', category: 'session' },
     { name: '/relay', desc: '${tr.commandRelay}', category: 'core' },
     { name: '/init', desc: '${tr.commandInit}', category: 'config' },
     { name: '/lsp', desc: '${tr.commandLsp}', category: 'config' },
@@ -169,7 +173,13 @@ export function getInputScript(tr: WebviewTranslations): string {
     }
 
     var query = input.toLowerCase();
-    slashMenuCommands = slashCommands.filter(function(cmd) {
+    var bareQuery = query === '/';
+    var menuSource = slashCommands.concat(engineCommands.filter(function(cmd) {
+      if (slashCommands.some(function(known) { return known.name === cmd.name; })) return false;
+      if (bareQuery && cmd.empty === false) return false;
+      return true;
+    }));
+    slashMenuCommands = menuSource.filter(function(cmd) {
       return cmd.name.toLowerCase().startsWith(query) || cmd.desc.toLowerCase().includes(query.slice(1));
     });
 
@@ -999,6 +1009,11 @@ export function getInputScript(tr: WebviewTranslations): string {
     /** The skill inventory, for '/skill <name>' completion in the slash menu. */
     setSkillNames: function(names) {
       skillNames = Array.isArray(names) ? names.slice() : [];
+    },
+    /** The engine's command tail for slash-menu completion. GUI-owned
+     *  commands keep their localized rows; only additions land here. */
+    setEngineCommands: function(commands) {
+      engineCommands = Array.isArray(commands) ? commands.slice() : [];
     },
   };
 

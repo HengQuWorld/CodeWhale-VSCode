@@ -12,6 +12,24 @@
 
 - **`/queue list` opens the conversation it names** — The command is always the whole-workspace view now: the strip beside the composer already shows the current conversation's memos, so repeating them added nothing. The card lists one row per conversation holding memos — named by its rail title (not its raw id), with the memo count and a first-line preview — plus a row for the not-yet-sent draft bucket that opens a new chat. Clicking a row opens that conversation, where the queue strip is waiting; the numbered `run`/`edit`/`drop` arguments stay scoped to the view on screen, so a number always means the same memo its panel row does.
 
+- **A command this extension does not ship still works** — The slash menu now completes the engine's own command surface — its builtins, its plugin commands, your `.md` commands — instead of only the ones this extension implements. Typing one of them no longer answers "Unknown command": a plugin command runs and its answer lands in the conversation, `/system`, `/tokens` and `/cost` run against the open conversation and report what the engine actually measured, and anything else answers with its usage and tells you it runs in the terminal. `/help` gained the engine's own list at the bottom, so it tracks the engine build instead of a copy in this file.
+
+- **`/jobs` means background shell jobs; the schedules moved to `/automation`** — `/jobs` lists the shell jobs the engine is running, shows one job's output, and cancels one — the same meaning the terminal gives it. The scheduled automations it used to answer for now live at `/automation`, the terminal's spelling. `/jobs cancel` with no id refuses rather than guessing which job you meant.
+
+- **`/new`, `/hooks` and `/subagents`** — `/new` starts a conversation the way the New-chat button does. `/hooks` lists the engine's configured hooks, read-only, including anything the engine refused or warned about at load. `/subagents` lists the delegated agent runs with their objective and latest note. None of the three were reachable before.
+
+### Improvements
+
+- **`/reasoning` speaks the engine's whole ladder** — `minimal`, `xhigh` and `ultra` are accepted instead of being rejected, and `none` is stored as `off`, the spelling the engine and the terminal both read back.
+
+- **The command list stopped offering commands the engine does not have** — `/cycles`, `/cycle` and `/recall` are gone (no engine build registers them), and `/review` and `/agent` left the written-in list so the engine's live catalog answers for them.
+
+### Bug Fixes
+
+- **`/new` and `/interrupt` no longer answer "not available in GUI"** — both had a handler but were missing from the command list, so the list gated them out before the handler could run.
+
+- **A job's status now reads correctly** — the engine reports `Running`/`Failed`, so the list's running and failed cues never lit; status matching is case-insensitive now.
+
 ## 0.9.5
 
 Works on the same engine floor as 0.9.4 (**v0.10.2**); nothing here waits on an engine build.
