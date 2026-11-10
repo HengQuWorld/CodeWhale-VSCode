@@ -63,8 +63,6 @@ export interface WebviewTranslations {
    *  `{title}` names the longest-waiting one the click expands. */
   agentStatusWaitingMany: string;
   closePanel: string;
-  sessionsTabHint: string;
-  threadsTabHint: string;
   activityTabHint: string;
   /** Activity tab's section picker: the ⚙ button's tooltip and the heading of
    *  the list it opens. */
@@ -643,15 +641,12 @@ ${css}
           <button class="sidebar-close-btn" id="sidebar-close-btn" title="${tr.closePanel}" aria-label="${tr.closePanel}">✕</button>
         </div>
         <div class="sidebar-section-body" id="tab-sessions">
-          <div class="sidebar-tab-hint">${tr.sessionsTabHint}</div>
           <div class="session-search-bar" id="session-search-bar">
             <span class="sidebar-section-action" id="workspace-filter-toggle" title="${tr.showAllWorkspaces}">🌐</span>
             <input type="text" class="session-search-input" id="session-search-input" placeholder="${tr.searchPlaceholder}">
           </div>
         </div>
-        <div class="sidebar-section-body" id="tab-threads-list">
-          <div class="sidebar-tab-hint">${tr.threadsTabHint}</div>
-        </div>
+        <div class="sidebar-section-body" id="tab-threads-list"></div>
         <div class="sidebar-section-body" id="tab-activity">
           <div class="sidebar-tab-hint sidebar-tab-hint-row">
             <span>${tr.activityTabHint}</span>

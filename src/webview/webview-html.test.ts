@@ -26,8 +26,6 @@ function makeTr(): WebviewTranslations {
     agentStatusWaitingOne: "“{title}” is waiting for your approval or input — click to answer it here",
     agentStatusWaitingMany: "{count} threads need you — click to answer the longest-waiting “{title}”",
     closePanel: "Close panel",
-    sessionsTabHint: "Saved sessions",
-    threadsTabHint: "Active threads",
     activityTabHint: "Agent activity",
     activitySectionsTitle: "Sections to show",
     activitySectionsHint: "Untick a section to hide it here — your choice is remembered.",

@@ -1053,8 +1053,9 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
     if (!container) return;
     var count = threads.length;
 
-    // Preserve the hint header; remove only thread items, the fetch status and
-    // the empty placeholder.
+    // The container holds only rendered items — thread cards, group headers,
+    // the fetch status and the empty placeholder. Clear them before painting
+    // the fresh list.
     var existing = container.querySelectorAll('.thread-item, .work-empty, .thread-group-header, .thread-list-status');
     for (var r = 0; r < existing.length; r++) {
       existing[r].remove();
