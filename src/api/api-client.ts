@@ -31,6 +31,11 @@ import type {
   SkillEntry,
   SkillMutationReceiptResponse,
   SkillsResponse,
+  EngineCommandEntry,
+  RuntimeCommandResult,
+  BuiltinCommandApiResponse,
+  HooksResponse,
+  JobListResponse,
   SetSkillEnabledResponse,
   SessionMetadata,
   SessionsResponse,
@@ -126,6 +131,11 @@ export type {
   SkillEntry,
   SkillMutationReceiptResponse,
   SkillsResponse,
+  EngineCommandEntry,
+  RuntimeCommandResult,
+  BuiltinCommandApiResponse,
+  HooksResponse,
+  JobListResponse,
   SetSkillEnabledResponse,
   SessionMetadata,
   SessionsResponse,
@@ -690,6 +700,79 @@ export class CodeWhaleApiClient {
 
   async cancelTask(taskId: string): Promise<void> {
     await this.post(`/v1/tasks/${taskId}/cancel`, {});
+  }
+
+  // ── Engine command catalog ──
+
+  /** `GET /v1/commands` — the engine's live command catalog: builtins, the
+   *  workspace's user commands, and plugin commands. Pass `threadId` to
+   *  resolve plugin command registrations against that thread; the returned
+   *  `registration_id` is the token `runThreadCommand` requires. */
+  async listCommands(threadId?: string): Promise<EngineCommandEntry[]> {
+    const params = new URLSearchParams();
+    if (threadId) params.set("thread_id", threadId);
+    const qs = params.toString();
+    const path = `/v1/commands${qs ? "?" + qs : ""}`;
+    const response = (await this.get(path)) as { commands: EngineCommandEntry[] };
+    return response.commands ?? [];
+  }
+
+  /** `POST /v1/threads/{id}/commands` — execute one Runtime (plugin)
+   *  command. `operation_key` is a fresh idempotency token: the engine
+   *  refuses a reuse whose request does not match the recorded one, and
+   *  replays the recorded result when it does. */
+  async runThreadCommand(
+    threadId: string,
+    opts: {
+      name: string;
+      args: string;
+      registrationId: string;
+      expectedWorkspace: string;
+    }
+  ): Promise<RuntimeCommandResult> {
+    return (await this.post(`/v1/threads/${threadId}/commands`, {
+      name: opts.name,
+      args: opts.args,
+      registration_id: opts.registrationId,
+      operation_key: `gui-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+      expected_workspace: opts.expectedWorkspace,
+    })) as RuntimeCommandResult;
+  }
+
+  /** `POST /v1/threads/{id}/commands/builtin` — execute one terminal
+   *  built-in command against the thread. Engines without the route (older
+   *  builds) answer 404; callers fall back to describing the command. */
+  async runBuiltinCommand(
+    threadId: string,
+    name: string,
+    args?: string
+  ): Promise<BuiltinCommandApiResponse> {
+    return (await this.post(`/v1/threads/${threadId}/commands/builtin`, {
+      name,
+      ...(args ? { args } : {}),
+    })) as BuiltinCommandApiResponse;
+  }
+
+  /** `GET /v1/hooks` — the engine's configured hooks, one table shared with
+   *  the terminal. Pass `threadId` to resolve against that thread's
+   *  workspace. */
+  async listHooks(threadId?: string): Promise<HooksResponse> {
+    const params = new URLSearchParams();
+    if (threadId) params.set("thread_id", threadId);
+    const qs = params.toString();
+    return (await this.get(`/v1/hooks${qs ? "?" + qs : ""}`)) as HooksResponse;
+  }
+
+  /** `GET /v1/jobs` — every thread's tracked background shell jobs. */
+  async listJobs(): Promise<JobListResponse> {
+    return (await this.get("/v1/jobs")) as JobListResponse;
+  }
+
+  /** `POST /v1/threads/{id}/jobs/{jobId}/kill` — stop one background job.
+   *  The job lives on a thread, so callers resolve `threadId` from
+   *  `listJobs()` first. */
+  async killThreadJob(threadId: string, jobId: string): Promise<void> {
+    await this.post(`/v1/threads/${threadId}/jobs/${encodeURIComponent(jobId)}/kill`, {});
   }
 
   // ── Skills ──

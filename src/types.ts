@@ -578,6 +578,110 @@ export interface SkillsResponse {
   skills: SkillEntry[];
 }
 
+/** One row of `GET /v1/commands` — the engine's live command catalog.
+ *
+ *  `kind` says who owns the spelling: `builtin` commands are code-registered
+ *  in the terminal host, `user` commands expand a stored `.md` template, and
+ *  `extension` commands are plugin commands the Runtime command endpoint can
+ *  execute. `binding` is how the engine itself would run it (`host`,
+ *  `extension`, or `prompt`). */
+export interface EngineCommandEntry {
+  name: string;
+  aliases: string[];
+  /** English source text; localizing is the client's surface. */
+  summary?: string;
+  usage?: string;
+  subcommands: string[];
+  takes_arguments: boolean;
+  requires_argument: boolean;
+  composer_wants_trailing_space: boolean;
+  palette_runs_directly: boolean;
+  show_in_empty_discovery: boolean;
+  kind: "builtin" | "user" | "extension";
+  binding: string;
+  /** `primary` | `advanced` | `compatibility`; builtins only. */
+  discovery?: string;
+  hidden: boolean;
+  /** User command holding this builtin's canonical name. */
+  shadowed_by?: string;
+  origin?: string;
+  /** Present on `extension` entries when the catalog was queried with a
+   *  thread id — the token `POST /v1/threads/{id}/commands` requires. */
+  registration_id?: string;
+}
+
+/** One configured hook, as `GET /v1/hooks` reports it — the same loader the
+ *  engines use, so the GUI shows one truth instead of keeping its own table. */
+export interface EngineHookEntry {
+  name: string | null;
+  event: string;
+  /** The shell command, with credential-shaped values masked. */
+  command: string;
+  background: boolean;
+  timeout_secs: number;
+  /** `global` (user config), `plugin` (reviewed plugin) or `project`
+   *  (trusted, approved `.codewhale/hooks.toml`). */
+  source: string;
+}
+
+export interface HooksResponse {
+  workspace: string;
+  enabled: boolean;
+  hooks: EngineHookEntry[];
+  /** Hooks rejected or warned about at load, one redaction-safe line each. */
+  problems: string[];
+}
+
+/** One tracked background shell job, as `GET /v1/jobs` flattens it: the
+ *  engine's shell snapshot plus the thread that owns it and who launched it
+ *  (`client` = through the API, `agent` = the model's shell tool,
+ *  `subagent` = a delegated agent). */
+export interface ShellJobView {
+  id: string;
+  job_id: string;
+  command: string;
+  cwd: string;
+  status: string;
+  background: boolean;
+  started_at?: string | null;
+  finished_at?: string | null;
+  exit_code?: number | null;
+  elapsed_ms: number;
+  stdout_tail: string;
+  stderr_tail: string;
+  stdin_available: boolean;
+  stale: boolean;
+  thread_id: string;
+  owner: string;
+}
+
+export interface JobListResponse {
+  jobs: ShellJobView[];
+}
+
+/** `POST /v1/threads/{id}/commands/builtin` — one executed terminal
+ *  built-in command. `text_only` is false when the command also asked the
+ *  terminal host for an action no API client can perform. */
+export interface BuiltinCommandApiResponse {
+  name: string;
+  text: string;
+  is_error: boolean;
+  text_only: boolean;
+}
+
+/** `POST /v1/threads/{id}/commands` — one executed Runtime command. */
+export interface RuntimeCommandResult {
+  operation_key: string;
+  name: string;
+  origin: string;
+  status: string;
+  text: string;
+  extension: unknown;
+  turn?: unknown;
+  thread?: unknown;
+  idempotent_replay: boolean;
+}
+
 export interface SetSkillEnabledResponse {
   name: string;
   enabled: boolean;
