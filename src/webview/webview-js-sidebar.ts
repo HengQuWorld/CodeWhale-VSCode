@@ -2120,8 +2120,13 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
     var command = document.getElementById('mcp-add-command');
     var args = document.getElementById('mcp-add-args');
     var url = document.getElementById('mcp-add-url');
+    var env = document.getElementById('mcp-add-env');
     var transport = document.getElementById('mcp-add-transport');
     if (name) name.value = rec.id;
+    // A recommendation replaces the launch wholesale, so an env block left
+    // over from an earlier paste would ride along under someone else's
+    // command. Cleared with the rest of the fields it belongs to.
+    if (env) env.value = '';
     if (rec.url) {
       if (transport) transport.value = 'http';
       if (url) url.value = rec.url;
@@ -2134,6 +2139,113 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
       if (url) url.value = '';
     }
     syncMcpAddFields();
+  }
+
+  /** KEY=value lines — the env textarea's format — into the map the engine
+   *  stores. Blank lines and '#' comments are skipped; so is a line that
+   *  cannot name a variable (no '=', or nothing before it). The value keeps
+   *  everything after the *first* '=', because a value may contain one. */
+  function mcpEnvFromText(text) {
+    var env = {};
+    var lines = String(text || '').split(/\\r?\\n/);
+    for (var i = 0; i < lines.length; i++) {
+      var line = lines[i].trim();
+      if (!line || line.charAt(0) === '#') continue;
+      var eq = line.indexOf('=');
+      if (eq <= 0) continue;
+      var key = line.slice(0, eq).trim();
+      if (!key) continue;
+      env[key] = line.slice(eq + 1).trim();
+    }
+    return env;
+  }
+
+  /** One server entry out of pasted JSON. Three shapes are accepted, because
+   *  servers are shared in all three: a Claude-style "{mcpServers:{name:{…}}}"
+   *  block, a single-key "{name:{…}}" wrapper, and a bare "{command…}" or
+   *  "{url…}" entry. The first entry wins — the dialog adds one server at a
+   *  time. {error:'parse'} is unreadable JSON; {error:'shape'} is JSON that
+   *  names no server. */
+  function mcpEntryFromJson(text) {
+    var parsed;
+    try { parsed = JSON.parse(String(text || '')); } catch (err) { return { error: 'parse' }; }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return { error: 'shape' };
+    var isEntry = function(c) {
+      return !!c && typeof c === 'object' && !Array.isArray(c) &&
+        ((typeof c.command === 'string' && c.command) || (typeof c.url === 'string' && c.url));
+    };
+    var name = null;
+    var entry = null;
+    if (parsed.mcpServers && typeof parsed.mcpServers === 'object' && !Array.isArray(parsed.mcpServers)) {
+      for (var key in parsed.mcpServers) {
+        if (!Object.prototype.hasOwnProperty.call(parsed.mcpServers, key)) continue;
+        if (isEntry(parsed.mcpServers[key])) { name = key; entry = parsed.mcpServers[key]; break; }
+      }
+      if (!entry) return { error: 'shape' };
+    } else if (isEntry(parsed)) {
+      entry = parsed;
+      if (typeof parsed.name === 'string' && parsed.name) name = parsed.name;
+    } else {
+      var keys = Object.keys(parsed);
+      if (keys.length === 1 && isEntry(parsed[keys[0]])) { name = keys[0]; entry = parsed[keys[0]]; }
+      else return { error: 'shape' };
+    }
+    var args = [];
+    if (Array.isArray(entry.args)) {
+      for (var i = 0; i < entry.args.length; i++) {
+        if (typeof entry.args[i] === 'string') args.push(entry.args[i]);
+      }
+    } else if (typeof entry.args === 'string' && entry.args.trim()) {
+      args = entry.args.trim().split(/\\s+/);
+    }
+    var env = {};
+    if (entry.env && typeof entry.env === 'object' && !Array.isArray(entry.env)) {
+      for (var ek in entry.env) {
+        if (!Object.prototype.hasOwnProperty.call(entry.env, ek)) continue;
+        if (typeof entry.env[ek] === 'string') env[ek] = entry.env[ek];
+      }
+    }
+    var sse = entry.type === 'sse' || entry.transport === 'sse';
+    return {
+      name: name || '',
+      transport: sse ? 'sse' : (entry.url ? 'http' : 'stdio'),
+      command: typeof entry.command === 'string' ? entry.command : '',
+      args: args,
+      url: typeof entry.url === 'string' ? entry.url : '',
+      env: env
+    };
+  }
+
+  /** The paste box's Fill action: parse, and on a server entry write every
+   *  field it names — the others keep what they had — then fold the box. A
+   *  paste that names no server says so under the box, where the reader is
+   *  already looking, instead of silently filling nothing. */
+  function applyMcpPasteJson() {
+    var paste = document.getElementById('mcp-paste-json');
+    var error = document.getElementById('mcp-paste-error');
+    var parsed = mcpEntryFromJson(paste ? paste.value : '');
+    if (parsed.error || (!parsed.command && !parsed.url)) {
+      if (error) { error.textContent = __i18n.mcpPasteError; error.hidden = false; }
+      return;
+    }
+    if (error) error.hidden = true;
+    if (parsed.name) {
+      var nameEl = document.getElementById('mcp-add-name');
+      if (nameEl) nameEl.value = parsed.name;
+    }
+    var command = document.getElementById('mcp-add-command');
+    var args = document.getElementById('mcp-add-args');
+    var url = document.getElementById('mcp-add-url');
+    var env = document.getElementById('mcp-add-env');
+    var transport = document.getElementById('mcp-add-transport');
+    if (command) command.value = parsed.command;
+    if (args) args.value = parsed.args.join('\\n');
+    if (url) url.value = parsed.url;
+    if (env) env.value = Object.keys(parsed.env).map(function(k) { return k + '=' + parsed.env[k]; }).join('\\n');
+    if (transport) transport.value = parsed.transport;
+    syncMcpAddFields();
+    var body = document.getElementById('mcp-paste-body');
+    if (body) body.hidden = true;
   }
 
   function submitMcpAddDialog() {
@@ -2156,6 +2268,9 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
     } else {
       spec.url = urlEl ? urlEl.value.trim() : '';
     }
+    var envEl = document.getElementById('mcp-add-env');
+    var env = mcpEnvFromText(envEl ? envEl.value : '');
+    if (Object.keys(env).length > 0) spec.env = env;
     vscode.postMessage({ type: 'addMcpServer', spec: spec });
     closeMcpAddDialog();
   }
@@ -2169,8 +2284,14 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
     html += '<h3>' + e(__i18n.mcpAddTitle) + '</h3>';
     html += '<button class="close-btn mcp-add-close" type="button">\u2715</button></div>';
     html += '<div class="task-create-body mcp-add-body">';
+    html += '<button type="button" class="mcp-paste-toggle" id="mcp-paste-toggle">' + e(__i18n.mcpPasteJson) + '</button>';
+    html += '<div id="mcp-paste-body" hidden>';
+    html += '<textarea id="mcp-paste-json" rows="5"></textarea>';
+    html += '<div class="mcp-paste-error" id="mcp-paste-error" hidden></div>';
+    html += '<button type="button" class="detail-action-btn mcp-paste-fill" id="mcp-paste-fill">' + e(__i18n.mcpPasteFill) + '</button>';
+    html += '</div>';
     html += '<label class="mcp-field"><span>' + e(__i18n.mcpFieldName) + '</span>';
-    html += '<input type="text" id="mcp-add-name" /></label>';
+    html += '<input type="text" id="mcp-add-name" placeholder="my-server" /></label>';
     html += '<label class="mcp-field"><span>' + e(__i18n.mcpFieldTransport) + '</span>';
     html += '<select id="mcp-add-transport">';
     html += '<option value="stdio">stdio</option><option value="http">http</option><option value="sse">sse</option>';
@@ -2178,9 +2299,11 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
     html += '<label class="mcp-field" id="mcp-add-command-field"><span>' + e(__i18n.mcpFieldCommand) + '</span>';
     html += '<input type="text" id="mcp-add-command" placeholder="npx" /></label>';
     html += '<label class="mcp-field" id="mcp-add-args-field"><span>' + e(__i18n.mcpFieldArgs) + '</span>';
-    html += '<textarea id="mcp-add-args" rows="3"></textarea></label>';
+    html += '<textarea id="mcp-add-args" rows="3" placeholder="-y\\n@scope/mcp-server"></textarea></label>';
     html += '<label class="mcp-field" id="mcp-add-url-field" hidden><span>' + e(__i18n.mcpFieldUrl) + '</span>';
     html += '<input type="text" id="mcp-add-url" placeholder="https://" /></label>';
+    html += '<label class="mcp-field" id="mcp-add-env-field"><span>' + e(__i18n.mcpFieldEnv) + '</span>';
+    html += '<textarea id="mcp-add-env" rows="2" placeholder="API_KEY=your-key"></textarea></label>';
     html += '<div class="mcp-suggestions"><div class="mcp-suggestions-title">' + e(__i18n.mcpSuggested) + '</div>';
     for (var i = 0; i < MCP_RECOMMENDATIONS.length; i++) {
       html += '<button type="button" class="mcp-suggestion" data-mcp-suggestion="' + i + '" title="' +
@@ -2203,6 +2326,19 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
         closeMcpAddDialog();
         return;
       }
+      var pasteToggle = target.closest && target.closest('.mcp-paste-toggle');
+      if (pasteToggle) {
+        var pasteBody = document.getElementById('mcp-paste-body');
+        if (pasteBody) {
+          pasteBody.hidden = !pasteBody.hidden;
+          pasteToggle.classList.toggle('open', !pasteBody.hidden);
+        }
+        return;
+      }
+      if (target.closest && target.closest('.mcp-paste-fill')) {
+        applyMcpPasteJson();
+        return;
+      }
       var suggestion = target.closest && target.closest('[data-mcp-suggestion]');
       if (suggestion) {
         applyMcpSuggestion(Number(suggestion.getAttribute('data-mcp-suggestion')));
@@ -2210,6 +2346,11 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
       }
       if (target.closest && target.closest('.mcp-add-submit')) submitMcpAddDialog();
     };
+    var pasteArea = document.getElementById('mcp-paste-json');
+    if (pasteArea) {
+      pasteArea.setAttribute('placeholder',
+        '{\\n  "mcpServers": {\\n    "my-server": {\\n      "command": "npx", "args": ["-y", "pkg"],\\n      "env": {"API_KEY": "key"}\\n    }\\n  }\\n}}');
+    }
     var transport = document.getElementById('mcp-add-transport');
     if (transport) transport.addEventListener('change', syncMcpAddFields);
     syncMcpAddFields();
@@ -3558,6 +3699,11 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
     renderMcp: renderMcp,
     renderMcpTools: renderMcpTools,
     renderMcpImports: renderMcpImports,
+    /** The add dialog's paste parser and env-line reader, exported because
+     *  the unit tests drive them directly — the test DOM keeps an overlay's
+     *  HTML as a string, so its fields are not queryable there. */
+    parseMcpPaste: mcpEntryFromJson,
+    parseMcpEnvText: mcpEnvFromText,
     /** Bring the MCP panel into view: open the sidebar on the Activity tab with
      *  the MCP section shown and unfolded. /mcp is the reason this exists —
      *  a command that only printed a list would leave the reader to find the

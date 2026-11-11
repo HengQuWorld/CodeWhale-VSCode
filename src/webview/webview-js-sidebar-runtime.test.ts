@@ -2697,6 +2697,63 @@ describe("MCP panel", () => {
   });
 });
 
+// ── MCP add dialog paste ──
+// The dialog's fields live inside an innerHTML string in this DOM stand-in, so
+// the tests drive the parser the Fill action runs rather than the click — the
+// parser is the whole of the paste behaviour anyway, and it is exported on
+// `__wvSidebar` for exactly that. Each shape here is one that real configs
+// circulate in: Claude's `mcpServers` block, a single-key wrapper, a bare
+// entry.
+describe("MCP add dialog paste", () => {
+  it("parses the three shared JSON shapes", () => {
+    const { sidebar } = createHarness();
+
+    const wrapped = sidebar.parseMcpPaste(
+      '{"mcpServers":{"devtools":{"command":"npx","args":["-y","chrome-devtools-mcp"],"env":{"API_KEY":"sk-1"}}}}',
+    );
+    expect(wrapped.error).toBeUndefined();
+    expect(wrapped).toMatchObject({ name: "devtools", transport: "stdio", command: "npx", url: "" });
+    expect(wrapped.args).toEqual(["-y", "chrome-devtools-mcp"]);
+    expect(wrapped.env).toEqual({ API_KEY: "sk-1" });
+
+    const keyed = sidebar.parseMcpPaste('{"devtools":{"url":"https://x/mcp"}}');
+    expect(keyed).toMatchObject({ name: "devtools", transport: "http", command: "", url: "https://x/mcp" });
+
+    const bare = sidebar.parseMcpPaste('{"command":"container-use","args":["stdio"]}');
+    expect(bare).toMatchObject({ name: "", transport: "stdio", command: "container-use" });
+  });
+
+  it("marks an SSE entry and takes the first of several servers", () => {
+    const { sidebar } = createHarness();
+
+    const sse = sidebar.parseMcpPaste('{"legacy":{"url":"https://y/sse","type":"sse"}}');
+    expect(sse.transport).toBe("sse");
+
+    const many = sidebar.parseMcpPaste(
+      '{"mcpServers":{"first":{"url":"https://a"},"second":{"url":"https://b"}}}',
+    );
+    expect(many.name).toBe("first");
+    expect(many.url).toBe("https://a");
+  });
+
+  it("rejects text that names no server, saying which way it failed", () => {
+    const { sidebar } = createHarness();
+
+    expect(sidebar.parseMcpPaste("not json").error).toBe("parse");
+    expect(sidebar.parseMcpPaste("[]").error).toBe("shape");
+    expect(sidebar.parseMcpPaste('{"a":1}').error).toBe("shape");
+    expect(sidebar.parseMcpPaste('{"mcpServers":{}}').error).toBe("shape");
+  });
+
+  it("reads KEY=value lines, skipping comments and lines without a key", () => {
+    const { sidebar } = createHarness();
+
+    expect(
+      sidebar.parseMcpEnvText("API_KEY=sk-1\n# comment\n\nB=has=equals\nnoteq\n=v"),
+    ).toEqual({ API_KEY: "sk-1", B: "has=equals" });
+  });
+});
+
 // ── Modal backdrop dismissal ──
 // A press inside a dialog that comes up over the backdrop reports the overlay
 // as the click's target: a click is dispatched on the nearest common ancestor of

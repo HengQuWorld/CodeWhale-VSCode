@@ -448,6 +448,10 @@ export interface WebviewTranslations {
   mcpFieldCommand: string;
   mcpFieldArgs: string;
   mcpFieldUrl: string;
+  mcpFieldEnv: string;
+  mcpPasteJson: string;
+  mcpPasteFill: string;
+  mcpPasteError: string;
   mcpAddSubmit: string;
   mcpCancel: string;
   mcpSuggested: string;

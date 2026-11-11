@@ -350,6 +350,47 @@ describe("ChatProvider MCP management", () => {
     );
   });
 
+  it("forwards the env map, and accepts KEY=value lines from an older panel", async () => {
+    const { provider, api } = createProvider();
+    (provider as any).apiCapabilities.mcpServerManagement = true;
+    await provider.refreshMcpServers();
+
+    await provider.addMcpServer({
+      name: "devtools",
+      transport: "stdio",
+      command: "npx",
+      args: ["-y", "chrome-devtools-mcp"],
+      env: { API_KEY: "sk-1" },
+    });
+    expect(api.createMcpServer).toHaveBeenCalledWith(
+      { name: "devtools", command: "npx", args: ["-y", "chrome-devtools-mcp"], env: { API_KEY: "sk-1" } },
+      "mcp-v1-abc"
+    );
+
+    // The line-array form is what the first env-capable panel sent before it
+    // parsed the lines itself; it is accepted here so an old webview cannot
+    // silently drop the variables its reader collected.
+    (api.createMcpServer as any).mockClear();
+    await provider.addMcpServer({
+      name: "lines",
+      transport: "stdio",
+      command: "npx",
+      env: ["A=1", "# comment", "=nope", "noteq"],
+    });
+    expect(api.createMcpServer).toHaveBeenCalledWith(
+      { name: "lines", command: "npx", args: [], env: { A: "1" } },
+      "mcp-v1-abc"
+    );
+
+    // An env the reader never filled is omitted, not sent as {}.
+    (api.createMcpServer as any).mockClear();
+    await provider.addMcpServer({ name: "plain", transport: "stdio", command: "npx", env: {} });
+    expect(api.createMcpServer).toHaveBeenCalledWith(
+      { name: "plain", command: "npx", args: [] },
+      "mcp-v1-abc"
+    );
+  });
+
   it("shows only the tools belonging to the server that was asked about", async () => {
     // The route answers for every connected server; a row's panel that listed
     // its siblings' tools would misattribute them.

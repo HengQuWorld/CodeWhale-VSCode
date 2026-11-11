@@ -35,6 +35,35 @@ export interface McpHost {
   debugLog(msg: string): void;
 }
 
+/** The add form's `env`, as the engine's create request wants it: a map of
+ *  strings. The webview normally sends that map already (it parses the
+ *  `KEY=value` lines itself); the line-array form is accepted too so an
+ *  older panel build cannot silently drop the variables it collected.
+ *  Lines without a key and non-string values are skipped rather than
+ *  rejected — a half-typed line costs the reader the variables it does
+ *  carry, and the engine's own validation speaks for anything else. */
+function normalizeMcpEnv(raw: unknown): Record<string, string> | undefined {
+  if (Array.isArray(raw)) {
+    const env: Record<string, string> = {};
+    for (const line of raw) {
+      if (typeof line !== "string") continue;
+      const eq = line.indexOf("=");
+      if (eq <= 0) continue;
+      const key = line.slice(0, eq).trim();
+      if (!key) continue;
+      env[key] = line.slice(eq + 1).trim();
+    }
+    return Object.keys(env).length > 0 ? env : undefined;
+  }
+  if (!raw || typeof raw !== "object") return undefined;
+  const env: Record<string, string> = {};
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (!key || typeof value !== "string") continue;
+    env[key] = value;
+  }
+  return Object.keys(env).length > 0 ? env : undefined;
+}
+
 export class McpController {
   /** The MCP config revision the last listing carried — the token every
    *  mutation presents back in `If-Match`, so a concurrent edit is refused
@@ -179,7 +208,9 @@ export class McpController {
    *  Exactly one of `command` (a stdio child) or `url` (an HTTP/SSE endpoint)
    *  is required — the engine rejects a request with neither, and says so in
    *  its own words, so the validation here only catches what the form cannot
-   *  express (an empty name). */
+   *  express (an empty name). An `env` map rides along when the form
+   *  collected one; the engine stores the values as-is and redacts them from
+   *  every listing. */
   public async addMcpServer(spec: Record<string, unknown>): Promise<void> {
     if (!this.requireMcpManagement()) return;
     const name = typeof spec?.name === "string" ? spec.name.trim() : "";
@@ -208,6 +239,7 @@ export class McpController {
       });
       return;
     }
+    const env = normalizeMcpEnv(spec?.env);
     const revision = await this.revisionForMutation();
     if (!revision) return;
     try {
@@ -217,6 +249,7 @@ export class McpController {
           ...(command ? { command, args } : {}),
           ...(url ? { url } : {}),
           ...(override ? { transport: override } : {}),
+          ...(env ? { env } : {}),
         },
         revision
       );

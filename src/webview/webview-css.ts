@@ -2844,6 +2844,50 @@ export function getWebviewCss(): string {
     .mcp-suggestion:hover {
       border-color: var(--fg);
     }
+    .mcp-paste-toggle {
+      align-self: flex-start;
+      font-size: 10px;
+      padding: 2px 6px;
+      background: none;
+      color: var(--accent, inherit);
+      border: 1px solid rgba(128,128,128,0.25);
+      border-radius: 10px;
+      cursor: pointer;
+    }
+    .mcp-paste-toggle:hover {
+      border-color: var(--fg);
+    }
+    #mcp-paste-body .detail-action-btn {
+      align-self: flex-end;
+      font-size: 10px;
+      padding: 2px 8px;
+    }
+    #mcp-paste-body {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    #mcp-paste-body textarea {
+      width: 100%;
+      font-size: 11px;
+      font-family: var(--vscode-editor-font-family, monospace);
+      line-height: 1.5;
+      padding: 4px 6px;
+      background: var(--input-bg, rgba(128,128,128,0.08));
+      color: inherit;
+      border: 1px solid rgba(128,128,128,0.25);
+      border-radius: 3px;
+      outline: none;
+      resize: vertical;
+    }
+    .mcp-paste-toggle.open {
+      background: rgba(128,128,128,0.12);
+      border-color: var(--fg);
+    }
+    .mcp-paste-error {
+      font-size: 10px;
+      color: var(--vscode-errorForeground, #f66);
+    }
     .mcp-import-card {
       border: 1px solid rgba(128,128,128,0.18);
       border-radius: 4px;

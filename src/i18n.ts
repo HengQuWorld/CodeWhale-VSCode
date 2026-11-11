@@ -511,6 +511,15 @@ interface Translations {
   mcpFieldCommand: string;
   mcpFieldArgs: string;
   mcpFieldUrl: string;
+  /** Label of the add dialog's environment textarea: one `KEY=value` per
+   *  line, sent to the engine as the server's `env` map. */
+  mcpFieldEnv: string;
+  /** Toggle that opens the paste-a-server-JSON box in the add dialog. */
+  mcpPasteJson: string;
+  /** Button that parses the pasted JSON and fills the fields above it. */
+  mcpPasteFill: string;
+  /** Shown under the paste box when the text is not a server entry. */
+  mcpPasteError: string;
   mcpAddSubmit: string;
   mcpCancel: string;
   mcpSuggested: string;
@@ -1018,6 +1027,10 @@ const en: Translations = {
   mcpFieldCommand: "Command",
   mcpFieldArgs: "Arguments (one per line)",
   mcpFieldUrl: "URL",
+  mcpFieldEnv: "Environment variables (KEY=value per line)",
+  mcpPasteJson: "Paste JSON",
+  mcpPasteFill: "Fill form",
+  mcpPasteError: "Not an MCP server JSON.",
   mcpAddSubmit: "Add",
   mcpCancel: "Cancel",
   mcpSuggested: "Suggested",
@@ -1517,6 +1530,10 @@ const zhCn: Translations = {
   mcpFieldCommand: "命令",
   mcpFieldArgs: "参数（每行一个）",
   mcpFieldUrl: "URL",
+  mcpFieldEnv: "环境变量（每行 KEY=value）",
+  mcpPasteJson: "粘贴 JSON",
+  mcpPasteFill: "填充表单",
+  mcpPasteError: "不是有效的 MCP 服务器 JSON。",
   mcpAddSubmit: "添加",
   mcpCancel: "取消",
   mcpSuggested: "推荐",
@@ -2046,6 +2063,10 @@ export function webviewTranslations(tr: Translations) {
     mcpFieldCommand: tr.mcpFieldCommand,
     mcpFieldArgs: tr.mcpFieldArgs,
     mcpFieldUrl: tr.mcpFieldUrl,
+    mcpFieldEnv: tr.mcpFieldEnv,
+    mcpPasteJson: tr.mcpPasteJson,
+    mcpPasteFill: tr.mcpPasteFill,
+    mcpPasteError: tr.mcpPasteError,
     mcpAddSubmit: tr.mcpAddSubmit,
     mcpCancel: tr.mcpCancel,
     mcpSuggested: tr.mcpSuggested,
