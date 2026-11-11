@@ -1,6 +1,8 @@
 # Change Log
 
-## Unreleased
+## 0.10.0
+
+The message queue — memos parked beside the composer — is entirely client-side and works on the same engine floor as 0.9.5 (**v0.10.2**). The slash-menu additions read the engine's own command catalog, hooks and background jobs: routes no tagged engine release serves yet, where an older engine answers 404 and the command keeps its shipped behaviour instead of pretending to run.
 
 ### New Features
 

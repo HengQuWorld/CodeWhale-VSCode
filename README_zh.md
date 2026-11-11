@@ -1,11 +1,11 @@
 # CodeWhale for VS Code —— CodeWhale 代理的轻量图形前端
 
-[![Version](https://img.shields.io/badge/version-0.9.5-blue)](https://github.com/HengQuWorld/CodeWhale-VSCode)
+[![Version](https://img.shields.io/badge/version-0.10.0-blue)](https://github.com/HengQuWorld/CodeWhale-VSCode)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![CI](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/ci.yml/badge.svg)](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/ci.yml)
 [![Release](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/release.yml/badge.svg)](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/release.yml)
 [![VS Code](https://img.shields.io/badge/VS%20Code-1.85+-informational)](https://code.visualstudio.com/)
-[![VSIX](https://img.shields.io/badge/VSIX-~495%20KB-brightgreen)](https://github.com/HengQuWorld/CodeWhale-VSCode/releases)
+[![VSIX](https://img.shields.io/badge/VSIX-~514%20KB-brightgreen)](https://github.com/HengQuWorld/CodeWhale-VSCode/releases)
 [![macOS](https://img.shields.io/badge/macOS-supported-brightgreen)](#系统要求)
 [![Windows](https://img.shields.io/badge/Windows-supported-brightgreen)](#系统要求)
 [![Linux](https://img.shields.io/badge/Linux-supported-brightgreen)](#系统要求)
@@ -22,7 +22,7 @@ CodeWhale for VS Code 是 [CodeWhale](https://github.com/codewhale-hq/Codewhale)
 
 | | |
 |---|---|
-| VSIX 体积（0.9.5） | 约 495 KB |
+| VSIX 体积（0.10.0） | 约 514 KB |
 | 运行时 npm 依赖 | **零** —— 扩展自身的 TypeScript（以及用于渲染的 `marked`）都被 webpack 内联 |
 | 打包的引擎或模型 | **无** —— `codewhale` 是独立的原生二进制 |
 | 重复实现的代理逻辑 | **无** —— GUI 只是引擎本地 runtime API 之上的适配层 |
@@ -32,15 +32,17 @@ CodeWhale for VS Code 是 [CodeWhale](https://github.com/codewhale-hq/Codewhale)
 
 正因为代理的任何一部分都没有被复制进扩展，引擎可以独立发布新能力和修复，而不需要前端跟着发版。
 
-### 0.9.5 的引擎兼容性
+### 0.10.0 的引擎兼容性
 
-0.9.5 运行在引擎 **v0.10.2** 上，与 0.9.4 的底线相同，且它带来的内容全部在客户端侧：回合失败时有独立的提示音，终端选中的文本可以右键直接送进对话，侧栏视图更名为 CodeWhale Agent。三个各自有底线的面保持不变 —— 记忆审阅命令与 **MCP** 面板需要引擎 **v0.10.0**（正是那个版本引入了它们读取的 Context Lens 路由，以及 MCP 管理路由：清单会带上每个服务器所属的层级、每次修改都要呈上配置 revision），而工作区信任横幅、会话上报自己属于哪个客户端、以及在同机上开第二个窗口或并行另一个 CodeWhale 客户端，都需要 **v0.10.2**。
+0.10.0 运行在引擎 **v0.10.2** 上，与 0.9.5 的底线相同。消息队列 —— 停靠在输入框旁、连同附件一起驻留的备忘 —— 完全在客户端侧，它的折叠与全工作区的 `/queue list` 也是。三个各自有底线的面保持不变 —— 记忆审阅命令与 **MCP** 面板需要引擎 **v0.10.0**（正是那个版本引入了它们读取的 Context Lens 路由，以及 MCP 管理路由：清单会带上每个服务器所属的层级、每次修改都要呈上配置 revision），而工作区信任横幅、会话上报自己属于哪个客户端、以及在同机上开第二个窗口或并行另一个 CodeWhale 客户端，都需要 **v0.10.2**。
 
 以下仍需要比任何已发布引擎 tag 更新的 Codewhale 构建：
 
 - **随回合推进的成本与上下文** —— 状态栏上的实时读数依赖 [Codewhale#7074](https://github.com/codewhale-hq/Codewhale/pull/7074)，已于 2026-10-25 合并、尚未进入任何已发布的引擎 tag。它是引擎侧的那一半：每次模型调用发出的用量回执会带上这次调用自己的价格，以及提供商实际计费的提示词大小。在引擎携带它之前，这两个读数会在回合结束时才落定，与之前一致；对话本身不受影响。
 
 - **收到工作区漂移通知的会话无法 undo、fork 与 retry** —— 当引擎向某个会话追加过工作区、技能或记忆的漂移通知（`<context_update>`）后，那条会话就再也切不开了：第一条通知之后的每次 undo、fork 与 retry 都以 "Cannot identify an exact saved-history boundary" 拒绝。引擎侧的修复是 [Codewhale#7234](https://github.com/codewhale-hq/Codewhale/pull/7234)，已于 2026-11-07 合并上游、尚未进入任何已发布的引擎 tag。在已发布引擎携带它之前，带漂移通知的会话保持完整；没有通知的会话切割正常。
+
+- **对接引擎的斜杠命令** —— 斜杠菜单对引擎自有命令目录的补全、以及 `/hooks` 与 `/jobs` 的列表，依赖 `/v1/commands`、`/v1/hooks` 与 `/v1/jobs`，目前没有任何已发布的引擎 tag 提供这些路由。在现有的引擎上，菜单只补全本扩展自己的命令，这两条命令会如实报告缺失而不是给出列表，手打的引擎命令也只回答用法而不真正执行；本版本的其余内容不受影响。
 
 在引擎 **v0.10.1** 上，以上各项都成立，只有明确需要 **v0.10.2** 的那三项例外；特别是那里会拒绝第二个运行本扩展的 VS Code 窗口、或本扩展与 TUI 并用 —— 那个版本引入的 runtime ownership 模型在 [Codewhale#6924](https://github.com/codewhale-hq/Codewhale/pull/6924) 落地之前，只允许每台机器一个驱动客户端。
 
@@ -138,12 +140,12 @@ npx @vscode/vsce package --no-dependencies
 然后安装生成的 `.vsix`（`Extensions: Install from VSIX...`），或在终端执行：
 
 ```bash
-code --install-extension ./brotherwhale-vscode-0.9.5.vsix --force
+code --install-extension ./brotherwhale-vscode-0.10.0.vsix --force
 ```
 
 > **Trae CN 用户：** 如果 `code` 不在 `PATH` 中，使用自带的 CLI：
 > ```bash
-> "/Applications/Trae CN.app/Contents/Resources/app/bin/code" --install-extension ./brotherwhale-vscode-0.9.5.vsix --force
+> "/Applications/Trae CN.app/Contents/Resources/app/bin/code" --install-extension ./brotherwhale-vscode-0.10.0.vsix --force
 > ```
 
 **方式 C —— Open VSX：** [Open VSX](https://open-vsx.org/extension/hengquworld/brotherwhale-vscode) 面向微软生态之外的编辑器提供同样的构建 —— VSCodium，以及鸿蒙 PC 上的 CodeArts（扩展面板自带一页 Open VSX）。搜 "CodeWhale" 直接安装，不必手动装 VSIX。
@@ -319,7 +321,7 @@ codewhale serve（引擎 —— 单独安装与升级）
 
 **安装 VSIX**
 ```bash
-code --install-extension /path/to/brotherwhale-vscode-0.9.5.vsix --force
+code --install-extension /path/to/brotherwhale-vscode-0.10.0.vsix --force
 ```
 
 ## 隐私与数据
