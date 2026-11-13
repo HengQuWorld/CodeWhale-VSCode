@@ -270,7 +270,8 @@ threadsPanel.classList.remove('open');
 
 规则：
 
-- 提示音只播**扩展自己带的那个文件**：路径必须来自**绝对**扩展目录，且 `media/completion-chime.wav` **确实存在**，两条缺一即静默（`utils/completion-sound.ts` 的 `bundledCuePath`）。相对路径、或不存在的文件，一律不播——播放器拿相对路径去问"当前工作目录"，那不是我们能担保的对象。
+- 提示音只播**扩展自己带的那个文件**：路径必须来自**绝对**扩展目录，且 `media/` 下对应的那个 WAV（`completion-chime` / `failure-chime` / `attention-chime`）**确实存在**，两条缺一即静默（`utils/completion-sound.ts` 的 `bundledCuePath`）。相对路径、或不存在的文件，一律不播——播放器拿相对路径去问"当前工作目录"，那不是我们能担保的对象。
+- 每种提示音各管一件事：轮次完成（下行五度）、轮次失败（粗糙的低音）、需要用户（上行的大三和弦，即等待批准或提问）。后两种都不从原始事件直接响：后台线程的“需要你”只认 summary 的 `pending_attention_count`，因为引擎对自动批准的调用也会发 `approval.required`；当前会话里的批准则按**请求 id** 去重（`announcedApprovals`），重投的同一条请求不会再响一次。
 - 空路径不做兜底：`playCompletionCue()` 在没有 `extensionUri.fsPath` 时直接返回，不传 `""`。
 - 写测试时：
   - 验证"某一轮会响"→ 把 `./utils/completion-sound` mock 掉（见 `src/chat-provider/turns/completion-sound.test.ts`），只测接线，不碰播放器。

@@ -1,12 +1,12 @@
 /**
- * The ending cues' gates and their delivery.
+ * The cues' gates and their delivery.
  *
  * What matters here is that a cue is *stoppable and quiet when it should be*:
- * the user's setting wins over everything, a burst of finished turns is one
- * sound rather than a rattle, a path this host cannot vouch for is silence, and
- * a machine without a player costs nothing but a false. Every test gets a fresh
- * module, because the floor between cues is module state and one test's clock
- * must not leak into the next.
+ * the user's setting wins over everything, a burst of events is one sound rather
+ * than a rattle, a path this host cannot vouch for is silence, and a machine
+ * without a player costs nothing but a false. Every test gets a fresh module,
+ * because the floor between cues is module state and one test's clock must not
+ * leak into the next.
  *
  * Which player this machine happens to have is not part of any expectation: the
  * host's clock, platform and PATH check are all injected, so these tests answer
@@ -52,6 +52,7 @@ const ANY_CUE = "/ext/media/completion-chime.wav";
 let extensionDir = "";
 let cue = "";
 let failureCue = "";
+let attentionCue = "";
 
 beforeEach(() => {
   state.enabled = true;
@@ -66,8 +67,10 @@ beforeEach(() => {
   fs.mkdirSync(path.join(extensionDir, "media"), { recursive: true });
   fs.writeFileSync(path.join(extensionDir, "media", "completion-chime.wav"), "");
   fs.writeFileSync(path.join(extensionDir, "media", "failure-chime.wav"), "");
+  fs.writeFileSync(path.join(extensionDir, "media", "attention-chime.wav"), "");
   cue = path.join(extensionDir, "media", "completion-chime.wav");
   failureCue = path.join(extensionDir, "media", "failure-chime.wav");
+  attentionCue = path.join(extensionDir, "media", "attention-chime.wav");
 });
 
 afterEach(() => {
@@ -344,5 +347,60 @@ describe("playFailureSound", () => {
     });
 
     expect(playFailureSound(extensionDir, { ...HOST, nowMs: 1_000 })).toBe(false);
+  });
+});
+
+describe("playAttentionSound", () => {
+  it("hands the player the attention cue, not an ending cue", async () => {
+    const { playAttentionSound } = await freshModule();
+
+    expect(playAttentionSound(extensionDir, { ...HOST, nowMs: 1_000 })).toBe(true);
+    expect(state.spawn).toHaveBeenCalledExactlyOnceWith("/usr/bin/afplay", [attentionCue], {
+      stdio: "ignore",
+      windowsHide: true,
+    });
+  });
+
+  it("is gated by the same setting as the endings", async () => {
+    const { playAttentionSound } = await freshModule();
+    state.enabled = false;
+
+    expect(playAttentionSound(extensionDir, { ...HOST, nowMs: 1_000 })).toBe(false);
+    expect(state.spawn).not.toHaveBeenCalled();
+  });
+
+  it("stays silent when its own file is not on disk, and still rings an ending", async () => {
+    const { playAttentionSound, playCompletionSound } = await freshModule();
+    fs.rmSync(path.join(extensionDir, "media", "attention-chime.wav"));
+
+    // The vouching rule is per file: a missing attention cue costs a silent
+    // skip, and says nothing about the cues that are there.
+    expect(playAttentionSound(extensionDir, { ...HOST, nowMs: 1_000 })).toBe(false);
+    expect(playCompletionSound(extensionDir, { ...HOST, nowMs: 2_000 })).toBe(true);
+    expect(state.spawn).toHaveBeenCalledTimes(1);
+  });
+
+  it("shares the floor with the endings, in both directions", async () => {
+    const { COMPLETION_SOUND_MIN_INTERVAL_MS, playAttentionSound, playCompletionSound } =
+      await freshModule();
+    const host = { ...HOST, nowMs: 10_000 };
+
+    expect(playAttentionSound(extensionDir, host)).toBe(true);
+    expect(
+      playCompletionSound(extensionDir, { ...host, nowMs: 10_000 + COMPLETION_SOUND_MIN_INTERVAL_MS - 1 }),
+    ).toBe(false);
+    expect(
+      playCompletionSound(extensionDir, { ...host, nowMs: 10_000 + COMPLETION_SOUND_MIN_INTERVAL_MS }),
+    ).toBe(true);
+    expect(state.spawn).toHaveBeenCalledTimes(2);
+  });
+
+  it("survives a spawn that throws, like the endings", async () => {
+    const { playAttentionSound } = await freshModule();
+    state.spawn.mockImplementation(() => {
+      throw new Error("EMFILE");
+    });
+
+    expect(playAttentionSound(extensionDir, { ...HOST, nowMs: 1_000 })).toBe(false);
   });
 });

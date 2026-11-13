@@ -84,6 +84,7 @@ import {
   compactionCheckpointTextBody,
 } from "./utils/compaction-summary";
 import {
+  playAttentionSound,
   playCompletionSound,
   playFailureSound,
   type CompletionCueKind,
@@ -194,6 +195,12 @@ interface BackgroundThreadState {
   currentTurnId: string | null;
   running: boolean;
   attention: number;
+  /** Whether `attention` has already been announced by the cue. The count
+   *  itself cannot answer that: a watcher event optimistically raises it too,
+   *  and the runtime emits `approval.required` for calls it resolves itself.
+   *  Only the summary's authoritative count rings the cue, once per waiting
+   *  spell — cleared when the count reaches zero. */
+  attentionAnnounced: boolean;
   /** Auto-save in-place target (same thread → same session). */
   sessionId: string | null;
   goal: ThreadGoal | null;
@@ -506,6 +513,13 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
   private set currentTurnId(v: string | null) { this.sessionState.data.currentTurnId = v; }
   private get pendingApprovals(): Map<string, ToolCallInfo> { return this.sessionState.data.pendingApprovals; }
   private get pendingUserInputs() { return this.sessionState.data.pendingUserInputs; }
+  /** Approval ids whose attention cue has already been rung, so a re-delivered
+   *  request is not a second reason to interrupt the user. It is keyed on the
+   *  request and not read off `pendingApprovals`: a request whose tool row never
+   *  made it into the conversation (see `postPendingPrompts`) has no entry
+   *  there, and would otherwise ring again on every re-delivery. Retiring the
+   *  approval forgets it, which is what makes the next request audible. */
+  private announcedApprovals = new Set<string>();
   private get activeItems() { return this.sessionState.data.activeItems; }
   private get currentTextBlockIdx(): number { return this.sessionState.data.currentTextBlockIdx; }
   private set currentTextBlockIdx(v: number) { this.sessionState.data.currentTextBlockIdx = v; }
@@ -582,11 +596,11 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
   }
 
   /**
-   * The audible "a turn ended" cue for a turn observed from the host — the
-   * one being watched or a parked one whose watch is reporting. The setting,
-   * the floor between cues and the platform player all live in
-   * `utils/completion-sound`. A completed turn rings the success chime, a
-   * failed one the failure cue, so the kind of ending is audible at once.
+   * The audible cue for something the user may have looked away from — a turn
+   * ending, or a request that needs them. The setting, the floor between cues
+   * and the platform player all live in `utils/completion-sound`. A completed
+   * turn rings the success chime, a failed one the failure cue, and a pending
+   * approval or question the attention cue, so what happened is audible at once.
    *
    * A provider with no extension URI asks for nothing. The alternative — a
    * stand-in empty path — is what let a test-harness provider play the chime
@@ -597,6 +611,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     const extensionPath = this.extensionUri?.fsPath;
     if (!extensionPath) return;
     if (kind === "failed") playFailureSound(extensionPath);
+    else if (kind === "attention") playAttentionSound(extensionPath);
     else playCompletionSound(extensionPath);
   }
 
@@ -2016,6 +2031,9 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
   private retireApproval(approvalId: string | null, status: "running" | "error"): void {
     if (approvalId === null) this.pendingApprovals.clear();
     else this.pendingApprovals.delete(approvalId);
+    // Its cue is spent: a later request id is a new one, and rings as such.
+    if (approvalId === null) this.announcedApprovals.clear();
+    else this.announcedApprovals.delete(approvalId);
     // The map's entry is one of these calls (it is resolved out of
     // `this.messages`), so the scan retires it along with the seeded rows.
     for (const msg of this.messages) {
@@ -6588,6 +6606,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         currentTurnId: null,
         running: false,
         attention: 0,
+        attentionAnnounced: false,
         sessionId: null,
         goal: null,
         goalChecked: false,
@@ -6680,7 +6699,27 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       // registers the pending approval before it sequences the event
       // ("Register before sequencing the event" in runtime_threads.rs), so any
       // event already observed is visible to a fetch issued afterwards.
+      //
+      // It is also what the attention cue is rung from, and for the same
+      // reason: a raw `approval.required` is not evidence that the user is
+      // needed — the runtime emits one for the calls it resolves itself too
+      // (Full Access, Auto-Review, a remembered grant) — while this count only
+      // moves for a request that was really registered as pending.
+      //
+      // One waiting spell is one cue: a thread this pass finds still waiting
+      // after the previous pass already announced it stays silent, and the badge
+      // is the report of it. A thread this client is hearing about for the first
+      // time rings even though the request predates the pass — it is the
+      // discovery path for attention raised where nothing here was watching
+      // (another window, the terminal), and the fact it announces is exactly
+      // true: somebody is waiting for the user.
       st.attention = authoritativeAttention;
+      if (authoritativeAttention > 0 && !st.attentionAnnounced) {
+        st.attentionAnnounced = true;
+        this.playCompletionCue("attention");
+      } else if (authoritativeAttention === 0) {
+        st.attentionAnnounced = false;
+      }
     }
     for (const id of wanted) {
       const st = this.backgroundThreads.get(id)!;
@@ -6766,7 +6805,9 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       case "user_input.required": {
         // Fast path for the rail badge only. Whether this is really the user's
         // turn to act is decided from the authoritative pending count in
-        // syncBackgroundWatchers — see the note there.
+        // syncBackgroundWatchers — see the note there. The attention cue is
+        // rung from that same count, not from this event: the runtime also
+        // emits `approval.required` for calls it resolves itself.
         st.attention += 1;
         this.scheduleThreadListRefresh();
         // The rail card is not the only surface: the Tasks panel reads the same
@@ -6983,6 +7024,9 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         st.running = true;
       }
       st.attention = Math.max(st.attention, this.pendingApprovals.size + this.pendingUserInputs.size);
+      // Whatever is waiting here has just been on screen: parking must not
+      // announce it all over again as if it had arrived while away.
+      st.attentionAnnounced = st.attention > 0;
       // `parked: true` — currentThread still names this thread until the
       // caller resets it, and the whole point of parking is to keep watching.
       // A real cursor resumes from it; `0` is not a cursor but the absence of
@@ -7231,6 +7275,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     this.activeTurnMode = null;
     this.activeItems.clear();
     this.pendingApprovals.clear();
+    this.announcedApprovals.clear();
     this.pendingUserInputs.clear();
     this.stopPeriodicTaskRefresh();
     await this.loadHistory(this.currentThread?.id);
@@ -8441,6 +8486,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         }
         // Clear pending approvals and active items for this turn.
         this.pendingApprovals.clear();
+        this.announcedApprovals.clear();
         this.activeItems.clear();
 
         // The cue belongs to an ending that just happened. A completed turn
@@ -8615,6 +8661,16 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
           break;
         }
 
+        // This is the one state the turn cannot leave without the user, and the
+        // card can sit in a panel they are not looking at — so it rings the
+        // attention cue, like an ending rings its own. A re-delivered event for
+        // a request already announced here is the same request, not a second
+        // one: the id set is what tells them apart.
+        if (!this.announcedApprovals.has(approvalId)) {
+          this.announcedApprovals.add(approvalId);
+          this.playCompletionCue("attention");
+        }
+
         const actualInput = tc?.input || toolInput;
         const summary = buildApprovalSummary(toolName, actualInput);
 
@@ -8739,12 +8795,18 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
           messageId = lastMsg?.id;
         }
 
+        // A re-delivered event for a question already held here is the same
+        // request, so it is not a second reason to ring.
+        const isNewInput = !this.pendingUserInputs.has(inputId);
         this.pendingUserInputs.set(inputId, {
           threadId: event.thread_id,
           questions,
           answers: [],
           answeredQuestions: new Set(),
         });
+        // A question is the user's turn to speak: it rings the attention cue so
+        // an answer the turn is blocked on is not missed from another window.
+        if (isNewInput) this.playCompletionCue("attention");
         this.postMessage({
           type: "userInputRequired",
           messageId,

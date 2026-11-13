@@ -45,10 +45,29 @@ buzzer-like edge:
 Regenerate the same way: two rising minor-second clusters, odd partials
 included.
 
-Both cues are gated by the one setting (`brotherwhale.completionSound`) and
-share the same 1 s floor: two turns ending together are one sound, whichever
-cue each would have been.
+## `attention-chime.wav`
 
-Both cues are gated by the one setting (`brotherwhale.completionSound`) and
-share the same 1 s floor: two turns ending together are one sound, whichever
-cue each would have been.
+The cue played when the agent needs the user — an approval waiting in Ask, or a
+question (`approval.required` / `user_input.required`; see
+`src/utils/completion-sound.ts`, `playAttentionSound`). The transcript says so,
+but the user may have looked away, and this is the one state where the work
+cannot go on without them.
+
+It is the success cue turned upward: a clean rising *major triad* instead of a
+falling fifth, so "finished" falls away and "your turn" rises. Three notes
+rather than two, because the request is rarer and must not be mistaken for an
+ending:
+
+- 22,050 Hz, 16-bit mono PCM, 0.56 s, 24,740 bytes, peak −6 dBFS (−16384 /
+  +16384), first and last sample exactly 0, 20 ms fade at the end.
+- A5 (880.000 Hz) from 0.00 s, C♯6 (1108.731 Hz) from 0.09 s, E6 (1318.510 Hz)
+  from 0.18 s. Each note: 5 ms attack, exponential decay (τ 90 ms, 90 ms,
+  200 ms), quiet partials (2× at 0.16, 3× at 0.05), normalized to −6 dBFS.
+  Pure tones, no detune — like the success cue, but rising.
+
+To regenerate: synthesize those three notes at those frequencies, sum them into
+one buffer, apply the fade, and normalize as above.
+
+All three cues are gated by the one setting (`brotherwhale.completionSound`) and
+share the same 1 s floor: whatever arrives in the same moment is one sound,
+whichever cue each would have been.

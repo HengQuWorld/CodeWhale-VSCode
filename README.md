@@ -187,7 +187,7 @@ Switch from the status bar or with `/mode` (shortcuts `1`/`2`/`3`) and `/auto`. 
 - **Cross-workspace resumption** — loading a session from another project rebinds it to the workspace you are in.
 - **Workspace filter** — show sessions from all workspaces or only the current one.
 - **Attention surfacing** — a thread waiting on an approval or your input carries a count on its rail card (grouped under *Needs you*) and a total on the toolbar's **Agent** label, which names the longest-waiting thread. Approvals and questions from another thread can be answered inline in its rail card, without switching to it.
-- **A chime when a turn finishes** — audible from wherever you are: the cue rings for the conversation you are watching and for a parked thread finishing in the background. A failed or interrupted turn stays silent, turns finishing together are heard once, and `brotherwhale.completionSound` turns it off.
+- **A chime when a turn finishes, and when the agent needs you** — audible from wherever you are: the cue rings for the conversation you are watching and for a parked thread finishing in the background, and a third, rising cue rings when an approval or a question is waiting — on the thread you are reading or on a parked one. A failed turn has its own low, rough cue; an interrupted turn stays silent, and anything arriving at the same moment is heard once. `brotherwhale.completionSound` turns it off.
 - **Watched, not polled** — every background thread that is running or waiting on you holds one lightweight SSE stream, so the rail badge and the auto-save stay live without a polling timer, and a request that arrives while you are elsewhere shows up on the rail instead of waiting for a poll.
 - Three peer sidebar tabs — **Sessions** (saved conversations), **Threads** (the active ones) and **Activity** (live agent status: Work, Changes, Fleet, Tasks, Agents) — each with a hint line saying what it holds.
 
@@ -264,7 +264,7 @@ Search for `brotherwhale` in VS Code settings (`Cmd/Ctrl+,`).
 | `brotherwhale.reasoningEffort` | `"auto"` | `auto`, `off`, `low`, `medium`, `high`, `max` |
 | `brotherwhale.autoApprove` | `false` | Legacy fallback for auto-approval. Prefer the **Full Access** posture, which already implies it |
 | `brotherwhale.costCurrency` | `"auto"` | `auto` follows the UI language (Chinese → CNY, otherwise USD), or force `usd` / `cny`. Falls back to USD when no native CNY price exists |
-| `brotherwhale.completionSound` | `true` | Play a chime when a turn finishes — in the conversation you are reading or in a background thread. Failed and interrupted turns stay silent, and turns finishing at the same moment are heard once |
+| `brotherwhale.completionSound` | `true` | Play a cue when a turn ends or the agent needs you — in the conversation you are reading or in a background thread: a soft chime for a finished turn, a low rough one for a failure, a rising one when an approval or a question is waiting. Interrupted turns stay silent, and events arriving at the same moment are heard once |
 | `brotherwhale.telemetry` | `true` | Let the engine this window starts count anonymous usage. Application-scoped; what is collected is the engine's concern (see [Usage reporting](#usage-reporting)) |
 
 ### Recommended settings

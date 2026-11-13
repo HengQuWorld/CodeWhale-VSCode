@@ -1,7 +1,7 @@
 /**
- * The audible "a turn finished" cue.
+ * The audible "something happened while you were away" cues.
  *
- * The host plays it, not the webview: the point of the cue is to reach a user
+ * The host plays them, not the webview: the point of a cue is to reach a user
  * who has looked away, and a sidebar webview that is not on screen can be
  * suspended — taking anything queued for the speakers with it.
  *
@@ -11,8 +11,10 @@
  * ended. The cues are original additive synthesis — see `media/README.md`: the
  * success cue is a clean falling fifth (A5→D5), the failure cue for a turn
  * that failed — a dead network among other causes — two urgent, buzzy blips
- * (minor-second clusters), so the endings are told apart by shape before the
- * user has read a word of the transcript.
+ * (minor-second clusters), and the attention cue for a request that needs the
+ * user — an approval or a question — a rising major triad (A5→C♯6→E6). So the
+ * three are told apart by shape before the user has read a word of the
+ * transcript: endings fall, failure is rough, a request rises.
  *
  * The cue is that bundled file and nothing else: it is played from the
  * extension's own absolute path only while the file is really there, because a
@@ -35,15 +37,19 @@ export const COMPLETION_SOUND_FILE = "completion-chime.wav";
 /** The cue for a turn that ended in failure, relative to the extension root. */
 export const FAILURE_SOUND_FILE = "failure-chime.wav";
 
-/** Which ending a cue announces. */
-export type CompletionCueKind = "completed" | "failed";
+/** The cue for a request that needs the user — an approval or a question —
+ *  relative to the extension root. */
+export const ATTENTION_SOUND_FILE = "attention-chime.wav";
+
+/** Which event a cue announces. */
+export type CompletionCueKind = "completed" | "failed" | "attention";
 
 /**
- * Two turns finishing together — a parked thread and the one being watched —
- * must not stack into a rattle. The floor is shared by both cues: a success
- * chime and a failure cue arriving in the same instant are still one moment
- * for the listener. The TUI's own event sound policy carries the
- * same floor (`notifications.event_sound.min_interval_ms`).
+ * Two events arriving together — a parked thread finishing while the one being
+ * watched asks for approval — must not stack into a rattle. The floor is shared
+ * by all three cues: whatever arrives in the same instant is still one moment
+ * for the listener. The TUI's own event sound policy carries the same floor per
+ * event (`notifications.event_sound.min_interval_ms`).
  */
 export const COMPLETION_SOUND_MIN_INTERVAL_MS = 1000;
 
@@ -129,7 +135,7 @@ function commandIsRunnable(command: string): boolean {
 
 /**
  * A bundled cue's absolute path, or undefined when this host cannot vouch for
- * the file. Defaults to the success cue; the failure cue is named explicitly.
+ * the file. Defaults to the success cue; the other cues name their own file.
  *
  * A cue is *this extension's own* file and nothing else, so two things have to
  * hold before a player is even considered: `extensionPath` is the absolute
@@ -179,7 +185,7 @@ export function playCompletionSound(
   extensionPath: string,
   host: CompletionSoundHost = {},
 ): boolean {
-  return playTurnEndSound(extensionPath, COMPLETION_SOUND_FILE, host);
+  return playCue(extensionPath, COMPLETION_SOUND_FILE, host);
 }
 
 /**
@@ -193,12 +199,26 @@ export function playFailureSound(
   extensionPath: string,
   host: CompletionSoundHost = {},
 ): boolean {
-  return playTurnEndSound(extensionPath, FAILURE_SOUND_FILE, host);
+  return playCue(extensionPath, FAILURE_SOUND_FILE, host);
 }
 
-/** One delivery for both cues: gate, vouch for the path, take the floor's
+/**
+ * Play the attention cue for a request that needs the user — an approval
+ * waiting in Ask, or a question. The same gates as the endings: the setting,
+ * the path, the shared floor, the player. The file is the one that differs, and
+ * with it the shape: a rising major triad instead of a fall, so "your turn" is
+ * told apart from "finished" before a word is read.
+ */
+export function playAttentionSound(
+  extensionPath: string,
+  host: CompletionSoundHost = {},
+): boolean {
+  return playCue(extensionPath, ATTENTION_SOUND_FILE, host);
+}
+
+/** One delivery for every cue: gate, vouch for the path, take the floor's
  *  slot, and hand the file to the platform player out of band. */
-function playTurnEndSound(
+function playCue(
   extensionPath: string,
   file: string,
   host: CompletionSoundHost,
@@ -213,7 +233,7 @@ function playTurnEndSound(
   if (nowMs - lastPlayedMs < COMPLETION_SOUND_MIN_INTERVAL_MS) return false;
   const resolved = resolveSoundCommand(platform, cue, isRunnable);
   if (!resolved) return false;
-  // Take the slot before spawning: a burst of completions is throttled whether
+  // Take the slot before spawning: a burst of events is throttled whether
   // or not the player itself turns out to work.
   lastPlayedMs = nowMs;
   try {
@@ -221,7 +241,7 @@ function playTurnEndSound(
       stdio: "ignore",
       windowsHide: true,
     });
-    // A cue that cannot be heard must never disturb the turn that ended: the
+    // A cue that cannot be heard must never disturb the work it announced: the
     // player is not awaited, and its failure (or absence, asynchronously) is
     // swallowed here rather than surfacing as an unhandled child process.
     child.on("error", () => undefined);

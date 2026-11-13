@@ -1,28 +1,34 @@
 /**
- * When the host rings an ending cue.
+ * When the host rings a cue.
  *
- * The cue is played by `utils/completion-sound` (which owns the setting, the
- * floor between cues, the path it is willing to vouch for and the platform
- * player); what these tests pin is the *timing*: a finished turn rings the
- * success chime, a turn that failed rings the failure cue — a dead network must
- * be heard, not read — a turn the user interrupted themselves stays silent, a
- * compaction pass is not a conversation turn and does not ring, a turn whose
- * ending the runtime recovered is history and does not ring, and a turn
- * ending on a thread the view is not on rings too — that last case is what
- * the cue is for.
+ * The cues themselves are played by `utils/completion-sound` (which owns the
+ * setting, the floor between them, the paths it is willing to vouch for and the
+ * platform player); what these tests pin is the *timing*: a finished turn rings
+ * the success chime, a turn that failed rings the failure cue — a dead network
+ * must be heard, not read — a pending approval or question rings the attention
+ * cue, a turn the user interrupted themselves stays silent, a compaction pass is
+ * not a conversation turn and does not ring, a turn whose ending the runtime
+ * recovered is history and does not ring, and an ending or request on a thread
+ * the view is not on rings too — that last case is what the cue is for.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../../utils/completion-sound", () => ({
   playCompletionSound: vi.fn(() => true),
   playFailureSound: vi.fn(() => true),
+  playAttentionSound: vi.fn(() => true),
 }));
 
 import { ChatProvider } from "../../chat-provider";
-import { playCompletionSound, playFailureSound } from "../../utils/completion-sound";
+import {
+  playCompletionSound,
+  playFailureSound,
+  playAttentionSound,
+} from "../../utils/completion-sound";
 
 const cue = playCompletionSound as unknown as ReturnType<typeof vi.fn>;
 const failCue = playFailureSound as unknown as ReturnType<typeof vi.fn>;
+const attentionCue = playAttentionSound as unknown as ReturnType<typeof vi.fn>;
 const EXTENSION_PATH = "/ext";
 
 function createProvider(extensionPath: string | null = EXTENSION_PATH) {
@@ -35,6 +41,8 @@ function createProvider(extensionPath: string | null = EXTENSION_PATH) {
     saveCurrentSession: vi.fn(async () => ({ session_id: "session-1" })),
     listSessions: vi.fn(async () => ({ sessions: [] })),
     listTasks: vi.fn(async () => ({ tasks: [], counts: { active: 0, completed: 0, failed: 0 } })),
+    // The background path opens one watch per thread that needs the user.
+    streamEvents: vi.fn(() => ({ abort: vi.fn() })),
   };
   const provider = new ChatProvider(
     (extensionPath === null ? {} : { fsPath: extensionPath }) as any,
@@ -75,6 +83,7 @@ function turnCompleted(turnId: string, status: string, extra: Record<string, unk
 beforeEach(() => {
   cue.mockClear();
   failCue.mockClear();
+  attentionCue.mockClear();
 });
 
 describe("the cue for the conversation being watched", () => {
@@ -232,5 +241,195 @@ describe("the cue for a thread the view is not on", () => {
 
     expect(cue).not.toHaveBeenCalled();
     expect(failCue).not.toHaveBeenCalled();
+  });
+});
+
+/** The engine's approval request, for the conversation the view is on. */
+function approvalRequired(approvalId: string) {
+  return {
+    seq: 11,
+    event: "approval.required",
+    turn_id: "turn-1",
+    item_id: null,
+    payload: {
+      id: approvalId,
+      approval_id: approvalId,
+      tool_call_id: `call-${approvalId}`,
+      tool_name: "exec_shell",
+      input: { command: "ls" },
+    },
+  } as any;
+}
+
+/** The engine's question, for the conversation the view is on. */
+function userInputRequired(inputId: string) {
+  return {
+    seq: 12,
+    event: "user_input.required",
+    turn_id: "turn-1",
+    item_id: null,
+    payload: {
+      id: inputId,
+      request: {
+        questions: [
+          { header: "Route", id: "q1", question: "Which route?", options: [{ label: "A", description: "" }] },
+        ],
+      },
+    },
+  } as any;
+}
+
+describe("the cue for a request that needs the user", () => {
+  it("rings when the agent asks for an approval", () => {
+    const { provider } = createProvider();
+
+    // The view is on this thread, but the user may not be: the card is what the
+    // cue announces, and it is the one state the turn cannot leave without them.
+    (provider as any).handleRuntimeEvent(approvalRequired("approval-1"));
+
+    expect(attentionCue).toHaveBeenCalledExactlyOnceWith(EXTENSION_PATH);
+    expect(cue).not.toHaveBeenCalled();
+    expect(failCue).not.toHaveBeenCalled();
+  });
+
+  it("stays silent for an approval the engine resolves itself", () => {
+    // Full Access and Auto-Review emit `approval.required` too, then answer it
+    // server-side. Nothing is waiting on the user, so nothing rings.
+    for (const posture of ["full_access", "auto_review"]) {
+      const { provider } = createProvider();
+      provider.currentThread = { id: "thread-1", permission_posture: posture } as any;
+
+      (provider as any).handleRuntimeEvent(approvalRequired(`approval-${posture}`));
+
+      expect(attentionCue).not.toHaveBeenCalled();
+    }
+  });
+
+  it("does not ring again for an approval already waiting here", () => {
+    const { provider } = createProvider();
+
+    (provider as any).handleRuntimeEvent(approvalRequired("approval-1"));
+    // The same request re-delivered (a resumed stream, a replayed batch) is not
+    // a second reason to ring: the sound was for the request, and it is one
+    // request. No tool row is set up here on purpose — a request whose row never
+    // made it into the conversation is still one request.
+    (provider as any).handleRuntimeEvent(approvalRequired("approval-1"));
+
+    expect(attentionCue).toHaveBeenCalledTimes(1);
+  });
+
+  it("rings again for the next request once the last one was answered", () => {
+    const { provider } = createProvider();
+
+    (provider as any).handleRuntimeEvent(approvalRequired("approval-1"));
+    (provider as any).handleRuntimeEvent({
+      seq: 12,
+      event: "approval.decided",
+      turn_id: "turn-1",
+      item_id: null,
+      payload: { approval_id: "approval-1", decision: "allow" },
+    } as any);
+    (provider as any).handleRuntimeEvent(approvalRequired("approval-2"));
+
+    // Being interrupted once is what the cue is for; staying silent for the
+    // rest of the turn because the first request was answered is not.
+    expect(attentionCue).toHaveBeenCalledTimes(2);
+  });
+
+  it("rings when the agent asks a question", () => {
+    const { provider } = createProvider();
+
+    (provider as any).handleRuntimeEvent(userInputRequired("input-1"));
+
+    expect(attentionCue).toHaveBeenCalledExactlyOnceWith(EXTENSION_PATH);
+    expect(cue).not.toHaveBeenCalled();
+    expect(failCue).not.toHaveBeenCalled();
+  });
+
+  it("is never asked for when the host has no extension path", () => {
+    const { provider } = createProvider(null);
+
+    (provider as any).handleRuntimeEvent(userInputRequired("input-1"));
+
+    expect(attentionCue).not.toHaveBeenCalled();
+  });
+});
+
+describe("the cue for a request on a thread the view is not on", () => {
+  function summary(id: string, attention: number) {
+    return {
+      id,
+      title: id,
+      preview: "",
+      model: "deepseek-v4-pro",
+      mode: "agent",
+      archived: false,
+      updated_at: "2026-09-17T00:00:00Z",
+      latest_turn_id: null,
+      latest_turn_status: "inprogress",
+      pending_attention_count: attention,
+    } as any;
+  }
+
+  it("rings once when a parked thread starts waiting for the user", () => {
+    const { provider } = createProvider();
+
+    (provider as any).syncBackgroundWatchers([summary("thread-b", 1)]);
+    expect(attentionCue).toHaveBeenCalledExactlyOnceWith(EXTENSION_PATH);
+
+    // A second request on the same thread is the same waiting user, not a
+    // second reason to interrupt them.
+    (provider as any).syncBackgroundWatchers([summary("thread-b", 2)]);
+    expect(attentionCue).toHaveBeenCalledTimes(1);
+
+    // Answering everything closes the spell; the next request rings again.
+    (provider as any).syncBackgroundWatchers([summary("thread-b", 0)]);
+    (provider as any).syncBackgroundWatchers([summary("thread-b", 1)]);
+    expect(attentionCue).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not ring for a raw background approval the runtime resolves itself", () => {
+    // The runtime emits `approval.required` for calls it answers server-side
+    // (Full Access, a remembered grant) as well as for real prompts. A watcher
+    // event is not evidence that the user is needed — only the summary's
+    // pending count is, and that count never moves for an automatic decision.
+    const { provider } = createProvider();
+    (provider as any).backgroundThreads.set("thread-b", {
+      running: true,
+      currentTurnId: "turn-b",
+      lastEventSeq: 0,
+      attention: 0,
+      attentionAnnounced: false,
+      goalChecked: true,
+      goal: null,
+    });
+
+    (provider as any).handleBackgroundEvent("thread-b", {
+      seq: 4,
+      timestamp: "2026-09-17T00:00:00Z",
+      thread_id: "thread-b",
+      turn_id: "turn-b",
+      item_id: null,
+      event: "approval.required",
+      payload: { id: "approval-auto-1" },
+    } as any);
+
+    expect(attentionCue).not.toHaveBeenCalled();
+  });
+
+  it("stays silent for attention the parked thread already had", () => {
+    // Parking a thread with a request still on screen must not announce it as
+    // if it had arrived while the user was away.
+    const { provider } = createProvider();
+    provider.currentThread = { id: "thread-parked" } as any;
+    (provider as any).currentTurnId = null;
+    (provider as any).pendingApprovals.set("approval-1", {});
+
+    (provider as any).parkCurrentThread();
+    // The view moves on; the parked thread keeps its own watch.
+    provider.currentThread = { id: "thread-elsewhere" } as any;
+    (provider as any).syncBackgroundWatchers([summary("thread-parked", 1)]);
+
+    expect(attentionCue).not.toHaveBeenCalled();
   });
 });
