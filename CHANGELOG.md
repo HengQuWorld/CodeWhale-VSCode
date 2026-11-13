@@ -1,5 +1,25 @@
 # Change Log
 
+## 0.10.1
+
+Everything in this release is client-side and works on engine **v0.10.2**, the same floor 0.10.0 names; nothing here waits on an engine build.
+
+### New Features
+
+- **A cue when the agent needs you** — An approval or a question waiting for an answer now rings its own rising three-note cue, told apart from the falling success chime and the rough failure one by shape alone, and it rings for the conversation you are reading and for a thread parked in the background. One wait is one sound: a request you have already been told about stays quiet, and answering it lets the next one be heard. `brotherwhale.completionSound` turns the whole set off.
+
+- **A question with more than one right answer** — A question the model marked as multi-select used to be answered by its first click, so only one of its options could ever be picked. It now ticks and unticks without sending anything, and a confirm button carries the count and sends the whole set at once — one answer per selected option. The set is locked once confirmed, so a later click cannot contradict it.
+
+- **Your archived conversations are one toggle away** — The engine keeps a fixed number of conversations live and archives the rest, so a project whose sessions had all aged out read "No conversations" over a history that was still on disk, and the search box could not reach it either. A cabinet toggle beside the workspace filter now lists archived records too, each row badged as archived — such a row opens and continues like any other conversation.
+
+- **Set up an MCP server from a config another tool already has** — The add dialog takes a server config pasted as JSON — Claude-style `mcpServers` blocks, a single-key wrapper, or a bare entry — and fills the form from it, so a server can be set up from the config another tool shares instead of retyped field by field. Environment variables are settable for the first time, one `KEY=value` per line, passed to the engine and never echoed back in the listings.
+
+### Bug Fixes
+
+- **A request with several questions now reads as several questions** — The bar says how many there are, numbers them and counts the answered ones, and it keeps a pick filled and checked with the other options dimmed — in the conversation and on the thread card alike. A pick can still be changed before it is sent, only its last answer is used, and answering one request no longer closes another one's panel.
+
+- **An agent run that already aged out says so** — A finished run leaves the run list about an hour after it settles, but its card stayed on screen and clicking it answered a bare "API error 404". The card now opens its own detail and refreshes the list, and when there is nothing left it says the run is gone instead of quoting the API.
+
 ## 0.10.0
 
 The message queue — memos parked beside the composer — is entirely client-side and works on the same engine floor as 0.9.5 (**v0.10.2**). The slash-menu additions read the engine's own command catalog, hooks and background jobs: routes no tagged engine release serves yet, where an older engine answers 404 and the command keeps its shipped behaviour instead of pretending to run.

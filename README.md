@@ -1,11 +1,11 @@
 # CodeWhale for VS Code — a lightweight GUI frontend for the CodeWhale agent
 
-[![Version](https://img.shields.io/badge/version-0.10.0-blue)](https://github.com/HengQuWorld/CodeWhale-VSCode)
+[![Version](https://img.shields.io/badge/version-0.10.1-blue)](https://github.com/HengQuWorld/CodeWhale-VSCode)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![CI](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/ci.yml/badge.svg)](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/ci.yml)
 [![Release](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/release.yml/badge.svg)](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/release.yml)
 [![VS Code](https://img.shields.io/badge/VS%20Code-1.85+-informational)](https://code.visualstudio.com/)
-[![VSIX](https://img.shields.io/badge/VSIX-~514%20KB-brightgreen)](https://github.com/HengQuWorld/CodeWhale-VSCode/releases)
+[![VSIX](https://img.shields.io/badge/VSIX-~553%20KB-brightgreen)](https://github.com/HengQuWorld/CodeWhale-VSCode/releases)
 [![macOS](https://img.shields.io/badge/macOS-supported-brightgreen)](#requirements)
 [![Windows](https://img.shields.io/badge/Windows-supported-brightgreen)](#requirements)
 [![Linux](https://img.shields.io/badge/Linux-supported-brightgreen)](#requirements)
@@ -22,7 +22,7 @@ The split is deliberate: **the agent stays in the engine, the ergonomics stay in
 
 | | |
 |---|---|
-| VSIX size (0.10.0) | ~514 KB |
+| VSIX size (0.10.1) | ~553 KB |
 | Runtime npm dependencies | **none** — webpack inlines the extension's own TypeScript (and `marked` for rendering) |
 | Bundled engine or model | **none** — `codewhale` is a separate native binary |
 | Duplicated agent logic | **none** — the GUI is an adapter over the engine's local runtime API |
@@ -32,9 +32,9 @@ The frontend is a webview. `ChatProvider` runs in the extension host, speaks HTT
 
 Because nothing about the agent is copied into the extension, the engine can ship new capabilities and fixes without a frontend release.
 
-### Engine compatibility for 0.10.0
+### Engine compatibility for 0.10.1
 
-0.10.0 runs on engine **v0.10.2**, the same floor 0.9.5 names. The message queue — memos parked beside the composer, riding with their attachments — is entirely client-side, as are its fold and the whole-workspace `/queue list`. The three surfaces with a floor of their own are unchanged — the memory review commands and the **MCP** panel arrive with engine **v0.10.0** (the release that introduced the Context Lens routes they read, and the MCP management routes whose listing names the layer each server belongs to and carries the configuration revision every edit presents), while the workspace-trust banner, the client a session reports itself as, and a second window or a second CodeWhale client on the same machine all need **v0.10.2**.
+0.10.1 runs on engine **v0.10.2**, the same floor 0.10.0 names, and everything it ships is client-side: a cue for the moment the agent needs you, questions you can tick several answers on, the archived half of the Sessions rail, and an MCP add dialog that takes a pasted config and the server's environment variables. The three surfaces with a floor of their own are unchanged — the memory review commands and the **MCP** panel arrive with engine **v0.10.0** (the release that introduced the Context Lens routes they read, and the MCP management routes whose listing names the layer each server belongs to and carries the configuration revision every edit presents), while the workspace-trust banner, the client a session reports itself as, and a second window or a second CodeWhale client on the same machine all need **v0.10.2**.
 
 What still needs a Codewhale build newer than any tagged engine release:
 
@@ -42,7 +42,7 @@ What still needs a Codewhale build newer than any tagged engine release:
 
 - **Undo, fork and retry on conversations that received workspace drift notices** — an engine that has told a conversation about workspace, skills or memory drift (a `<context_update>` append) leaves that conversation unable to cut: every undo, fork and retry past the first notice refused with "Cannot identify an exact saved-history boundary". The engine half is [Codewhale#7234](https://github.com/codewhale-hq/Codewhale/pull/7234), merged upstream 2026-11-07 and not yet in a tagged engine release. Until a tagged engine carries it, a conversation with a drift notice keeps its turns whole; conversations without one cut normally.
 
-- **The engine-backed slash commands** — the slash menu's completion of the engine's own catalog, and the `/hooks` and `/jobs` listings, ride on `/v1/commands`, `/v1/hooks` and `/v1/jobs`, which no tagged engine release serves yet. On the engine you have, the menu completes only this extension's commands, those two answer with the miss instead of a listing, and an engine command you type answers with its usage rather than running; everything else in this release is unaffected.
+- **Running the engine's own commands from the composer** — completing the engine's catalog, and the `/hooks` and `/jobs` listings, work on engine v0.10.2: it serves them, and `/help` tracks the engine build. Running one through this panel does not — the routes that execute a plugin command or a builtin inside a conversation are not in any tagged engine release — so a command you type answers with its usage and names where it runs, and on v0.10.2 the catalog carries no plugin commands to complete.
 
 On engine **v0.10.1** everything above holds except the three items that need **v0.10.2**; in particular a second VS Code window running this extension, or this extension beside the TUI, is refused there — the runtime ownership model that release introduced allowed one driving client per machine until [Codewhale#6924](https://github.com/codewhale-hq/Codewhale/pull/6924) landed.
 
@@ -140,12 +140,12 @@ npx @vscode/vsce package --no-dependencies
 Then install the generated `.vsix` (`Extensions: Install from VSIX...`), or from a terminal:
 
 ```bash
-code --install-extension ./brotherwhale-vscode-0.10.0.vsix --force
+code --install-extension ./brotherwhale-vscode-0.10.1.vsix --force
 ```
 
 > **Trae CN users:** if `code` is not on your `PATH`, use the bundled CLI:
 > ```bash
-> "/Applications/Trae CN.app/Contents/Resources/app/bin/code" --install-extension ./brotherwhale-vscode-0.10.0.vsix --force
+> "/Applications/Trae CN.app/Contents/Resources/app/bin/code" --install-extension ./brotherwhale-vscode-0.10.1.vsix --force
 > ```
 
 **Option C — Open VSX:** [Open VSX](https://open-vsx.org/extension/hengquworld/brotherwhale-vscode) carries the same builds for editors outside Microsoft's ecosystem — VSCodium, and CodeArts on HarmonyOS PC, whose extension panel has an Open VSX page. Search "CodeWhale" and install; no VSIX to side-load.
@@ -162,6 +162,7 @@ Click the **CodeWhale icon** in the activity bar. The extension starts the engin
 - **One send/stop button** that reflects the real turn state, plus **Undo** and **Retry** for the last turn.
 - **Attachments** — `/attach`, the 📎 button, or **CodeWhale: Attach to Conversation** on a file in the Explorer's context menu; images can be pasted with `Ctrl/Cmd+V`, and a file dragged in from Finder or another window attaches the same way. (A drag that starts inside VS Code — from the Explorer tree or an editor tab — never reaches the chat webview: VS Code keeps it for its own editor-group drop target. Use the context-menu entry for those.)
 - **Message navigation rail** — dots along the right edge jump to each user message; `Ctrl/Cmd+Up` / `Ctrl/Cmd+Down` step between them.
+- **Questions you can answer more than once** — a question the model offers several answers to ticks and unticks as you click, and a confirm button sends the whole set at once; a request carrying several questions numbers them and counts the answered ones.
 
 ### Modes and permission posture
 Two independent controls, aligned with the engine's own vocabulary:
@@ -186,6 +187,7 @@ Switch from the status bar or with `/mode` (shortcuts `1`/`2`/`3`) and `/auto`. 
 - **Background threads keep running** — switching threads, sessions or starting a new chat no longer touches the running turn: the Runtime owns it, so a goal loop or a long turn keeps going while you work elsewhere. Switching back re-attaches the view to that turn (Stop and Steer work again); stopping one stays explicit (**Stop**).
 - **Cross-workspace resumption** — loading a session from another project rebinds it to the workspace you are in.
 - **Workspace filter** — show sessions from all workspaces or only the current one.
+- **Archived sessions, on request** — the engine keeps a fixed number of conversations live and archives the rest, so a cabinet toggle beside the workspace filter lists archived records too, each row badged as archived; such a row opens and continues like any other conversation.
 - **Attention surfacing** — a thread waiting on an approval or your input carries a count on its rail card (grouped under *Needs you*) and a total on the toolbar's **Agent** label, which names the longest-waiting thread. Approvals and questions from another thread can be answered inline in its rail card, without switching to it.
 - **A chime when a turn finishes, and when the agent needs you** — audible from wherever you are: the cue rings for the conversation you are watching and for a parked thread finishing in the background, and a third, rising cue rings when an approval or a question is waiting — on the thread you are reading or on a parked one. A failed turn has its own low, rough cue; an interrupted turn stays silent, and anything arriving at the same moment is heard once. `brotherwhale.completionSound` turns it off.
 - **Watched, not polled** — every background thread that is running or waiting on you holds one lightweight SSE stream, so the rail badge and the auto-save stay live without a polling timer, and a request that arrives while you are elsewhere shows up on the rail instead of waiting for a poll.
@@ -209,7 +211,7 @@ Switch from the status bar or with `/mode` (shortcuts `1`/`2`/`3`) and `/auto`. 
 - **Memory** — `/memory` reads and writes the engine's native memory store through the runtime API. The notes the model proposes arrive as candidates you decide on: `/memory pending` lists them, and `/memory approve|reject|forget <id>` decide one. That review needs engine v0.10.0 (the Context Lens routes); on an older engine it says so.
 - **Notes** — `/note` for quick per-workspace notes.
 - **Skills** — the Activity tab's **Skills** panel lists your skills and the shipped ones, switches each on or off, installs one from GitHub (`github:owner/repo`, a URL, or a registry name), and offers update / remove / trust / audit for the skills you own. `/skill <name>` arms a skill for your next message — its instructions go with that one message, while the message you see stays the one you typed — `/skill <name> <task>` sends the task immediately, `/skill <name> on|off` toggles it, and `/skills <name>` (or typing `/skill `) shows a skill's detail and completes its name. Install/update/remove/trust/audit and activation need an engine that answers the skill routes; on an older one the panel dims those controls and says why, and listing/toggling keep working.
-- **MCP** — the Activity tab's **MCP** panel lists the engine's MCP servers, grouped by where each one is configured (**Project** / **Global** / **Plugin**), with its live connection state. Switch one on or off, connect it and read the tools it exposes, remove it, add a stdio/HTTP/SSE server with the form (or pick one of the suggested servers to fill it in), and review the servers other tools on this machine already have (`~/.claude.json`, a project `.mcp.json`, a marketplace) to approve or decline them one by one. `/mcp` opens the panel; `/mcp list` prints the servers in the conversation. Editing is the engine's: it owns the config and is its only writer, an entry owned by a project or plugin config is shown but not editable here, and on an engine without the MCP routes the panel says so rather than showing an empty list.
+- **MCP** — the Activity tab's **MCP** panel lists the engine's MCP servers, grouped by where each one is configured (**Project** / **Global** / **Plugin**), with its live connection state. Switch one on or off, connect it and read the tools it exposes, remove it, add a stdio/HTTP/SSE server with the form (or pick one of the suggested servers to fill it in, or paste a server config as JSON), set the server's environment variables one `KEY=value` per line, and review the servers other tools on this machine already have (`~/.claude.json`, a project `.mcp.json`, a marketplace) to approve or decline them one by one. `/mcp` opens the panel; `/mcp list` prints the servers in the conversation. Editing is the engine's: it owns the config and is its only writer, an entry owned by a project or plugin config is shown but not editable here, and on an engine without the MCP routes the panel says so rather than showing an empty list.
 - **Snapshots** — `/restore` lists snapshots and can revert workspace files to one.
 
 ### Models, cost, and diagnostics
@@ -319,7 +321,7 @@ Reloading or closing the extension stops that window's Runtime and interrupts ac
 
 **Installing a VSIX**
 ```bash
-code --install-extension /path/to/brotherwhale-vscode-0.10.0.vsix --force
+code --install-extension /path/to/brotherwhale-vscode-0.10.1.vsix --force
 ```
 
 ## Privacy & data
