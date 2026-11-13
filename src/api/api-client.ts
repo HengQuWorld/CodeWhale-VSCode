@@ -951,10 +951,23 @@ export class CodeWhaleApiClient {
 
   // ── Sessions ──
 
-  async listSessions(opts?: { limit?: number; search?: string }): Promise<SessionsResponse> {
+  /**
+   * `GET /v1/sessions`
+   *
+   * `includeArchived` is the Sessions rail's archive toggle. Without it the
+   * engine answers with active records only — archived ones are hidden by the
+   * shared projection, not missing from disk, so a workspace whose sessions
+   * have all aged out looked empty and its history could not be searched.
+   */
+  async listSessions(opts?: {
+    limit?: number;
+    search?: string;
+    includeArchived?: boolean;
+  }): Promise<SessionsResponse> {
     const params = new URLSearchParams();
     if (opts?.limit) params.set("limit", String(opts.limit));
     if (opts?.search) params.set("search", opts.search);
+    if (opts?.includeArchived) params.set("include_archived", "true");
     const qs = params.toString() ? `?${params.toString()}` : "";
     return (await this.get(`/v1/sessions${qs}`)) as SessionsResponse;
   }

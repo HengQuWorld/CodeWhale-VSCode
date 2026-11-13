@@ -493,6 +493,39 @@ function mockHttpRequestCapturingBody(
   );
 }
 
+/** The same mock, with the requested URL kept: a query string is part of the
+ *  contract of a listing route, and the canned-response mock above would let
+ *  a missing or misnamed parameter pass unnoticed. */
+function mockHttpRequestCapturingUrl(
+  statusCode: number,
+  responseData: string,
+  urls: string[]
+) {
+  (http.request as any).mockImplementation(
+    (url: unknown, _opts: unknown, callback: (res: { statusCode: number; on: (evt: string, fn: (chunk?: Buffer) => void) => void }) => void) => {
+      urls.push(String(url));
+      const res = {
+        statusCode,
+        on(evt: string, fn: (chunk?: Buffer) => void) {
+          if (evt === "data") {
+            fn(Buffer.from(responseData));
+          } else if (evt === "end") {
+            fn();
+          }
+        },
+      };
+      callback(res);
+      const req = {
+        on: () => req,
+        setTimeout: () => req,
+        write: () => {},
+        end: () => {},
+      };
+      return req;
+    }
+  );
+}
+
 describe("CodeWhaleApiClient - Constructor and configuration", () => {
   it("creates client with baseUrl", () => {
     const client = new CodeWhaleApiClient("http://localhost:54321");
@@ -796,6 +829,22 @@ describe("CodeWhaleApiClient - HTTP methods with mocked server", () => {
     mockHttpRequest(200, JSON.stringify(response));
     const result = await client.listSessions();
     expect(result.sessions).toHaveLength(1);
+  });
+
+  it("listSessions() asks the engine for archived records only when told to", async () => {
+    // The engine hides archived sessions unless asked, which is why a
+    // workspace whose history has all aged out read as empty. The rail's
+    // archive toggle is the one caller that asks; the default request must
+    // stay exactly what it was.
+    const urls: string[] = [];
+    mockHttpRequestCapturingUrl(200, JSON.stringify({ sessions: [] }), urls);
+
+    await client.listSessions({ limit: 100 });
+    expect(urls[0]).not.toContain("include_archived");
+
+    await client.listSessions({ limit: 500, includeArchived: true });
+    expect(urls[1]).toContain("include_archived=true");
+    expect(urls[1]).toContain("limit=500");
   });
 
   it("throws on API error (status >= 400)", async () => {

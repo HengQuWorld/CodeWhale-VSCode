@@ -1161,6 +1161,11 @@ ${PROVIDER_PICKER_JS}
       case 'sessionList':
         window.__wvSidebar.setSessions(msg.sessions || []);
         window.__wvSidebar.setShowAllWorkspaces(!!msg.showAllWorkspaces);
+        // The filter state is the extension's — it decided which query to ask
+        // — so the rail takes it back with the rows, exactly as it takes the
+        // workspace scope. Rendering from a local guess would let a dimmed
+        // cabinet describe a list that includes archived rows.
+        window.__wvSidebar.setShowArchivedSessions(!!msg.showArchivedSessions);
         window.__wvSidebar.renderSessions();
         break;
 
@@ -1182,6 +1187,15 @@ ${PROVIDER_PICKER_JS}
             msg.failed ? 'failed' : (msg.loading ? 'loading' : null),
           );
         }
+        break;
+
+      case 'sessionFilterState':
+        // The filter alone, with no rows: published the moment a toggle is
+        // clicked so its state answers the click instead of waiting out the
+        // listing. The rows that follow carry the same state.
+        window.__wvSidebar.setShowAllWorkspaces(!!msg.showAllWorkspaces);
+        window.__wvSidebar.setShowArchivedSessions(!!msg.showArchivedSessions);
+        window.__wvSidebar.renderSessions();
         break;
 
       case 'threadAttention':

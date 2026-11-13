@@ -185,6 +185,7 @@ describe("webview-js-sidebar.ts", () => {
     expect(script).toContain("setThreads:");
     expect(script).toContain("setActiveThreadId:");
     expect(script).toContain("setShowAllWorkspaces:");
+    expect(script).toContain("setShowArchivedSessions:");
     expect(script).toContain("setWorkState:");
   });
 

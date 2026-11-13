@@ -294,6 +294,7 @@ function createHarness(options?: { storage?: Record<string, string> | null }) {
   return {
     rail,
     sessionRail: getEl("tab-sessions"),
+    archiveToggle: getEl("archive-filter-toggle"),
     chip: getEl("agent-panel-toggle"),
     panel: getEl("threads-panel"),
     panelCloseBtn: getEl("sidebar-close-btn"),
@@ -2248,6 +2249,115 @@ describe("session rail fork families", () => {
 function threadRow(rail: FakeElement, id: string): FakeElement {
   return rail.querySelector(`.thread-item[data-thread-id="${id}"]`)!;
 }
+/** A session the retention window archived, as the engine lists it once
+ *  `include_archived` asks for it: the flag is present only when true. */
+function archivedSession(id: string, overrides: Record<string, unknown> = {}) {
+  return savedSession(id, { archived: true, ...overrides });
+}
+
+describe("session rail archive filter", () => {
+  it("marks archived rows so retired history is not read as the current set", () => {
+    const { sessionRail, sidebar } = createHarness();
+    sidebar.setSessions([savedSession("live"), archivedSession("old")]);
+    sidebar.setShowArchivedSessions(true);
+
+    sidebar.renderSessions();
+
+    // Both rows are listed — that is what the toggle bought — so the badge is
+    // the only thing saying which of them the engine has retired.
+    expect(sessionRailOrder(sessionRail)).toEqual(["0:live", "0:old"]);
+    const old = sessionRail.querySelector('[data-session-id="old"]')!;
+    expect(old.className).toContain("session-archived");
+    expect(old.querySelector(".session-archived-badge")!.textContent).toBe("Archived");
+    // The badge says what archiving cost: nothing beyond the filter.
+    expect(old.querySelector(".session-archived-badge")!.title).toContain("continues");
+
+    const live = sessionRail.querySelector('[data-session-id="live"]')!;
+    expect(live.className).not.toContain("session-archived");
+    expect(live.querySelector(".session-archived-badge")).toBeNull();
+  });
+
+  it("names the archive toggle by the action it performs, and shows its state", () => {
+    const { archiveToggle, sidebar } = createHarness();
+    sidebar.setShowArchivedSessions(false);
+
+    sidebar.renderSessions();
+
+    // An empty rail is the symptom this control exists for, so the control
+    // says what it would do rather than naming a filter the reader cannot see.
+    expect(archiveToggle.title).toBe("Show archived sessions");
+    expect(archiveToggle.getAttribute("aria-pressed")).toBe("false");
+    expect(archiveToggle.style.opacity).toBe("0.5");
+
+    sidebar.setShowArchivedSessions(true);
+    sidebar.renderSessions();
+
+    expect(archiveToggle.title).toBe("Hide archived sessions");
+    expect(archiveToggle.getAttribute("aria-pressed")).toBe("true");
+    expect(archiveToggle.style.opacity).toBe("1");
+  });
+
+  it("carries the search query with the toggle, so the box and the list agree", () => {
+    const { archiveToggle, sidebar, postMessages } = createHarness();
+    sidebar.setSessionSearchQuery("deploy");
+
+    archiveToggle.dispatch("click", { stopPropagation: () => {} });
+
+    // The extension re-runs *this* query with the other archive filter; a bare
+    // refresh would answer with the whole store while the box still read
+    // "deploy", and the two would disagree until the next keystroke.
+    expect(postMessages).toContainEqual({ type: "toggleArchivedSessions", query: "deploy" });
+  });
+
+  it("answers Enter and Space on the toggle, being a button the reader can reach", () => {
+    const { archiveToggle, sidebar, postMessages } = createHarness();
+    sidebar.setSessionSearchQuery("deploy");
+    // role="button" is a promise to the keyboard: a span that only answers a
+    // click is half an affordance, and the agent chip in the same panel makes
+    // the same bargain.
+    const prevented: boolean[] = [];
+    const key = (k: string) => archiveToggle.dispatch("keydown", {
+      key: k,
+      preventDefault: () => prevented.push(true),
+    });
+
+    key("Enter");
+    key(" ");
+    key("a");
+
+    expect(postMessages.filter((m) => m.type === "toggleArchivedSessions")).toEqual([
+      { type: "toggleArchivedSessions", query: "deploy" },
+      { type: "toggleArchivedSessions", query: "deploy" },
+    ]);
+    // A key it does not answer must not swallow the event: other handlers, and
+    // the browser's own defaults, still get it.
+    expect(prevented).toHaveLength(2);
+  });
+
+  it("keeps an archived row usable: it still opens, and still nests as a branch", () => {
+    const { sessionRail, sidebar, postMessages } = createHarness();
+    // Archiving is a listing filter, never a read restriction — the engine
+    // answers `GET /v1/sessions/{id}` and resumes the thread the same way. A
+    // row that opened differently would be the bug, so the row is clicked
+    // here rather than only inspected.
+    sidebar.setSessions([
+      archivedSession("source"),
+      archivedSession("branch", { parent_session_id: "source" }),
+    ]);
+    sidebar.setShowArchivedSessions(true);
+
+    sidebar.renderSessions();
+
+    // The two markers compose: a branch of an archived source is both.
+    expect(sessionRailOrder(sessionRail)).toEqual(["0:source", "1:branch"]);
+    const branch = sessionRail.querySelector('[data-session-id="branch"]')!;
+    expect(branch.className).toContain("session-fork-child");
+    expect(branch.className).toContain("session-archived");
+
+    branch.dispatch("click", { stopPropagation: () => {} });
+    expect(postMessages).toContainEqual({ type: "loadSession", sessionId: "branch" });
+  });
+});
 
 describe("thread rail branch lineage", () => {
   it("says inline which conversation a live thread was branched from", () => {

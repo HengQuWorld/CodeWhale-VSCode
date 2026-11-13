@@ -194,6 +194,10 @@ function createRuntimeHarness() {
   };
 
   const postMessages: Array<Record<string, unknown>> = [];
+  /** What the handler told the rail to do, in order: the rail's filter state
+   *  travels through these calls, so a message that stops calling them would
+   *  otherwise leave the toggle describing a query nobody is running. */
+  const sidebarCalls: string[] = [];
   const sendStopCalls: boolean[] = [];
   /** Labels the handler handed the input module's host-operation hold. */
   const hostOperationCalls: string[] = [];
@@ -274,6 +278,9 @@ function createRuntimeHarness() {
       closeTaskDetail: () => {},
       setSessions: () => {},
       setShowAllWorkspaces: () => {},
+      setShowArchivedSessions: (v: unknown) => {
+        sidebarCalls.push(`archived:${!!v}`);
+      },
       renderSessions: () => {},
       setThreads: () => {},
       renderThreads: () => {},
@@ -442,6 +449,8 @@ function createRuntimeHarness() {
       if (!handler) throw new Error("message handler not registered");
       handler({ data: msg });
     },
+    /** What the handler asked the rail to do, oldest first. */
+    sidebarCalls,
     /** Ids of the approvals the floating panel is currently offering. */
     approvalItemIds(): string[] {
       return getEl("approval-float").children
@@ -554,6 +563,28 @@ function buildScopedMenu(
 }
 
 describe("webview-js-event-handler runtime", () => {
+  it("hands the rail the session filter, with the rows and without them", () => {
+    const harness = createRuntimeHarness();
+
+    // Rows carry the filter they were queried under, so a list that includes
+    // archived records cannot be drawn under a toggle that says otherwise.
+    harness.dispatchMessage({
+      type: "sessionList",
+      sessions: [],
+      showAllWorkspaces: false,
+      showArchivedSessions: true,
+    });
+    expect(harness.sidebarCalls).toEqual(["archived:true"]);
+
+    // And the filter alone, published the moment a toggle is clicked while
+    // its listing is still in flight.
+    harness.dispatchMessage({
+      type: "sessionFilterState",
+      showAllWorkspaces: false,
+      showArchivedSessions: false,
+    });
+    expect(harness.sidebarCalls).toEqual(["archived:true", "archived:false"]);
+  });
   it("updates the visible settings labels and ready status text for ready/settingsUpdated messages", () => {
     const harness = createRuntimeHarness();
 

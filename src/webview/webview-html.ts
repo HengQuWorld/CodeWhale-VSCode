@@ -131,6 +131,10 @@ export interface WebviewTranslations {
   contextUsageTooltipNoWindow: string;
   showAllWorkspaces: string;
   filterCurrentWorkspace: string;
+  /** The Sessions rail's archive toggle: the action it performs while archived
+   *  records are hidden, and the one it performs once they are listed. */
+  showArchivedSessions: string;
+  hideArchivedSessions: string;
   approvalRequired: string;
   allow: string;
   deny: string;
@@ -376,6 +380,10 @@ export interface WebviewTranslations {
    *  (`SessionMetadata.parent_session_id` is written when a fork gets its own
    *  document.) */
   sessionForkBadge: string;
+  /** Badge on a row the engine archived, plus the tooltip that says what
+   *  archiving did not take away: it still opens and continues. */
+  sessionArchivedBadge: string;
+  sessionArchivedBadgeTitle: string;
   /** Origin line for a branch whose source is not in the list the rail is
    *  showing — archived, deleted, or filtered out by search or workspace.
    *  `{source}` is the source session's shortened id, the only name there is. */
@@ -655,6 +663,7 @@ ${css}
         </div>
         <div class="sidebar-section-body" id="tab-sessions">
           <div class="session-search-bar" id="session-search-bar">
+            <span class="sidebar-section-action" id="archive-filter-toggle" role="button" tabindex="0" title="${tr.showArchivedSessions}" aria-label="${tr.showArchivedSessions}" aria-pressed="false" style="opacity:0.5">🗄</span>
             <span class="sidebar-section-action" id="workspace-filter-toggle" title="${tr.showAllWorkspaces}">🌐</span>
             <input type="text" class="session-search-input" id="session-search-input" placeholder="${tr.searchPlaceholder}">
           </div>
@@ -894,6 +903,7 @@ ${css}
         threads: [],
         activeThreadId: null,
         showAllWorkspaces: false,
+        showArchivedSessions: false,
         sidebarTab: 'sessions',
         workState: { checklist: [], checklistCompletionPct: 0, strategy: [] },
         changesState: [],
@@ -913,6 +923,7 @@ ${css}
         setThreads: function(t) { this.threads = t; },
         setActiveThreadId: function(id) { this.activeThreadId = id; },
         setShowAllWorkspaces: function(v) { this.showAllWorkspaces = v; },
+        setShowArchivedSessions: function(v) { this.showArchivedSessions = v; },
         setWorkState: function(ws) { this.workState = ws; },
         setChangesState: function(cs, turns) { this.changesState = cs; this.changeTurns = turns || []; },
       };

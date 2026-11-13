@@ -748,6 +748,12 @@ export interface SessionMetadata {
   parent_session_id?: string | null;
   forked_from_message_count?: number | null;
   cumulative_turn_secs?: number;
+  /** Set by the engine when the record is archived, and *absent* otherwise:
+   *  the runtime skips the field on the wire for an active session rather
+   *  than sending `false`. The rail lists active records by default (the
+   *  engine filters them out of `GET /v1/sessions` unless asked), so a row's
+   *  archived marker is only ever seen after the archive toggle is on. */
+  archived?: boolean;
 }
 
 export interface SessionsResponse {

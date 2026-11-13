@@ -82,6 +82,8 @@ function makeTr(): WebviewTranslations {
     contextUsageTooltipNoWindow: "Model context window: {percent}% used",
     showAllWorkspaces: "Show all workspaces",
     filterCurrentWorkspace: "Current workspace",
+    showArchivedSessions: "Show archived sessions",
+    hideArchivedSessions: "Hide archived sessions",
     approvalRequired: "Approval required",
     allow: "Allow",
     deny: "Deny",
@@ -258,6 +260,9 @@ function makeTr(): WebviewTranslations {
     deleteSessionFailed: "Failed to delete session",
     noSearchResults: "No matching sessions",
     sessionForkBadge: "Fork",
+    sessionArchivedBadge: "Archived",
+    sessionArchivedBadgeTitle:
+      "Past the active-session window, so the rail hides it unless you show archived sessions. It opens and continues like any other conversation.",
     forkFromMissing: "Branched from “{source}” — not in this list",
     threadForkFrom: "Branched from “{source}”",
     forkTooltip: "Branched from “{source}”: the branch keeps that conversation up to the point it was cut, and the turns after it stayed behind.",
@@ -849,6 +854,7 @@ describe("webview-html.ts assembler", () => {
     expect(html).toContain("threads: []");
     expect(html).toContain("activeThreadId: null");
     expect(html).toContain("showAllWorkspaces: false");
+    expect(html).toContain("showArchivedSessions: false");
     expect(html).toContain("sidebarTab: 'sessions'");
     expect(html).toContain("workState:");
     expect(html).toContain("renderSessions:");
@@ -856,6 +862,20 @@ describe("webview-html.ts assembler", () => {
     expect(html).toContain("renderTasks:");
     expect(html).toContain("renderWork:");
     expect(html).toContain("switchSidebarTab:");
+  });
+
+  it("gives the archive toggle an element for the script to bind to", () => {
+    const html = getWebviewHtml(makeMockWebview(), makeMockExtensionUri(), makeTr());
+    // The sidebar resolves this id while the IIFE loads: a template that lost
+    // the element would throw there and take the panel's whole script block
+    // down, so the two halves are asserted together.
+    expect(html).toContain('id="archive-filter-toggle"');
+    expect(html).toContain("getElementById('archive-filter-toggle')");
+    // Hidden by default: archived records are the exception the reader opts
+    // into, not the set the rail starts from.
+    expect(html).toContain('id="archive-filter-toggle" role="button" tabindex="0"');
+    expect(html).toContain('aria-pressed="false"');
+    expect(html).toContain('title="Show archived sessions"');
   });
 
   it("API capabilities default to all false", () => {

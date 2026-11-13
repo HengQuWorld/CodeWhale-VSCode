@@ -638,6 +638,24 @@ export function getWebviewCss(): string {
       background: rgba(255,255,255,0.2);
       color: white;
     }
+    /* A session the retention window archived. It is fully readable and
+       resumable — the badge exists only so the rail does not present retired
+       history as the current set, which is what the archive toggle turned on. */
+    .thread-item .session-archived-badge {
+      padding: 0 4px;
+      border-radius: 3px;
+      font-size: 0.85em;
+      font-weight: 600;
+      background: rgba(128,128,128,0.18);
+      color: var(--muted);
+    }
+    .thread-item.active .session-archived-badge {
+      background: rgba(255,255,255,0.2);
+      color: white;
+    }
+    .thread-item.session-archived .thread-title {
+      opacity: 0.8;
+    }
     .thread-item .session-fork-origin {
       font-size: 0.9em;
       color: var(--muted);

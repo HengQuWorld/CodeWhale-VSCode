@@ -86,6 +86,8 @@ export function makeTr(overrides?: Partial<WebviewTranslations>): WebviewTransla
     contextUsageTooltipNoWindow: "Model context window: {percent}% used",
     showAllWorkspaces: "Show all workspaces",
     filterCurrentWorkspace: "Current workspace",
+    showArchivedSessions: "Show archived sessions",
+    hideArchivedSessions: "Hide archived sessions",
     approvalRequired: "Approval required",
     allow: "Allow",
     deny: "Deny",
@@ -262,6 +264,9 @@ export function makeTr(overrides?: Partial<WebviewTranslations>): WebviewTransla
     deleteSessionFailed: "Failed to delete session",
     noSearchResults: "No matching sessions",
     sessionForkBadge: "Fork",
+    sessionArchivedBadge: "Archived",
+    sessionArchivedBadgeTitle:
+      "Past the active-session window, so the rail hides it unless you show archived sessions. It opens and continues like any other conversation.",
     forkFromMissing: "Branched from “{source}” — not in this list",
     threadForkFrom: "Branched from “{source}”",
     forkTooltip: "Branched from “{source}”: the branch keeps that conversation up to the point it was cut, and the turns after it stayed behind.",

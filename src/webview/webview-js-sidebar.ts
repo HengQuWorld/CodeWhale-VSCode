@@ -38,6 +38,11 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
   var threads = [];
   var activeThreadId = null;
   var showAllWorkspaces = false;
+  // Whether the rail lists archived sessions. The engine hides them unless the
+  // extension asks, so this is a *query* switch, not a client-side filter: the
+  // rows it turns on are not in the sessions list until the toggle has
+  // round-tripped.
+  var showArchivedSessions = false;
   var sidebarTab = 'sessions';
   var agentPanelToggleEl = document.getElementById('agent-panel-toggle');
   var sessionSearchQuery = '';
@@ -560,7 +565,8 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
     var el = document.createElement('div');
     el.className = 'thread-item'
       + (s.id === activeSessionId ? ' active' : '')
-      + (nested ? ' session-fork-child' : '');
+      + (nested ? ' session-fork-child' : '')
+      + (s.archived ? ' session-archived' : '');
     el.setAttribute('data-session-id', s.id);
 
     var titleEl = document.createElement('div');
@@ -622,6 +628,18 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
       metaEl.appendChild(wsEl);
     }
 
+    if (s.archived) {
+      // An archived row opens and resumes exactly like an active one — the
+      // engine has no separate read route for it — so the only thing telling
+      // them apart is this badge. Without it the rail would present history
+      // the retention window already retired as if it were still current.
+      var archivedBadge = document.createElement('span');
+      archivedBadge.className = 'session-archived-badge';
+      archivedBadge.textContent = __i18n.sessionArchivedBadge;
+      archivedBadge.title = __i18n.sessionArchivedBadgeTitle;
+      metaEl.appendChild(archivedBadge);
+    }
+
     if (s.message_count) {
       var msgEl = document.createElement('span');
       msgEl.textContent = s.message_count + ' msgs';
@@ -668,6 +686,18 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
       filterToggle.textContent = showAllWorkspaces ? '\\uD83C\\uDF0D' : '\\uD83C\\uDF10';
       filterToggle.title = showAllWorkspaces ? __i18n.filterCurrentWorkspace : __i18n.showAllWorkspaces;
       filterToggle.style.opacity = showAllWorkspaces ? '1' : '0.5';
+    }
+
+    var archiveToggle = document.getElementById('archive-filter-toggle');
+    if (archiveToggle) {
+      // Both the title and the opacity name the state the filter is in: a
+      // dimmed cabinet means archived records are hidden, which is what the
+      // empty rail a user just saw was describing.
+      var archiveAction = showArchivedSessions ? __i18n.hideArchivedSessions : __i18n.showArchivedSessions;
+      archiveToggle.title = archiveAction;
+      archiveToggle.setAttribute('aria-label', archiveAction);
+      archiveToggle.setAttribute('aria-pressed', showArchivedSessions ? 'true' : 'false');
+      archiveToggle.style.opacity = showArchivedSessions ? '1' : '0.5';
     }
 
     // Ensure search bar exists (only created once)
@@ -3730,6 +3760,23 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
     vscode.postMessage({ type: 'toggleAllWorkspaces' });
   });
 
+  // ── Archive filter toggle ──
+  // The query travels with the click: the extension answers with the list that
+  // query describes, so a search in the box is never silently replaced by the
+  // whole store.
+  var archiveToggleEl = document.getElementById('archive-filter-toggle');
+  archiveToggleEl.addEventListener('click', function(e) {
+    e.stopPropagation();
+    vscode.postMessage({ type: 'toggleArchivedSessions', query: sessionSearchQuery });
+  });
+  // It carries role="button", so it has to answer the keyboard the way the
+  // pointer does — the same bargain the agent chip makes below.
+  archiveToggleEl.addEventListener('keydown', function(e) {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    e.preventDefault();
+    vscode.postMessage({ type: 'toggleArchivedSessions', query: sessionSearchQuery });
+  });
+
   // ── Threads panel toggle buttons ──
   document.getElementById('btn-threads').addEventListener('click', toggleThreadsPanel);
   if (agentPanelToggleEl) {
@@ -3808,6 +3855,8 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
     setActiveThreadId: function(v) { activeThreadId = v; },
     getShowAllWorkspaces: function() { return showAllWorkspaces; },
     setShowAllWorkspaces: function(v) { showAllWorkspaces = v; },
+    getShowArchivedSessions: function() { return showArchivedSessions; },
+    setShowArchivedSessions: function(v) { showArchivedSessions = v; },
     getWorkState: function() { return workState; },
     setWorkState: function(v) { workState = v; },
     getChangesState: function() { return changesState; },

@@ -286,6 +286,18 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
    *  is retried inside `fetchThreadSummaries`; a timeout is not. */
   private static readonly THREAD_LIST_ATTEMPTS = 2;
 
+  /** Rows the Sessions rail asks for while it shows active records only. */
+  private static readonly SESSION_LIST_LIMIT = 100;
+
+  /** Rows it asks for once archived records are included.
+   *
+   *  Archived records outnumber active ones on a long-lived machine (that is
+   *  what `MAX_SESSIONS = 50` does to a store shared by every workspace), so
+   *  the active-only limit would cut the archive off partway and the rail
+   *  would offer a filter that hides most of what it names. The route clamps at
+   *  500; asking for the clamp is what makes the view complete. */
+  private static readonly SESSION_LIST_ARCHIVED_LIMIT = 500;
+
   private view?: vscode.WebviewView;
   public readonly api: CodeWhaleApiClient;
   public readonly engine: CodeWhaleEngine;
@@ -300,6 +312,14 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
   /** Monotonic source of attachment ids; see AttachmentRecord. */
   private attachmentSeq = 0;
   private showAllWorkspaces: boolean = false;
+  /** Whether the Sessions rail also lists archived records.
+   *
+   *  The engine hides them unless `include_archived` asks, and they are not
+   *  rare — the store's cap archives every transcript past 50 active ones. On
+   *  a workspace whose sessions have all aged out the rail therefore read "no
+   *  conversations" over a full history. The toggle in the rail's search bar
+   *  is the only thing that sets this; it changes the query, never a record. */
+  private showArchivedSessions: boolean = false;
   /** Fallback workspace from the TUI, used when VS Code has no folder open. */
   private tuiWorkspace: string | null = null;
   /** The engine's verdict on this workspace (project skills, commands, hooks,
@@ -317,6 +337,11 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
    *  large store, so overlapping refreshes (sidebar opens, watcher errors) do
    *  finish out of order and a stale list must not clobber a newer one. */
   private threadListRefreshToken: number = 0;
+  /** The same guard for the Sessions rail. It has one more reason to need it:
+   *  the archive toggle can be clicked twice while the first listing is still
+   *  in flight, and the two answers land in either order. Whichever pass owns
+   *  the rail is the one whose query the rows were asked for. */
+  private sessionListRefreshToken: number = 0;
   private runtimeVersion: string | null = null;
   /** Cached provider list from `GET /v1/providers`. Refreshed on init and
    * after the active provider changes so the webview picker stays in sync. */
@@ -783,12 +808,31 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         break;
       case "toggleAllWorkspaces":
         this.showAllWorkspaces = !this.showAllWorkspaces;
+        this.postSessionFilterState();
         // Fire all three refreshes in parallel — they're independent.
         await Promise.all([
           this.refreshSessionList(),
           this.refreshThreadList(),
           this.refreshTaskList(),
         ]);
+        break;
+      case "toggleArchivedSessions":
+        this.showArchivedSessions = !this.showArchivedSessions;
+        // The rail is told the new filter before the listing is asked for. The
+        // fetch can take seconds and can fail outright; without this the
+        // toggle would sit in its old state until rows arrive, which reads as
+        // a click that did not land. Rows are still published with the filter
+        // they were queried under, so the two never disagree.
+        this.postSessionFilterState();
+        // The search box is showing a query, so re-running that query is what
+        // keeps the box and the list describing the same thing. Refreshing
+        // instead would answer with every session while the box still reads
+        // "something" — the two would disagree until the next keystroke.
+        if (typeof msg.query === "string" && msg.query.trim()) {
+          await this.handleSearchSessions(msg.query);
+        } else {
+          await this.refreshSessionList();
+        }
         break;
       case "inputHistoryPush":
         // The composer records what was sent so ↑/↓ can walk it back. The
@@ -3955,11 +3999,25 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
 
   /** Refresh the session list shown in the sidebar */
   public async refreshSessionList(): Promise<void> {
+    // Both filters are read once, before the request: they can change while it
+    // is in flight (the message listener is async and VS Code does not
+    // serialize messages, so two clicks on the archive toggle overlap), and a
+    // row must be filtered and published under the query it was asked for.
+    const archived = this.showArchivedSessions;
+    const showAll = this.showAllWorkspaces;
+    const token = ++this.sessionListRefreshToken;
     const fetchAndSend = async () => {
-      const result = await this.api.listSessions({ limit: 100 });
+      const result = await this.api.listSessions(
+        archived
+          ? {
+              limit: ChatProvider.SESSION_LIST_ARCHIVED_LIMIT,
+              includeArchived: true,
+            }
+          : { limit: ChatProvider.SESSION_LIST_LIMIT }
+      );
       let sessions = result.sessions || [];
       const currentWorkspace = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-      if (!this.showAllWorkspaces && currentWorkspace) {
+      if (!showAll && currentWorkspace) {
         sessions = sessions.filter(s => s.workspace === currentWorkspace);
       }
       // Defensive: the backend can return the same session id multiple times
@@ -3975,7 +4033,15 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         }
       }
       const deduped = Array.from(latestById.values());
-      this.postMessage({ type: "sessionList", sessions: deduped, showAllWorkspaces: this.showAllWorkspaces });
+      // A newer pass owns the rail now; its rows and its filter are the pair
+      // that must be painted, not this one's.
+      if (token !== this.sessionListRefreshToken) return;
+      this.postMessage({
+        type: "sessionList",
+        sessions: deduped,
+        showAllWorkspaces: showAll,
+        showArchivedSessions: archived,
+      });
     };
     try {
       await fetchAndSend();
@@ -4179,17 +4245,49 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
 
   /** Search sessions by query and update the sidebar */
   private async handleSearchSessions(query: string): Promise<void> {
+    // Same read-once rule as `refreshSessionList`: this pass answers the
+    // filters it started with, and a newer pass wins the rail.
+    const archived = this.showArchivedSessions;
+    const showAll = this.showAllWorkspaces;
+    const token = ++this.sessionListRefreshToken;
     try {
-      const result = await this.api.listSessions({ limit: 100, search: query || undefined });
+      const result = await this.api.listSessions(
+        archived
+          ? {
+              limit: ChatProvider.SESSION_LIST_ARCHIVED_LIMIT,
+              search: query || undefined,
+              includeArchived: true,
+            }
+          : { limit: ChatProvider.SESSION_LIST_LIMIT, search: query || undefined }
+      );
       let sessions = result.sessions || [];
       const currentWorkspace = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-      if (!this.showAllWorkspaces && currentWorkspace) {
+      if (!showAll && currentWorkspace) {
         sessions = sessions.filter(s => s.workspace === currentWorkspace);
       }
-      this.postMessage({ type: "sessionList", sessions, showAllWorkspaces: this.showAllWorkspaces });
+      if (token !== this.sessionListRefreshToken) return;
+      this.postMessage({
+        type: "sessionList",
+        sessions,
+        showAllWorkspaces: showAll,
+        showArchivedSessions: archived,
+      });
     } catch {
       // best-effort
     }
+  }
+
+  /** Tell the rail which filters are in force, before any listing answers.
+   *
+   *  The filter state is the extension's: it decides which query to send. This
+   *  is the state alone, with no rows — so it can be published the moment a
+   *  toggle is clicked, while the listing it starts is still in flight. */
+  private postSessionFilterState(): void {
+    this.postMessage({
+      type: "sessionFilterState",
+      showAllWorkspaces: this.showAllWorkspaces,
+      showArchivedSessions: this.showArchivedSessions,
+    });
   }
 
   /** Refresh the task list shown in the sidebar, scoped to the current workspace */

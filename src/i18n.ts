@@ -263,6 +263,11 @@ interface Translations {
   showAllWorkspaces: string;
   /** "Current workspace only" / "仅当前工作区" */
   filterCurrentWorkspace: string;
+  /** The Sessions rail's archive toggle, named by the action it performs:
+   *  this is the title while archived records are hidden. */
+  showArchivedSessions: string;
+  /** The same toggle once archived records are listed. */
+  hideArchivedSessions: string;
   // Slash commands
   commandMode: string;
   commandModel: string;
@@ -455,6 +460,11 @@ interface Translations {
    *  forkTooltip, forkTooltipPoint). */
   sessionForkBadge: string;
   forkFromMissing: string;
+  /** Badge on a row the engine has archived: the transcript is out of the
+   *  active window but still fully readable and resumable. */
+  sessionArchivedBadge: string;
+  /** Tooltip for that badge: says what "archived" did and did not cost. */
+  sessionArchivedBadgeTitle: string;
   /** The Threads rail's inline lineage line: which conversation a live thread
    *  was branched from. `{source}` is that conversation's title, or its
    *  shortened session id when it is not in either listing. */
@@ -812,6 +822,8 @@ const en: Translations = {
   contextUsageTooltipNoWindow: "Model context window: {percent}% used",
   showAllWorkspaces: "Show all workspaces",
   filterCurrentWorkspace: "Current workspace only",
+  showArchivedSessions: "Show archived sessions",
+  hideArchivedSessions: "Hide archived sessions",
   commandMode: "/mode - Switch mode (act/plan/operate)",
   commandModel: "/model - Switch model",
   commandModels: "/models - List available models",
@@ -988,6 +1000,9 @@ const en: Translations = {
   noSearchResults: "No matching sessions",
   sessionForkBadge: "Fork",
   forkFromMissing: "Branched from “{source}” — not in this list",
+  sessionArchivedBadge: "Archived",
+  sessionArchivedBadgeTitle:
+    "Past the active-session window, so the rail hides it unless you show archived sessions. It opens and continues like any other conversation.",
   threadForkFrom: "Branched from “{source}”",
   forkTooltip: "Branched from “{source}”: the branch keeps that conversation up to the point it was cut, and the turns after it stayed behind.",
   forkTooltipPoint: "The conversation it came from had {count} messages at that point.",
@@ -1321,6 +1336,8 @@ const zhCn: Translations = {
   contextUsageTooltipNoWindow: "模型上下文窗口：已用 {percent}%",
   showAllWorkspaces: "显示所有工作区",
   filterCurrentWorkspace: "仅当前工作区",
+  showArchivedSessions: "显示已归档会话",
+  hideArchivedSessions: "隐藏已归档会话",
   commandMode: "/mode - 切换模式 (act/plan/operate)",
   commandModel: "/model - 切换模型",
   commandModels: "/models - 列出可用模型",
@@ -1496,6 +1513,9 @@ const zhCn: Translations = {
   noSearchResults: "没有匹配的会话",
   sessionForkBadge: "分叉",
   forkFromMissing: "分叉自「{source}」— 不在当前列表中",
+  sessionArchivedBadge: "已归档",
+  sessionArchivedBadgeTitle:
+    "已超出活动会话窗口，因此默认不显示；打开和继续使用与其它会话完全一样。",
   threadForkFrom: "分叉自「{source}」",
   forkTooltip: "分叉自「{source}」：此分支保留到分叉点为止的对话，其后的轮次留在原会话。",
   forkTooltipPoint: "分叉时原会话已有 {count} 条消息。",
@@ -1808,6 +1828,8 @@ export function webviewTranslations(tr: Translations) {
     contextUsageTooltip: tr.contextUsageTooltip,
     contextUsageTooltipNoWindow: tr.contextUsageTooltipNoWindow,
     showAllWorkspaces: tr.showAllWorkspaces,
+    showArchivedSessions: tr.showArchivedSessions,
+    hideArchivedSessions: tr.hideArchivedSessions,
     filterCurrentWorkspace: tr.filterCurrentWorkspace,
     approvalRequired: tr.approvalRequired,
     allow: tr.allow,
@@ -2034,6 +2056,8 @@ export function webviewTranslations(tr: Translations) {
     noSearchResults: tr.noSearchResults,
     sessionForkBadge: tr.sessionForkBadge,
     forkFromMissing: tr.forkFromMissing,
+    sessionArchivedBadge: tr.sessionArchivedBadge,
+    sessionArchivedBadgeTitle: tr.sessionArchivedBadgeTitle,
     threadForkFrom: tr.threadForkFrom,
     forkTooltip: tr.forkTooltip,
     forkTooltipPoint: tr.forkTooltipPoint,
