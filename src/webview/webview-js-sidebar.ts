@@ -2632,7 +2632,10 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
         card.addEventListener('click', function(e) {
           if (e.target.tagName === 'BUTTON') return;
           var runId = runData.spec && (runData.spec.run_id || runData.spec.worker_id);
-          vscode.postMessage({ type: 'showAgentSessions', runId: runId || '' });
+          // The card the reader clicked is also the record to show. Sent along
+          // because a finished run is age-evicted from the runtime's ledger
+          // while its card stays on screen, and the detail should still open.
+          vscode.postMessage({ type: 'showAgentSessions', runId: runId || '', run: runData });
         });
       })(r);
       container.appendChild(card);
@@ -3663,7 +3666,15 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
       var header = document.getElementById(key + '-section-toggle');
       if (!header) return;
       header.addEventListener('click', function() {
-        setActivitySectionCollapsed(key, !isActivitySectionCollapsed(key));
+        var collapsing = !isActivitySectionCollapsed(key);
+        setActivitySectionCollapsed(key, collapsing);
+        // A folded Agents section keeps the list it painted last time, and the
+        // runtime drops a finished run about an hour after it settles. Opening
+        // the section asks for the truth instead of showing a card that can no
+        // longer be opened.
+        if (!collapsing && key === 'agents') {
+          vscode.postMessage({ type: 'refreshAgentRuns' });
+        }
       });
     })(ACTIVITY_SECTION_KEYS[sectionToggleIndex]);
   }

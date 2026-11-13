@@ -148,7 +148,7 @@ describe("webview-js-sidebar.ts", () => {
     // still there and still keyed by the roster.
     expect(script).toContain("ACTIVITY_SECTION_KEYS[sectionToggleIndex]");
     expect(script).toContain("document.getElementById(key + '-section-toggle')");
-    expect(script).toContain("setActivitySectionCollapsed(key, !isActivitySectionCollapsed(key))");
+    expect(script).toContain("setActivitySectionCollapsed(key, collapsing)");
   });
 
   it("carries the Activity roster into the script it generates", () => {

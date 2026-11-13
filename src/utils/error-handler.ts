@@ -62,3 +62,15 @@ export function isTransientFetchError(err: unknown): boolean {
   const code = (err as NodeJS.ErrnoException | null | undefined)?.code;
   return typeof code === "string" && TRANSIENT_SOCKET_CODES.has(code);
 }
+
+/**
+ * Whether the runtime answered 404 for a record.
+ *
+ * Some records are deliberately not kept: the run ledger age-evicts a finished
+ * agent run, so a card the sidebar drew earlier can point at a run the runtime
+ * no longer holds. That is a "gone", not a broken request, and the caller can
+ * say so instead of showing the raw API envelope.
+ */
+export function isApiNotFoundError(err: unknown): boolean {
+  return err instanceof Error && err.message.startsWith("API error 404");
+}

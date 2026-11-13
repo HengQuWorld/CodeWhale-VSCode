@@ -16,6 +16,7 @@ import {
   TurnItemRecord,
 } from "./types";
 import type {
+  AgentRunRecord,
   TaskSummary,
   ThreadDetailResponse,
   CreateFleetRunRequest,
@@ -24,7 +25,7 @@ import type {
   WorkspaceSnapshotRef,
   CallChangesResponse,
 } from "./types";
-import { formatError, getErrorMessage, isTransientFetchError } from "./utils/error-handler";
+import { formatError, getErrorMessage, isApiNotFoundError, isTransientFetchError } from "./utils/error-handler";
 import {
   providerEntryRouteKey,
   providerRouteKey,
@@ -139,6 +140,23 @@ function mergeThreadRecord(
  *  the two agree on the prompt itself without pretending they are identical. */
 function promptMatchKey(text: string): string {
   return text.replace(/\s+/g, " ").trim();
+}
+
+/** The webview sends back the run card it drew; accept only something shaped
+ *  like a run record, so a malformed payload cannot stand in for the engine's
+ *  own answer. */
+function isAgentRunRecord(value: unknown): value is AgentRunRecord {
+  if (!value || typeof value !== "object") return false;
+  const spec = (value as { spec?: unknown }).spec;
+  return !!spec && typeof spec === "object";
+}
+
+/** A run is addressed by its run id, or by its worker id for records that
+ *  predate run ids — the same rule the runtime's own lookup uses. */
+function agentRunAnswers(record: AgentRunRecord, runId: string): boolean {
+  const spec = record.spec;
+  const effective = spec.run_id || spec.worker_id;
+  return effective === runId || spec.worker_id === runId;
 }
 
 /** Which of a conversation's user prompts were mid-turn steering.
@@ -923,7 +941,13 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         ConfigPanel.createOrShow(this.extensionUri, this.api);
         break;
       case "showAgentSessions":
-        this.handleShowAgentSessions(msg.runId as string);
+        this.handleShowAgentSessions(
+          msg.runId as string,
+          isAgentRunRecord(msg.run) ? msg.run : undefined
+        );
+        break;
+      case "refreshAgentRuns":
+        this.refreshAgentRuns();
         break;
       case "showTaskDetail":
         this.handleShowTaskDetail(msg.taskId as string);
@@ -4945,8 +4969,18 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     }
   }
 
-  /** Show an agent run detail inside the main webview when a run id is known. */
-  private async handleShowAgentSessions(runId: string): Promise<void> {
+  /** Show an agent run detail inside the main webview when a run id is known.
+   *
+   *  `clicked` is the record the card was drawn from. It matters because the
+   *  runtime's run ledger age-evicts a finished run (about an hour) while the
+   *  card that points at it stays on screen until the list is refreshed: the
+   *  click is then a request for a run the runtime no longer holds. Falling
+   *  back to the card's own record keeps the detail open, and re-asking for the
+   *  list is what finally retires the stale card. */
+  private async handleShowAgentSessions(
+    runId: string,
+    clicked?: AgentRunRecord
+  ): Promise<void> {
     if (!runId) {
       return;
     }
@@ -4954,6 +4988,15 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       const run = await this.api.getAgentRun(runId);
       this.postMessage({ type: "agentDetail", run });
     } catch (err) {
+      if (isApiNotFoundError(err)) {
+        if (clicked && agentRunAnswers(clicked, runId)) {
+          this.postMessage({ type: "agentDetail", run: clicked });
+        } else {
+          vscode.window.showWarningMessage(t().agentRunGone);
+        }
+        this.refreshAgentRuns();
+        return;
+      }
       vscode.window.showErrorMessage(`Failed to load agent run: ${(err as Error).message}`);
     }
   }

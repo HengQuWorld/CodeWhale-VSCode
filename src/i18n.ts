@@ -543,6 +543,7 @@ interface Translations {
   mcpImportBlocked: string;
   mcpImportConflict: string;
   noAgentRuns: string;
+  agentRunGone: string;
   agentStatusQueued: string;
   agentStatusStarting: string;
   agentStatusRunning: string;
@@ -1058,6 +1059,7 @@ const en: Translations = {
   mcpImportBlocked: "Blocked at source",
   mcpImportConflict: "Name already in use",
   noAgentRuns: "No agent runs",
+  agentRunGone: "That agent run is no longer in this runtime — a finished run is dropped from the run list about an hour after it settles.",
   agentStatusQueued: "Queued",
   agentStatusStarting: "Starting",
   agentStatusRunning: "Running",
@@ -1565,6 +1567,7 @@ const zhCn: Translations = {
   mcpImportBlocked: "来源处已禁用",
   mcpImportConflict: "名称已被占用",
   noAgentRuns: "暂无子代理运行",
+  agentRunGone: "该子代理运行已不在当前引擎中——已结束的运行约一小时后会从运行列表里清理。",
   agentStatusQueued: "排队中",
   agentStatusStarting: "启动中",
   agentStatusRunning: "运行中",
@@ -2102,6 +2105,7 @@ export function webviewTranslations(tr: Translations) {
     mcpImportBlocked: tr.mcpImportBlocked,
     mcpImportConflict: tr.mcpImportConflict,
     noAgentRuns: tr.noAgentRuns,
+    agentRunGone: tr.agentRunGone,
     agentStatusQueued: tr.agentStatusQueued,
     agentStatusStarting: tr.agentStatusStarting,
     agentStatusRunning: tr.agentStatusRunning,

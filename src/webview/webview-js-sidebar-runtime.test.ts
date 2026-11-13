@@ -567,6 +567,23 @@ describe("agent cards show when each agent ran", () => {
 
     expect(html).not.toContain("agent-runtime");
   });
+
+  it("hands the clicked card's own record back to the host", () => {
+    // The card outlives the runtime's ledger entry for a finished run, so the
+    // detail has to be openable from what the card was drawn from.
+    const { sidebar, agentsPanel, postMessages } = createHarness();
+    const run = agentRun({ status: "completed" });
+    sidebar.setAgentRuns([run]);
+    sidebar.renderAgents(sidebar.getAgentRuns());
+
+    agentsPanel.children[0].dispatch("click", { target: { tagName: "DIV" } });
+
+    expect(postMessages).toContainEqual({
+      type: "showAgentSessions",
+      runId: "run-1",
+      run,
+    });
+  });
 });
 
 // ── Toolbar Agent chip ──
@@ -855,6 +872,31 @@ describe("Activity section folding", () => {
 
     expect(sections.changes.classList.contains("collapsed")).toBe(false);
     expect(storage.getItem("codewhale:collapsedSections")).toBe("[]");
+  });
+
+  it("asks for a fresh agent list when the Agents section is opened", () => {
+    // A folded section keeps the list it painted last time, and the runtime
+    // drops a finished run after about an hour: opening it must re-ask rather
+    // than show a card that can no longer be opened.
+    const { sectionHeaders, postMessages } = createHarness();
+
+    const refreshRequests = () =>
+      postMessages.filter((message) => message.type === "refreshAgentRuns");
+
+    sectionHeaders.agents.dispatch("click");
+    expect(refreshRequests()).toEqual([]);
+
+    sectionHeaders.agents.dispatch("click");
+    expect(refreshRequests()).toHaveLength(1);
+  });
+
+  it("does not re-ask for agents when another section is opened", () => {
+    const { sectionHeaders, postMessages } = createHarness();
+
+    sectionHeaders.tasks.dispatch("click");
+    sectionHeaders.tasks.dispatch("click");
+
+    expect(postMessages.filter((message) => message.type === "refreshAgentRuns")).toEqual([]);
   });
 
   it("keeps each section's fold to itself", () => {

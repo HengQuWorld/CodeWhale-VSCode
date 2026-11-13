@@ -108,6 +108,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         await engine.restart();
         api.setBaseUrl(engine.baseUrl);
         api.setToken(engine.token);
+        // Agent runs live in the runtime process, not on disk, so every card
+        // the sidebar still shows belongs to the engine that just went away.
+        // Re-ask before the reader clicks one and reads a bare 404.
+        void chatProvider.refreshAgentRuns();
         vscode.window.showInformationMessage(t().engineRestarted);
       } catch (err) {
         vscode.window.showErrorMessage(

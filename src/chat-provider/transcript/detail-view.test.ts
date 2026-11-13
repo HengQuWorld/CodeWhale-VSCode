@@ -392,6 +392,103 @@ describe("ChatProvider detail view routing", () => {
     });
   });
 
+  it("opens the clicked card's own record when the run has aged out of the ledger", async () => {
+    // A finished run is evicted from the runtime's ledger about an hour after it
+    // settles, but its card stays on screen until the list refreshes. Clicking
+    // it must still open the detail the reader is looking at.
+    const clicked = {
+      spec: { worker_id: "agent_1", run_id: "agent_1", objective: "audit the repo" },
+      status: "completed",
+      steps_taken: 40,
+    };
+    const api = {
+      bindEngine: vi.fn(),
+      getAgentRun: vi.fn(async () => {
+        throw new Error("API error 404: agent run 'agent_1' not found");
+      }),
+      listAgentRuns: vi.fn(async () => ({ runs: [] })),
+    };
+
+    const provider = new ChatProvider({} as any, {} as any, api as any);
+    provider.postMessage = vi.fn();
+
+    await (provider as any).handleShowAgentSessions("agent_1", clicked);
+    await vi.waitFor(() => {
+      expect(api.listAgentRuns).toHaveBeenCalled();
+    });
+
+    expect(provider.postMessage).toHaveBeenCalledWith({ type: "agentDetail", run: clicked });
+    expect(vscodeState.showWarningMessage).not.toHaveBeenCalled();
+    expect(vscodeState.showErrorMessage).not.toHaveBeenCalled();
+  });
+
+  it("ignores a card record that names a different run", async () => {
+    const api = {
+      bindEngine: vi.fn(),
+      getAgentRun: vi.fn(async () => {
+        throw new Error("API error 404: agent run 'agent_2' not found");
+      }),
+      listAgentRuns: vi.fn(async () => ({ runs: [] })),
+    };
+
+    const provider = new ChatProvider({} as any, {} as any, api as any);
+    provider.postMessage = vi.fn();
+
+    await (provider as any).handleShowAgentSessions("agent_2", {
+      spec: { worker_id: "agent_1", run_id: "agent_1" },
+      status: "completed",
+    });
+
+    expect(provider.postMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: "agentDetail" })
+    );
+    expect(vscodeState.showWarningMessage).toHaveBeenCalledWith(
+      expect.stringContaining("no longer in this runtime")
+    );
+  });
+
+  it("says the run is gone, and refreshes the list, when no card record was supplied", async () => {
+    const api = {
+      bindEngine: vi.fn(),
+      getAgentRun: vi.fn(async () => {
+        throw new Error("API error 404: agent run 'agent_1' not found");
+      }),
+      listAgentRuns: vi.fn(async () => ({ runs: [] })),
+    };
+
+    const provider = new ChatProvider({} as any, {} as any, api as any);
+    provider.postMessage = vi.fn();
+
+    await (provider as any).handleShowAgentSessions("agent_1");
+    await vi.waitFor(() => {
+      expect(api.listAgentRuns).toHaveBeenCalled();
+    });
+
+    expect(vscodeState.showWarningMessage).toHaveBeenCalledWith(
+      expect.stringContaining("no longer in this runtime")
+    );
+    expect(vscodeState.showErrorMessage).not.toHaveBeenCalled();
+  });
+
+  it("still reports a load failure other than a missing run", async () => {
+    const api = {
+      bindEngine: vi.fn(),
+      getAgentRun: vi.fn(async () => {
+        throw new Error("API error 500: boom");
+      }),
+      listAgentRuns: vi.fn(async () => ({ runs: [] })),
+    };
+
+    const provider = new ChatProvider({} as any, {} as any, api as any);
+    provider.postMessage = vi.fn();
+
+    await (provider as any).handleShowAgentSessions("agent_1");
+
+    expect(vscodeState.showErrorMessage).toHaveBeenCalledWith(
+      "Failed to load agent run: API error 500: boom"
+    );
+  });
+
   it("opens cached task preview when the artifact file no longer exists", async () => {
     const api = {
       bindEngine: vi.fn(),
