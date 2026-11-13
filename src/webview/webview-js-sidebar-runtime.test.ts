@@ -963,6 +963,25 @@ function pendingApproval(id: string) {
   return { id, tool_name: "shell", description: "run the tests" };
 }
 
+/** A `request_user_input` request holding `questionCount` questions, each with
+ *  two options — the shape the bar draws one block per question for. */
+function pendingInput(id: string, questionCount: number) {
+  return {
+    id,
+    request: {
+      questions: Array.from({ length: questionCount }, (_, q) => ({
+        id: `q${q}`,
+        header: `Question ${q + 1}`,
+        question: `Pick one for question ${q + 1}`,
+        options: [
+          { label: `option-${q}-a`, description: "first" },
+          { label: `option-${q}-b`, description: "second" },
+        ],
+      })),
+    },
+  };
+}
+
 describe("inline thread attention", () => {
   it("keeps the expanded card on its row across a rail rebuild", () => {
     const { postMessages, rail, sidebar } = createHarness();
@@ -1098,6 +1117,94 @@ describe("inline thread attention", () => {
     });
 
     expect(postMessages).toContainEqual({ type: "loadThread", threadId: "thread-elsewhere" });
+  });
+
+  it("says how many questions a request holds and numbers them", () => {
+    const { rail, sidebar } = createHarness();
+    sidebar.setThreads([waitingThread("thread-a", "2026-09-17T00:00:00Z")]);
+    sidebar.renderThreads();
+    sidebar.showThreadAttention({
+      threadId: "thread-a",
+      approvals: [],
+      inputs: [pendingInput("input-1", 2)],
+    });
+
+    const card = attentionCard(rail, "thread-a")!;
+    // Without the count, two questions under one heading read as one question
+    // with a pile of buttons.
+    expect(card.querySelector(".thread-attention-qcount")?.textContent).toBe(
+      makeTr().userInputQuestionsCount.replace("{count}", "2"),
+    );
+    const questions = card.querySelectorAll(".thread-attention-question");
+    expect(questions).toHaveLength(2);
+    expect(questions[0].innerHTML).toContain('class="thread-attention-qidx">1<');
+    expect(questions[1].innerHTML).toContain('class="thread-attention-qidx">2<');
+  });
+
+  it("keeps a pick visible, and says it once", () => {
+    const { postMessages, rail, sidebar } = createHarness();
+    sidebar.setThreads([waitingThread("thread-a", "2026-09-17T00:00:00Z")]);
+    sidebar.renderThreads();
+    sidebar.showThreadAttention({
+      threadId: "thread-a",
+      approvals: [],
+      inputs: [pendingInput("input-1", 2)],
+    });
+
+    const first = attentionCard(rail, "thread-a")!
+      .querySelectorAll(".thread-attention-question")[0];
+    const buttons = first.querySelectorAll(".thread-attention-btn");
+    const [chosen, other] = buttons;
+    chosen.dispatch("click", { stopPropagation: () => undefined });
+
+    // The row stays — the second question is unanswered — so the pick has to
+    // show, or the click reads as dropped.
+    expect(chosen.classList.contains("is-selected")).toBe(true);
+    expect(other.classList.contains("is-dimmed")).toBe(true);
+    expect(chosen.textContent).toBe("\u2713 " + chosen.getAttribute("data-option-label"));
+    expect(first.classList.contains("is-answered")).toBe(true);
+
+    // Same option again: the row already moved; a second answer would reach
+    // the runtime as a duplicate reply to the same question.
+    chosen.dispatch("click", { stopPropagation: () => undefined });
+    expect(postMessages.filter((m) => m.type === "userInputSelect")).toHaveLength(1);
+
+    // A different option takes the pick over.
+    other.dispatch("click", { stopPropagation: () => undefined });
+    const selects = postMessages.filter((m) => m.type === "userInputSelect");
+    expect(selects).toHaveLength(2);
+    expect(selects[1].optionLabel).toBe("option-0-b");
+    expect(other.classList.contains("is-selected")).toBe(true);
+    expect(chosen.classList.contains("is-selected")).toBe(false);
+    expect(chosen.textContent).toBe("option-0-a");
+  });
+
+  it("keeps that pick across the rebuild the thread list causes", () => {
+    const { rail, sidebar } = createHarness();
+    sidebar.setThreads([waitingThread("thread-a", "2026-09-17T00:00:00Z")]);
+    sidebar.renderThreads();
+    sidebar.showThreadAttention({
+      threadId: "thread-a",
+      approvals: [],
+      inputs: [pendingInput("input-1", 2)],
+    });
+
+    const before = attentionCard(rail, "thread-a")!
+      .querySelectorAll(".thread-attention-question")[1]
+      .querySelectorAll(".thread-attention-btn")[0];
+    before.dispatch("click", { stopPropagation: () => undefined });
+
+    // The discovery sweep publishes a thread list while a thread waits, and a
+    // rebuild replaces the card. A pick it forgets is a pick the user will
+    // click again.
+    sidebar.renderThreads();
+
+    const after = attentionCard(rail, "thread-a")!
+      .querySelectorAll(".thread-attention-question")[1];
+    const rebuilt = after.querySelectorAll(".thread-attention-btn")[0];
+    expect(after.classList.contains("is-answered")).toBe(true);
+    expect(rebuilt.classList.contains("is-selected")).toBe(true);
+    expect(rebuilt.textContent).toBe("\u2713 option-1-a");
   });
 
   it("stops expanding a thread once it is the one on screen", () => {

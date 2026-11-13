@@ -323,6 +323,28 @@ describe("webview-js-event-handler.ts", () => {
     expect(script).toContain("'.file-change-card.is-from-call'");
   });
 
+  it("says how many questions a request carries, and numbers them", () => {
+    // One bar can hold several questions. Nothing in the old markup said so:
+    // two question blocks stacked under one icon read as one question with two
+    // rows of buttons. The header carries the count, the chip the running
+    // progress, and each block its index.
+    const script = getEventHandlerScript(makeTr());
+    expect(script).toContain("var multi = questions.length > 1");
+    expect(script).toContain('class="user-input-title-row"');
+    expect(script).toContain("__i18n.userInputQuestionsCount.replace('{count}'");
+    expect(script).toContain("__i18n.userInputMultiHint");
+    expect(script).toContain('class="user-input-qidx"');
+    expect(script).toContain('data-question-id="');
+  });
+
+  it("retires only the bar the resolved input owned", () => {
+    // Two requests can be open at once (a view and a background thread); a
+    // blanket removal takes the other request's only answerable buttons away.
+    const script = getEventHandlerScript(makeTr());
+    expect(script).toContain('bar.setAttribute(\'data-input-id\', inputId)');
+    expect(script).toContain("'.user-input-bar[data-input-id=\"' + msg.inputId + '\"]'");
+  });
+
   it("renders friendly TUI mode and posture labels while keeping canonical values", () => {
     const script = getEventHandlerScript(makeTr());
     // Injected display maps mirror AppMode::display_name() and

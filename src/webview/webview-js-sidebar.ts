@@ -1125,6 +1125,10 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
       // thread waits — and a rebuild replaces the whole card. Without this the
       // tick would be lost between ticking it and clicking Allow.
       remember: {},
+      // Picks already made in a multi-question request, by input id and then
+      // question id. The row outlives the click (it leaves only when the last
+      // question is answered), so a repaint in between has to redraw them.
+      inputPicks: {},
     };
     renderThreadAttention(true);
   }
@@ -1229,30 +1233,16 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
       var inputRow = document.createElement('div');
       inputRow.className = 'thread-attention-input';
       inputRow.setAttribute('data-input-id', pending.id || '');
-      for (var q = 0; q < questions.length; q++) {
-        var question = questions[q];
-        var qEl = document.createElement('div');
-        qEl.className = 'thread-attention-question';
-        qEl.innerHTML = '<div class="thread-attention-text"><strong>' + __wvEscapeHtml(question.header || '') + '</strong> ' + __wvEscapeHtml(question.question || '') + '</div>';
-        var opts = document.createElement('div');
-        opts.className = 'thread-attention-buttons';
-        for (var o = 0; o < (question.options || []).length; o++) {
-          (function(inputId, questionId, optIdx, optLabel) {
-            var btn = document.createElement('button');
-            btn.className = 'thread-attention-btn';
-            btn.type = 'button';
-            btn.textContent = optLabel.label;
-            btn.title = optLabel.description || '';
-            btn.addEventListener('click', function(e) {
-              e.stopPropagation();
-              vscode.postMessage({ type: 'userInputSelect', inputId: inputId, questionId: questionId, optionIdx: optIdx, optionLabel: optLabel.label });
-            });
-            opts.appendChild(btn);
-          })(pending.id || '', question.id, o, question.options[o]);
-        }
-        qEl.appendChild(opts);
-        inputRow.appendChild(qEl);
+      // A request can carry several questions and its row only leaves once all
+      // of them are answered, so the count and every pick have to stay on
+      // screen: a pick a repaint forgets reads as a click that never landed.
+      var pickMap = {};
+      if (expandedAttention) {
+        var inputKey = pending.id || '';
+        if (!expandedAttention.inputPicks[inputKey]) expandedAttention.inputPicks[inputKey] = {};
+        pickMap = expandedAttention.inputPicks[inputKey];
       }
+      renderThreadAttentionQuestions(inputRow, pending.id || '', questions, pickMap);
       (function(inputId) {
         var cancel = document.createElement('button');
         cancel.className = 'thread-attention-btn cancel';
@@ -1265,6 +1255,76 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
     }
 
     item.appendChild(panel);
+  }
+
+  /** One request's questions, drawn inside the attention card.
+   *
+   *  Scoped per request rather than inlined in the loop above: the picks a
+   *  click records live in this closure, so two requests waiting on the same
+   *  card cannot read each other's map. */
+  function renderThreadAttentionQuestions(inputRow, inputId, questions, pickMap) {
+    var pickedFor = function(questionId) {
+      return Object.prototype.hasOwnProperty.call(pickMap, questionId) ? pickMap[questionId] : undefined;
+    };
+    // Several questions in one request read as one question with a pile of
+    // buttons unless the bar says how many there are and numbers them.
+    var multiQuestion = questions.length > 1;
+    if (multiQuestion) {
+      var summary = document.createElement('div');
+      summary.className = 'thread-attention-qcount';
+      summary.textContent = __i18n.userInputQuestionsCount.replace('{count}', String(questions.length));
+      inputRow.appendChild(summary);
+    }
+    for (var q = 0; q < questions.length; q++) {
+      var question = questions[q];
+      var qEl = document.createElement('div');
+      qEl.className = 'thread-attention-question';
+      if (pickedFor(question.id) !== undefined) qEl.classList.add('is-answered');
+      qEl.innerHTML = '<div class="thread-attention-text">' +
+        (multiQuestion ? '<span class="thread-attention-qidx">' + (q + 1) + '</span>' : '') +
+        '<strong>' + __wvEscapeHtml(question.header || '') + '</strong> ' + __wvEscapeHtml(question.question || '') + '</div>';
+      var opts = document.createElement('div');
+      opts.className = 'thread-attention-buttons';
+      for (var o = 0; o < (question.options || []).length; o++) {
+        // opts and qEl travel as parameters: both are vars reassigned on
+        // every question, so a closure reading them would mark the last
+        // question's buttons whichever one was clicked.
+        (function(questionId, optIdx, optLabel, opts, qEl) {
+          var btn = document.createElement('button');
+          btn.className = 'thread-attention-btn';
+          btn.type = 'button';
+          btn.textContent = optLabel.label;
+          btn.title = optLabel.description || '';
+          btn.setAttribute('data-option-label', optLabel.label);
+          if (pickedFor(questionId) !== undefined) {
+            btn.classList.add(pickedFor(questionId) === optIdx ? 'is-selected' : 'is-dimmed');
+            if (pickedFor(questionId) === optIdx) btn.textContent = '\u2713 ' + optLabel.label;
+          }
+          btn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            var already = pickedFor(questionId) === optIdx;
+            pickMap[questionId] = optIdx;
+            // Mark it in place rather than waiting for the next repaint: the
+            // row stays until every question is answered, so nothing else on
+            // screen would confirm the click.
+            var siblingBtns = opts.querySelectorAll('.thread-attention-btn');
+            for (var b = 0; b < siblingBtns.length; b++) {
+              var isChosen = siblingBtns[b] === btn;
+              siblingBtns[b].classList.toggle('is-selected', isChosen);
+              siblingBtns[b].classList.toggle('is-dimmed', !isChosen);
+              siblingBtns[b].textContent = (isChosen ? '\u2713 ' : '') + siblingBtns[b].getAttribute('data-option-label');
+            }
+            qEl.classList.add('is-answered');
+            if (!already) {
+              vscode.postMessage({ type: 'userInputSelect', inputId: inputId, questionId: questionId, optionIdx: optIdx, optionLabel: optLabel.label });
+            }
+          });
+          opts.appendChild(btn);
+        })(question.id, o, question.options[o], opts, qEl);
+      }
+      qEl.appendChild(opts);
+      inputRow.appendChild(qEl);
+    }
   }
 
   /** Remove one inline attention row, plus any panel it leaves empty. */
@@ -1302,6 +1362,9 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
     expandedAttention[list] = expandedAttention[list].filter(function(entry) {
       return String((entry && entry.id) || '') !== String(id);
     });
+    // The answered request's picks go with it, so nothing stale can be read
+    // back if its id ever reaches the card again.
+    if (list === 'inputs') delete expandedAttention.inputPicks[String(id)];
     if (expandedAttention.approvals.length === 0 && expandedAttention.inputs.length === 0) {
       forgetThreadAttention();
     }

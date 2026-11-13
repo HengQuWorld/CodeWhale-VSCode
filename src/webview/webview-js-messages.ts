@@ -984,6 +984,54 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
   }
 
   // ── Approval Decision ──
+  // ── User-input selection ──
+  //
+  // A click on an option is not self-evidently a click. The bar only retires
+  // once every question in it is answered, so with two questions the first
+  // answer leaves the bar on screen unchanged — which reads as "my click was
+  // dropped" and gets clicked again. The mark is optimistic and local: the
+  // host still owns the answer, and userInputResolved retires the bar when
+  // the reply lands.
+  function markUserInputSelection(groupEl, chosenEl, barEl) {
+    if (!groupEl || !chosenEl) return;
+    var opts = groupEl.querySelectorAll('.btn-user-input-option');
+    for (var i = 0; i < opts.length; i++) {
+      var opt = opts[i];
+      var isChosen = opt === chosenEl;
+      opt.classList.toggle('is-selected', isChosen);
+      opt.classList.toggle('is-dimmed', !isChosen);
+      opt.setAttribute('aria-pressed', isChosen ? 'true' : 'false');
+      var check = opt.querySelector('.user-input-check');
+      // The check mark lives in the button's own span (the renderer draws it
+      // empty), so showing it is a text change — nothing has to be inserted
+      // into, or pulled out of, a button that is already on screen.
+      if (check) check.textContent = isChosen ? '\u2713 ' : '';
+    }
+    groupEl.classList.add('is-answered');
+    var statusEl = groupEl.querySelector('.user-input-qstatus');
+    if (statusEl) statusEl.textContent = __i18n.userInputSelected;
+    updateUserInputProgress(barEl);
+  }
+
+  /** "{done}/{total} answered" on a multi-question bar, counted from what is
+   *  marked on screen rather than from a closure variable: the bar outlives
+   *  the click, and a rebuilt bar starts from its own markup. */
+  function updateUserInputProgress(barEl) {
+    if (!barEl || !barEl.querySelectorAll) return;
+    var groups = barEl.querySelectorAll('.user-input-question');
+    if (groups.length < 2) return;
+    var done = 0;
+    for (var i = 0; i < groups.length; i++) {
+      if (groups[i].classList.contains('is-answered')) done++;
+    }
+    var progressEl = barEl.querySelector('.user-input-progress');
+    if (!progressEl) return;
+    progressEl.textContent = __i18n.userInputProgress
+      .replace('{done}', String(done))
+      .replace('{total}', String(groups.length));
+    progressEl.classList.toggle('is-complete', done >= groups.length);
+  }
+
   function decideApproval(approvalId, decision, btnEl) {
     var checkbox = null;
     if (btnEl && btnEl.closest) {
@@ -1179,13 +1227,22 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
       var optionIdx = target.getAttribute('data-option-idx');
       var optionLabel = target.getAttribute('data-option-label');
       if (inputId && questionId && optionIdx !== null && optionLabel) {
-        vscode.postMessage({
-          type: 'userInputSelect',
-          inputId: inputId,
-          questionId: questionId,
-          optionIdx: parseInt(optionIdx),
-          optionLabel: optionLabel,
-        });
+        // Already the chosen option: say it once. A second identical answer
+        // for the same question would otherwise travel to the runtime as a
+        // duplicate reply.
+        var alreadyChosen = target.classList.contains('is-selected');
+        var groupEl = target.closest ? target.closest('.user-input-question') : null;
+        var barEl = target.closest ? target.closest('.user-input-bar') : null;
+        if (groupEl) markUserInputSelection(groupEl, target, barEl);
+        if (!alreadyChosen) {
+          vscode.postMessage({
+            type: 'userInputSelect',
+            inputId: inputId,
+            questionId: questionId,
+            optionIdx: parseInt(optionIdx),
+            optionLabel: optionLabel,
+          });
+        }
       }
     }
 

@@ -352,6 +352,16 @@ export interface WebviewTranslations {
   locateChange: string;
   locateChangeTooltip: string;
   userInputAwaiting: string;
+  /** "{count} questions to answer" — the bar's header when one request holds
+   *  several questions. */
+  userInputQuestionsCount: string;
+  /** "{done}/{total} answered" beside that header. */
+  userInputProgress: string;
+  /** What to do with a multi-question bar. */
+  userInputMultiHint: string;
+  /** Marks a question whose option was clicked but whose reply is still
+   *  waiting on the other questions. */
+  userInputSelected: string;
   // Session search & delete
   searchSessions: string;
   searchPlaceholder: string;

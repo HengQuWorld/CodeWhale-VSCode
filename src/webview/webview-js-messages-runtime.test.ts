@@ -1562,3 +1562,118 @@ describe("renderToolInput for a background-task poll", () => {
     expect(messages.renderToolInput({ name: "task_shell_wait", input: {} })).toBe("");
   });
 });
+
+/**
+ * The bar a `request_user_input` request draws is answerable only while the
+ * click shows. It ships one bar for *all* the questions in a request, so with
+ * two questions the first answer leaves the bar on screen; the picked option
+ * has to look picked, and the running count has to say how many are left.
+ */
+describe("user-input option selection", () => {
+  /** The bar's markup, built the way the event-handler module builds it —
+   *  question blocks, options, one check span per button, a progress chip.
+   *  The stand-in here does not parse innerHTML, so the tree is assembled by
+   *  hand; the classes and attributes are the contract between the modules. */
+  function buildBar(questionCount: number) {
+    const { messagesEl, postMessages } = createHarness();
+    const bar = new FakeElement();
+    bar.className = "user-input-bar";
+    bar.setAttribute("data-input-id", "in-1");
+    messagesEl.appendChild(bar);
+
+    const progress = new FakeElement();
+    progress.className = "user-input-progress";
+    progress.textContent = '0/2 answered';
+    bar.appendChild(progress);
+
+    const questions: Array<{
+      group: FakeElement;
+      status: FakeElement;
+      buttons: FakeElement[];
+    }> = [];
+
+    for (let q = 0; q < questionCount; q++) {
+      const group = new FakeElement();
+      group.className = "user-input-question";
+      bar.appendChild(group);
+
+      const head = new FakeElement();
+      head.className = "user-input-qhead";
+      group.appendChild(head);
+
+      const status = new FakeElement();
+      status.className = "user-input-qstatus";
+      head.appendChild(status);
+
+      const options = new FakeElement();
+      options.className = "user-input-options";
+      group.appendChild(options);
+
+      const buttons: FakeElement[] = [];
+      for (let o = 0; o < 2; o++) {
+        const button = new FakeElement();
+        button.className = "btn-user-input-option";
+        button.setAttribute("data-input-id", "in-1");
+        button.setAttribute("data-question-id", "q" + q);
+        button.setAttribute("data-option-idx", String(o));
+        button.setAttribute("data-option-label", "option-" + q + "-" + o);
+        const check = new FakeElement();
+        check.className = "user-input-check";
+        button.appendChild(check);
+        options.appendChild(button);
+        buttons.push(button);
+      }
+      questions.push({ group, status, buttons });
+    }
+
+    const click = (button: FakeElement) => messagesEl.dispatch("click", { target: button });
+    return { questions, progress, postMessages, click };
+  }
+
+  it("marks the picked option, dims the rest, and counts it", () => {
+    const tr = makeTr();
+    const { questions, progress, postMessages, click } = buildBar(2);
+    const [first] = questions;
+
+    click(first.buttons[0]);
+
+    expect(first.buttons[0].classList.contains("is-selected")).toBe(true);
+    expect(first.buttons[0].getAttribute("aria-pressed")).toBe("true");
+    expect(first.buttons[0].querySelector(".user-input-check")?.textContent).toBe("\u2713 ");
+    // The question did not take the other option, but it is still pickable —
+    // the answer is only sent once the whole bar is answered.
+    expect(first.buttons[1].classList.contains("is-dimmed")).toBe(true);
+    expect(first.buttons[1].getAttribute("aria-pressed")).toBe("false");
+    expect(first.group.classList.contains("is-answered")).toBe(true);
+    expect(first.status.textContent).toBe(tr.userInputSelected);
+    expect(progress.textContent).toBe("1/2 answered");
+    expect(postMessages.filter((m) => m.type === "userInputSelect")).toHaveLength(1);
+  });
+
+  it("says each answer once, and lets a question change its mind", () => {
+    const { questions, progress, postMessages, click } = buildBar(2);
+    const [first, second] = questions;
+
+    click(first.buttons[0]);
+    // Same option again: the bar already moved; a second answer would reach
+    // the runtime as a duplicate reply to the same question.
+    click(first.buttons[0]);
+    expect(postMessages.filter((m) => m.type === "userInputSelect")).toHaveLength(1);
+
+    // A different option in the same question replaces the pick, and the count
+    // still says one question answered.
+    click(first.buttons[1]);
+    const selects = postMessages.filter((m) => m.type === "userInputSelect");
+    expect(selects).toHaveLength(2);
+    expect(selects[1].optionLabel).toBe("option-0-1");
+    expect(first.buttons[0].classList.contains("is-selected")).toBe(false);
+    expect(first.buttons[0].querySelector(".user-input-check")?.textContent).toBe("");
+    expect(first.buttons[1].classList.contains("is-selected")).toBe(true);
+    expect(progress.textContent).toBe("1/2 answered");
+
+    // The second question completes the bar.
+    click(second.buttons[0]);
+    expect(progress.textContent).toBe("2/2 answered");
+    expect(progress.classList.contains("is-complete")).toBe(true);
+  });
+});

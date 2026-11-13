@@ -551,6 +551,44 @@ export function getWebviewCss(): string {
     .thread-attention-btn.allow { color: #4caf50; border-color: rgba(76,175,80,0.5); }
     .thread-attention-btn.deny { color: #f44336; border-color: rgba(244,67,54,0.5); }
     .thread-attention-btn.cancel { color: var(--muted); }
+    /* A request holding several questions: the count line, the question
+       numbers, and the pick. Same reading as the chat bar's own panel — the
+       two surfaces answer the same request, so a pick has to look picked in
+       both. */
+    .thread-attention-qcount {
+      font-size: 0.74em;
+      font-weight: 700;
+      color: #e2b93d;
+      letter-spacing: 0.02em;
+    }
+    .thread-attention-qidx {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 16px;
+      height: 16px;
+      margin-right: 4px;
+      border-radius: 50%;
+      background: rgba(226, 185, 61, 0.22);
+      border: 1px solid rgba(226, 185, 61, 0.6);
+      color: var(--fg);
+      font-size: 0.85em;
+      font-weight: 700;
+      vertical-align: baseline;
+    }
+    .thread-attention-question.is-answered .thread-attention-qidx {
+      background: #4caf50;
+      border-color: #4caf50;
+      color: #fff;
+    }
+    .thread-attention-question.is-answered .thread-attention-text { color: var(--muted); }
+    .thread-attention-btn.is-selected {
+      background: #2f7d32;
+      border-color: #4cae4c;
+      color: #fff;
+      font-weight: 600;
+    }
+    .thread-attention-btn.is-dimmed { opacity: 0.5; }
     .session-workspace {
       color: var(--accent);
       font-size: 0.9em;
@@ -1628,9 +1666,77 @@ export function getWebviewCss(): string {
       align-items: flex-start;
     }
     .user-input-icon { font-size: 1.2em; }
-    .user-input-content { flex: 1; }
+    .user-input-content { flex: 1; min-width: 0; }
+    /* Multi-question header: the count is the point. Without it two questions
+       read as one question with two rows of buttons. */
+    .user-input-title-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-bottom: 4px;
+      padding-bottom: 6px;
+      border-bottom: 1px solid rgba(255, 193, 7, 0.35);
+    }
+    .user-input-title {
+      font-size: 0.8em;
+      font-weight: 700;
+      color: #ffc107;
+      letter-spacing: 0.02em;
+    }
+    .user-input-progress {
+      font-size: 0.72em;
+      padding: 1px 8px;
+      border-radius: 10px;
+      background: rgba(255, 193, 7, 0.18);
+      border: 1px solid rgba(255, 193, 7, 0.45);
+      color: var(--muted);
+      white-space: nowrap;
+    }
+    .user-input-progress.is-complete {
+      background: rgba(92, 184, 92, 0.22);
+      border-color: #5cb85c;
+      color: var(--fg);
+    }
+    .user-input-hint { font-size: 0.75em; color: var(--muted); margin-bottom: 8px; }
     .user-input-question { margin-bottom: 8px; }
-    .user-input-header { font-weight: bold; font-size: 0.9em; color: var(--text); margin-bottom: 3px; }
+    /* A rule between questions, so the grouping is visible and not inferred
+       from the spacing alone. */
+    .user-input-bar .user-input-question + .user-input-question {
+      border-top: 1px dashed rgba(255, 193, 7, 0.25);
+      padding-top: 10px;
+      margin-top: 10px;
+    }
+    .user-input-qhead { display: flex; align-items: center; gap: 6px; margin-bottom: 3px; }
+    .user-input-qidx {
+      flex: 0 0 auto;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: rgba(255, 193, 7, 0.22);
+      border: 1px solid rgba(255, 193, 7, 0.6);
+      color: var(--fg);
+      font-size: 0.72em;
+      font-weight: 700;
+    }
+    .user-input-question.is-answered .user-input-qidx {
+      background: #5cb85c;
+      border-color: #5cb85c;
+      color: #fff;
+    }
+    .user-input-header { font-weight: bold; font-size: 0.9em; color: var(--fg); }
+    .user-input-question.is-answered .user-input-header { color: var(--muted); }
+    .user-input-qstatus {
+      margin-left: auto;
+      font-size: 0.72em;
+      font-weight: 600;
+      color: #7ed07e;
+      white-space: nowrap;
+    }
+    .user-input-qstatus:empty { display: none; }
     .user-input-text { font-size: 0.85em; color: var(--muted); margin-bottom: 4px; }
     .user-input-options { display: flex; gap: 8px; flex-wrap: wrap; }
     .btn-user-input-option {
@@ -1640,10 +1746,32 @@ export function getWebviewCss(): string {
       border-radius: 4px;
       cursor: pointer;
       font-size: 0.8em;
+      line-height: 1.4;
       color: #5cb85c;
-      transition: all 0.2s;
+      text-align: left;
+      transition: background 0.15s ease, color 0.15s ease, opacity 0.15s ease, box-shadow 0.15s ease;
     }
     .btn-user-input-option:hover { background: rgba(92, 184, 92, 0.3); }
+    .btn-user-input-option:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 1px;
+    }
+    /* The picked option. Solid fill, a ring, and a check mark: on a dark panel
+       a tinted pill tinted a little further is not a state a glance can read. */
+    .btn-user-input-option.is-selected {
+      background: #2f7d32;
+      border-color: #4cae4c;
+      color: #fff;
+      font-weight: 600;
+      box-shadow: 0 0 0 2px rgba(92, 184, 92, 0.4);
+    }
+    .btn-user-input-option.is-selected:hover { background: #2f7d32; }
+    /* An option the same question did not take: it can still be picked (the
+       answer is only sent when the bar is complete), so it dims rather than
+       disabling. */
+    .btn-user-input-option.is-dimmed { opacity: 0.5; }
+    .btn-user-input-option.is-dimmed:hover { opacity: 0.9; }
+    .user-input-check { font-weight: 700; }
     .user-input-buttons { display: flex; gap: 6px; justify-content: flex-end; margin-top: 8px; }
     .btn-user-input-cancel {
       padding: 4px 10px;

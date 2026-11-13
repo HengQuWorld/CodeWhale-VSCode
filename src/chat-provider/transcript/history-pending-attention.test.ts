@@ -15,6 +15,7 @@ function createProvider(detail: Record<string, unknown>) {
       models: [{ id: "glm-5.3" }, { id: "glm-5.4" }],
     })),
     decideApproval: vi.fn(async () => undefined),
+    submitUserInput: vi.fn(async (..._args: unknown[]) => undefined),
     ensureReady: vi.fn(async () => undefined),
     interruptTurn: vi.fn(async () => undefined),
   };
@@ -201,6 +202,57 @@ describe("ChatProvider pending attention across a rebuild", () => {
     expect((provider as any).backgroundUserInputs.get("input-1")).toBe(collected);
     expect((provider as any).pendingUserInputs.has("input-1")).toBe(false);
     expect(postedMessages(postMessage).some((m) => m.type === "userInputRequired")).toBe(true);
+  });
+
+  const twoQuestions = {
+    id: "input-2",
+    turn_id: "turn-1",
+    request: {
+      questions: [
+        {
+          header: "Environment",
+          id: "q1",
+          question: "Which environment?",
+          options: [
+            { label: "Staging", description: "" },
+            { label: "Production", description: "" },
+          ],
+        },
+        {
+          header: "Scope",
+          id: "q2",
+          question: "How much of it?",
+          options: [
+            { label: "All", description: "" },
+            { label: "Part", description: "" },
+          ],
+        },
+      ],
+    },
+  };
+
+  it("sends one answer per question, the last pick winning", async () => {
+    const { provider, api } = createProvider(
+      detailWith({ pending_user_inputs: [twoQuestions] }),
+    );
+    await (provider as any).loadHistory("thread-1");
+
+    // The bar stays on screen until every question is answered, so a pick can
+    // be changed. The reply is the `answers` list, and two entries for one
+    // question would arrive as two contradicting answers to it.
+    await (provider as any).handleUserInputSelect("input-2", "q1", 0, "Staging");
+    await (provider as any).handleUserInputSelect("input-2", "q1", 1, "Production");
+
+    // Half answered: nothing is submitted yet.
+    expect(api.submitUserInput).not.toHaveBeenCalled();
+
+    await (provider as any).handleUserInputSelect("input-2", "q2", 0, "All");
+    expect(api.submitUserInput).toHaveBeenCalledTimes(1);
+    const answers = api.submitUserInput.mock.calls[0][2];
+    expect(answers).toEqual([
+      { id: "q1", label: "Production", value: "Production" },
+      { id: "q2", label: "All", value: "All" },
+    ]);
   });
 
   it("stops calling an answered approval pending on its tool row", async () => {

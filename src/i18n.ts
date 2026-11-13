@@ -68,6 +68,18 @@ interface Translations {
   approvalRemember: string;
   userInputRequired: string;
   userInputAwaiting: string;
+  /** Bar header when one request carries several questions: "{count}
+   *  questions". The count is the point — a two-question bar otherwise reads
+   *  as one question with two groups of buttons. */
+  userInputQuestionsCount: string;
+  /** Running count beside that header: "{done}/{total} answered". */
+  userInputProgress: string;
+  /** What to do with a multi-question bar: pick one per question, and the
+   *  reply is sent once the last one is answered. */
+  userInputMultiHint: string;
+  /** Set on a question once its option was clicked, before the reply is sent
+   *  — the click has to be visible, or the bar looks like it ignored it. */
+  userInputSelected: string;
   noConversations: string;
   threadAttention: string;
   threadsNeedsYou: string;
@@ -698,6 +710,10 @@ const en: Translations = {
   turnFailed: "The turn failed without a reported reason.",
   userInputRequired: "Input required",
   userInputAwaiting: "⏳ Awaiting your input...",
+  userInputQuestionsCount: "{count} questions to answer",
+  userInputProgress: "{done}/{total} answered",
+  userInputMultiHint: "One choice per question — the reply is sent once all of them are answered.",
+  userInputSelected: "✓ selected",
   noConversations: "No conversations yet", threadAttention: "Waiting for your approval or input — click to open", threadsNeedsYou: "Needs you", threadsRunning: "Running", threadsRecent: "Recent",
   threadsLoading: "Loading threads…", threadsLoadFailed: "Couldn't load the thread list", threadsRetry: "Retry",
   turnContinuesInBackground: "Turn continues running in the background",
@@ -1202,6 +1218,10 @@ const zhCn: Translations = {
   turnFailed: "本轮执行失败，引擎未给出原因。",
   userInputRequired: "需要输入",
   userInputAwaiting: "⏳ 等待您的输入...",
+  userInputQuestionsCount: "共 {count} 个问题",
+  userInputProgress: "已答 {done}/{total}",
+  userInputMultiHint: "每个问题各选一项，全部选完后自动提交。",
+  userInputSelected: "✓ 已选择",
   noConversations: "暂无会话", threadAttention: "等待你的审批或输入——点击打开", threadsNeedsYou: "等你处理", threadsRunning: "运行中", threadsRecent: "最近",
   threadsLoading: "正在加载线程…", threadsLoadFailed: "线程列表加载失败", threadsRetry: "重试",
   turnContinuesInBackground: "回合将在后台继续运行",
@@ -1748,6 +1768,10 @@ export function webviewTranslations(tr: Translations) {
     approvalRemember: tr.approvalRemember,
     userInputRequired: tr.userInputRequired,
     userInputAwaiting: tr.userInputAwaiting,
+    userInputQuestionsCount: tr.userInputQuestionsCount,
+    userInputProgress: tr.userInputProgress,
+    userInputMultiHint: tr.userInputMultiHint,
+    userInputSelected: tr.userInputSelected,
     noConversations: tr.noConversations,
     threadAttention: tr.threadAttention,
     threadsNeedsYou: tr.threadsNeedsYou,

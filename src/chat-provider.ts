@@ -8087,6 +8087,11 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     }
     if (!pending) return;
 
+    // One answer per question. The bar lets a pick be changed until the last
+    // question is answered, and a change must *replace* that question's answer:
+    // the runtime is handed `answers` as the reply, so two entries for one
+    // question would arrive as two contradicting answers to the same question.
+    pending.answers = pending.answers.filter(a => a.id !== questionId);
     pending.answers.push({
       id: questionId,
       label: optionLabel,

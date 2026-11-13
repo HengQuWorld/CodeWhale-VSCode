@@ -1749,16 +1749,33 @@ ${PROVIDER_PICKER_JS}
       case 'userInputRequired': {
         var inputId = msg.inputId;
         var questions = msg.questions || [];
+        // Several questions arrive in one bar. Say so in a header with a
+        // running count: without it a two-question request reads as a single
+        // question with two unrelated groups of buttons, and answering the
+        // first one looks like nothing happened — the bar is *meant* to stay,
+        // because the rest are still open.
+        var multi = questions.length > 1;
         var questionsHtml = '';
+        if (multi) {
+          questionsHtml += '<div class="user-input-title-row">';
+          questionsHtml += '<span class="user-input-title">' + __wvEscapeHtml(__i18n.userInputQuestionsCount.replace('{count}', String(questions.length))) + '</span>';
+          questionsHtml += '<span class="user-input-progress">' + __wvEscapeHtml(__i18n.userInputProgress.replace('{done}', '0').replace('{total}', String(questions.length))) + '</span>';
+          questionsHtml += '</div>';
+          questionsHtml += '<div class="user-input-hint">' + __wvEscapeHtml(__i18n.userInputMultiHint) + '</div>';
+        }
         for (var qi = 0; qi < questions.length; qi++) {
           var q = questions[qi];
-          questionsHtml += '<div class="user-input-question">';
-          questionsHtml += '<div class="user-input-header">' + __wvEscapeHtml(q.header) + '</div>';
+          questionsHtml += '<div class="user-input-question" data-question-id="' + __wvEscapeHtml(q.id) + '">';
+          questionsHtml += '<div class="user-input-qhead">';
+          if (multi) questionsHtml += '<span class="user-input-qidx">' + (qi + 1) + '</span>';
+          questionsHtml += '<span class="user-input-header">' + __wvEscapeHtml(q.header) + '</span>';
+          questionsHtml += '<span class="user-input-qstatus"></span>';
+          questionsHtml += '</div>';
           questionsHtml += '<div class="user-input-text">' + __wvEscapeHtml(q.question) + '</div>';
           questionsHtml += '<div class="user-input-options">';
           for (var optIdx = 0; optIdx < (q.options || []).length; optIdx++) {
             var opt = q.options[optIdx];
-            questionsHtml += '<button class="btn-user-input-option" data-input-id="' + inputId + '" data-question-id="' + q.id + '" data-option-idx="' + optIdx + '" data-option-label="' + __wvEscapeHtml(opt.label) + '">' + __wvEscapeHtml(opt.label) + ': ' + __wvEscapeHtml(opt.description || '') + '</button>';
+            questionsHtml += '<button type="button" class="btn-user-input-option" aria-pressed="false" data-input-id="' + __wvEscapeHtml(inputId) + '" data-question-id="' + __wvEscapeHtml(q.id) + '" data-option-idx="' + optIdx + '" data-option-label="' + __wvEscapeHtml(opt.label) + '"><span class="user-input-check" aria-hidden="true"></span>' + __wvEscapeHtml(opt.label) + ': ' + __wvEscapeHtml(opt.description || '') + '</button>';
           }
           questionsHtml += '</div></div>';
         }
@@ -1768,6 +1785,9 @@ ${PROVIDER_PICKER_JS}
           var bar = document.createElement('div');
           bar.className = 'user-input-bar';
           bar.id = 'user-input-' + inputId;
+          // Tool rows hang their state lines off this id, and userInputResolved
+          // retires the bar it names rather than every bar on screen.
+          bar.setAttribute('data-input-id', inputId);
           bar.innerHTML = '<div class="user-input-icon">\\u2753</div><div class="user-input-content">' + questionsHtml + '</div><div class="user-input-buttons"><button class="btn-user-input-cancel" data-input-id="' + inputId + '">' + __i18n.cancel + '</button></div>';
           bodyEl.appendChild(bar);
           window.__wvMessages.smartScrollToBottom();
@@ -1776,7 +1796,14 @@ ${PROVIDER_PICKER_JS}
       }
 
       case 'userInputResolved':
-        document.querySelectorAll('.user-input-bar').forEach(function(bar) { bar.remove(); });
+        // Retire the bar this input owned. Other requests can be open at the
+        // same time (two turns, a view and a background thread), and clearing
+        // every bar would take their unanswerable-elsewhere buttons with it.
+        if (msg.inputId) {
+          document.querySelectorAll('.user-input-bar[data-input-id="' + msg.inputId + '"]').forEach(function(bar) { bar.remove(); });
+        } else {
+          document.querySelectorAll('.user-input-bar').forEach(function(bar) { bar.remove(); });
+        }
         // Also retire the inline sidebar card for a background thread's
         // input (answered without switching) — keyed by input id.
         if (window.__wvSidebar && window.__wvSidebar.removeThreadAttentionInput) {
