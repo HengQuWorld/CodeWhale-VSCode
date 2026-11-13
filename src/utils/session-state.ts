@@ -218,6 +218,10 @@ export interface UserInputState {
     id: string;
     question: string;
     options: Array<{ label: string; description: string }>;
+    /** Ticked rather than answered: the reply carries one answer per selected
+     *  option, and only a confirm step sends it. */
+    multi_select?: boolean;
+    allow_free_text?: boolean;
   }>;
   answers: Array<{ id: string; label: string; value: string }>;
   answeredQuestions: Set<string>;

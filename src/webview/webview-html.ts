@@ -366,6 +366,12 @@ export interface WebviewTranslations {
   /** Marks a question whose option was clicked but whose reply is still
    *  waiting on the other questions. */
   userInputSelected: string;
+  /** A multi-select question's commit button, with its tick count. */
+  userInputConfirmSelect: string;
+  /** That button once the question is committed. */
+  userInputConfirmed: string;
+  /** Says a click ticks rather than answers. */
+  userInputMultiSelectHint: string;
   // Session search & delete
   searchSessions: string;
   searchPlaceholder: string;

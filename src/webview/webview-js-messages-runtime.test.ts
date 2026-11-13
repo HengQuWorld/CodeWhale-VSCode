@@ -83,6 +83,9 @@ class FakeElement {
   public classList = new FakeClassList(this);
   public textContent = "";
   public value = "";
+  /** What the confirm button's own state hangs on; a real element reflects it
+   *  to the `disabled` attribute, which the click handler's guard reads. */
+  public disabled = false;
   public style: Record<string, string> = {};
   public dataset: Record<string, string> = {};
   public scrollTop = 0;
@@ -1574,8 +1577,9 @@ describe("user-input option selection", () => {
    *  question blocks, options, one check span per button, a progress chip.
    *  The stand-in here does not parse innerHTML, so the tree is assembled by
    *  hand; the classes and attributes are the contract between the modules. */
-  function buildBar(questionCount: number) {
+  function buildBar(questionCount: number, multi: boolean | boolean[] = false) {
     const { messagesEl, postMessages } = createHarness();
+    const isMulti = (index: number) => (Array.isArray(multi) ? !!multi[index] : !!multi);
     const bar = new FakeElement();
     bar.className = "user-input-bar";
     bar.setAttribute("data-input-id", "in-1");
@@ -1590,11 +1594,16 @@ describe("user-input option selection", () => {
       group: FakeElement;
       status: FakeElement;
       buttons: FakeElement[];
+      confirm: FakeElement | null;
     }> = [];
 
     for (let q = 0; q < questionCount; q++) {
       const group = new FakeElement();
       group.className = "user-input-question";
+      if (isMulti(q)) {
+        group.classList.add("is-multi");
+        group.setAttribute("data-multi", "1");
+      }
       bar.appendChild(group);
 
       const head = new FakeElement();
@@ -1623,12 +1632,31 @@ describe("user-input option selection", () => {
         options.appendChild(button);
         buttons.push(button);
       }
-      questions.push({ group, status, buttons });
+
+      // The confirm control only multi-select questions get.
+      let confirm: FakeElement | null = null;
+      if (isMulti(q)) {
+        const row = new FakeElement();
+        row.className = "user-input-multi-row";
+        group.appendChild(row);
+        confirm = new FakeElement();
+        confirm.className = "btn-user-input-confirm";
+        confirm.setAttribute("data-input-id", "in-1");
+        confirm.setAttribute("data-question-id", "q" + q);
+        confirm.textContent = "Confirm 0";
+        row.appendChild(confirm);
+      }
+      questions.push({ group, status, buttons, confirm });
     }
 
-    const click = (button: FakeElement) => messagesEl.dispatch("click", { target: button });
+    const click = (el: FakeElement) => messagesEl.dispatch("click", { target: el });
     return { questions, progress, postMessages, click };
   }
+
+  const selects = (posted: Array<Record<string, unknown>>) =>
+    posted.filter((m) => m.type === "userInputSelect");
+  const confirms = (posted: Array<Record<string, unknown>>) =>
+    posted.filter((m) => m.type === "userInputConfirm");
 
   it("marks the picked option, dims the rest, and counts it", () => {
     const tr = makeTr();
@@ -1647,7 +1675,7 @@ describe("user-input option selection", () => {
     expect(first.group.classList.contains("is-answered")).toBe(true);
     expect(first.status.textContent).toBe(tr.userInputSelected);
     expect(progress.textContent).toBe("1/2 answered");
-    expect(postMessages.filter((m) => m.type === "userInputSelect")).toHaveLength(1);
+    expect(selects(postMessages)).toHaveLength(1);
   });
 
   it("says each answer once, and lets a question change its mind", () => {
@@ -1658,14 +1686,14 @@ describe("user-input option selection", () => {
     // Same option again: the bar already moved; a second answer would reach
     // the runtime as a duplicate reply to the same question.
     click(first.buttons[0]);
-    expect(postMessages.filter((m) => m.type === "userInputSelect")).toHaveLength(1);
+    expect(selects(postMessages)).toHaveLength(1);
 
     // A different option in the same question replaces the pick, and the count
     // still says one question answered.
     click(first.buttons[1]);
-    const selects = postMessages.filter((m) => m.type === "userInputSelect");
-    expect(selects).toHaveLength(2);
-    expect(selects[1].optionLabel).toBe("option-0-1");
+    const posted = selects(postMessages);
+    expect(posted).toHaveLength(2);
+    expect(posted[1].optionLabel).toBe("option-0-1");
     expect(first.buttons[0].classList.contains("is-selected")).toBe(false);
     expect(first.buttons[0].querySelector(".user-input-check")?.textContent).toBe("");
     expect(first.buttons[1].classList.contains("is-selected")).toBe(true);
@@ -1675,5 +1703,79 @@ describe("user-input option selection", () => {
     click(second.buttons[0]);
     expect(progress.textContent).toBe("2/2 answered");
     expect(progress.classList.contains("is-complete")).toBe(true);
+  });
+
+  it("ticks a multi-select question without answering it", () => {
+    const { questions, postMessages, click } = buildBar(1, true);
+    const [only] = questions;
+
+    click(only.buttons[0]);
+    click(only.buttons[1]);
+
+    // Two ticks, nothing sent: the click only records intent, and the answer
+    // is whatever the confirm button names.
+    expect(selects(postMessages)).toHaveLength(0);
+    expect(confirms(postMessages)).toHaveLength(0);
+    expect(only.buttons[0].classList.contains("is-selected")).toBe(true);
+    expect(only.buttons[1].classList.contains("is-selected")).toBe(true);
+    expect(only.group.classList.contains("is-answered")).toBe(false);
+    expect(only.confirm?.disabled).toBe(false);
+    expect(only.confirm?.textContent).toBe("Confirm 2");
+  });
+
+  it("untick leaves nothing to confirm", () => {
+    const { questions, click } = buildBar(1, true);
+    const [only] = questions;
+
+    click(only.buttons[0]);
+    click(only.buttons[0]);
+
+    expect(only.buttons[0].classList.contains("is-selected")).toBe(false);
+    expect(only.confirm?.disabled).toBe(true);
+    expect(only.confirm?.textContent).toBe("Confirm 0");
+  });
+
+  it("sends the ticked set on confirm, and closes the question", () => {
+    const tr = makeTr();
+    const { questions, postMessages, click } = buildBar(1, true);
+    const [only] = questions;
+
+    click(only.buttons[1]);
+    click(only.buttons[0]);
+    click(only.confirm!);
+
+    const sent = confirms(postMessages);
+    expect(sent).toHaveLength(1);
+    // DOM order, not click order: the answer set is the options the person
+    // ticked, and their order on screen is the one the runtime reads back.
+    expect(sent[0]).toEqual({
+      type: "userInputConfirm",
+      inputId: "in-1",
+      questionId: "q0",
+      labels: ["option-0-0", "option-0-1"],
+    });
+    expect(only.group.classList.contains("is-answered")).toBe(true);
+    expect(only.status.textContent).toBe(tr.userInputSelected);
+    expect(only.confirm?.textContent).toBe("confirmed");
+
+    // Locked afterwards: a tick now would contradict what was already sent.
+    click(only.buttons[0]);
+    expect(confirms(postMessages)).toHaveLength(1);
+    expect(only.buttons[0].classList.contains("is-selected")).toBe(true);
+  });
+
+  it("counts a mixed bar once per question, multi only after confirm", () => {
+    const { questions, progress, click } = buildBar(2, [false, true]);
+    const [single, multi] = questions;
+
+    click(single.buttons[0]);
+    expect(progress.textContent).toBe("1/2 answered");
+
+    // Ticks alone leave the question open, so the bar still says 1/2.
+    click(multi.buttons[0]);
+    expect(progress.textContent).toBe("1/2 answered");
+
+    click(multi.confirm!);
+    expect(progress.textContent).toBe("2/2 answered");
   });
 });

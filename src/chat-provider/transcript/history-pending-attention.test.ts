@@ -231,6 +231,78 @@ describe("ChatProvider pending attention across a rebuild", () => {
     },
   };
 
+  const multiQuestionRequest = {
+    id: "input-3",
+    turn_id: "turn-1",
+    request: {
+      questions: [
+        {
+          header: "Databases",
+          id: "q1",
+          question: "Which ones?",
+          multi_select: true,
+          options: [
+            { label: "Postgres", description: "" },
+            { label: "Redis", description: "" },
+            { label: "ClickHouse", description: "" },
+          ],
+        },
+      ],
+    },
+  };
+
+  it("sends a multi-select answer as one entry per ticked option", async () => {
+    const { provider, api } = createProvider(
+      detailWith({ pending_user_inputs: [multiQuestionRequest] }),
+    );
+    await (provider as any).loadHistory("thread-1");
+
+    // A click on a multi-select option only ticks it: the reply is not final
+    // until the confirm button names the set.
+    await (provider as any).handleUserInputSelect("input-3", "q1", 0, "Postgres");
+    expect(api.submitUserInput).not.toHaveBeenCalled();
+
+    await (provider as any).handleUserInputConfirm("input-3", "q1", ["Postgres", "Redis"]);
+    expect(api.submitUserInput).toHaveBeenCalledTimes(1);
+    expect(api.submitUserInput.mock.calls[0][2]).toEqual([
+      { id: "q1", label: "Postgres", value: "Postgres" },
+      { id: "q1", label: "Redis", value: "Redis" },
+    ]);
+  });
+
+  it("ignores labels a multi-select question never offered", async () => {
+    const { provider, api } = createProvider(
+      detailWith({ pending_user_inputs: [multiQuestionRequest] }),
+    );
+    await (provider as any).loadHistory("thread-1");
+
+    // The engine rejects an answer naming a label it did not offer, and that
+    // rejection would fail the whole turn — so a stray label is dropped here,
+    // where it can still be corrected.
+    await (provider as any).handleUserInputConfirm("input-3", "q1", ["Postgres", "MySQL"]);
+
+    expect(api.submitUserInput.mock.calls[0][2]).toEqual([
+      { id: "q1", label: "Postgres", value: "Postgres" },
+    ]);
+  });
+
+  it("ignores a confirm for a single-select question", async () => {
+    const { provider, api } = createProvider(
+      detailWith({ pending_user_inputs: [pendingQuestion] }),
+    );
+    await (provider as any).loadHistory("thread-1");
+
+    // Single-select is answered by its click; a confirm would replace that
+    // answer with a stale copy.
+    await (provider as any).handleUserInputSelect("input-1", "q1", 0, "Staging");
+    await (provider as any).handleUserInputConfirm("input-1", "q1", ["Staging"]);
+
+    expect(api.submitUserInput).toHaveBeenCalledTimes(1);
+    expect(api.submitUserInput.mock.calls[0][2]).toEqual([
+      { id: "q1", label: "Staging", value: "Staging" },
+    ]);
+  });
+
   it("sends one answer per question, the last pick winning", async () => {
     const { provider, api } = createProvider(
       detailWith({ pending_user_inputs: [twoQuestions] }),

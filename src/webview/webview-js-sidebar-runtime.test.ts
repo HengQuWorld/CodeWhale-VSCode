@@ -1008,7 +1008,7 @@ function pendingApproval(id: string) {
 
 /** A `request_user_input` request holding `questionCount` questions, each with
  *  two options — the shape the bar draws one block per question for. */
-function pendingInput(id: string, questionCount: number) {
+function pendingInput(id: string, questionCount: number, multi = false) {
   return {
     id,
     request: {
@@ -1016,6 +1016,7 @@ function pendingInput(id: string, questionCount: number) {
         id: `q${q}`,
         header: `Question ${q + 1}`,
         question: `Pick one for question ${q + 1}`,
+        multi_select: multi,
         options: [
           { label: `option-${q}-a`, description: "first" },
           { label: `option-${q}-b`, description: "second" },
@@ -1248,6 +1249,80 @@ describe("inline thread attention", () => {
     expect(after.classList.contains("is-answered")).toBe(true);
     expect(rebuilt.classList.contains("is-selected")).toBe(true);
     expect(rebuilt.textContent).toBe("\u2713 option-1-a");
+  });
+
+  it("ticks a multi-select question and sends only what was confirmed", () => {
+    const { postMessages, rail, sidebar } = createHarness();
+    sidebar.setThreads([waitingThread("thread-a", "2026-09-17T00:00:00Z")]);
+    sidebar.renderThreads();
+    sidebar.showThreadAttention({
+      threadId: "thread-a",
+      approvals: [],
+      inputs: [pendingInput("input-1", 1, true)],
+    });
+
+    const question = attentionCard(rail, "thread-a")!.querySelector(".thread-attention-question")!;
+    const buttons = question.querySelectorAll(".thread-attention-btn");
+    const confirm = buttons.find((btn) => btn.className.includes("confirm"))!;
+    const [first, second] = buttons;
+
+    // Both ticks are recorded; neither click is an answer yet.
+    first.dispatch("click", { stopPropagation: () => undefined });
+    second.dispatch("click", { stopPropagation: () => undefined });
+    expect(postMessages.filter((m) => m.type === "userInputSelect")).toHaveLength(0);
+    expect(postMessages.filter((m) => m.type === "userInputConfirm")).toHaveLength(0);
+    expect(first.classList.contains("is-selected")).toBe(true);
+    expect(second.classList.contains("is-selected")).toBe(true);
+    expect(confirm.textContent).toBe(makeTr().userInputConfirmSelect.replace("{count}", "2"));
+
+    // Untick and re-tick: the set follows the ticks, not the clicks.
+    second.dispatch("click", { stopPropagation: () => undefined });
+    second.dispatch("click", { stopPropagation: () => undefined });
+
+    confirm.dispatch("click", { stopPropagation: () => undefined });
+    const sent = postMessages.filter((m) => m.type === "userInputConfirm");
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toEqual({
+      type: "userInputConfirm",
+      inputId: "input-1",
+      questionId: "q0",
+      labels: ["option-0-a", "option-0-b"],
+    });
+    expect(question.classList.contains("is-answered")).toBe(true);
+    expect(sent[0].labels).toHaveLength(2);
+  });
+
+  it("keeps ticks and a confirmed set across a rebuild", () => {
+    const { rail, sidebar } = createHarness();
+    sidebar.setThreads([waitingThread("thread-a", "2026-09-17T00:00:00Z")]);
+    sidebar.renderThreads();
+    sidebar.showThreadAttention({
+      threadId: "thread-a",
+      approvals: [],
+      inputs: [pendingInput("input-1", 1, true)],
+    });
+
+    let question = attentionCard(rail, "thread-a")!.querySelector(".thread-attention-question")!;
+    question.querySelectorAll(".thread-attention-btn")[0].dispatch("click", { stopPropagation: () => undefined });
+
+    // A tick that a repaint forgets is a tick the user will make twice.
+    sidebar.renderThreads();
+    question = attentionCard(rail, "thread-a")!.querySelector(".thread-attention-question")!;
+    let buttons = question.querySelectorAll(".thread-attention-btn");
+    expect(buttons[0].classList.contains("is-selected")).toBe(true);
+    expect(question.classList.contains("is-answered")).toBe(false);
+
+    buttons.find((btn) => btn.className.includes("confirm"))!
+      .dispatch("click", { stopPropagation: () => undefined });
+
+    // Once confirmed the set is closed: the next rebuild must not offer the
+    // ticks again, or the same question could be sent twice.
+    sidebar.renderThreads();
+    question = attentionCard(rail, "thread-a")!.querySelector(".thread-attention-question")!;
+    buttons = question.querySelectorAll(".thread-attention-btn");
+    expect(question.classList.contains("is-answered")).toBe(true);
+    expect(buttons[0].classList.contains("is-selected")).toBe(true);
+    expect(buttons[1].classList.contains("is-dimmed")).toBe(true);
   });
 
   it("stops expanding a thread once it is the one on screen", () => {

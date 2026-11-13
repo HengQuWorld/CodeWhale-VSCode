@@ -1779,7 +1779,11 @@ ${PROVIDER_PICKER_JS}
         }
         for (var qi = 0; qi < questions.length; qi++) {
           var q = questions[qi];
-          questionsHtml += '<div class="user-input-question" data-question-id="' + __wvEscapeHtml(q.id) + '">';
+          // A multi-select question is not answered by a click: the click
+          // ticks, and a confirm button sends the whole ticked set. Markup
+          // says which kind it is so the click handler never has to guess.
+          var isMultiSelect = !!q.multi_select;
+          questionsHtml += '<div class="user-input-question' + (isMultiSelect ? ' is-multi' : '') + '" data-question-id="' + __wvEscapeHtml(q.id) + '"' + (isMultiSelect ? ' data-multi="1"' : '') + '>';
           questionsHtml += '<div class="user-input-qhead">';
           if (multi) questionsHtml += '<span class="user-input-qidx">' + (qi + 1) + '</span>';
           questionsHtml += '<span class="user-input-header">' + __wvEscapeHtml(q.header) + '</span>';
@@ -1791,7 +1795,14 @@ ${PROVIDER_PICKER_JS}
             var opt = q.options[optIdx];
             questionsHtml += '<button type="button" class="btn-user-input-option" aria-pressed="false" data-input-id="' + __wvEscapeHtml(inputId) + '" data-question-id="' + __wvEscapeHtml(q.id) + '" data-option-idx="' + optIdx + '" data-option-label="' + __wvEscapeHtml(opt.label) + '"><span class="user-input-check" aria-hidden="true"></span>' + __wvEscapeHtml(opt.label) + ': ' + __wvEscapeHtml(opt.description || '') + '</button>';
           }
-          questionsHtml += '</div></div>';
+          questionsHtml += '</div>';
+          if (isMultiSelect) {
+            questionsHtml += '<div class="user-input-multi-row">';
+            questionsHtml += '<button type="button" class="btn-user-input-confirm" disabled data-input-id="' + __wvEscapeHtml(inputId) + '" data-question-id="' + __wvEscapeHtml(q.id) + '">' + __wvEscapeHtml(__i18n.userInputConfirmSelect.replace('{count}', '0')) + '</button>';
+            questionsHtml += '<span class="user-input-multi-hint">' + __wvEscapeHtml(__i18n.userInputMultiSelectHint) + '</span>';
+            questionsHtml += '</div>';
+          }
+          questionsHtml += '</div>';
         }
         setStreamingState(true, __i18n.userInputAwaiting);
         var bodyEl = document.getElementById('body-' + msg.messageId);

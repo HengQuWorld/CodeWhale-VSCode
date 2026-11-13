@@ -589,6 +589,19 @@ export function getWebviewCss(): string {
       font-weight: 600;
     }
     .thread-attention-btn.is-dimmed { opacity: 0.5; }
+    .thread-attention-multi-row { display: flex; margin-top: 4px; }
+    .thread-attention-btn.confirm {
+      border-color: rgba(76,175,80,0.7);
+      color: #fff;
+      background: #2f7d32;
+      font-weight: 600;
+    }
+    .thread-attention-btn.confirm:disabled {
+      background: transparent;
+      border-color: rgba(128,128,128,0.3);
+      color: var(--muted);
+      font-weight: 400;
+    }
     .session-workspace {
       color: var(--accent);
       font-size: 0.9em;
@@ -1790,6 +1803,37 @@ export function getWebviewCss(): string {
     .btn-user-input-option.is-dimmed { opacity: 0.5; }
     .btn-user-input-option.is-dimmed:hover { opacity: 0.9; }
     .user-input-check { font-weight: 700; }
+    /* A multi-select question: the options are switches, so they do not dim
+       each other — and the confirm button is the only thing that sends. */
+    .user-input-multi-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 6px;
+    }
+    .btn-user-input-confirm {
+      padding: 5px 12px;
+      border-radius: 4px;
+      border: 1px solid #4cae4c;
+      background: #2f7d32;
+      color: #fff;
+      font: inherit;
+      font-size: 0.8em;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .btn-user-input-confirm:hover { filter: brightness(1.12); }
+    .btn-user-input-confirm.is-empty,
+    .btn-user-input-confirm:disabled {
+      background: transparent;
+      border-color: rgba(92, 184, 92, 0.4);
+      color: var(--muted);
+      cursor: not-allowed;
+      font-weight: 400;
+    }
+    .btn-user-input-confirm:disabled:hover { filter: none; }
+    .user-input-multi-hint { font-size: 0.74em; color: var(--muted); }
     .user-input-buttons { display: flex; gap: 6px; justify-content: flex-end; margin-top: 8px; }
     .btn-user-input-cancel {
       padding: 4px 10px;

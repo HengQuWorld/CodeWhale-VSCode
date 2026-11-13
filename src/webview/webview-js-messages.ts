@@ -1032,6 +1032,64 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
     progressEl.classList.toggle('is-complete', done >= groups.length);
   }
 
+  /** Tick or untick one option of a multi-select question.
+   *
+   *  The option is a switch, not an answer: the runtime is sent one answer per
+   *  ticked option, and only when the question is confirmed. Nothing here
+   *  posts, so a person can tick three things and change their mind twice
+   *  without the turn ever seeing it. */
+  function toggleUserInputOption(groupEl, btnEl) {
+    if (!groupEl || !btnEl || groupEl.classList.contains('is-answered')) return;
+    var chosen = !btnEl.classList.contains('is-selected');
+    btnEl.classList.toggle('is-selected', chosen);
+    btnEl.setAttribute('aria-pressed', chosen ? 'true' : 'false');
+    var check = btnEl.querySelector('.user-input-check');
+    if (check) check.textContent = chosen ? '\u2713 ' : '';
+    updateUserInputConfirm(groupEl);
+  }
+
+  /** Keep the confirm button honest: how many ticks ride on it, and that a
+   *  question with nothing ticked cannot be committed. */
+  function updateUserInputConfirm(groupEl) {
+    if (!groupEl) return;
+    var confirmBtn = groupEl.querySelector('.btn-user-input-confirm');
+    if (!confirmBtn) return;
+    var count = groupEl.querySelectorAll('.btn-user-input-option.is-selected').length;
+    confirmBtn.disabled = count === 0;
+    confirmBtn.textContent = __i18n.userInputConfirmSelect.replace('{count}', String(count));
+    confirmBtn.classList.toggle('is-empty', count === 0);
+  }
+
+  /** Commit a multi-select question: lock its options and send the ticked set.
+   *
+   *  Locking is what makes the answer final — without it a click after the
+   *  send would raise a second, contradicting answer for a question the host
+   *  has already taken. */
+  function confirmUserInputGroup(btnEl, groupEl, barEl) {
+    if (!groupEl || !btnEl || groupEl.classList.contains('is-answered')) return;
+    var chosen = groupEl.querySelectorAll('.btn-user-input-option.is-selected');
+    if (chosen.length === 0) return;
+    var labels = [];
+    for (var i = 0; i < chosen.length; i++) labels.push(chosen[i].getAttribute('data-option-label'));
+    var opts = groupEl.querySelectorAll('.btn-user-input-option');
+    for (var j = 0; j < opts.length; j++) {
+      opts[j].disabled = true;
+      if (!opts[j].classList.contains('is-selected')) opts[j].classList.add('is-dimmed');
+    }
+    btnEl.disabled = true;
+    btnEl.textContent = __i18n.userInputConfirmed.replace('{count}', String(labels.length));
+    groupEl.classList.add('is-answered');
+    var statusEl = groupEl.querySelector('.user-input-qstatus');
+    if (statusEl) statusEl.textContent = __i18n.userInputSelected;
+    updateUserInputProgress(barEl);
+    vscode.postMessage({
+      type: 'userInputConfirm',
+      inputId: btnEl.getAttribute('data-input-id'),
+      questionId: btnEl.getAttribute('data-question-id'),
+      labels: labels,
+    });
+  }
+
   function decideApproval(approvalId, decision, btnEl) {
     var checkbox = null;
     if (btnEl && btnEl.closest) {
@@ -1227,12 +1285,18 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
       var optionIdx = target.getAttribute('data-option-idx');
       var optionLabel = target.getAttribute('data-option-label');
       if (inputId && questionId && optionIdx !== null && optionLabel) {
+        var groupEl = target.closest ? target.closest('.user-input-question') : null;
+        var barEl = target.closest ? target.closest('.user-input-bar') : null;
+        // A multi-select question ticks here and is sent by its confirm
+        // button; a single-select one is answered by this click.
+        if (groupEl && groupEl.getAttribute('data-multi') === '1') {
+          toggleUserInputOption(groupEl, target);
+          return;
+        }
         // Already the chosen option: say it once. A second identical answer
         // for the same question would otherwise travel to the runtime as a
         // duplicate reply.
         var alreadyChosen = target.classList.contains('is-selected');
-        var groupEl = target.closest ? target.closest('.user-input-question') : null;
-        var barEl = target.closest ? target.closest('.user-input-bar') : null;
         if (groupEl) markUserInputSelection(groupEl, target, barEl);
         if (!alreadyChosen) {
           vscode.postMessage({
@@ -1244,6 +1308,16 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
           });
         }
       }
+      return;
+    }
+
+    if (target.classList.contains('btn-user-input-confirm')) {
+      confirmUserInputGroup(
+        target,
+        target.closest ? target.closest('.user-input-question') : null,
+        target.closest ? target.closest('.user-input-bar') : null,
+      );
+      return;
     }
 
     if (target.classList.contains('btn-user-input-cancel')) {

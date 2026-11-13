@@ -337,6 +337,18 @@ describe("webview-js-event-handler.ts", () => {
     expect(script).toContain('data-question-id="');
   });
 
+  it("gives a multi-select question a confirm button, and only that one", () => {
+    // A click on a multi-select option ticks it; the answer is the set the
+    // confirm button sends. The markup says which kind each question is so the
+    // click handler never has to infer it from the options count.
+    const script = getEventHandlerScript(makeTr());
+    expect(script).toContain("var isMultiSelect = !!q.multi_select");
+    expect(script).toContain("' data-multi=\"1\"'");
+    expect(script).toContain('class="btn-user-input-confirm"');
+    expect(script).toContain("__i18n.userInputConfirmSelect.replace('{count}', '0')");
+    expect(script).toContain("__i18n.userInputMultiSelectHint");
+  });
+
   it("retires only the bar the resolved input owned", () => {
     // Two requests can be open at once (a view and a background thread); a
     // blanket removal takes the other request's only answerable buttons away.

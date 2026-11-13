@@ -797,6 +797,13 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
           msg.optionLabel as string
         );
         break;
+      case "userInputConfirm":
+        await this.handleUserInputConfirm(
+          msg.inputId as string,
+          msg.questionId as string,
+          Array.isArray(msg.labels) ? (msg.labels as string[]) : []
+        );
+        break;
       case "userInputCancel":
         await this.handleUserInputCancel(msg.inputId as string);
         break;
@@ -8212,6 +8219,17 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     this.view?.show?.(true);
   }
 
+  /** Find the request a webview message names, and which surface owns it. */
+  private findPendingUserInput(inputId: string):
+    | { pending: UserInputState; owner: "view" | "background" }
+    | undefined {
+    const viewPending = this.pendingUserInputs.get(inputId);
+    if (viewPending) return { pending: viewPending, owner: "view" };
+    const backgroundPending = this.backgroundUserInputs.get(inputId);
+    if (backgroundPending) return { pending: backgroundPending, owner: "background" };
+    return undefined;
+  }
+
   private async handleUserInputSelect(
     inputId: string,
     questionId: string,
@@ -8220,13 +8238,9 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
   ): Promise<void> {
     // Background threads register their pending inputs in a separate map
     // that survives view switches; the view's map is checked first.
-    let pending = this.pendingUserInputs.get(inputId);
-    let owner: "view" | "background" = "view";
-    if (!pending) {
-      pending = this.backgroundUserInputs.get(inputId);
-      owner = "background";
-    }
-    if (!pending) return;
+    const found = this.findPendingUserInput(inputId);
+    if (!found) return;
+    const { pending, owner } = found;
 
     // One answer per question. The bar lets a pick be changed until the last
     // question is answered, and a change must *replace* that question's answer:
@@ -8238,30 +8252,76 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       label: optionLabel,
       value: optionLabel,
     });
+    // A multi-select question is ticked, not answered: its picks are not final
+    // until the confirm button names the whole set, so a click must not mark it
+    // answered — that would let a request with one ticked option submit itself.
+    const question = pending.questions.find(q => q.id === questionId);
+    if (question && question.multi_select) return;
     pending.answeredQuestions.add(questionId);
+    await this.submitUserInputIfComplete(inputId, pending, owner);
+  }
 
-    const allAnswered = pending.questions.every(q => pending!.answeredQuestions.has(q.id));
-    if (allAnswered) {
-      try {
-        await this.api.submitUserInput(pending.threadId, inputId, pending.answers);
-        if (owner === "view") this.pendingUserInputs.delete(inputId);
-        else this.backgroundUserInputs.delete(inputId);
-        this.postMessage({
-          type: "userInputResolved",
-          inputId,
-          cancelled: false,
-          answers: pending.answers,
-        });
-        await this.refreshActiveTaskDetail();
-        await this.refreshTaskList();
-      } catch (err) {
-        this.postMessage({
-          type: "error",
-          message: `${formatError("Failed to submit user input", err)}. Use /interrupt to clear the stuck turn.`,
-        });
-        if (owner === "view") this.pendingUserInputs.delete(inputId);
-        else this.backgroundUserInputs.delete(inputId);
-      }
+  /** Commit a multi-select question: the ticked labels become its answers.
+   *
+   *  The runtime takes one answer per selected option under the same question
+   *  id (crates/tui's multi-select view builds its response the same way), so
+   *  the whole set replaces whatever partial picks earlier clicks recorded. */
+  private async handleUserInputConfirm(
+    inputId: string,
+    questionId: string,
+    labels: string[]
+  ): Promise<void> {
+    const found = this.findPendingUserInput(inputId);
+    if (!found) return;
+    const { pending, owner } = found;
+    if (!Array.isArray(labels) || labels.length === 0) return;
+    const question = pending.questions.find(q => q.id === questionId);
+    // Only a multi-select question has a confirm step; a single-select one was
+    // already answered by its click, and confirming it again would replace that
+    // answer with a stale copy.
+    if (!question || !question.multi_select) return;
+    const offered = new Set((question.options || []).map(o => o.label));
+    const values = labels.filter(label => offered.has(label));
+    if (values.length === 0) return;
+
+    pending.answers = pending.answers.filter(a => a.id !== questionId);
+    for (const label of values) {
+      pending.answers.push({ id: questionId, label, value: label });
+    }
+    pending.answeredQuestions.add(questionId);
+    await this.submitUserInputIfComplete(inputId, pending, owner);
+  }
+
+  /** Send the reply once every question has an answer, and retire the request.
+   *
+   *  Shared by the click path and the confirm path so both finish a request
+   *  the same way — the last question answered, whatever kind it was. */
+  private async submitUserInputIfComplete(
+    inputId: string,
+    pending: UserInputState,
+    owner: "view" | "background"
+  ): Promise<void> {
+    const allAnswered = pending.questions.every(q => pending.answeredQuestions.has(q.id));
+    if (!allAnswered) return;
+    try {
+      await this.api.submitUserInput(pending.threadId, inputId, pending.answers);
+      if (owner === "view") this.pendingUserInputs.delete(inputId);
+      else this.backgroundUserInputs.delete(inputId);
+      this.postMessage({
+        type: "userInputResolved",
+        inputId,
+        cancelled: false,
+        answers: pending.answers,
+      });
+      await this.refreshActiveTaskDetail();
+      await this.refreshTaskList();
+    } catch (err) {
+      this.postMessage({
+        type: "error",
+        message: `${formatError("Failed to submit user input", err)}. Use /interrupt to clear the stuck turn.`,
+      });
+      if (owner === "view") this.pendingUserInputs.delete(inputId);
+      else this.backgroundUserInputs.delete(inputId);
     }
   }
 

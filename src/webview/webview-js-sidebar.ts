@@ -1291,10 +1291,18 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
    *
    *  Scoped per request rather than inlined in the loop above: the picks a
    *  click records live in this closure, so two requests waiting on the same
-   *  card cannot read each other's map. */
+   *  card cannot read each other's map.
+   *
+   *  pickMap[questionId] holds { picks: [optionIdx], confirmed: bool }. A
+   *  single-select question is confirmed by its own click; a multi-select one
+   *  collects ticks until its confirm button sends the set — the same rule the
+   *  conversation's own bar follows, because both answer one request. */
   function renderThreadAttentionQuestions(inputRow, inputId, questions, pickMap) {
-    var pickedFor = function(questionId) {
-      return Object.prototype.hasOwnProperty.call(pickMap, questionId) ? pickMap[questionId] : undefined;
+    var entryFor = function(questionId) {
+      return Object.prototype.hasOwnProperty.call(pickMap, questionId) ? pickMap[questionId] : null;
+    };
+    var entryPicks = function(entry) {
+      return entry && Array.isArray(entry.picks) ? entry.picks : [];
     };
     // Several questions in one request read as one question with a pile of
     // buttons unless the bar says how many there are and numbers them.
@@ -1307,53 +1315,122 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
     }
     for (var q = 0; q < questions.length; q++) {
       var question = questions[q];
+      var entry = entryFor(question.id);
+      var isMultiSelect = !!question.multi_select;
       var qEl = document.createElement('div');
       qEl.className = 'thread-attention-question';
-      if (pickedFor(question.id) !== undefined) qEl.classList.add('is-answered');
+      if (entry && entry.confirmed) qEl.classList.add('is-answered');
       qEl.innerHTML = '<div class="thread-attention-text">' +
         (multiQuestion ? '<span class="thread-attention-qidx">' + (q + 1) + '</span>' : '') +
         '<strong>' + __wvEscapeHtml(question.header || '') + '</strong> ' + __wvEscapeHtml(question.question || '') + '</div>';
       var opts = document.createElement('div');
       opts.className = 'thread-attention-buttons';
+      var confirmBtn = null;
+      // Every option button of this question, so a toggle and its confirm can
+      // repaint the row without a full re-render of the card.
+      var buttons = [];
       for (var o = 0; o < (question.options || []).length; o++) {
-        // opts and qEl travel as parameters: both are vars reassigned on
-        // every question, so a closure reading them would mark the last
-        // question's buttons whichever one was clicked.
-        (function(questionId, optIdx, optLabel, opts, qEl) {
-          var btn = document.createElement('button');
-          btn.className = 'thread-attention-btn';
-          btn.type = 'button';
-          btn.textContent = optLabel.label;
-          btn.title = optLabel.description || '';
-          btn.setAttribute('data-option-label', optLabel.label);
-          if (pickedFor(questionId) !== undefined) {
-            btn.classList.add(pickedFor(questionId) === optIdx ? 'is-selected' : 'is-dimmed');
-            if (pickedFor(questionId) === optIdx) btn.textContent = '\u2713 ' + optLabel.label;
-          }
-          btn.addEventListener('click', function(e) {
-            e.stopPropagation();
-            var already = pickedFor(questionId) === optIdx;
-            pickMap[questionId] = optIdx;
-            // Mark it in place rather than waiting for the next repaint: the
-            // row stays until every question is answered, so nothing else on
-            // screen would confirm the click.
-            var siblingBtns = opts.querySelectorAll('.thread-attention-btn');
-            for (var b = 0; b < siblingBtns.length; b++) {
-              var isChosen = siblingBtns[b] === btn;
-              siblingBtns[b].classList.toggle('is-selected', isChosen);
-              siblingBtns[b].classList.toggle('is-dimmed', !isChosen);
-              siblingBtns[b].textContent = (isChosen ? '\u2713 ' : '') + siblingBtns[b].getAttribute('data-option-label');
-            }
-            qEl.classList.add('is-answered');
-            if (!already) {
-              vscode.postMessage({ type: 'userInputSelect', inputId: inputId, questionId: questionId, optionIdx: optIdx, optionLabel: optLabel.label });
-            }
-          });
-          opts.appendChild(btn);
-        })(question.id, o, question.options[o], opts, qEl);
+        buttons.push(threadAttentionOption(
+          question, o, question.options[o], inputId, pickMap, qEl, buttons, isMultiSelect,
+          function() { return confirmBtn; },
+        ));
       }
+      for (var b = 0; b < buttons.length; b++) opts.appendChild(buttons[b]);
+      if (isMultiSelect) {
+        var multiRow = document.createElement('div');
+        multiRow.className = 'thread-attention-multi-row';
+        confirmBtn = document.createElement('button');
+        confirmBtn.className = 'thread-attention-btn confirm';
+        confirmBtn.type = 'button';
+        confirmBtn.title = __i18n.userInputMultiSelectHint;
+        confirmBtn.addEventListener('click', function(e) {
+          e.stopPropagation();
+          var state = pickMap[question.id];
+          if (!state || state.confirmed || state.picks.length === 0) return;
+          var sorted = state.picks.slice().sort(function(a, b) { return a - b; });
+          var labels = [];
+          for (var p = 0; p < sorted.length; p++) {
+            var option = (question.options || [])[sorted[p]];
+            if (option) labels.push(option.label);
+          }
+          state.confirmed = true;
+          qEl.classList.add('is-answered');
+          paintThreadAttentionQuestion(buttons, state, isMultiSelect, confirmBtn);
+          vscode.postMessage({ type: 'userInputConfirm', inputId: inputId, questionId: question.id, labels: labels });
+        });
+        multiRow.appendChild(confirmBtn);
+        opts.appendChild(multiRow);
+      }
+      paintThreadAttentionQuestion(buttons, entry, isMultiSelect, confirmBtn);
       qEl.appendChild(opts);
       inputRow.appendChild(qEl);
+    }
+  }
+
+  /** One option of one question: its button, its state and its click.
+   *
+   *  buttons is the question's list so far, which is also how the paint
+   *  finds this button's index: option index and list position are the same
+   *  thing here, and confirmBtnOf is read at click time because the confirm
+   *  button is built after the options. */
+  function threadAttentionOption(question, optIdx, optLabel, inputId, pickMap, qEl, buttons, isMulti, confirmBtnOf) {
+    var btn = document.createElement('button');
+    btn.className = 'thread-attention-btn';
+    btn.type = 'button';
+    btn.textContent = optLabel.label;
+    btn.title = optLabel.description || '';
+    btn.setAttribute('data-option-label', optLabel.label);
+    btn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      var state = pickMap[question.id];
+      if (!state) {
+        state = { picks: [], confirmed: false };
+        pickMap[question.id] = state;
+      }
+      // A confirmed multi-select question is closed: its set was already sent,
+      // and another tick would contradict it. A single-select one stays open —
+      // its answer is one label, and re-picking replaces it (the host replaces
+      // that question's answer rather than appending a second one).
+      if (state.confirmed && isMulti) return;
+      // Same option again on a single-select question: already answered this
+      // way, and a second identical answer is a duplicate reply.
+      if (!isMulti && state.confirmed && state.picks.length === 1 && state.picks[0] === optIdx) return;
+      if (isMulti) {
+        // Tick or untick: nothing is sent until the confirm button.
+        var at = state.picks.indexOf(optIdx);
+        if (at >= 0) state.picks.splice(at, 1);
+        else state.picks.push(optIdx);
+      } else {
+        state.picks = [optIdx];
+        state.confirmed = true;
+        qEl.classList.add('is-answered');
+        vscode.postMessage({ type: 'userInputSelect', inputId: inputId, questionId: question.id, optionIdx: optIdx, optionLabel: optLabel.label });
+      }
+      paintThreadAttentionQuestion(buttons, state, isMulti, confirmBtnOf());
+    });
+    return btn;
+  }
+
+  /** Repaint one question's buttons and its confirm label from its state.
+   *
+   *  A single-select question is answered by its click, so its other options
+   *  dim; a multi-select one shows exactly the ticks it holds. */
+  function paintThreadAttentionQuestion(buttons, state, isMulti, confirmBtn) {
+    var picks = state && Array.isArray(state.picks) ? state.picks : [];
+    var confirmed = !!(state && state.confirmed);
+    for (var b = 0; b < buttons.length; b++) {
+      var btn = buttons[b];
+      var chosen = picks.indexOf(b) >= 0;
+      var label = btn.getAttribute('data-option-label') || '';
+      btn.classList.toggle('is-selected', chosen);
+      btn.classList.toggle('is-dimmed', confirmed && !chosen);
+      btn.textContent = (chosen ? '\u2713 ' : '') + label;
+    }
+    if (confirmBtn) {
+      confirmBtn.disabled = confirmed || picks.length === 0;
+      confirmBtn.textContent = confirmed
+        ? __i18n.userInputConfirmed.replace('{count}', String(picks.length))
+        : __i18n.userInputConfirmSelect.replace('{count}', String(picks.length));
     }
   }
 

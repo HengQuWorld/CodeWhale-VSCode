@@ -80,6 +80,14 @@ interface Translations {
   /** Set on a question once its option was clicked, before the reply is sent
    *  — the click has to be visible, or the bar looks like it ignored it. */
   userInputSelected: string;
+  /** A multi-select question's commit button: "{count} picked, confirm". The
+   *  count is part of the label because the button is the only thing that says
+   *  how many ticks are riding on it. */
+  userInputConfirmSelect: string;
+  /** That button once the question is committed: what was sent. */
+  userInputConfirmed: string;
+  /** Under a multi-select question: a click ticks rather than answers. */
+  userInputMultiSelectHint: string;
   noConversations: string;
   threadAttention: string;
   threadsNeedsYou: string;
@@ -723,8 +731,11 @@ const en: Translations = {
   userInputAwaiting: "⏳ Awaiting your input...",
   userInputQuestionsCount: "{count} questions to answer",
   userInputProgress: "{done}/{total} answered",
-  userInputMultiHint: "One choice per question — the reply is sent once all of them are answered.",
+  userInputMultiHint: "The reply is sent once every question has an answer.",
   userInputSelected: "✓ selected",
+  userInputConfirmSelect: "Confirm {count} selected",
+  userInputConfirmed: "✓ {count} confirmed",
+  userInputMultiSelectHint: "Select all that apply, then confirm.",
   noConversations: "No conversations yet", threadAttention: "Waiting for your approval or input — click to open", threadsNeedsYou: "Needs you", threadsRunning: "Running", threadsRecent: "Recent",
   threadsLoading: "Loading threads…", threadsLoadFailed: "Couldn't load the thread list", threadsRetry: "Retry",
   turnContinuesInBackground: "Turn continues running in the background",
@@ -1237,8 +1248,11 @@ const zhCn: Translations = {
   userInputAwaiting: "⏳ 等待您的输入...",
   userInputQuestionsCount: "共 {count} 个问题",
   userInputProgress: "已答 {done}/{total}",
-  userInputMultiHint: "每个问题各选一项，全部选完后自动提交。",
+  userInputMultiHint: "全部问题都有答案后自动提交。",
   userInputSelected: "✓ 已选择",
+  userInputConfirmSelect: "确认选择 {count} 项",
+  userInputConfirmed: "✓ 已确认 {count} 项",
+  userInputMultiSelectHint: "可多选，选好后点确认。",
   noConversations: "暂无会话", threadAttention: "等待你的审批或输入——点击打开", threadsNeedsYou: "等你处理", threadsRunning: "运行中", threadsRecent: "最近",
   threadsLoading: "正在加载线程…", threadsLoadFailed: "线程列表加载失败", threadsRetry: "重试",
   turnContinuesInBackground: "回合将在后台继续运行",
@@ -1795,6 +1809,9 @@ export function webviewTranslations(tr: Translations) {
     userInputProgress: tr.userInputProgress,
     userInputMultiHint: tr.userInputMultiHint,
     userInputSelected: tr.userInputSelected,
+    userInputConfirmSelect: tr.userInputConfirmSelect,
+    userInputConfirmed: tr.userInputConfirmed,
+    userInputMultiSelectHint: tr.userInputMultiSelectHint,
     noConversations: tr.noConversations,
     threadAttention: tr.threadAttention,
     threadsNeedsYou: tr.threadsNeedsYou,
