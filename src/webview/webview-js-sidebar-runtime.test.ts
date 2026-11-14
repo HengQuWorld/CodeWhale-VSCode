@@ -36,7 +36,7 @@ vi.mock("vscode", () => ({
   ConfigurationTarget: { Global: "global" },
 }));
 
-import { SKILL_GROUP_KEYS, getSidebarScript } from "./webview-js-sidebar";
+import { ACTIVITY_SECTION_KEYS, SKILL_GROUP_KEYS, getSidebarScript } from "./webview-js-sidebar";
 import { getUtilitiesScript } from "./webview-js-utilities";
 import { makeTr } from "./webview-test-helpers";
 
@@ -95,9 +95,17 @@ class FakeElement {
   public parentElement: FakeElement | null = null;
   public children: FakeElement[] = [];
   public type = "";
+  public tagName = "DIV";
+  public rows = 0;
+  /** The measured height the add-note field grows from. Zero until a real
+   *  layout has run, which is what the real thing reports too. */
+  public scrollHeight = 0;
+  /** What the layout reports for the box. A hidden panel reports 0. */
+  public offsetHeight = 0;
   public checked = false;
   /** The Skills panel's filter reads this back; the type needs it declared. */
   public value = "";
+  public disabled = false;
   private html = "";
   private listeners = new Map<string, (event: unknown) => void>();
   private attributes = new Map<string, string>();
@@ -135,6 +143,12 @@ class FakeElement {
   public onmousedown: ((event: unknown) => void) | null = null;
   public onmouseup: ((event: unknown) => void) | null = null;
   public onkeydown: ((event: unknown) => void) | null = null;
+
+  /** The DOM's own convenience click, which the panels use for Enter-key
+   *  submits (`btn.click()`). It runs the same handlers a pointer click does. */
+  click(): void {
+    this.dispatch("click", {});
+  }
 
   dispatch(name: string, event: unknown = {}): void {
     this.listeners.get(name)?.(event);
@@ -253,7 +267,11 @@ function createHarness(options?: { storage?: Record<string, string> | null }) {
   }
   const documentObj = {
     getElementById: (id: string) => getEl(id),
-    createElement: () => new FakeElement(),
+    createElement: (tag?: string) => {
+      const element = new FakeElement();
+      if (tag) element.tagName = tag.toUpperCase();
+      return element;
+    },
     // The inline attention card labels its remember box with a text node; a
     // bare element carrying the text stands in well enough for a child count
     // and a click to be asserted.
@@ -272,12 +290,25 @@ function createHarness(options?: { storage?: Record<string, string> | null }) {
     },
   };
 
+  const resizeObservers: Array<{ target: FakeElement; fire: () => void }> = [];
+  class FakeResizeObserver {
+    private readonly callback: () => void;
+    constructor(callback: () => void) {
+      this.callback = callback;
+    }
+    observe(target: FakeElement): void {
+      resizeObservers.push({ target, fire: () => this.callback() });
+    }
+    disconnect(): void {}
+  }
+
   const context = vm.createContext({
     window: windowObj,
     document: documentObj,
     setTimeout: () => 0,
     clearTimeout: () => {},
     console,
+    ResizeObserver: FakeResizeObserver,
   });
   // The real utilities module runs first, as it does in the template: the
   // sidebar captures its backdrop guard, and that guard is the mechanism under
@@ -307,6 +338,7 @@ function createHarness(options?: { storage?: Record<string, string> | null }) {
     agentsPanel: getEl("tab-agents"),
     changesPanel: getEl("tab-changes"),
     skillPanel: getEl("tab-skills"),
+    memoryPanel: getEl("tab-memory"),
     mcpPanel: getEl("tab-mcp"),
     taskPanel: getEl("tab-tasks"),
     mcpAddOverlay: getEl("mcp-add-overlay"),
@@ -318,6 +350,7 @@ function createHarness(options?: { storage?: Record<string, string> | null }) {
     sections: {
       work: getEl("sidebar-work"),
       changes: getEl("sidebar-changes"),
+      memory: getEl("sidebar-memory"),
       fleet: getEl("sidebar-fleet"),
       tasks: getEl("sidebar-tasks"),
       agents: getEl("sidebar-agents"),
@@ -329,6 +362,7 @@ function createHarness(options?: { storage?: Record<string, string> | null }) {
     sectionHeaders: {
       work: getEl("work-section-toggle"),
       changes: getEl("changes-section-toggle"),
+      memory: getEl("memory-section-toggle"),
       fleet: getEl("fleet-section-toggle"),
       tasks: getEl("tasks-section-toggle"),
       agents: getEl("agents-section-toggle"),
@@ -336,9 +370,15 @@ function createHarness(options?: { storage?: Record<string, string> | null }) {
       mcp: getEl("mcp-section-toggle"),
     },
     storage,
+    /** Fire the resize callback the note box registered, as a drag would. */
+    fireResize: (): void => {
+      for (const observer of resizeObservers) observer.fire();
+    },
     postMessages,
     revealCalls,
     diffStore: windowObj.__wvDiffStore as Map<string, string>,
+    /** The stand-in window, for the capability flags the panels read live. */
+    window: windowObj,
     sidebar: windowObj.__wvSidebar as Record<string, any>,
   };
 }
@@ -854,7 +894,7 @@ describe("Activity section folding", () => {
     // The binding walks the roster and skips a header it cannot find, so a
     // section whose header id drifted would fail silently — as a fold that
     // does nothing. Each one is folded from its own header here.
-    for (const key of ["work", "changes", "fleet", "tasks", "agents", "skills", "mcp"] as const) {
+    for (const key of ACTIVITY_SECTION_KEYS) {
       const { sectionHeaders, sections, sidebar } = createHarness();
 
       sectionHeaders[key].dispatch("click");
@@ -2031,7 +2071,9 @@ describe("Changes panel keeps every row visible", () => {
 });
 
 describe("Activity section visibility", () => {
-  const ALL = ["work", "changes", "fleet", "tasks", "agents", "skills", "mcp"] as const;
+  // The roster itself, not a copy: a section added to the panel is covered
+  // by every one of these tests without a second list to keep in step.
+  const ALL = ACTIVITY_SECTION_KEYS;
 
   it("shows every section until the reader hides one", () => {
     const { sections, activityEmpty } = createHarness();
@@ -2694,6 +2736,63 @@ function threeGroups() {
   ];
 }
 
+describe("skills panel install action", () => {
+  it("keeps the install action in the toolbar, above the fields it commits", () => {
+    const { sidebar, skillPanel, window: win } = createHarness();
+    win.__wvApiCapabilities = { skillDetail: true, skillLifecycle: true };
+
+    sidebar.renderSkills({ skills: [skillRowFixture({ name: "alpha" })] });
+
+    // The same toolbar the MCP panel carries: add first and accent-filled,
+    // then the quiet refresh — above the form, not inside it.
+    const toolbar = skillPanel.querySelector(".task-toolbar")!;
+    expect(toolbar.children.map((child) => child.className)).toEqual([
+      "task-icon-btn primary",
+      "task-icon-btn",
+    ]);
+    expect(toolbar.children[0].textContent).toBe("+");
+    expect(toolbar.children[0].title).toBe("Install");
+
+    const installRow = skillPanel.querySelector(".skill-install-row")!;
+    expect(installRow.children.map((child) => child.className)).toEqual([
+      "skill-install-input",
+      "skill-install-scope",
+    ]);
+  });
+
+  it("submits the source and scope the reader typed", () => {
+    const { sidebar, skillPanel, postMessages, window: win } = createHarness();
+    win.__wvApiCapabilities = { skillDetail: true, skillLifecycle: true };
+    sidebar.renderSkills({ skills: [] });
+
+    const source = skillPanel.querySelector(".skill-install-input")!;
+    const scope = skillPanel.querySelector(".skill-install-scope")!;
+    source.value = " github:owner/repo ";
+    scope.value = "project";
+
+    postMessages.length = 0;
+    skillPanel.querySelector(".task-toolbar")!.children[0].dispatch("click");
+
+    expect(postMessages).toEqual([
+      { type: "installSkill", source: "github:owner/repo", scope: "project" },
+    ]);
+    expect(source.value).toBe("");
+  });
+
+  it("greys the install action when the engine has no lifecycle routes", () => {
+    const { sidebar, skillPanel, window: win } = createHarness();
+    win.__wvApiCapabilities = { skillDetail: true, skillLifecycle: false };
+
+    sidebar.renderSkills({ skills: [] });
+
+    // Disabled rather than absent, exactly like the MCP panel's add: the
+    // control keeps its place and its tooltip says what it would do.
+    const addBtn = skillPanel.querySelector(".task-toolbar")!.children[0];
+    expect(addBtn.disabled).toBe(true);
+    expect(skillPanel.querySelector(".skill-install-row")).toBeNull();
+  });
+});
+
 describe("skills panel group folding", () => {
   it("starts every group open, with nothing stored", () => {
     const { sidebar, skillPanel } = createHarness();
@@ -3152,5 +3251,428 @@ describe("modal backdrop dismissal", () => {
     taskCreateOverlay.dispatch("mousedown", { target: taskCreateOverlay });
     taskCreateOverlay.dispatch("click", { target: taskCreateOverlay });
     expect(taskCreateOverlay.style.display).toBe("none");
+  });
+});
+
+/** One row as the host publishes it (`chat-provider/memory.ts`). */
+function memoryRowFixture(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "3f2a1b9c-0000-4000-8000-000000000000",
+    shortId: "3f2a1b9c",
+    revision: 2,
+    status: "active",
+    title: "Prefers pnpm",
+    body: "The user wants pnpm, not npm.",
+    kind: "fact",
+    scope: "global",
+    pinned: false,
+    suppressed: false,
+    freshness: "current",
+    inContext: false,
+    updatedAt: 100,
+    ...overrides,
+  };
+}
+
+function memoryCards(panel: FakeElement): FakeElement[] {
+  return panel.querySelectorAll(".memory-card");
+}
+
+function memoryButton(card: FakeElement, label: string): FakeElement | null {
+  return card.querySelectorAll(".task-action-btn").find((btn) => btn.title === label) ?? null;
+}
+
+function memoryTitles(panel: FakeElement): string[] {
+  return memoryCards(panel).map((card) => card.querySelector(".task-title")!.textContent);
+}
+
+describe("memory panel", () => {
+  it("draws one card per entry, with the decision first and its state named", () => {
+    const { sidebar, memoryPanel } = createHarness();
+
+    sidebar.renderMemory({
+      entries: [
+        memoryRowFixture({ id: "b", shortId: "bbbbbbbb", title: "Released 0.10.1", status: "active", updatedAt: 200 }),
+        memoryRowFixture({ id: "a", shortId: "aaaaaaaa", title: "Try the flaky test", status: "candidate", scope: "session", updatedAt: 100 }),
+      ],
+      canReview: true,
+      canForget: true,
+    });
+
+    // A candidate is the only row that needs the reader, so it is drawn first
+    // even though its engine timestamp is older.
+    expect(memoryTitles(memoryPanel)).toEqual(["Try the flaky test", "Released 0.10.1"]);
+    const [candidate, active] = memoryCards(memoryPanel);
+    expect(candidate.querySelector(".memory-status-badge")!.textContent).toBe("Candidate");
+    expect(active.querySelector(".memory-status-badge")!.textContent).toBe("Active");
+    // Session scope is named as such: the note applies to this conversation,
+    // not to every conversation in the repository.
+    expect(candidate.querySelectorAll(".skill-badge")[0].textContent).toBe("This conversation");
+    expect(active.querySelectorAll(".skill-badge")[0].textContent).toBe("Global");
+  });
+
+  it("sends the revision the row displayed when a candidate is approved", () => {
+    const { sidebar, memoryPanel, postMessages } = createHarness();
+    sidebar.renderMemory({ entries: [memoryRowFixture({ status: "candidate", revision: 7 })], canReview: true });
+
+    postMessages.length = 0;
+    memoryButton(memoryCards(memoryPanel)[0], "Approve")!.dispatch("click", {
+      stopPropagation: () => undefined,
+    });
+
+    expect(postMessages).toEqual([
+      {
+        type: "memoryLensAction",
+        action: "approve",
+        id: "3f2a1b9c-0000-4000-8000-000000000000",
+        revision: 7,
+      },
+    ]);
+  });
+
+  it("offers approve only on a candidate, since the engine refuses it elsewhere", () => {
+    const { sidebar, memoryPanel } = createHarness();
+    sidebar.renderMemory({ entries: [memoryRowFixture({ status: "active" })], canReview: true, canForget: true });
+
+    const card = memoryCards(memoryPanel)[0];
+    expect(memoryButton(card, "Approve")).toBeNull();
+    expect(memoryButton(card, "Reject")).toBeNull();
+    expect(memoryButton(card, "Forget")).not.toBeNull();
+  });
+
+  it("draws no review controls when the runtime grants no review", () => {
+    // The capabilities are the engine's answer about this caller, not a guess:
+    // showing the buttons anyway would promise a write that comes back denied.
+    const { sidebar, memoryPanel } = createHarness();
+    sidebar.renderMemory({
+      entries: [memoryRowFixture({ status: "candidate" })],
+      canReview: false,
+      canForget: false,
+    });
+
+    const card = memoryCards(memoryPanel)[0];
+    expect(memoryButton(card, "Approve")).toBeNull();
+    expect(memoryButton(card, "Pin")).toBeNull();
+    expect(memoryButton(card, "Forget")).toBeNull();
+  });
+
+  it("sends both preference flags, because the engine takes the pair", () => {
+    const { sidebar, memoryPanel, postMessages } = createHarness();
+    sidebar.renderMemory({ entries: [memoryRowFixture({ pinned: false, suppressed: true })], canReview: true });
+
+    postMessages.length = 0;
+    memoryButton(memoryCards(memoryPanel)[0], "Pin")!.dispatch("click", {
+      stopPropagation: () => undefined,
+    });
+
+    expect(postMessages).toEqual([
+      {
+        type: "memoryLensAction",
+        action: "preferences",
+        id: "3f2a1b9c-0000-4000-8000-000000000000",
+        revision: 2,
+        pinned: true,
+        suppressed: true,
+      },
+    ]);
+  });
+
+  it("lists only what awaits review under the pending filter", () => {
+    const { sidebar, memoryPanel } = createHarness();
+    sidebar.renderMemory({
+      entries: [
+        memoryRowFixture({ title: "candidate one", status: "candidate" }),
+        memoryRowFixture({ title: "active one", status: "active" }),
+      ],
+      canReview: true,
+    });
+
+    const chips = memoryPanel.querySelectorAll(".memory-filter-chip");
+    expect(chips.map((chip) => chip.textContent)).toEqual(["All (2)", "Pending (1)"]);
+
+    chips[1].dispatch("click");
+    expect(memoryTitles(memoryPanel)).toEqual(["candidate one"]);
+
+    memoryPanel.querySelectorAll(".memory-filter-chip")[0].dispatch("click");
+    expect(memoryTitles(memoryPanel)).toHaveLength(2);
+  });
+
+  it("filters rows in the webview by title and body", () => {
+    const { sidebar, memoryPanel, postMessages } = createHarness();
+    sidebar.renderMemory({
+      entries: [
+        memoryRowFixture({ title: "Prefers pnpm", body: "The user wants pnpm, not npm." }),
+        memoryRowFixture({ title: "Runs rust tests", body: "cargo nextest through dev-test.sh" }),
+      ],
+      canReview: true,
+    });
+
+    postMessages.length = 0;
+    const input = memoryPanel.querySelector(".skill-search-input")!;
+    input.value = "NEXTEST";
+    input.dispatch("input");
+
+    // The filter never leaves the webview.
+    expect(postMessages).toEqual([]);
+    expect(memoryTitles(memoryPanel)).toEqual(["Runs rust tests"]);
+  });
+
+  it("adds a note with the scope the reader picked", () => {
+    const { sidebar, memoryPanel, postMessages } = createHarness();
+    sidebar.renderMemory({ entries: [], canReview: true });
+
+    postMessages.length = 0;
+    const addRow = memoryPanel.querySelector(".memory-add-row")!;
+    const input = addRow.querySelector(".memory-add-input")!;
+    const scope = memoryPanel.querySelector(".memory-add-scope")!;
+    input.value = "  Prefers pnpm  ";
+    scope.value = "workspace";
+    memoryPanel.querySelector(".task-toolbar")!.children[1].dispatch("click"); 
+
+    expect(postMessages).toEqual([
+      { type: "rememberMemory", text: "Prefers pnpm", scope: "workspace" },
+    ]);
+  });
+
+  it("puts the scope and the actions in one toolbar row, above the field", () => {
+    const { sidebar, memoryPanel } = createHarness();
+    sidebar.renderMemory({ entries: [], canReview: true });
+
+    // The scope leads the row and the actions follow it — the same toolbar the
+    // MCP panel carries, with the add action accent-filled and the refresh
+    // quiet. `margin-right: auto` on the scope is what parts the two groups.
+    const toolbar = memoryPanel.querySelector(".task-toolbar")!;
+    expect(toolbar.children.map((child) => child.className)).toEqual([
+      "skill-install-scope memory-add-scope",
+      "task-icon-btn primary",
+      "task-icon-btn",
+    ]);
+    expect(toolbar.children[1].textContent).toBe("+");
+    expect(toolbar.children[1].title).toBe("Remember");
+
+    // Nothing shares the field's row with it.
+    const addRow = memoryPanel.querySelector(".memory-add-row")!;
+    expect(addRow.children.map((child) => child.className)).toEqual([
+      "memory-add-input",
+    ]);
+    // A textarea, one line tall to start: a note is prose and wraps, so an
+    // input element would hide everything past the first line as it is typed.
+    const field = addRow.querySelector(".memory-add-input")!;
+    expect(field.tagName).toBe("TEXTAREA");
+    expect(field.rows).toBe(1);
+  });
+
+  it("greys the add action when the engine has no store to write to", () => {
+    const { sidebar, memoryPanel } = createHarness();
+    sidebar.renderMemory({
+      entries: [],
+      canReview: false,
+      canForget: false,
+      problem: { kind: "unsupported", message: "no routes" },
+    });
+
+    // Present but disabled, the way the MCP panel greys its add when the
+    // engine has no management routes. The scope goes with it: a dropdown that
+    // governs no note reads as an option that was silently ignored.
+    expect(memoryPanel.querySelector(".task-toolbar")!.children[1].disabled).toBe(true);
+    expect(memoryPanel.querySelector(".memory-add-scope")!.disabled).toBe(true);
+  });
+
+  it("puts the caret in the note when there is nothing to remember", () => {
+    const { sidebar, memoryPanel, postMessages } = createHarness();
+    sidebar.renderMemory({ entries: [], canReview: true });
+    const field = memoryPanel.querySelector(".memory-add-input")!;
+
+    const focus = vi.spyOn(field, "focus");
+    postMessages.length = 0;
+    memoryPanel.querySelector(".task-toolbar")!.children[1].dispatch("click"); 
+
+    // An empty note is not an error worth a message.
+    expect(postMessages).toEqual([]);
+    expect(focus).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not grow by itself: the height is the reader's to set", () => {
+    const { sidebar, memoryPanel } = createHarness();
+    sidebar.renderMemory({ entries: [], canReview: true });
+    const field = memoryPanel.querySelector(".memory-add-input")!;
+
+    // A long note typed into a box nobody dragged leaves the height alone. The
+    // panel cannot know how tall the note will be, and a handler that wrote the
+    // height on every keystroke would erase the one the reader just dragged.
+    field.scrollHeight = 120;
+    field.value = "a\nnote\nseveral\nlines\nlong";
+    field.dispatch("input");
+
+    // No inline height at all, so the stylesheet's one-line floor holds.
+    expect(field.style.height).toBeUndefined();
+  });
+
+  it("keeps the height the reader dragged", () => {
+    const { sidebar, memoryPanel, storage, fireResize } = createHarness();
+    sidebar.renderMemory({ entries: [], canReview: true });
+    const field = memoryPanel.querySelector(".memory-add-input")!;
+
+    // The native grip fires no event of its own; the size change is the signal.
+    field.offsetHeight = 96;
+    fireResize();
+
+    expect(storage.getItem("codewhale:memoryNoteHeight")).toBe("96");
+  });
+
+  it("brings that height back on the next paint", () => {
+    // The panel is rebuilt on every refresh and every finished turn, so a
+    // height that only lived in the DOM would snap back to one line.
+    const { sidebar, memoryPanel } = createHarness({
+      storage: { "codewhale:memoryNoteHeight": "96" },
+    });
+    sidebar.renderMemory({ entries: [], canReview: true });
+
+    expect(memoryPanel.querySelector(".memory-add-input")!.style.height).toBe("96px");
+  });
+
+  it("ignores a stored height this panel could not have written", () => {
+    const { sidebar, memoryPanel } = createHarness({
+      storage: { "codewhale:memoryNoteHeight": "tall" },
+    });
+    sidebar.renderMemory({ entries: [], canReview: true });
+
+    // No inline height, so the stylesheet's one-line floor holds.
+    expect(memoryPanel.querySelector(".memory-add-input")!.style.height).toBeUndefined();
+  });
+
+  it("does not store the zero a hidden panel measures", () => {
+    const { sidebar, memoryPanel, storage, fireResize } = createHarness();
+    sidebar.renderMemory({ entries: [], canReview: true });
+    const field = memoryPanel.querySelector(".memory-add-input")!;
+
+    field.offsetHeight = 0;
+    fireResize();
+
+    // Pinning the field to nothing would be worse than forgetting the drag.
+    expect(storage.getItem("codewhale:memoryNoteHeight")).toBeNull();
+  });
+
+  it("leaves Enter to insert a newline and submits on Cmd/Ctrl+Enter", () => {
+    const { sidebar, memoryPanel, postMessages } = createHarness();
+    sidebar.renderMemory({ entries: [], canReview: true });
+    const addRow = memoryPanel.querySelector(".memory-add-row")!;
+    const field = addRow.querySelector(".memory-add-input")!;
+    const scope = memoryPanel.querySelector(".memory-add-scope")!;
+    field.value = "first line";
+    // A real select reports its first option; the stand-in has no option
+    // selection model, so the value the panel reads is set here.
+    scope.value = "global";
+
+    postMessages.length = 0;
+    const prevented: string[] = [];
+    field.dispatch("keydown", { key: "Enter", preventDefault: () => prevented.push("enter") });
+    // A plain Enter belongs to the note: a body the engine stores as written
+    // must be able to hold more than one line.
+    expect(postMessages).toEqual([]);
+    expect(prevented).toEqual([]);
+
+    field.dispatch("keydown", {
+      key: "Enter",
+      metaKey: true,
+      preventDefault: () => prevented.push("meta"),
+    });
+    expect(postMessages).toEqual([
+      { type: "rememberMemory", text: "first line", scope: "global" },
+    ]);
+  });
+
+  it("clears the sent note but keeps the height the reader chose", () => {
+    const { sidebar, memoryPanel } = createHarness({
+      storage: { "codewhale:memoryNoteHeight": "96" },
+    });
+    sidebar.renderMemory({ entries: [], canReview: true });
+    const field = memoryPanel.querySelector(".memory-add-input")!;
+
+    field.value = "a long note";
+    field.dispatch("input");
+    memoryPanel.querySelector(".task-toolbar")!.children[1].dispatch("click");
+
+    expect(field.value).toBe("");
+    // The height is a layout choice, not a property of what was in the box:
+    // sending the note must not undo it.
+    expect(field.style.height).toBe("96px");
+  });
+
+  it("keeps the note being typed across a repaint", () => {
+    const { sidebar, memoryPanel } = createHarness();
+    sidebar.renderMemory({ entries: [], canReview: true });
+    const field = memoryPanel.querySelector(".memory-add-input")!;
+
+    field.value = "half a thought";
+    field.dispatch("input");
+
+    // Every refresh and every finished turn rebuilds this panel; the sentence
+    // being written is not something a background refresh should eat.
+    sidebar.renderMemory({ entries: [], canReview: true });
+    expect(memoryPanel.querySelector(".memory-add-input")!.value).toBe("half a thought");
+  });
+
+  it("says the engine has no memory routes instead of drawing controls", () => {
+    const { sidebar, memoryPanel } = createHarness();
+    sidebar.renderMemory({
+      entries: [],
+      canReview: false,
+      canForget: false,
+      problem: { kind: "unsupported", message: "no routes" },
+    });
+
+    expect(memoryPanel.querySelector(".memory-add-row")).toBeNull();
+    expect(memoryCards(memoryPanel)).toEqual([]);
+    expect(memoryPanel.querySelectorAll(".skill-capability-note")[0].textContent).toContain(
+      "This engine has no memory routes.",
+    );
+    // The add and the refresh both stay: the engine can be updated, or memory
+    // re-enabled, while this window is open — the add is simply disabled until
+    // there is somewhere to write.
+    expect(memoryPanel.querySelectorAll(".task-icon-btn")).toHaveLength(2);
+  });
+
+  it("keeps the rows it had when a refresh fails", () => {
+    const { sidebar, memoryPanel } = createHarness();
+    sidebar.renderMemory({ entries: [memoryRowFixture()], canReview: true, canForget: true });
+    sidebar.renderMemory({
+      entries: [memoryRowFixture()],
+      canReview: true,
+      canForget: true,
+      problem: { kind: "failed", message: "Could not read memory: socket closed" },
+    });
+
+    // A failed read is not an empty store: the list stays, with the reason
+    // stated above it.
+    expect(memoryCards(memoryPanel)).toHaveLength(1);
+    expect(memoryPanel.querySelectorAll(".skill-capability-note")[0].textContent).toContain(
+      "Could not read memory: socket closed",
+    );
+  });
+
+  it("marks pinned and excluded entries in the row itself", () => {
+    const { sidebar, memoryPanel } = createHarness();
+    sidebar.renderMemory({
+      entries: [memoryRowFixture({ pinned: true, suppressed: true, inContext: false })],
+      canReview: true,
+    });
+
+    const meta = memoryCards(memoryPanel)[0].querySelector(".memory-meta")!;
+    expect(meta.querySelector(".memory-freshness")!.textContent).toBe("Freshness: current");
+    // Pin is a glyph with the word in its tooltip; exclusion is spelled out,
+    // because "still stored, never given" is not something a pin can convey.
+    const flags = meta.querySelectorAll(".memory-flag");
+    expect(flags.map((flag) => flag.title)).toContain("Pinned");
+    expect(meta.querySelector(".memory-flag.is-excluded")!.textContent).toBe("Excluded");
+  });
+
+  it("says a first-page list is not the whole store", () => {
+    const { sidebar, memoryPanel } = createHarness();
+    sidebar.renderMemory({ entries: [memoryRowFixture()], truncated: true });
+
+    expect(memoryPanel.querySelectorAll(".skill-capability-note")[0].textContent).toContain(
+      "More entries exist.",
+    );
   });
 });

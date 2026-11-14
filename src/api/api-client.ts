@@ -1141,6 +1141,7 @@ export class CodeWhaleApiClient {
       skillLifecycle: runtimeFlags.skill_lifecycle,
       skillDetail: runtimeFlags.skill_detail,
       mcpServerManagement: runtimeFlags.mcp_server_management,
+      memory: runtimeFlags.memory,
     };
   }
 
@@ -1152,6 +1153,7 @@ export class CodeWhaleApiClient {
     skill_lifecycle: boolean;
     skill_detail: boolean;
     mcp_server_management: boolean;
+    memory: boolean;
   }> {
     try {
       const info = (await this.get("/v1/runtime/info")) as {
@@ -1161,12 +1163,14 @@ export class CodeWhaleApiClient {
         skill_lifecycle: info.capabilities?.skill_lifecycle === true,
         skill_detail: info.capabilities?.skill_detail === true,
         mcp_server_management: info.capabilities?.mcp_server_management === true,
+        memory: info.capabilities?.memory === true,
       };
     } catch {
       return {
         skill_lifecycle: false,
         skill_detail: false,
         mcp_server_management: false,
+        memory: false,
       };
     }
   }

@@ -12,7 +12,7 @@ import { recommendedMcpServers } from "../utils/mcp-utils";
  * the sections whose fold is remembered, and the header each fold is bound to.
  * It is injected into the script below rather than written twice, and the
  * template's own ids are checked against it by `webview-html.test.ts`. */
-export const ACTIVITY_SECTION_KEYS = ['work', 'changes', 'fleet', 'tasks', 'agents', 'skills', 'mcp'] as const;
+export const ACTIVITY_SECTION_KEYS = ['work', 'changes', 'memory', 'fleet', 'tasks', 'agents', 'skills', 'mcp'] as const;
 
 /** The Skills panel's scope groups, in the order it draws them.
  *
@@ -1812,8 +1812,52 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
     var caps = skillCapabilities();
     container.innerHTML = '';
 
+    // The form's two fields exist before the toolbar so its add button can
+    // reach them: the button is in the toolbar, where the MCP panel keeps its
+    // own add action, and the row below holds only what a skill install needs
+    // — a source and where to put it.
+    var input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'skill-install-input';
+    input.placeholder = __i18n.skillsInstallPlaceholder;
+    input.setAttribute('aria-label', __i18n.skillsInstall);
+    var select = document.createElement('select');
+    select.className = 'skill-install-scope';
+    select.setAttribute('aria-label', __i18n.skillsInstall);
+    [['global', __i18n.skillsInstallGlobal], ['project', __i18n.skillsInstallProject]].forEach(function(opt) {
+      var o = document.createElement('option');
+      o.value = opt[0];
+      o.textContent = opt[1];
+      select.appendChild(o);
+    });
+
     var controls = document.createElement('div');
     controls.className = 'task-toolbar';
+    // Same pair, same order, same colours as the MCP panel's toolbar: the add
+    // action is the accent-filled icon button, the refresh is quiet. An engine
+    // without the lifecycle routes greys the add exactly as MCP does when it
+    // has no management routes.
+    var installBtn = document.createElement('button');
+    installBtn.type = 'button';
+    installBtn.className = 'task-icon-btn primary';
+    installBtn.title = __i18n.skillsInstall;
+    installBtn.setAttribute('aria-label', __i18n.skillsInstall);
+    installBtn.textContent = '+';
+    installBtn.disabled = !caps.skillLifecycle;
+    installBtn.onclick = function() {
+      var source = input.value.trim();
+      if (!source) {
+        // Nothing to install yet is not an error; put the caret where the
+        // source goes.
+        input.focus();
+        return;
+      }
+      vscode.postMessage({ type: 'installSkill', source: source, scope: select.value });
+      input.value = '';
+    };
+    input.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter') { e.preventDefault(); installBtn.click(); }
+    });
     var refreshBtn = document.createElement('button');
     refreshBtn.className = 'task-icon-btn';
     refreshBtn.type = 'button';
@@ -1821,42 +1865,15 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
     refreshBtn.setAttribute('aria-label', __i18n.skillsRefresh);
     refreshBtn.textContent = '\u21BB';
     refreshBtn.onclick = function() { vscode.postMessage({ type: 'refreshSkillList' }); };
+    controls.appendChild(installBtn);
     controls.appendChild(refreshBtn);
     container.appendChild(controls);
 
     if (caps.skillLifecycle) {
       var installRow = document.createElement('div');
       installRow.className = 'skill-install-row';
-      var input = document.createElement('input');
-      input.type = 'text';
-      input.className = 'skill-install-input';
-      input.placeholder = __i18n.skillsInstallPlaceholder;
-      input.setAttribute('aria-label', __i18n.skillsInstall);
-      var select = document.createElement('select');
-      select.className = 'skill-install-scope';
-      select.setAttribute('aria-label', __i18n.skillsInstall);
-      [['global', __i18n.skillsInstallGlobal], ['project', __i18n.skillsInstallProject]].forEach(function(opt) {
-        var o = document.createElement('option');
-        o.value = opt[0];
-        o.textContent = opt[1];
-        select.appendChild(o);
-      });
-      var installBtn = document.createElement('button');
-      installBtn.type = 'button';
-      installBtn.className = 'task-action-btn';
-      installBtn.textContent = __i18n.skillsInstall;
-      installBtn.onclick = function() {
-        var source = input.value.trim();
-        if (!source) return;
-        vscode.postMessage({ type: 'installSkill', source: source, scope: select.value });
-        input.value = '';
-      };
-      input.addEventListener('keydown', function(e) {
-        if (e.key === 'Enter') { e.preventDefault(); installBtn.click(); }
-      });
       installRow.appendChild(input);
       installRow.appendChild(select);
-      installRow.appendChild(installBtn);
       container.appendChild(installRow);
     } else {
       var note = document.createElement('div');
@@ -1974,6 +1991,448 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
       actNote.className = 'skill-capability-note';
       actNote.textContent = __i18n.skillsNoActivation;
       container.appendChild(actNote);
+    }
+  }
+
+  // ── Render Memory ──
+  // The engine's native memory store, read through the Context Lens. Every row
+  // is one entry; the buttons are exactly the review controls the engine says
+  // this caller holds (canReview / canForget), which is why they are not
+  // guessed from who is asking. Nothing is decided here: a click posts the
+  // action together with the revision the row displayed, and the host re-reads
+  // the store, so what stays on screen is the engine's answer rather than this
+  // panel's assumption.
+  var memoryState = { entries: [], canReview: false, canForget: false, truncated: false, problem: null };
+  // The reader's filter, kept across refreshes: an approve round-trips through
+  // the engine and repaints the panel, and the filter typed before that has to
+  // survive it. Not persisted — this is the visit's view, not a long-term
+  // choice like a section fold.
+  var memorySearchQuery = '';
+  var memoryStatusFilter = 'all';
+  // The note box's height is the reader's, not the panel's: it is dragged with
+  // the native resize grip and remembered the way the sidebar's own width is,
+  // because a re-render (every refresh, every action, every finished turn)
+  // rebuilds the form and would otherwise snap it back to one line.
+  var MEMORY_NOTE_HEIGHT_STORAGE_KEY = 'codewhale:memoryNoteHeight';
+  /** The note being typed. Module-level for the same reason as the search box:
+   *  a refresh repaints the panel, and the sentence being written is not
+   *  something a background refresh should eat. Not persisted — unlike the
+   *  height, an unsent draft is the visit's, not a layout choice. */
+  var memoryNoteDraft = '';
+
+  function storedMemoryNoteHeight() {
+    var storage = webviewLocalStorage();
+    if (!storage) return 0;
+    var raw;
+    try { raw = storage.getItem(MEMORY_NOTE_HEIGHT_STORAGE_KEY); } catch (e) { return 0; }
+    var px = parseInt(raw, 10);
+    // Only a height this panel could have written: a positive, finite number.
+    return isFinite(px) && px > 0 ? px : 0;
+  }
+
+  function saveMemoryNoteHeight(px) {
+    var storage = webviewLocalStorage();
+    if (!storage || !isFinite(px) || px <= 0) return;
+    try { storage.setItem(MEMORY_NOTE_HEIGHT_STORAGE_KEY, String(Math.round(px))); } catch (e) { /* a full store is not worth failing the drag */ }
+  }
+
+  /** The order rows are drawn in: what needs a decision first, then what is in
+   *  use, then what is history. A panel sorted by id would bury a candidate
+   *  under rows the reader has already reviewed. */
+  var MEMORY_STATUS_ORDER = ['candidate', 'active', 'stale', 'superseded', 'rejected'];
+
+  function memoryStatusLabel(status) {
+    var labels = {
+      candidate: __i18n.memoryStatusCandidate,
+      active: __i18n.memoryStatusActive,
+      stale: __i18n.memoryStatusStale,
+      superseded: __i18n.memoryStatusSuperseded,
+      rejected: __i18n.memoryStatusRejected,
+    };
+    return labels[status] || status || '';
+  }
+
+  function memoryScopeLabel(scope) {
+    if (scope === 'session') return __i18n.memoryScopeSession;
+    if (scope === 'workspace') return __i18n.memoryScopeWorkspace;
+    return __i18n.memoryScopeGlobal;
+  }
+
+  function memoryMatchesQuery(entry, query) {
+    if (!query) return true;
+    var q = query.toLowerCase();
+    return (entry.title || '').toLowerCase().indexOf(q) !== -1 ||
+      (entry.body || '').toLowerCase().indexOf(q) !== -1;
+  }
+
+  function memoryStatusRank(status) {
+    var rank = MEMORY_STATUS_ORDER.indexOf(status);
+    return rank === -1 ? MEMORY_STATUS_ORDER.length : rank;
+  }
+
+  /** One entry. The title is what the reader recognizes; the body is shown only
+   *  when it says more than the title, so a note captured without one does not
+   *  print the same sentence twice. */
+  function memoryRow(entry) {
+    var card = document.createElement('div');
+    card.className = 'task-card memory-card';
+
+    var header = document.createElement('div');
+    header.className = 'task-header';
+    var status = document.createElement('span');
+    status.className = 'memory-status-badge is-' + (entry.status || 'unknown');
+    status.textContent = memoryStatusLabel(entry.status);
+    status.title = memoryStatusLabel(entry.status);
+    header.appendChild(status);
+    var title = document.createElement('span');
+    title.className = 'task-title';
+    title.textContent = entry.title || entry.shortId;
+    // The short id is what /memory approve|reject|forget take, so hovering a
+    // row says which entry it is in the vocabulary of the command line too.
+    title.title = entry.shortId ? entry.shortId + ' — ' + (entry.title || '') : (entry.title || '');
+    header.appendChild(title);
+    var scope = document.createElement('span');
+    scope.className = 'skill-badge';
+    scope.textContent = memoryScopeLabel(entry.scope);
+    scope.title = memoryScopeLabel(entry.scope);
+    header.appendChild(scope);
+    card.appendChild(header);
+
+    if (entry.body && entry.body !== entry.title) {
+      var body = document.createElement('div');
+      body.className = 'task-meta memory-body';
+      body.textContent = entry.body;
+      card.appendChild(body);
+    }
+
+    var meta = document.createElement('div');
+    meta.className = 'task-meta memory-meta';
+    if (entry.freshness) {
+      var fresh = document.createElement('span');
+      fresh.className = 'memory-freshness';
+      fresh.textContent = __i18n.memoryFreshnessLabel.replace('{value}', entry.freshness);
+      meta.appendChild(fresh);
+    }
+    if (entry.inContext) {
+      var ctx = document.createElement('span');
+      ctx.className = 'memory-context-flag';
+      ctx.textContent = __i18n.memoryInContext;
+      meta.appendChild(ctx);
+    }
+    if (entry.pinned) {
+      var pin = document.createElement('span');
+      pin.className = 'memory-flag';
+      pin.textContent = '\u2691';
+      pin.title = __i18n.memoryPinnedBadge;
+      meta.appendChild(pin);
+    }
+    if (entry.suppressed) {
+      var excluded = document.createElement('span');
+      excluded.className = 'memory-flag is-excluded';
+      excluded.textContent = __i18n.memorySuppressedBadge;
+      excluded.title = __i18n.memorySuppressedBadge;
+      meta.appendChild(excluded);
+    }
+    card.appendChild(meta);
+
+    var actions = document.createElement('div');
+    actions.className = 'task-actions';
+    // Monochrome glyphs, like every other row action in the sidebar (MCP's
+    // ↻ ✓ ✕, Skills' ▸ ℹ ↻ ✔ ✕). An emoji pin or basket draws in its own
+    // colours and reads as a different kind of control than the ones beside it.
+    // The controls are exactly the capabilities the engine reported for this
+    // caller: a dead button whose tooltip cannot say why would be worse than
+    // its absence. Approve and reject additionally apply only to a candidate —
+    // the engine refuses them on anything else, so they are not drawn where
+    // they would fail.
+    if (memoryState.canReview) {
+      if (entry.status === 'candidate') {
+        actions.appendChild(skillActionButton(
+          __i18n.memoryApprove, '\u2713', true, __i18n.memoryApprove, function() {
+            vscode.postMessage({ type: 'memoryLensAction', action: 'approve', id: entry.id, revision: entry.revision });
+          }
+        ));
+        actions.appendChild(skillActionButton(
+          __i18n.memoryReject, '\u2715', true, __i18n.memoryReject, function() {
+            vscode.postMessage({ type: 'memoryLensAction', action: 'reject', id: entry.id, revision: entry.revision });
+          }
+        ));
+      }
+      // Pin and exclude are preferences: one engine command carries both
+      // flags, so the panel sends the pair it wants rather than a delta the
+      // engine would have to infer.
+      actions.appendChild(skillActionButton(
+        entry.pinned ? __i18n.memoryUnpin : __i18n.memoryPin,
+        '\u2691', true,
+        entry.pinned ? __i18n.memoryUnpin : __i18n.memoryPin,
+        function() {
+          vscode.postMessage({
+            type: 'memoryLensAction', action: 'preferences', id: entry.id, revision: entry.revision,
+            pinned: !entry.pinned, suppressed: !!entry.suppressed
+          });
+        }
+      ));
+      actions.appendChild(skillActionButton(
+        entry.suppressed ? __i18n.memoryUnsuppress : __i18n.memorySuppress,
+        '\u2298', true,
+        entry.suppressed ? __i18n.memoryUnsuppress : __i18n.memorySuppress,
+        function() {
+          vscode.postMessage({
+            type: 'memoryLensAction', action: 'preferences', id: entry.id, revision: entry.revision,
+            pinned: !!entry.pinned, suppressed: !entry.suppressed
+          });
+        }
+      ));
+    }
+    if (memoryState.canForget) {
+      actions.appendChild(skillActionButton(
+        __i18n.memoryForget, '\u232B', true, __i18n.memoryForget, function() {
+          vscode.postMessage({ type: 'memoryLensAction', action: 'forget', id: entry.id, revision: entry.revision });
+        }
+      ));
+    }
+    card.appendChild(actions);
+    return card;
+  }
+
+  function renderMemory(next) {
+    var container = document.getElementById('tab-memory');
+    if (!container) return;
+    if (next) {
+      memoryState = {
+        entries: next.entries || [],
+        canReview: !!next.canReview,
+        canForget: !!next.canForget,
+        truncated: !!next.truncated,
+        problem: next.problem || null,
+      };
+    }
+    container.innerHTML = '';
+
+    var problem = memoryState.problem;
+    // No store to write to: the add button is present but disabled, the way the
+    // MCP panel greys its own add when the engine has no management routes.
+    var noStore = !!problem && (problem.kind === 'unsupported' || problem.kind === 'disabled');
+
+    // The form's fields are created before the toolbar so the toolbar's add
+    // button can reach them: the button lives in the toolbar, above the row it
+    // commits.
+    var addInput = document.createElement('textarea');
+    addInput.className = 'memory-add-input';
+    addInput.rows = 1;
+    addInput.placeholder = __i18n.memoryRememberPlaceholder;
+    addInput.setAttribute('aria-label', __i18n.memoryRemember);
+    var addScope = document.createElement('select');
+    addScope.className = 'skill-install-scope memory-add-scope';
+    addScope.setAttribute('aria-label', __i18n.memoryRemember);
+    [['global', __i18n.memoryScopeGlobal], ['workspace', __i18n.memoryScopeWorkspace]].forEach(function(opt) {
+      var o = document.createElement('option');
+      o.value = opt[0];
+      o.textContent = opt[1];
+      addScope.appendChild(o);
+    });
+
+    var controls = document.createElement('div');
+    controls.className = 'task-toolbar';
+    // The same pair the MCP panel's toolbar carries, in the same order and the
+    // same colours: the add action wears the accent fill and everything else is
+    // quiet. Its word is in the tooltip because the glyph is the panel-wide
+    // "add", not a per-panel verb.
+    var addBtn = document.createElement('button');
+    addBtn.className = 'task-icon-btn primary';
+    addBtn.type = 'button';
+    addBtn.title = __i18n.memoryRemember;
+    addBtn.setAttribute('aria-label', __i18n.memoryRemember);
+    addBtn.textContent = '+';
+    addBtn.disabled = noStore;
+    addBtn.onclick = function() {
+      var text = addInput.value.trim();
+      if (!text) {
+        // An empty box is not an error worth a message; put the caret where the
+        // missing text goes.
+        addInput.focus();
+        return;
+      }
+      vscode.postMessage({ type: 'rememberMemory', text: text, scope: addScope.value });
+      addInput.value = '';
+      // The sent note is no longer a draft. The height stays: it is the
+      // reader's layout choice, not a property of what was in the box.
+      memoryNoteDraft = '';
+    };
+    var refreshBtn = document.createElement('button');
+    refreshBtn.className = 'task-icon-btn';
+    refreshBtn.type = 'button';
+    refreshBtn.title = __i18n.memoryRefresh;
+    refreshBtn.setAttribute('aria-label', __i18n.memoryRefresh);
+    refreshBtn.textContent = '\u21BB';
+    refreshBtn.onclick = function() { vscode.postMessage({ type: 'refreshMemoryPanel' }); };
+    // The scope sits in the toolbar with the actions, at the row's start: one
+    // line of controls, then the field. It is created above, before the
+    // buttons, so it lands in that order. With no store to write to it is
+    // greyed like the add button: a scope dropdown that governs nothing reads
+    // as an option that was silently ignored.
+    addScope.disabled = noStore;
+    controls.appendChild(addScope);
+    controls.appendChild(addBtn);
+    controls.appendChild(refreshBtn);
+    container.appendChild(controls);
+    // No store at all, or one the engine has turned off: the reason, and
+    // nothing that would fail on click. A refresh stays available because the
+    // config may be fixed while the window is open.
+    if (problem && (problem.kind === 'unsupported' || problem.kind === 'disabled')) {
+      var note = document.createElement('div');
+      note.className = 'skill-capability-note';
+      note.textContent = problem.kind === 'unsupported' ? __i18n.memoryNoStore : problem.message;
+      container.appendChild(note);
+      return;
+    }
+    // A failed read over rows the panel already had: keep the rows and say
+    // they are what was last read, rather than blanking the list.
+    if (problem) {
+      var warn = document.createElement('div');
+      warn.className = 'skill-capability-note memory-problem';
+      warn.textContent = problem.message;
+      container.appendChild(warn);
+    }
+
+    // The note itself. The scope and the actions are in the toolbar above, so
+    // what is left is the field, alone on its row and the full width of the
+    // panel: a note is prose, and a field sharing a row with a select is about
+    // twenty characters wide — narrow enough that every note is written blind to
+    // its own start.
+    //
+    // Its height is the reader's to set: one line to begin with, dragged taller
+    // with the textarea's own resize grip. It does not grow by itself. The two
+    // cannot both own the height — a handler that writes it on every keystroke
+    // would overwrite the height the reader just dragged — and the panel cannot
+    // guess how long the note will be.
+    var addRow = document.createElement('div');
+    addRow.className = 'memory-add-row';
+
+    // The draft survives a repaint. Everything from a refresh to a finished
+    // background turn rebuilds this panel, and the sentence being written is
+    // not something a refresh should eat.
+    addInput.value = memoryNoteDraft;
+    addInput.addEventListener('input', function() {
+      memoryNoteDraft = addInput.value;
+    });
+
+    // Restore the height the reader left the box at. Written inline because it
+    // is a pixel value the stylesheet cannot know; the CSS min-height still
+    // holds the one-line floor when nothing was ever stored.
+    var storedHeight = storedMemoryNoteHeight();
+    if (storedHeight > 0) addInput.style.height = storedHeight + 'px';
+    // A drag on the native grip fires no event of its own, and the pointer may
+    // leave the box before the button comes up, so the height is read whenever
+    // the box's own size changes.
+    if (typeof ResizeObserver !== 'undefined') {
+      var heightObserver = new ResizeObserver(function() {
+        // A hidden panel measures every box at zero; that is not a height the
+        // reader chose, and storing it would pin the field to nothing.
+        if (addInput.offsetHeight > 0) saveMemoryNoteHeight(addInput.offsetHeight);
+      });
+      heightObserver.observe(addInput);
+    }
+
+    // Enter is a newline — a memory body is prose, and the engine stores it as
+    // written. Cmd/Ctrl+Enter is the submit, the shortcut every other
+    // multi-line box in the panel follows.
+    addInput.addEventListener('keydown', function(e) {
+      if (e.key !== 'Enter' || !(e.metaKey || e.ctrlKey)) return;
+      e.preventDefault();
+      addBtn.click();
+    });
+
+    addRow.appendChild(addInput);
+    container.appendChild(addRow);
+
+    if (memoryState.entries.length === 0) {
+      var empty = document.createElement('div');
+      empty.className = 'work-empty';
+      empty.innerHTML = '<div class="work-empty-icon">\uD83E\uDDE0</div><div class="work-empty-text">' + __wvEscapeHtml(__i18n.memoryEmpty) + '</div>';
+      container.appendChild(empty);
+      return;
+    }
+
+    var pending = memoryState.entries.filter(function(e) { return e.status === 'candidate'; }).length;
+    var filterRow = document.createElement('div');
+    filterRow.className = 'memory-filter-row';
+    function filterChip(key, text) {
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'memory-filter-chip' + (memoryStatusFilter === key ? ' active' : '');
+      btn.setAttribute('data-memory-filter', key);
+      btn.setAttribute('aria-pressed', memoryStatusFilter === key ? 'true' : 'false');
+      btn.textContent = text;
+      btn.onclick = function() {
+        memoryStatusFilter = key;
+        // Only the chips and the rows are repainted: rebuilding the whole panel
+        // would take the search box out from under the cursor.
+        var chips = filterRow.querySelectorAll('.memory-filter-chip');
+        for (var i = 0; i < chips.length; i++) {
+          var on = chips[i].getAttribute('data-memory-filter') === key;
+          chips[i].classList.toggle('active', on);
+          chips[i].setAttribute('aria-pressed', on ? 'true' : 'false');
+        }
+        paintMemoryRows();
+      };
+      return btn;
+    }
+    filterRow.appendChild(filterChip('all', __i18n.memoryFilterAll + ' (' + memoryState.entries.length + ')'));
+    filterRow.appendChild(filterChip('pending', __i18n.memoryFilterPending + ' (' + pending + ')'));
+    container.appendChild(filterRow);
+
+    // The search box sits outside the row container so typing repaints only
+    // the rows — a rebuilt input would drop focus and the caret mid-word.
+    var searchRow = document.createElement('div');
+    searchRow.className = 'skill-search-row';
+    var searchInput = document.createElement('input');
+    searchInput.type = 'search';
+    searchInput.className = 'skill-search-input';
+    searchInput.placeholder = __i18n.memorySearchPlaceholder;
+    searchInput.setAttribute('aria-label', __i18n.memorySearchPlaceholder);
+    searchInput.value = memorySearchQuery;
+    searchRow.appendChild(searchInput);
+    container.appendChild(searchRow);
+
+    var rows = document.createElement('div');
+    rows.className = 'memory-rows';
+    container.appendChild(rows);
+
+    function paintMemoryRows() {
+      rows.innerHTML = '';
+      var visible = memoryState.entries.filter(function(entry) {
+        if (memoryStatusFilter === 'pending' && entry.status !== 'candidate') return false;
+        return memoryMatchesQuery(entry, memorySearchQuery);
+      });
+      visible.sort(function(a, b) {
+        var byStatus = memoryStatusRank(a.status) - memoryStatusRank(b.status);
+        if (byStatus !== 0) return byStatus;
+        if (!!a.pinned !== !!b.pinned) return a.pinned ? -1 : 1;
+        return (b.updatedAt || 0) - (a.updatedAt || 0);
+      });
+      if (visible.length === 0) {
+        var none = document.createElement('div');
+        none.className = 'work-empty';
+        none.innerHTML = '<div class="work-empty-icon">\uD83D\uDD0D</div><div class="work-empty-text">' + __wvEscapeHtml(__i18n.memoryNoMatch) + '</div>';
+        rows.appendChild(none);
+        return;
+      }
+      visible.forEach(function(entry) { rows.appendChild(memoryRow(entry)); });
+    }
+
+    searchInput.addEventListener('input', function() {
+      memorySearchQuery = searchInput.value;
+      paintMemoryRows();
+    });
+
+    paintMemoryRows();
+
+    if (memoryState.truncated) {
+      var cut = document.createElement('div');
+      cut.className = 'skill-capability-note';
+      cut.textContent = __i18n.memoryTruncated;
+      container.appendChild(cut);
     }
   }
 
@@ -3583,9 +4042,12 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
     var labels = {
       work: __i18n.work,
       changes: __i18n.changes,
+      memory: __i18n.memory,
       fleet: __i18n.fleet,
       tasks: __i18n.tasks,
       agents: __i18n.agents,
+      skills: __i18n.skills,
+      mcp: __i18n.mcp,
     };
     return labels[key] || key;
   }
@@ -3594,9 +4056,12 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
     var icons = {
       work: '\uD83C\uDFAF',
       changes: '\uD83D\uDCDD',
+      memory: '\uD83E\uDDE0',
       fleet: '\uD83D\uDE80',
       tasks: '\u2699',
       agents: '\uD83E\uDD16',
+      skills: '\uD83E\uDDE9',
+      mcp: '\uD83D\uDD0C',
     };
     return icons[key] || '';
   }
@@ -3894,6 +4359,7 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
     renderTasks: renderTasks,
     renderAgents: renderAgents,
     renderSkills: renderSkills,
+    renderMemory: renderMemory,
     renderMcp: renderMcp,
     renderMcpTools: renderMcpTools,
     renderMcpImports: renderMcpImports,

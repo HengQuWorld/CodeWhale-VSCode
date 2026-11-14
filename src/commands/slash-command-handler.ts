@@ -30,6 +30,7 @@ import {
 import { formatError, getErrorMessage } from "../utils/error-handler";
 import { DRAFT_QUEUE_KEY, type QueuedPrompt } from "../utils/message-queue";
 import type { CodeWhaleApiClient, CodeWhaleEngine, ThreadRecord, TaskSummary, ProviderEntry, SkillEntry, EngineCommandEntry, MemoryLensAction, MemoryLensEntry, MemoryLensSnapshot } from "../types";
+import { MEMORY_USAGE, collectMemoryLens, memoryLensId } from "../utils/memory-lens";
 
 // ── Context interface for dependency injection ──
 
@@ -62,6 +63,10 @@ export interface SlashCommandContext {
   clearArmedSkill(): void;
   /** Push the current skill inventory to the webview's Skills panel. */
   refreshSkillList(): Promise<void>;
+  /** Push the engine's memory store to the webview's Memory panel. Called
+   *  after a `/memory` mutation so the panel cannot go on showing a row the
+   *  command just decided. */
+  refreshMemoryPanel(): Promise<void>;
   /** Re-announce the startup defaults — the values the dropdown's "New
    *  threads" group is marked against.
    *
@@ -1930,22 +1935,9 @@ async function handleNote(ctx: SlashCommandContext, args: string): Promise<void>
   }
 }
 
-const MEMORY_USAGE = "Usage: /memory [show|pending|search <query>|get <id>|remember [global|workspace] <note>|approve <id>|reject <id>|forget <id>|clear [all|global|workspace]]";
-
 function formatMemoryEntryLine(entry: { id: number; scope: string; stale: boolean; summary: string }): string {
   const staleMark = entry.stale ? " (stale)" : "";
   return `  #${entry.id} [${entry.scope}]${staleMark} ${entry.summary}`;
-}
-
-/** The id characters this command prints for a Lens entry.
- *
- *  Lens ids are UUIDs. `/memory pending` shows this short form and the review
- *  subcommands accept it, so a candidate does not have to be approved by
- *  typing 36 characters. */
-const MEMORY_LENS_ID_CHARS = 8;
-
-function lensId(entry: MemoryLensEntry): string {
-  return entry.memory.id.slice(0, MEMORY_LENS_ID_CHARS);
 }
 
 /** One line per entry for `/memory pending`: the review state, the short id
@@ -1953,7 +1945,7 @@ function lensId(entry: MemoryLensEntry): string {
 function formatLensEntryLine(entry: MemoryLensEntry): string {
   const draft = entry.memory.draft;
   const title = draft.title || draft.body;
-  return `  ${lensId(entry)} [${entry.memory.status}, rev ${entry.memory.revision}] ${title}`;
+  return `  ${memoryLensId(entry)} [${entry.memory.status}, rev ${entry.memory.revision}] ${title}`;
 }
 
 /** Resolve `/memory approve|reject|forget <id>` against the current snapshot.
@@ -1973,31 +1965,16 @@ function resolveLensEntry(
   return { kind: "ambiguous", matches };
 }
 
-/** The engine clamps one Lens page to 100 entries. */
-const MEMORY_LENS_PAGE_SIZE = 100;
-/** Pages a single `/memory` subcommand will walk before it stops and says so. */
-const MEMORY_LENS_MAX_PAGES = 5;
-
-/** Read the whole Lens, a page at a time.
+/** Read the whole Lens, a page at a time (`utils/memory-lens`).
  *
  *  The id a user types must resolve against every entry, not only the first
  *  page, or a store larger than one page would answer "no memory matches" for
- *  an entry it is holding. The bound keeps a slash command from turning into an
- *  unbounded read; when it is hit, the caller is told the list was cut. */
+ *  an entry it is holding. The shared walk carries the page bound; when it is
+ *  hit, the caller is told the list was cut. */
 async function collectLensEntries(
   ctx: SlashCommandContext
 ): Promise<{ entries: MemoryLensEntry[]; snapshot: MemoryLensSnapshot; truncated: boolean }> {
-  let snapshot = await ctx.api.getMemoryLens({ limit: MEMORY_LENS_PAGE_SIZE });
-  const entries: MemoryLensEntry[] = [];
-  for (let page = 0; ; page++) {
-    entries.push(...snapshot.entries);
-    if (!snapshot.next_after) return { entries, snapshot, truncated: false };
-    if (page + 1 >= MEMORY_LENS_MAX_PAGES) return { entries, snapshot, truncated: true };
-    snapshot = await ctx.api.getMemoryLens({
-      limit: MEMORY_LENS_PAGE_SIZE,
-      after: snapshot.next_after,
-    });
-  }
+  return collectMemoryLens(ctx.api);
 }
 
 /** Read the Lens, or say that this engine has no such route.
@@ -2038,10 +2015,10 @@ function formatLensActionResult(
   const title = entry.memory.draft.title || entry.memory.draft.body;
   const head =
     verb === "approve"
-      ? `Approved ${lensId(entry)} (${title}) — it is given to later turns.`
+      ? `Approved ${memoryLensId(entry)} (${title}) — it is given to later turns.`
       : verb === "reject"
-        ? `Rejected ${lensId(entry)} (${title}) — it will not be given to the model.`
-        : `Forgotten ${lensId(entry)} (${title}) — it will not be given to later turns.`;
+        ? `Rejected ${memoryLensId(entry)} (${title}) — it will not be given to the model.`
+        : `Forgotten ${memoryLensId(entry)} (${title}) — it will not be given to later turns.`;
   return head +
     (cannotRetract ? " Text already sent to the model cannot be retracted." : "");
 }
@@ -2181,6 +2158,7 @@ async function handleMemory(ctx: SlashCommandContext, args: string): Promise<voi
       }
       const { entry } = await ctx.api.createMemoryEntry(note, scope);
       ctx.postMessage({ type: "info", message: `Memory remembered as #${entry.id} (${entry.scope}): ${entry.summary}` });
+      void ctx.refreshMemoryPanel();
       return;
     }
 
@@ -2231,7 +2209,7 @@ async function handleMemory(ctx: SlashCommandContext, args: string): Promise<voi
       if (sub !== "forget" && entry.memory.status !== "candidate") {
         ctx.postMessage({
           type: "error",
-          message: `Memory ${lensId(entry)} is ${entry.memory.status}, not a candidate, so there is nothing to ${sub} — /memory forget removes it instead.`,
+          message: `Memory ${memoryLensId(entry)} is ${entry.memory.status}, not a candidate, so there is nothing to ${sub} — /memory forget removes it instead.`,
         });
         return;
       }
@@ -2256,6 +2234,10 @@ async function handleMemory(ctx: SlashCommandContext, args: string): Promise<voi
           result.already_sent_context_cannot_be_retracted
         ),
       });
+      // The panel is the other surface for the same store and may be open
+      // beside this transcript; fire-and-forget so a refresh cannot turn a
+      // decided action into an error.
+      void ctx.refreshMemoryPanel();
       return;
     }
 
@@ -2267,6 +2249,7 @@ async function handleMemory(ctx: SlashCommandContext, args: string): Promise<voi
       }
       await ctx.api.clearMemory(scope as "all" | "global" | "workspace");
       ctx.postMessage({ type: "info", message: `Memory cleared (${scope}). This cannot be undone.` });
+      void ctx.refreshMemoryPanel();
       return;
     }
 

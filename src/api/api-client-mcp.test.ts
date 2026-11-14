@@ -46,6 +46,26 @@ describe("MCP capability detection", () => {
   });
 });
 
+describe("Memory capability detection", () => {
+  it("reads the memory flag the engine advertises", async () => {
+    const api = new CodeWhaleApiClient("http://127.0.0.1:1", "token");
+    (api as any).probePath = vi.fn(async () => true);
+    (api as any).get = vi.fn(async () => ({ capabilities: { memory: true } }));
+
+    expect((await api.probeRuntimeCapabilities()).memory).toBe(true);
+  });
+
+  it("defaults the flag off when the engine predates it", async () => {
+    const api = new CodeWhaleApiClient("http://127.0.0.1:1", "token");
+    (api as any).probePath = vi.fn(async () => false);
+    (api as any).get = vi.fn(async () => ({ capabilities: { skill_lifecycle: true } }));
+
+    // Off is the safe direction: a panel that promises memory on an engine
+    // with no such routes reads as a broken feature rather than an old engine.
+    expect((await api.probeRuntimeCapabilities()).memory).toBe(false);
+  });
+});
+
 describe("MCP management requests", () => {
   it("presents the revision on create", async () => {
     const { api, calls } = createClient();

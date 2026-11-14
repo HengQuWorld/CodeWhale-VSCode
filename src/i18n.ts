@@ -570,6 +570,50 @@ interface Translations {
   mcpDecline: string;
   mcpImportBlocked: string;
   mcpImportConflict: string;
+  // Memory panel
+  /** Activity section title. */
+  memory: string;
+  memoryRefresh: string;
+  memoryEmpty: string;
+  /** Shown when the search or the status filter matches no listed entry. */
+  memoryNoMatch: string;
+  memorySearchPlaceholder: string;
+  /** The add-note form: the placeholder for a note's text, the scope it is
+   *  filed under, and the word on the toolbar's add action (a glyph, so this is
+   *  its tooltip and its accessible name). */
+  memoryRememberPlaceholder: string;
+  memoryRemember: string;
+  /** Scope options for the add row, and the badge on every row. */
+  memoryScopeGlobal: string;
+  memoryScopeWorkspace: string;
+  /** An entry that applies to this conversation only. */
+  memoryScopeSession: string;
+  memoryFilterAll: string;
+  /** "Pending (2)" — the count is filled in by the panel. */
+  memoryFilterPending: string;
+  memoryStatusCandidate: string;
+  memoryStatusActive: string;
+  memoryStatusStale: string;
+  memoryStatusSuperseded: string;
+  memoryStatusRejected: string;
+  /** Row actions: the buttons are glyphs, so these are their tooltips. */
+  memoryApprove: string;
+  memoryReject: string;
+  memoryForget: string;
+  memoryPin: string;
+  memoryUnpin: string;
+  memorySuppress: string;
+  memoryUnsuppress: string;
+  /** Row meta: why the engine considers the entry fresh, stale or expired.
+   *  `{value}` is the engine's own freshness word, shown as it arrives. */
+  memoryFreshnessLabel: string;
+  memoryInContext: string;
+  /** Shown when the engine has no memory routes at all. */
+  memoryNoStore: string;
+  /** Note above a list that is only the store's first page. */
+  memoryTruncated: string;
+  memoryPinnedBadge: string;
+  memorySuppressedBadge: string;
   noAgentRuns: string;
   agentRunGone: string;
   agentStatusQueued: string;
@@ -1095,6 +1139,37 @@ const en: Translations = {
   mcpDecline: "Decline",
   mcpImportBlocked: "Blocked at source",
   mcpImportConflict: "Name already in use",
+  // Memory panel
+  memory: "Memory",
+  memoryRefresh: "Refresh",
+  memoryEmpty: "No memory yet. A note you add here — or one the model remembers — appears in this list.",
+  memoryNoMatch: "No memory matches this filter.",
+  memorySearchPlaceholder: "Search memory…",
+  memoryRememberPlaceholder: "Remember a note…",
+  memoryRemember: "Remember",
+  memoryScopeGlobal: "Global",
+  memoryScopeWorkspace: "Workspace",
+  memoryScopeSession: "This conversation",
+  memoryFilterAll: "All",
+  memoryFilterPending: "Pending",
+  memoryStatusCandidate: "Candidate",
+  memoryStatusActive: "Active",
+  memoryStatusStale: "Stale",
+  memoryStatusSuperseded: "Superseded",
+  memoryStatusRejected: "Rejected",
+  memoryApprove: "Approve — later turns are given it",
+  memoryReject: "Reject — it will not be given to the model",
+  memoryForget: "Forget — it will not be given to later turns",
+  memoryPin: "Pin — keep its place in the context budget",
+  memoryUnpin: "Unpin",
+  memorySuppress: "Exclude — keep it stored but never give it to the model",
+  memoryUnsuppress: "Include again",
+  memoryFreshnessLabel: "Freshness: {value}",
+  memoryInContext: "In context",
+  memoryNoStore: "This engine has no memory routes. Update the CodeWhale engine to maintain memory here.",
+  memoryTruncated: "Showing the first page of the store; more entries exist.",
+  memoryPinnedBadge: "Pinned",
+  memorySuppressedBadge: "Excluded",
   noAgentRuns: "No agent runs",
   agentRunGone: "That agent run is no longer in this runtime — a finished run is dropped from the run list about an hour after it settles.",
   agentStatusQueued: "Queued",
@@ -1612,6 +1687,37 @@ const zhCn: Translations = {
   mcpDecline: "拒绝",
   mcpImportBlocked: "来源处已禁用",
   mcpImportConflict: "名称已被占用",
+  // Memory panel
+  memory: "记忆",
+  memoryRefresh: "刷新",
+  memoryEmpty: "还没有记忆。你在这里添加的、或模型记住的内容，都会出现在这里。",
+  memoryNoMatch: "没有符合当前筛选的记忆。",
+  memorySearchPlaceholder: "搜索记忆…",
+  memoryRememberPlaceholder: "记一条…",
+  memoryRemember: "记住",
+  memoryScopeGlobal: "全局",
+  memoryScopeWorkspace: "工作区",
+  memoryScopeSession: "本次对话",
+  memoryFilterAll: "全部",
+  memoryFilterPending: "待审",
+  memoryStatusCandidate: "候选",
+  memoryStatusActive: "生效",
+  memoryStatusStale: "陈旧",
+  memoryStatusSuperseded: "已取代",
+  memoryStatusRejected: "已拒绝",
+  memoryApprove: "批准 —— 之后的回合会得到它",
+  memoryReject: "拒绝 —— 不会交给模型",
+  memoryForget: "遗忘 —— 之后的回合不会再得到它",
+  memoryPin: "固定 —— 保住它在上下文预算里的位置",
+  memoryUnpin: "取消固定",
+  memorySuppress: "排除 —— 仍保留在库中，但永不交给模型",
+  memoryUnsuppress: "重新纳入",
+  memoryFreshnessLabel: "新鲜度：{value}",
+  memoryInContext: "已在上下文中",
+  memoryNoStore: "当前引擎没有记忆接口。如需在此维护记忆，请更新 CodeWhale 引擎。",
+  memoryTruncated: "只显示第一页；库中还有更多条目。",
+  memoryPinnedBadge: "已固定",
+  memorySuppressedBadge: "已排除",
   noAgentRuns: "暂无子代理运行",
   agentRunGone: "该子代理运行已不在当前引擎中——已结束的运行约一小时后会从运行列表里清理。",
   agentStatusQueued: "排队中",
@@ -2161,6 +2267,37 @@ export function webviewTranslations(tr: Translations) {
     mcpDecline: tr.mcpDecline,
     mcpImportBlocked: tr.mcpImportBlocked,
     mcpImportConflict: tr.mcpImportConflict,
+    // Memory panel
+    memory: tr.memory,
+    memoryRefresh: tr.memoryRefresh,
+    memoryEmpty: tr.memoryEmpty,
+    memoryNoMatch: tr.memoryNoMatch,
+    memorySearchPlaceholder: tr.memorySearchPlaceholder,
+    memoryRememberPlaceholder: tr.memoryRememberPlaceholder,
+    memoryRemember: tr.memoryRemember,
+    memoryScopeGlobal: tr.memoryScopeGlobal,
+    memoryScopeWorkspace: tr.memoryScopeWorkspace,
+    memoryScopeSession: tr.memoryScopeSession,
+    memoryFilterAll: tr.memoryFilterAll,
+    memoryFilterPending: tr.memoryFilterPending,
+    memoryStatusCandidate: tr.memoryStatusCandidate,
+    memoryStatusActive: tr.memoryStatusActive,
+    memoryStatusStale: tr.memoryStatusStale,
+    memoryStatusSuperseded: tr.memoryStatusSuperseded,
+    memoryStatusRejected: tr.memoryStatusRejected,
+    memoryApprove: tr.memoryApprove,
+    memoryReject: tr.memoryReject,
+    memoryForget: tr.memoryForget,
+    memoryPin: tr.memoryPin,
+    memoryUnpin: tr.memoryUnpin,
+    memorySuppress: tr.memorySuppress,
+    memoryUnsuppress: tr.memoryUnsuppress,
+    memoryFreshnessLabel: tr.memoryFreshnessLabel,
+    memoryInContext: tr.memoryInContext,
+    memoryNoStore: tr.memoryNoStore,
+    memoryTruncated: tr.memoryTruncated,
+    memoryPinnedBadge: tr.memoryPinnedBadge,
+    memorySuppressedBadge: tr.memorySuppressedBadge,
     noAgentRuns: tr.noAgentRuns,
     agentRunGone: tr.agentRunGone,
     agentStatusQueued: tr.agentStatusQueued,

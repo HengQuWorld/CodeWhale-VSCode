@@ -493,6 +493,37 @@ export interface WebviewTranslations {
   mcpDecline: string;
   mcpImportBlocked: string;
   mcpImportConflict: string;
+  // Memory panel
+  memory: string;
+  memoryRefresh: string;
+  memoryEmpty: string;
+  memoryNoMatch: string;
+  memorySearchPlaceholder: string;
+  memoryRememberPlaceholder: string;
+  memoryRemember: string;
+  memoryScopeGlobal: string;
+  memoryScopeWorkspace: string;
+  memoryScopeSession: string;
+  memoryFilterAll: string;
+  memoryFilterPending: string;
+  memoryStatusCandidate: string;
+  memoryStatusActive: string;
+  memoryStatusStale: string;
+  memoryStatusSuperseded: string;
+  memoryStatusRejected: string;
+  memoryApprove: string;
+  memoryReject: string;
+  memoryForget: string;
+  memoryPin: string;
+  memoryUnpin: string;
+  memorySuppress: string;
+  memoryUnsuppress: string;
+  memoryFreshnessLabel: string;
+  memoryInContext: string;
+  memoryNoStore: string;
+  memoryTruncated: string;
+  memoryPinnedBadge: string;
+  memorySuppressedBadge: string;
   noAgentRuns: string;
   agentStatusQueued: string;
   agentStatusStarting: string;
@@ -705,6 +736,13 @@ ${css}
               <span class="sidebar-section-arrow">▼</span>
             </div>
             <div class="sidebar-section-body" id="tab-changes"></div>
+          </div>
+          <div class="sidebar-section" id="sidebar-memory">
+            <div class="sidebar-section-header" id="memory-section-toggle">
+              <span class="sidebar-section-title">🧠 ${tr.memory}</span>
+              <span class="sidebar-section-arrow">▼</span>
+            </div>
+            <div class="sidebar-section-body" id="tab-memory"></div>
           </div>
           <div class="sidebar-section" id="sidebar-fleet">
             <div class="sidebar-section-header" id="fleet-section-toggle">

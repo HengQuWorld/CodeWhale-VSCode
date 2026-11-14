@@ -2711,6 +2711,59 @@ export function getWebviewCss(): string {
       background: var(--accent-hover);
       border-color: var(--accent-hover);
     }
+    /* A toolbar button that cannot act keeps its place and its tooltip, and
+     * says with its own dimming that it is out of action. Without this the add
+     * buttons of an engine that cannot serve them looked live but did nothing. */
+    .task-icon-btn:disabled {
+      opacity: 0.4;
+      cursor: default;
+    }
+    .task-icon-btn.primary:disabled:hover {
+      background: var(--accent);
+      border-color: var(--accent);
+    }
+
+    /* ── Panel buttons ── */
+
+    /* One class, one meaning: a small button in a panel. The look is global
+     * because buttons with this class are not only in a card's action row —
+     * the Skills panel's Install sat outside one and, with the whole rule
+     * scoped to the card, came out in the browser's default white. The card
+     * row adds the 22px icon box on top; everything else is shared. */
+    .task-action-btn {
+      border: 1px solid var(--border);
+      background: rgba(128, 128, 128, 0.05);
+      color: var(--muted);
+      font-family: inherit;
+      font-size: 11px;
+      line-height: 1;
+      height: 24px;
+      padding: 0 8px;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: color 0.12s, border-color 0.12s, background 0.12s;
+    }
+    .task-action-btn:hover {
+      color: var(--fg);
+      border-color: var(--fg);
+      background: rgba(128, 128, 128, 0.04);
+    }
+    .task-action-btn:active {
+      background: rgba(128, 128, 128, 0.1);
+    }
+    .task-action-btn.danger:hover {
+      color: #f44336;
+      border-color: rgba(244, 67, 54, 0.4);
+      background: rgba(244, 67, 54, 0.08);
+    }
+    /* A disabled action keeps its place and its glyph: the capability it
+     * needs, not the feature, is what is missing, and the panel says so. This
+     * sits at class-plus-modifier specificity, above the bare class, and the
+     * card's icon box does not restate cursor, so it still wins there. */
+    .task-action-btn.is-unavailable {
+      opacity: 0.4;
+      cursor: default;
+    }
 
     .task-card {
       padding: 7px 10px;
@@ -2771,10 +2824,10 @@ export function getWebviewCss(): string {
       gap: 4px;
       margin-top: 4px;
     }
+    /* The card's action row narrows those buttons to an icon box. That is a
+     * shape, not a different kind of button — the look itself lives on the base
+     * rule above. */
     .task-card .task-actions .task-action-btn {
-      background: rgba(128,128,128,0.05);
-      border: 1px solid var(--border);
-      color: var(--muted);
       width: 22px;
       height: 22px;
       padding: 0;
@@ -2782,32 +2835,10 @@ export function getWebviewCss(): string {
       align-items: center;
       justify-content: center;
       font-size: 0.75em;
-      cursor: pointer;
-      border-radius: 4px;
-      transition: all 0.12s;
-    }
-    .task-card .task-actions .task-action-btn:hover {
-      color: var(--fg);
-      border-color: var(--fg);
-      background: rgba(128,128,128,0.04);
-    }
-    .task-card .task-actions .task-action-btn:active {
-      background: rgba(128,128,128,0.1);
-    }
-    .task-card .task-actions .task-action-btn.danger:hover {
-      color: #f44336;
-      border-color: rgba(244,67,54,0.4);
-      background: rgba(244,67,54,0.08);
     }
 
     /* ── Skills panel (sidebar) ── */
 
-    /* A disabled action keeps its place and its glyph: the capability it
-     * needs, not the feature, is what is missing, and the panel says so. */
-    .task-card .task-actions .task-action-btn.is-unavailable {
-      opacity: 0.4;
-      cursor: default;
-    }
     .skill-card .task-meta {
       white-space: normal;
       overflow: visible;
@@ -2922,6 +2953,158 @@ export function getWebviewCss(): string {
       line-height: 1.4;
       opacity: 0.6;
       white-space: pre-wrap;
+    }
+
+    /* ── Memory panel (sidebar) ── */
+
+    /* The status badge is the row's first word: whether it awaits a decision
+     * (candidate), is in use (active), or is history (stale/superseded/
+     * rejected). Colour carries that ranking, the text carries the exact state,
+     * so the badge stays readable in a high-contrast theme. */
+    .memory-status-badge {
+      font-size: 9px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      padding: 1px 4px;
+      border-radius: 3px;
+      border: 1px solid rgba(128,128,128,0.35);
+      opacity: 0.75;
+      flex-shrink: 0;
+    }
+    .memory-status-badge.is-candidate {
+      color: #ff9800;
+      border-color: rgba(255, 152, 0, 0.45);
+      background: rgba(255, 152, 0, 0.12);
+      opacity: 1;
+    }
+    .memory-status-badge.is-active {
+      color: #4caf50;
+      border-color: rgba(76, 175, 80, 0.4);
+      background: rgba(76, 175, 80, 0.1);
+      opacity: 1;
+    }
+    .memory-status-badge.is-rejected {
+      color: #f44336;
+      border-color: rgba(244, 67, 54, 0.35);
+    }
+    .memory-status-badge.is-stale,
+    .memory-status-badge.is-superseded {
+      opacity: 0.5;
+    }
+    /* The body is a memory's actual content, so it wraps instead of clipping:
+     * a row whose note cannot be read is a row the reader has to open the
+     * database to judge. Three lines is enough to recognize it. */
+    .memory-card .task-meta.memory-body {
+      white-space: normal;
+      overflow: hidden;
+      text-overflow: clip;
+      line-height: 1.35;
+      display: -webkit-box;
+      -webkit-line-clamp: 3;
+      -webkit-box-orient: vertical;
+    }
+    .memory-card .task-meta.memory-meta {
+      flex-wrap: wrap;
+      gap: 6px;
+      opacity: 0.75;
+    }
+    .memory-context-flag {
+      color: #4caf50;
+      font-weight: 600;
+    }
+    .memory-flag {
+      opacity: 0.8;
+    }
+    .memory-flag.is-excluded {
+      color: #ff9800;
+      text-transform: uppercase;
+      font-size: 0.9em;
+      letter-spacing: 0.04em;
+    }
+    /* The add-note form: the field alone on its row, the full width of the
+     * panel. The scope and the actions are up in the toolbar with the refresh,
+     * so nothing shares this row with the note. */
+    .memory-add-row {
+      padding: 4px 10px 6px;
+    }
+    /* The scope sits in the toolbar at the row's start, with the actions at its
+     * end: margin-right: auto is what keeps the two groups apart without a
+     * spacer. It shrinks rather than overflowing when the sidebar is dragged
+     * down to its 120px minimum. */
+    .memory-add-scope {
+      flex: 0 1 auto;
+      min-width: 0;
+      margin-right: auto;
+      height: 26px;
+      box-sizing: border-box;
+      font-family: inherit;
+      font-size: 11px;
+      line-height: 1;
+      padding: 0 2px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: rgba(128, 128, 128, 0.06);
+      color: var(--muted);
+    }
+    /* One line to begin with, and the reader decides the rest: the native
+     * resize grip sets the height, and the panel stores it. min-height holds
+     * the one-line floor for a box that has never been dragged; max-height
+     * keeps a tall box from pushing the list off the panel. */
+    .memory-add-input {
+      width: 100%;
+      box-sizing: border-box;
+      font-family: inherit;
+      font-size: 11px;
+      line-height: 1.4;
+      padding: 3px 5px;
+      min-height: calc(1.4em + 8px);
+      max-height: 40vh;
+      overflow-y: auto;
+      resize: vertical;
+      background: var(--input-bg, rgba(128,128,128,0.08));
+      color: inherit;
+      border: 1px solid rgba(128,128,128,0.25);
+      border-radius: 3px;
+      outline: none;
+    }
+    .memory-add-input:focus {
+      border-color: var(--accent, rgba(128,128,128,0.5));
+    }
+    .memory-add-input::placeholder {
+      color: var(--muted, inherit);
+    }
+
+    .memory-filter-row {
+      display: flex;
+      gap: 4px;
+      padding: 4px 10px 0;
+    }
+    /* The two filters are a view of one list, so they are chips rather than a
+     * select: the pending count is the reason to look, and it has to be
+     * visible without opening anything. */
+    .memory-filter-chip {
+      background: rgba(128, 128, 128, 0.08);
+      border: 1px solid rgba(128, 128, 128, 0.25);
+      color: inherit;
+      opacity: 0.7;
+      border-radius: 999px;
+      padding: 2px 8px;
+      font-size: 10px;
+      line-height: 1.4;
+      cursor: pointer;
+      font-family: inherit;
+    }
+    .memory-filter-chip:hover {
+      opacity: 0.95;
+    }
+    .memory-filter-chip.active {
+      opacity: 1;
+      border-color: var(--accent, rgba(128,128,128,0.5));
+      background: rgba(128, 128, 128, 0.16);
+    }
+    .memory-problem {
+      color: #ff9800;
+      opacity: 0.85;
     }
 
     /* ── MCP panel (sidebar) ── */

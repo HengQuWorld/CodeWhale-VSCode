@@ -33,6 +33,7 @@ import {
 } from "./utils/provider-route";
 import { McpController } from "./chat-provider/mcp";
 import { SkillController } from "./chat-provider/skills";
+import { MemoryController } from "./chat-provider/memory";
 import { FleetController } from "./chat-provider/fleet";
 import { getWebviewHtml } from "./webview/webview-html";
 import { renderMarkdown } from "./utils/markdown";
@@ -382,6 +383,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     skillLifecycle: false,
     skillDetail: false,
     mcpServerManagement: false,
+    memory: false,
   };
 
   /** The skill armed for the next outgoing message, if any. Set by `/skill
@@ -443,6 +445,9 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
 
   /** The engine's skills: list, toggle, activate, install, mutate, audit. */
   private readonly skills: SkillController;
+
+  /** The engine's native memory store, read and reviewed through the Lens. */
+  private readonly memory: MemoryController;
 
   /** Managed multi-agent runs: the list, and the one open in the panel. */
   private readonly fleet: FleetController;
@@ -644,6 +649,18 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       armSkill: (skill) => this.armSkill(skill),
       // Activation that carries its own task sends it straight away.
       sendMessage: (text) => this.sendMessage(text),
+    });
+    this.memory = new MemoryController({
+      api: this.api,
+      // Read live, like the other capability flags: the probe fills this in
+      // after startup.
+      hasMemoryStore: () => this.apiCapabilities.memory,
+      // Passed so the panel also sees entries scoped to this conversation;
+      // without it a session note would be invisible in the very thread it
+      // applies to.
+      currentThreadId: () => this.currentThread?.id ?? null,
+      postMessage: (msg) => this.postMessage(msg),
+      debugLog: (msg) => this.debugLog(msg),
     });
     this.fleet = new FleetController({
       api: this.api,
@@ -926,6 +943,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
           void this.refreshFleetRuns();
           void this.refreshGoal();
           void this.refreshSkillList();
+          void this.refreshMemoryPanel();
           void this.refreshMcpServers();
           void this.postCommandCatalog();
         }
@@ -1033,6 +1051,23 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         break;
       case "refreshSkillList":
         await this.refreshSkillList();
+        break;
+      case "refreshMemoryPanel":
+        await this.refreshMemoryPanel();
+        break;
+      case "memoryLensAction":
+        // One click, one engine command. The panel sends the revision it
+        // displayed, never a freshly read one: a write against an entry that
+        // moved on is the engine's call to refuse, not this side's to guess.
+        await this.memoryLensAction(
+          msg.action as string,
+          msg.id as string,
+          msg.revision as number,
+          { pinned: msg.pinned as boolean | undefined, suppressed: msg.suppressed as boolean | undefined }
+        );
+        break;
+      case "rememberMemory":
+        await this.rememberMemory(msg.text as string, msg.scope as string | undefined);
         break;
       case "toggleSkill":
         await this.setSkillEnabled(msg.name as string, msg.enabled as boolean);
@@ -1164,6 +1199,9 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     // inventory; the armed-skill chip reads the host's own armed state, which
     // outlives a webview reload.
     void this.refreshSkillList();
+    // Same for memory: a reloaded webview lost the rows, and the store may
+    // have changed while it was gone.
+    void this.refreshMemoryPanel();
     // The MCP panel's list travels on its own message; it is re-asked here so
     // a reloaded webview does not paint an empty panel until the next sidebar
     // refresh happens to fire.
@@ -1209,6 +1247,9 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     // action into that store. Published first, every row of a reloaded webview
     // held a key the rebuild had already dropped.
     this.refreshWorkPanel();
+    // Memory is thread-sensitive: the Lens read includes the session scope of
+    // the conversation on screen, so the rows change with the thread.
+    void this.refreshMemoryPanel();
 
     this.postMessage({
         type: "ready",
@@ -4538,6 +4579,33 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     return this.skills.refreshSkillList();
   }
 
+  // ── Memory ──
+  //
+  // The behaviour lives in `chat-provider/memory.ts`; this is the provider's
+  // entry point into it, because the webview's messages, the slash command and
+  // the turn-end refresh all route through here.
+
+  /** Push the engine's memory store to the webview's Memory panel. */
+  public async refreshMemoryPanel(): Promise<void> {
+    return this.memory.refreshMemoryPanel();
+  }
+
+  /** Apply one review action from the Memory panel (approve / reject / forget
+   *  / preferences), against the revision that panel displayed. */
+  public async memoryLensAction(
+    action: string,
+    id: string,
+    revision: number,
+    flags?: { pinned?: boolean; suppressed?: boolean }
+  ): Promise<void> {
+    return this.memory.act(action, id, revision, flags);
+  }
+
+  /** Store a note from the Memory panel. */
+  public async rememberMemory(text: string, scope?: string): Promise<void> {
+    return this.memory.remember(text, scope);
+  }
+
   /** The `/new` command's engine: the same flow the webview's New-chat
    *  button drives, exposed to the slash-command context. */
   public async startNewThread(): Promise<void> {
@@ -6092,6 +6160,11 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       // its mutations and the reviewed-import routes all come from the same
       // engine generation, so an engine that has any of them has all of them.
       mcpServerManagement: this.apiCapabilities.mcpServerManagement,
+      // Memory is deliberately not announced here. Its capability flag cannot
+      // say whether the store is *enabled* (that is a config answer the engine
+      // gives at read time, 503), and the panel already learns more from a
+      // failed read than from a boolean: it tells "this engine has no memory
+      // routes" apart from "memory is turned off" and from a real failure.
     };
   }
 
@@ -6130,6 +6203,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         skillLifecycle: false,
         skillDetail: false,
         mcpServerManagement: false,
+        memory: false,
       };
     }
     this.postApiCapabilities();
@@ -8810,6 +8884,11 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         // the turn recorded usage: a failed or interrupted turn still leaves
         // a conversation whose size the chip should describe.
         void this.refreshThreadContext();
+
+        // The model's `remember` tool captures candidates while the turn runs,
+        // so the panel's list is stale the moment one lands. Read it once the
+        // turn has settled, which is also when the transcript stops moving.
+        void this.refreshMemoryPanel();
 
         // TUI emits turn.completed for ALL terminal turn states
         // (completed / interrupted / failed) — it never emits

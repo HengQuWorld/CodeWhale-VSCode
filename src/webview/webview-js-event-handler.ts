@@ -1392,6 +1392,20 @@ ${PROVIDER_PICKER_JS}
         window.__wvSidebar.renderChanges();
         break;
 
+      case 'memoryState':
+        // The panel draws the engine's answer, capabilities included: the
+        // review and forget controls come from canReview / canForget, so a
+        // runtime that does not grant them shows no button rather than one
+        // that fails on click.
+        window.__wvSidebar.renderMemory({
+          entries: msg.entries || [],
+          canReview: !!msg.canReview,
+          canForget: !!msg.canForget,
+          truncated: !!msg.truncated,
+          problem: msg.problem || null
+        });
+        break;
+
       case 'apiCapabilities':
         apiCapabilities = Object.assign({}, apiCapabilities, msg.capabilities || {});
         window.__wvApiCapabilities = apiCapabilities;

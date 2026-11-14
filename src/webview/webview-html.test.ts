@@ -340,6 +340,37 @@ function makeTr(): WebviewTranslations {
     mcpDecline: "Decline",
     mcpImportBlocked: "Blocked at source",
     mcpImportConflict: "Name already in use",
+    // Memory panel
+    memory: "Memory",
+    memoryRefresh: "Refresh",
+    memoryEmpty: "No memory yet.",
+    memoryNoMatch: "No memory matches this filter.",
+    memorySearchPlaceholder: "Search memory…",
+    memoryRememberPlaceholder: "Remember a note…",
+    memoryRemember: "Remember",
+    memoryScopeGlobal: "Global",
+    memoryScopeWorkspace: "Workspace",
+    memoryScopeSession: "This conversation",
+    memoryFilterAll: "All",
+    memoryFilterPending: "Pending",
+    memoryStatusCandidate: "Candidate",
+    memoryStatusActive: "Active",
+    memoryStatusStale: "Stale",
+    memoryStatusSuperseded: "Superseded",
+    memoryStatusRejected: "Rejected",
+    memoryApprove: "Approve",
+    memoryReject: "Reject",
+    memoryForget: "Forget",
+    memoryPin: "Pin",
+    memoryUnpin: "Unpin",
+    memorySuppress: "Exclude",
+    memoryUnsuppress: "Include again",
+    memoryFreshnessLabel: "Freshness: {value}",
+    memoryInContext: "In context",
+    memoryNoStore: "This engine has no memory routes.",
+    memoryTruncated: "More entries exist.",
+    memoryPinnedBadge: "Pinned",
+    memorySuppressedBadge: "Excluded",
     noAgentRuns: "No agent runs",
     agentStatusQueued: "Queued",
     agentStatusStarting: "Starting",
@@ -579,15 +610,19 @@ describe("webview-html.ts assembler", () => {
     expect(html).toContain('id="tab-work"');
     expect(html).toContain('id="tab-tasks"');
     expect(html).toContain('id="tab-changes"');
+    expect(html).toContain('id="tab-memory"');
   });
 
-  it("orders the Activity sections as Work, Changes, Fleet, Tasks, Agents", () => {
+  it("orders the Activity sections as Work, Changes, Memory, Fleet, Tasks, Agents", () => {
     const html = getWebviewHtml(makeMockWebview(), makeMockExtensionUri(), makeTr());
     // Changes sits directly under Work: it is the highest-signal section for a
-    // running session, so it must not fall below Fleet/Tasks/Agents.
+    // running session, so it must not fall below Fleet/Tasks/Agents. Memory
+    // follows Changes — what the session changed, then what it learned — and
+    // stays above the run-management sections for the same reason.
     const ordered = [
       'sidebar-work',
       'sidebar-changes',
+      'sidebar-memory',
       'sidebar-fleet',
       'sidebar-tasks',
       'sidebar-agents',

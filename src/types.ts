@@ -876,6 +876,14 @@ export interface RuntimeApiCapabilities {
    *  false the MCP panel says which engine can serve it and offers no
    *  mutations, rather than promising a route the engine will 404. */
   mcpServerManagement: boolean;
+  /** The native memory family exists — `GET /v1/memory`,
+   *  `GET /v1/memory/lens` and `POST /v1/memory/lens/actions` — advertised as
+   *  `capabilities.memory` on `GET /v1/runtime/info`. When false the Memory
+   *  panel names the engine that can serve it and offers no controls, rather
+   *  than reading a route that 404s. It says nothing about whether memory is
+   *  *enabled* in the engine's config; a disabled store answers 503 and the
+   *  panel reports that separately. */
+  memory: boolean;
 }
 
 /** One path a single tool call changed, as the call-change route reports it. */

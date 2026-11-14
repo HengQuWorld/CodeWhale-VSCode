@@ -447,6 +447,7 @@ function createContext(overrides: Partial<SlashCommandContext> = {}): SlashComma
     activateSkill: vi.fn(async () => undefined),
     clearArmedSkill: vi.fn(),
     refreshSkillList: vi.fn(async () => undefined),
+    refreshMemoryPanel: vi.fn(async () => undefined),
     ...overrides,
   };
 }
