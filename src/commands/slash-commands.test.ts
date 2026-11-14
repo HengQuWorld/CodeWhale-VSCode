@@ -277,6 +277,18 @@ describe("getCommandHelpText", () => {
     const help = getCommandHelpText("/foobar");
     expect(help).toContain("Unknown command");
   });
+
+  it("every help text is plain prose the banner can render", () => {
+    // Help text reaches the user through an `info` message, which escapes its
+    // text and draws no markdown — a backtick would show up literally, and a
+    // stray blank line would break the one-line note. Guard the whole registry
+    // so a new command cannot reintroduce it.
+    for (const command of new SlashCommandRegistry().getAllCommands()) {
+      expect(command.helpText, command.name).not.toContain("`");
+      expect(command.helpText, command.name).not.toContain("\n");
+      expect(command.helpText.trim(), command.name).not.toBe("");
+    }
+  });
 });
 
 describe("Unavailable command reasons", () => {
