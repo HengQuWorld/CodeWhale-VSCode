@@ -212,6 +212,9 @@ function createRuntimeHarness() {
   };
 
   const postMessages: Array<Record<string, unknown>> = [];
+  /** Which scroll the handler asked for: a blocking prompt must bring itself
+   *  into view even when the reader had scrolled away. */
+  const scrollCalls: string[] = [];
   /** What the handler told the rail to do, in order: the rail's filter state
    *  travels through these calls, so a message that stops calling them would
    *  otherwise leave the toggle describing a query nobody is running. */
@@ -348,7 +351,12 @@ function createRuntimeHarness() {
       },
       isStreaming: () => streaming,
       setUserScrolledUp: () => {},
-      smartScrollToBottom: () => {},
+      smartScrollToBottom: () => {
+        scrollCalls.push("smart");
+      },
+      scrollToBottom: () => {
+        scrollCalls.push("forced");
+      },
       renderWelcome: () => {},
       createThinkingBlock: () => new FakeElement(),
       updateThinkingBlock: () => {},
@@ -490,6 +498,8 @@ function createRuntimeHarness() {
       return windowObj[name];
     },
     getElement: getEl,
+    /** The scrolls the handler asked the messages module for, in order. */
+    scrollCalls,
     /** Treat an id as absent, as a document does for a node that is not there. */
     hideElement(id: string) {
       missingIds.add(id);
@@ -2725,7 +2735,7 @@ describe("webview-js-event-handler runtime: the anchor follows the turn the view
   });
 });
 
-describe("webview-js-event-handler runtime: a question that must not be lost", () => {
+describe("webview-js-event-handler runtime: a question that must be seen", () => {
   const questions = [
     {
       header: "ruidong 脏文件",
@@ -2738,32 +2748,59 @@ describe("webview-js-event-handler runtime: a question that must not be lost", (
     },
   ];
 
-  it("draws the bar even when the message it names is gone", () => {
+  function barsIn(element: FakeElement) {
+    return element.children.filter((child) =>
+      child.className.split(/\s+/).includes("user-input-bar"),
+    );
+  }
+
+  it("draws the bar at the end of the conversation, not inside the turn's first segment", () => {
     const harness = createRuntimeHarness();
-    // The host names the message the question belongs to. A rebuild can leave
-    // that id behind: relying on it alone is how a turn sat "thinking" with no
-    // question on screen, waiting for an answer nobody could give.
-    harness.hideElement("body-assistant-vanished");
+    const messages = harness.getElement("messages");
+    // The host names the message the question belongs to, and for a long turn
+    // that is its *first* assistant segment — which can sit far above the end
+    // of the transcript. Drawing it there is how a waiting question became
+    // invisible while the reader watched a spinner at the bottom.
+    const firstSegment = harness.getElement("body-assistant-turn-1");
+    messages.appendChild(firstSegment);
+    for (let i = 0; i < 5; i++) {
+      const filler = new FakeElement();
+      filler.className = "message assistant";
+      messages.appendChild(filler);
+    }
 
     harness.dispatchMessage({
       type: "userInputRequired",
-      messageId: "assistant-vanished",
+      messageId: "assistant-turn-1",
       inputId: "input-1",
       questions,
     });
 
-    const bars = harness.getElement("messages").children.filter((child) =>
-      child.className.split(/\s+/).includes("user-input-bar"),
-    );
+    expect(barsIn(firstSegment)).toHaveLength(0);
+    const bars = barsIn(messages);
     expect(bars).toHaveLength(1);
     expect(bars[0].getAttribute("data-input-id")).toBe("input-1");
+    // It is the last thing in the transcript.
+    expect(messages.children[messages.children.length - 1]).toBe(bars[0]);
+  });
+
+  it("brings a question into view even when the reader had scrolled away", () => {
+    const harness = createRuntimeHarness();
+    harness.dispatchMessage({
+      type: "userInputRequired",
+      messageId: "assistant-turn-1",
+      inputId: "input-1",
+      questions,
+    });
+
+    // A turn is blocked on this answer, so the scroll is not the smart one —
+    // that one refuses to move a reader who scrolled up, which is exactly the
+    // state this has to escape.
+    expect(harness.scrollCalls).toEqual(["forced"]);
   });
 
   it("replaces its own bar instead of stacking a second one", () => {
     const harness = createRuntimeHarness();
-    const body = harness.getElement("body-assistant-turn-1");
-    harness.getElement("messages").appendChild(body);
-
     const message = {
       type: "userInputRequired",
       messageId: "assistant-turn-1",
@@ -2775,17 +2812,11 @@ describe("webview-js-event-handler runtime: a question that must not be lost", (
     harness.dispatchMessage(message);
     harness.dispatchMessage(message);
 
-    const bars = body.children.filter((child) =>
-      child.className.split(/\s+/).includes("user-input-bar"),
-    );
-    expect(bars).toHaveLength(1);
+    expect(barsIn(harness.getElement("messages"))).toHaveLength(1);
   });
 
   it("keeps two different requests apart", () => {
     const harness = createRuntimeHarness();
-    const body = harness.getElement("body-assistant-turn-1");
-    harness.getElement("messages").appendChild(body);
-
     harness.dispatchMessage({
       type: "userInputRequired", messageId: "assistant-turn-1", inputId: "input-1", questions,
     });
@@ -2793,9 +2824,8 @@ describe("webview-js-event-handler runtime: a question that must not be lost", (
       type: "userInputRequired", messageId: "assistant-turn-1", inputId: "input-2", questions,
     });
 
-    const bars = body.children.filter((child) =>
-      child.className.split(/\s+/).includes("user-input-bar"),
-    );
-    expect(bars.map((bar) => bar.getAttribute("data-input-id"))).toEqual(["input-1", "input-2"]);
+    expect(
+      barsIn(harness.getElement("messages")).map((bar) => bar.getAttribute("data-input-id")),
+    ).toEqual(["input-1", "input-2"]);
   });
 });

@@ -2092,14 +2092,23 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     // not this snapshot names them.
     //
     // A rebuild clears the transcript, and the bar a question draws is part of
-    // it — so every rebuild has to put the bar back. Trusting only the engine's
-    // list loses the question the moment a snapshot comes back without it: the
-    // observed case is a thread opened twice in a row, where the second
-    // `loadHistory` reported nothing pending and silently erased a bar that was
-    // still waiting for an answer, leaving the turn "thinking" with no way to
-    // answer it. The client's own map is the copy that cannot vanish between
-    // snapshots; it is only emptied when a request is answered or cancelled.
+    // it — so every rebuild has to put the bar back. The engine's list is the
+    // authority on what is new, but it is a point-in-time read: a snapshot that
+    // races the settle bookkeeping can come back without a request this client
+    // is still holding, and believing it alone erases a bar the turn is still
+    // blocked on. The client's own hold is the copy that cannot vanish between
+    // snapshots; it is only emptied when the runtime reports the request
+    // answered or cancelled, or when this client submits it.
+    //
+    // Both holds are redrawn, not just the view's: a question answered from the
+    // rail card without switching lives in the background map, and once this
+    // thread is the one on screen that is no longer a reason to leave it off
+    // the transcript.
     for (const [inputId, state] of this.pendingUserInputs) {
+      if (state.threadId !== threadId) continue;
+      offer(inputId, state.questions, state.turnId);
+    }
+    for (const [inputId, state] of this.backgroundUserInputs) {
       if (state.threadId !== threadId) continue;
       offer(inputId, state.questions, state.turnId);
     }
@@ -8543,8 +8552,42 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     );
   }
 
+  /** Let go of a request the runtime has settled.
+   *
+   *  Both maps are checked: the view's and the background watcher's. When the
+   *  request was still ours, the bar is retired here — this is the path that
+   *  covers an answer given in the terminal or another window, which otherwise
+   *  leaves a prompt on screen for a turn that has already moved on.
+   *
+   *  No message is posted for a request this client no longer holds: our own
+   *  submit already retired the bar and posted its resolution, and a second
+   *  `userInputResolved` would clear another request's status line. */
+  private retireAnsweredUserInput(event: RuntimeEvent): void {
+    const pl = event.payload as { id?: string; input_id?: string };
+    const inputId = pl.input_id || pl.id;
+    if (!inputId) return;
+    const heldView = this.pendingUserInputs.delete(inputId);
+    const heldBackground = this.backgroundUserInputs.delete(inputId);
+    if (!heldView && !heldBackground) return;
+    this.postMessage({
+      type: "userInputResolved",
+      inputId,
+      cancelled: event.event === "user_input.canceled",
+    });
+  }
+
   private handleRuntimeEvent(event: RuntimeEvent): void {
     this.lastEventSeq = event.seq;
+
+    // A request leaving the runtime is bookkeeping about a prompt, not about a
+    // turn, and it is handled before the stale-turn guard below: an answer can
+    // land while a later turn is running, and dropping it as "stale" would
+    // leave this client holding a request nobody is waiting on — which the
+    // rebuild path would then redraw as a question that can never be answered.
+    if (event.event === "user_input.answered" || event.event === "user_input.canceled") {
+      this.retireAnsweredUserInput(event);
+      return;
+    }
 
     // Drop stale events from a previous turn. SSE is ordered within a single
     // connection, but a delayed turn.completed for turn A can arrive after
@@ -8996,32 +9039,6 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         this.postMessage({
           type: "status",
           text: `${toolName} denied by sandbox: ${reason}`,
-        });
-        break;
-      }
-
-      case "user_input.answered":
-      case "user_input.canceled": {
-        // The request left the runtime — answered here, cancelled here, or
-        // answered in another client. Retiring our copy is what keeps a
-        // rebuilt transcript from redrawing a question nobody is waiting on
-        // any more: `postPendingPrompts` deliberately re-posts what this client
-        // still holds, so a copy that outlived its request would come back as a
-        // phantom bar on every rebuild.
-        const pl = event.payload as { id?: string; input_id?: string };
-        const inputId = pl.input_id || pl.id;
-        if (!inputId) break;
-        const heldView = this.pendingUserInputs.delete(inputId);
-        const heldBackground = this.backgroundUserInputs.delete(inputId);
-        const held = heldView || heldBackground;
-        // Answered here a moment ago, by the click that submitted it: the bar
-        // is already gone and saying so again would only clear another
-        // request's status line.
-        if (!held) break;
-        this.postMessage({
-          type: "userInputResolved",
-          inputId,
-          cancelled: event.event === "user_input.canceled",
         });
         break;
       }

@@ -1805,13 +1805,15 @@ ${PROVIDER_PICKER_JS}
           questionsHtml += '</div>';
         }
         setStreamingState(true, __i18n.userInputAwaiting);
-        // The bar is the only place this request can be answered, so it is
-        // drawn wherever it can be seen: under the message it belongs to when
-        // that message is on screen, and otherwise at the end of the
-        // conversation. A named message that a rebuild has replaced must not
-        // be allowed to swallow the question — that is a turn left waiting on
-        // an answer nobody can give.
-        var bodyEl = document.getElementById('body-' + msg.messageId);
+        // At the end of the conversation, never inside the message the host
+        // names. That message is the turn's *first* assistant segment, and a
+        // long turn can put it tens of thousands of pixels up — the observed
+        // case is a turn with 120 tool calls, where the bar was drawn above the
+        // whole of it while the reader sat at the bottom watching a spinner and
+        // a turn that looked stuck "thinking". The bar is the only place this
+        // request can be answered, so it goes where the reader is looking, and
+        // the view is brought to it even if they had scrolled away.
+        //
         // Re-posted on every rebuild (the host keeps the request until it is
         // answered), so a bar that is already on screen is replaced rather
         // than duplicated.
@@ -1824,9 +1826,9 @@ ${PROVIDER_PICKER_JS}
         // retires the bar it names rather than every bar on screen.
         bar.setAttribute('data-input-id', inputId);
         bar.innerHTML = '<div class="user-input-icon">\\u2753</div><div class="user-input-content">' + questionsHtml + '</div><div class="user-input-buttons"><button class="btn-user-input-cancel" data-input-id="' + inputId + '">' + __i18n.cancel + '</button></div>';
-        if (bodyEl) bodyEl.appendChild(bar);
-        else messagesEl.appendChild(bar);
-        window.__wvMessages.smartScrollToBottom();
+        messagesEl.appendChild(bar);
+        if (window.__wvMessages.scrollToBottom) window.__wvMessages.scrollToBottom();
+        else window.__wvMessages.smartScrollToBottom();
         break;
       }
 

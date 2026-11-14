@@ -129,6 +129,14 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
     messagesEl.scrollTop = messagesEl.scrollHeight;
   }
 
+  /** Bring the end of the conversation into view even if the reader had
+   *  scrolled away. Reserved for what cannot wait: a turn is blocked on it and
+   *  the control that unblocks it is at the end of the transcript. */
+  function scrollToBottomForced() {
+    userScrolledUp = false;
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  }
+
   function isNearBottom() {
     return messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight < SCROLL_BOTTOM_THRESHOLD;
   }
@@ -1707,6 +1715,7 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
     renderFileChangeCard: renderFileChangeCard,
     revealFileChangeCard: revealFileChangeCard,
     smartScrollToBottom: smartScrollToBottom,
+    scrollToBottom: scrollToBottomForced,
     isStreaming: function() { return isStreaming; },
     setStreaming: function(v) { isStreaming = v; },
     getStreamingTimeout: function() { return streamingTimeout; },

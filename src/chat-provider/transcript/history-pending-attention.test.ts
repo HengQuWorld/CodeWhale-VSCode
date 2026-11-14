@@ -224,6 +224,29 @@ describe("ChatProvider pending attention across a rebuild", () => {
     ]);
   });
 
+  it("retires a question settled while a later turn is running", async () => {
+    const { provider, postMessage } = createProvider(
+      detailWith({ pending_user_inputs: [pendingQuestion] }),
+    );
+    await (provider as any).loadHistory("thread-1");
+    // A newer turn owns the view: the answer to the earlier turn's question
+    // then arrives carrying the earlier turn's id.
+    (provider as any).currentTurnId = "turn-2";
+    postMessage.mockClear();
+
+    (provider as any).handleRuntimeEvent({
+      seq: 9,
+      event: "user_input.answered",
+      turn_id: "turn-1",
+      payload: { id: "input-1", input_id: "input-1" },
+    } as any);
+
+    // The stale-turn guard exists for item deltas and turn bookkeeping; this
+    // is neither, and dropping it would leave a request the client holds and
+    // redraws forever.
+    expect((provider as any).pendingUserInputs.has("input-1")).toBe(false);
+  });
+
   it("says nothing about a request it was not holding", async () => {
     const { provider, postMessage } = createProvider(detailWith({}));
     await (provider as any).loadHistory("thread-1");
@@ -256,6 +279,30 @@ describe("ChatProvider pending attention across a rebuild", () => {
     expect(
       postedMessages(postMessage).filter((m) => m.type === "userInputRequired"),
     ).toHaveLength(0);
+  });
+
+  it("redraws a question the rail already holds for this thread", async () => {
+    const { provider, postMessage } = createProvider(detailWith({}));
+    // Answered from the rail card without switching: the request lives in the
+    // background map, which is a different hold from the view's.
+    (provider as any).backgroundUserInputs.set("input-1", {
+      threadId: "thread-1",
+      turnId: "turn-1",
+      questions: pendingQuestion.request.questions,
+      answers: [{ id: "q1", label: "Staging", value: "Staging" }],
+      answeredQuestions: new Set(["q1"]),
+    });
+
+    await (provider as any).loadHistory("thread-1");
+
+    const posted = postedMessages(postMessage).filter((m) => m.type === "userInputRequired");
+    expect(posted).toHaveLength(1);
+    expect(posted[0].inputId).toBe("input-1");
+    // Registering a second, blank copy would win the lookup and throw away the
+    // answer already collected on the card.
+    const state = (provider as any).backgroundUserInputs.get("input-1");
+    expect(state.answers).toHaveLength(1);
+    expect((provider as any).pendingUserInputs.has("input-1")).toBe(false);
   });
 
   it("offers a held question only on its own thread", async () => {
