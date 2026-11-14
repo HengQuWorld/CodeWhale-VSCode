@@ -1805,18 +1805,28 @@ ${PROVIDER_PICKER_JS}
           questionsHtml += '</div>';
         }
         setStreamingState(true, __i18n.userInputAwaiting);
+        // The bar is the only place this request can be answered, so it is
+        // drawn wherever it can be seen: under the message it belongs to when
+        // that message is on screen, and otherwise at the end of the
+        // conversation. A named message that a rebuild has replaced must not
+        // be allowed to swallow the question — that is a turn left waiting on
+        // an answer nobody can give.
         var bodyEl = document.getElementById('body-' + msg.messageId);
-        if (bodyEl) {
-          var bar = document.createElement('div');
-          bar.className = 'user-input-bar';
-          bar.id = 'user-input-' + inputId;
-          // Tool rows hang their state lines off this id, and userInputResolved
-          // retires the bar it names rather than every bar on screen.
-          bar.setAttribute('data-input-id', inputId);
-          bar.innerHTML = '<div class="user-input-icon">\\u2753</div><div class="user-input-content">' + questionsHtml + '</div><div class="user-input-buttons"><button class="btn-user-input-cancel" data-input-id="' + inputId + '">' + __i18n.cancel + '</button></div>';
-          bodyEl.appendChild(bar);
-          window.__wvMessages.smartScrollToBottom();
-        }
+        // Re-posted on every rebuild (the host keeps the request until it is
+        // answered), so a bar that is already on screen is replaced rather
+        // than duplicated.
+        var staleBar = document.getElementById('user-input-' + inputId);
+        if (staleBar) staleBar.remove();
+        var bar = document.createElement('div');
+        bar.className = 'user-input-bar';
+        bar.id = 'user-input-' + inputId;
+        // Tool rows hang their state lines off this id, and userInputResolved
+        // retires the bar it names rather than every bar on screen.
+        bar.setAttribute('data-input-id', inputId);
+        bar.innerHTML = '<div class="user-input-icon">\\u2753</div><div class="user-input-content">' + questionsHtml + '</div><div class="user-input-buttons"><button class="btn-user-input-cancel" data-input-id="' + inputId + '">' + __i18n.cancel + '</button></div>';
+        if (bodyEl) bodyEl.appendChild(bar);
+        else messagesEl.appendChild(bar);
+        window.__wvMessages.smartScrollToBottom();
         break;
       }
 

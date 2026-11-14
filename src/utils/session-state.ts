@@ -213,6 +213,9 @@ export interface ActiveItem {
 
 export interface UserInputState {
   threadId: string;
+  /** The turn that asked, kept so a rebuilt transcript can put the question
+   *  back under the message it belongs to without asking the engine again. */
+  turnId?: string;
   questions: Array<{
     header: string;
     id: string;

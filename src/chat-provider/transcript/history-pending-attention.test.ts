@@ -181,6 +181,104 @@ describe("ChatProvider pending attention across a rebuild", () => {
     expect((provider as any).pendingUserInputs.get("input-1")).toBe(state);
   });
 
+  it("puts the question back on a rebuild that no longer names it", async () => {
+    const { provider, api, postMessage } = createProvider(
+      detailWith({ pending_user_inputs: [pendingQuestion] }),
+    );
+    await (provider as any).loadHistory("thread-1");
+    expect(postedMessages(postMessage).filter((m) => m.type === "userInputRequired")).toHaveLength(1);
+
+    // The rebuild clears the transcript, and the bar the question drew was part
+    // of it. The next snapshot came back with nothing pending (observed: two
+    // switches into the same thread seconds apart, the second one empty), and
+    // trusting only that list left a turn waiting on an answer no longer on
+    // screen. The client's own copy has to put the bar back.
+    postMessage.mockClear();
+    api.getThreadDetail.mockImplementation(async () => detailWith({}));
+    await (provider as any).loadHistory("thread-1");
+
+    const again = postedMessages(postMessage).filter((m) => m.type === "userInputRequired");
+    expect(again).toHaveLength(1);
+    expect(again[0].inputId).toBe("input-1");
+    expect(again[0].messageId).toBe("assistant-turn-1");
+  });
+
+  it("retires a question answered in another client", async () => {
+    const { provider, postMessage } = createProvider(
+      detailWith({ pending_user_inputs: [pendingQuestion] }),
+    );
+    await (provider as any).loadHistory("thread-1");
+    postMessage.mockClear();
+
+    // Answered from the terminal, or from another window: this view still
+    // holds the request, and would keep drawing its bar.
+    (provider as any).handleRuntimeEvent({
+      seq: 8,
+      event: "user_input.answered",
+      payload: { id: "input-1", input_id: "input-1" },
+    } as any);
+
+    expect((provider as any).pendingUserInputs.has("input-1")).toBe(false);
+    expect(postedMessages(postMessage).filter((m) => m.type === "userInputResolved")).toEqual([
+      { type: "userInputResolved", inputId: "input-1", cancelled: false },
+    ]);
+  });
+
+  it("says nothing about a request it was not holding", async () => {
+    const { provider, postMessage } = createProvider(detailWith({}));
+    await (provider as any).loadHistory("thread-1");
+    postMessage.mockClear();
+
+    // Our own submit already removed the bar and posted the resolution; the
+    // event the runtime sends afterwards must not post a second one.
+    (provider as any).handleRuntimeEvent({
+      seq: 8,
+      event: "user_input.answered",
+      payload: { id: "input-never-held", input_id: "input-never-held" },
+    } as any);
+
+    expect(postedMessages(postMessage).filter((m) => m.type === "userInputResolved")).toHaveLength(0);
+  });
+
+  it("forgets a held question once it is answered", async () => {
+    const { provider, api, postMessage } = createProvider(
+      detailWith({ pending_user_inputs: [pendingQuestion] }),
+    );
+    await (provider as any).loadHistory("thread-1");
+    await (provider as any).handleUserInputSelect("input-1", "q1", 0, "Staging");
+
+    // The map is what keeps the bar alive across rebuilds, so an entry that
+    // outlived its answer would redraw a question that is no longer waiting.
+    postMessage.mockClear();
+    api.getThreadDetail.mockImplementation(async () => detailWith({}));
+    await (provider as any).loadHistory("thread-1");
+
+    expect(
+      postedMessages(postMessage).filter((m) => m.type === "userInputRequired"),
+    ).toHaveLength(0);
+  });
+
+  it("offers a held question only on its own thread", async () => {
+    const { provider, postMessage } = createProvider(
+      detailWith({ pending_user_inputs: [] }),
+    );
+    (provider as any).pendingUserInputs.set("input-elsewhere", {
+      threadId: "thread-2",
+      turnId: "turn-2",
+      questions: pendingQuestion.request.questions,
+      answers: [],
+      answeredQuestions: new Set(),
+    });
+
+    await (provider as any).loadHistory("thread-1");
+
+    // A question belongs to the conversation it was asked in; drawing it here
+    // would put an unanswerable prompt on a thread that never asked it.
+    expect(
+      postedMessages(postMessage).filter((m) => m.type === "userInputRequired"),
+    ).toHaveLength(0);
+  });
+
   it("keeps the answers a rail card already collected for a question", async () => {
     const { provider, postMessage } = createProvider(
       detailWith({ pending_user_inputs: [pendingQuestion] }),

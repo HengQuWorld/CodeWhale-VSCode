@@ -57,6 +57,23 @@ function matchesSelector(element: FakeElement | null, selector?: string): boolea
 class FakeElement {
   public textContent = "";
   public value = "";
+  /** The document indexes elements by id, so a script may look up a node it
+   *  just built (`document.getElementById('user-input-<id>')`) and find it.
+   *  Without that, a re-post could not be told from a first one here. */
+  private idValue = "";
+  public onIdAssigned: ((id: string) => void) | null = null;
+  public onDetached: ((id: string) => void) | null = null;
+
+  get id(): string {
+    return this.idValue;
+  }
+
+  set id(value: string) {
+    const previous = this.idValue;
+    this.idValue = value;
+    if (previous && previous !== value) this.onDetached?.(previous);
+    if (value) this.onIdAssigned?.(value);
+  }
   /** What a toolbar button carries while the view hides it. */
   public hidden = false;
   public scrollTop = 0;
@@ -155,6 +172,7 @@ class FakeElement {
   remove(): void {
     if (this.parentElement) this.parentElement.detach(this);
     this.parentElement = null;
+    if (this.idValue) this.onDetached?.(this.idValue);
   }
 
   private detach(child: FakeElement): void {
@@ -373,8 +391,11 @@ function createRuntimeHarness() {
     },
   };
 
+  // Ids a test declares absent, so the "the message this names is gone" case
+  // can be exercised: a real document answers null there.
+  const missingIds = new Set<string>();
   const documentObj = {
-    getElementById: (id: string) => getEl(id),
+    getElementById: (id: string) => (missingIds.has(id) ? null : getEl(id)),
     // The webview asks the document for cards by selector (e.g. the approval
     // bar that carries one id), so the stand-in searches the elements it hands
     // out — including their children — instead of always answering nothing.
@@ -389,7 +410,14 @@ function createRuntimeHarness() {
     addEventListener: (name: string, handler: (event: any) => void) => {
       documentListeners.set(name, handler);
     },
-    createElement: () => new FakeElement(),
+    createElement: () => {
+      const element = new FakeElement();
+      element.onIdAssigned = (id: string) => elements.set(id, element);
+      element.onDetached = (id: string) => {
+        if (elements.get(id) === element) elements.delete(id);
+      };
+      return element;
+    },
   };
 
   let timerId = 0;
@@ -462,6 +490,10 @@ function createRuntimeHarness() {
       return windowObj[name];
     },
     getElement: getEl,
+    /** Treat an id as absent, as a document does for a node that is not there. */
+    hideElement(id: string) {
+      missingIds.add(id);
+    },
     /** Move the virtual clock forward and run every deadline that came due,
      *  oldest first, so the stall deadline can be watched firing (or not). */
     advance(ms: number) {
@@ -2690,5 +2722,80 @@ describe("webview-js-event-handler runtime: the anchor follows the turn the view
     });
     expect(inputBox.children.filter((child) => child.className === "tool-input-command")).toHaveLength(1);
     expect(inputBox.children[0]?.textContent).toBe("$ cargo build --workspace --release");
+  });
+});
+
+describe("webview-js-event-handler runtime: a question that must not be lost", () => {
+  const questions = [
+    {
+      header: "ruidong 脏文件",
+      id: "bak",
+      question: "怎么处理那个 .bak？",
+      options: [
+        { label: "移走后发布", description: "移到 ~/backups/ 再发" },
+        { label: "先不动", description: "保留现场" },
+      ],
+    },
+  ];
+
+  it("draws the bar even when the message it names is gone", () => {
+    const harness = createRuntimeHarness();
+    // The host names the message the question belongs to. A rebuild can leave
+    // that id behind: relying on it alone is how a turn sat "thinking" with no
+    // question on screen, waiting for an answer nobody could give.
+    harness.hideElement("body-assistant-vanished");
+
+    harness.dispatchMessage({
+      type: "userInputRequired",
+      messageId: "assistant-vanished",
+      inputId: "input-1",
+      questions,
+    });
+
+    const bars = harness.getElement("messages").children.filter((child) =>
+      child.className.split(/\s+/).includes("user-input-bar"),
+    );
+    expect(bars).toHaveLength(1);
+    expect(bars[0].getAttribute("data-input-id")).toBe("input-1");
+  });
+
+  it("replaces its own bar instead of stacking a second one", () => {
+    const harness = createRuntimeHarness();
+    const body = harness.getElement("body-assistant-turn-1");
+    harness.getElement("messages").appendChild(body);
+
+    const message = {
+      type: "userInputRequired",
+      messageId: "assistant-turn-1",
+      inputId: "input-1",
+      questions,
+    };
+    // The host re-posts a still-pending question on every rebuild, so the same
+    // request can arrive twice without anything having changed on screen.
+    harness.dispatchMessage(message);
+    harness.dispatchMessage(message);
+
+    const bars = body.children.filter((child) =>
+      child.className.split(/\s+/).includes("user-input-bar"),
+    );
+    expect(bars).toHaveLength(1);
+  });
+
+  it("keeps two different requests apart", () => {
+    const harness = createRuntimeHarness();
+    const body = harness.getElement("body-assistant-turn-1");
+    harness.getElement("messages").appendChild(body);
+
+    harness.dispatchMessage({
+      type: "userInputRequired", messageId: "assistant-turn-1", inputId: "input-1", questions,
+    });
+    harness.dispatchMessage({
+      type: "userInputRequired", messageId: "assistant-turn-1", inputId: "input-2", questions,
+    });
+
+    const bars = body.children.filter((child) =>
+      child.className.split(/\s+/).includes("user-input-bar"),
+    );
+    expect(bars.map((bar) => bar.getAttribute("data-input-id"))).toEqual(["input-1", "input-2"]);
   });
 });

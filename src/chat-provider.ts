@@ -2058,6 +2058,18 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
    *  `handleUserInputSelect` reads — an input the rail never expanded is in
    *  neither of them, so its buttons would post an answer nowhere. */
   private postPendingPrompts(threadId: string, detail: ThreadDetailResponse): void {
+    const offered = new Set<string>();
+    const offer = (inputId: string, questions: UserInputState["questions"], turnId?: string) => {
+      if (offered.has(inputId)) return;
+      offered.add(inputId);
+      this.postMessage({
+        type: "userInputRequired",
+        messageId: this.messageIdForTurn(turnId),
+        inputId,
+        questions,
+      });
+    };
+
     for (const req of detail.pending_user_inputs || []) {
       // A rail card may already hold this question, with answers collected
       // there. Leave that state where it is — `handleUserInputSelect` reads both
@@ -2067,18 +2079,31 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       if (!this.pendingUserInputs.has(req.id) && !this.backgroundUserInputs.has(req.id)) {
         this.pendingUserInputs.set(req.id, {
           threadId,
+          turnId: req.turn_id,
           questions: req.request.questions,
           answers: [],
           answeredQuestions: new Set(),
         });
       }
-      this.postMessage({
-        type: "userInputRequired",
-        messageId: this.messageIdForTurn(req.turn_id),
-        inputId: req.id,
-        questions: req.request.questions,
-      });
+      offer(req.id, req.request.questions, req.turn_id);
     }
+
+    // Then the questions this client already holds for this thread, whether or
+    // not this snapshot names them.
+    //
+    // A rebuild clears the transcript, and the bar a question draws is part of
+    // it — so every rebuild has to put the bar back. Trusting only the engine's
+    // list loses the question the moment a snapshot comes back without it: the
+    // observed case is a thread opened twice in a row, where the second
+    // `loadHistory` reported nothing pending and silently erased a bar that was
+    // still waiting for an answer, leaving the turn "thinking" with no way to
+    // answer it. The client's own map is the copy that cannot vanish between
+    // snapshots; it is only emptied when a request is answered or cancelled.
+    for (const [inputId, state] of this.pendingUserInputs) {
+      if (state.threadId !== threadId) continue;
+      offer(inputId, state.questions, state.turnId);
+    }
+
     for (const req of detail.pending_approvals || []) {
       // A row that rendered already carries this one; posting it again would
       // only re-open a panel that is already open.
@@ -5162,6 +5187,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         for (const pending of pendingUserInputs) {
           this.pendingUserInputs.set(pending.id, {
             threadId: task.thread_id,
+            turnId: pending.turn_id,
             questions: (pending.request?.questions || []).map((question) => ({
               header: question.header,
               id: question.id,
@@ -7131,6 +7157,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       for (const req of inputs) {
         this.backgroundUserInputs.set(req.id, {
           threadId,
+          turnId: req.turn_id,
           questions: req.request.questions,
           answers: [],
           answeredQuestions: new Set(),
@@ -8973,6 +9000,32 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         break;
       }
 
+      case "user_input.answered":
+      case "user_input.canceled": {
+        // The request left the runtime — answered here, cancelled here, or
+        // answered in another client. Retiring our copy is what keeps a
+        // rebuilt transcript from redrawing a question nobody is waiting on
+        // any more: `postPendingPrompts` deliberately re-posts what this client
+        // still holds, so a copy that outlived its request would come back as a
+        // phantom bar on every rebuild.
+        const pl = event.payload as { id?: string; input_id?: string };
+        const inputId = pl.input_id || pl.id;
+        if (!inputId) break;
+        const heldView = this.pendingUserInputs.delete(inputId);
+        const heldBackground = this.backgroundUserInputs.delete(inputId);
+        const held = heldView || heldBackground;
+        // Answered here a moment ago, by the click that submitted it: the bar
+        // is already gone and saying so again would only clear another
+        // request's status line.
+        if (!held) break;
+        this.postMessage({
+          type: "userInputResolved",
+          inputId,
+          cancelled: event.event === "user_input.canceled",
+        });
+        break;
+      }
+
       case "user_input.required": {
         const pl = event.payload as {
           id?: string;
@@ -9006,6 +9059,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         const isNewInput = !this.pendingUserInputs.has(inputId);
         this.pendingUserInputs.set(inputId, {
           threadId: event.thread_id,
+          turnId: event.turn_id ?? undefined,
           questions,
           answers: [],
           answeredQuestions: new Set(),
