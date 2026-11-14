@@ -2160,14 +2160,18 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
       }
       // Pin and exclude are preferences: one engine command carries both
       // flags, so the panel sends the pair it wants rather than a delta the
-      // engine would have to infer.
+      // engine would have to infer. They carry the *preference* row's revision,
+      // not the entry's: the engine compares it against the prefs it holds, and
+      // an entry nobody has pinned yet has none (0) while the memory itself is
+      // already at 2. Sending the memory revision here is refused every time.
       actions.appendChild(skillActionButton(
         entry.pinned ? __i18n.memoryUnpin : __i18n.memoryPin,
         '\u2691', true,
         entry.pinned ? __i18n.memoryUnpin : __i18n.memoryPin,
         function() {
           vscode.postMessage({
-            type: 'memoryLensAction', action: 'preferences', id: entry.id, revision: entry.revision,
+            type: 'memoryLensAction', action: 'preferences', id: entry.id,
+            revision: entry.preferencesRevision,
             pinned: !entry.pinned, suppressed: !!entry.suppressed
           });
         }
@@ -2178,7 +2182,8 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
         entry.suppressed ? __i18n.memoryUnsuppress : __i18n.memorySuppress,
         function() {
           vscode.postMessage({
-            type: 'memoryLensAction', action: 'preferences', id: entry.id, revision: entry.revision,
+            type: 'memoryLensAction', action: 'preferences', id: entry.id,
+            revision: entry.preferencesRevision,
             pinned: !!entry.pinned, suppressed: !entry.suppressed
           });
         }

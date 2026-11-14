@@ -3259,7 +3259,10 @@ function memoryRowFixture(overrides: Record<string, unknown> = {}) {
   return {
     id: "3f2a1b9c-0000-4000-8000-000000000000",
     shortId: "3f2a1b9c",
+    // Two different counters on purpose: approve/reject/forget write against
+    // the entry's revision, pin/exclude against the preference row's.
     revision: 2,
+    preferencesRevision: 3,
     status: "active",
     title: "Prefers pnpm",
     body: "The user wants pnpm, not npm.",
@@ -3365,12 +3368,16 @@ describe("memory panel", () => {
       stopPropagation: () => undefined,
     });
 
+    // The preference row's revision (3), not the entry's (2): the engine
+    // compares it against the prefs it holds, and refuses anything else with
+    // revision_conflict — which is what an entry nobody pinned yet would do if
+    // the panel sent the memory revision.
     expect(postMessages).toEqual([
       {
         type: "memoryLensAction",
         action: "preferences",
         id: "3f2a1b9c-0000-4000-8000-000000000000",
-        revision: 2,
+        revision: 3,
         pinned: true,
         suppressed: true,
       },

@@ -111,6 +111,8 @@ describe("ChatProvider memory panel", () => {
         id: "3f2a1b9c-0000-4000-8000-000000000000",
         shortId: "3f2a1b9c",
         revision: 2,
+        // Pin and exclude write against this counter, not the entry's.
+        preferencesRevision: 1,
         status: "candidate",
         title: "Prefers pnpm",
         scope: "workspace",

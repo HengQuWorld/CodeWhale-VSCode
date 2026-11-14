@@ -56,7 +56,14 @@ export interface MemoryPanelRow {
    *  and is the only value the action route accepts. */
   id: string;
   shortId: string;
+  /** The entry's own revision. Approve, reject and forget write against this. */
   revision: number;
+  /** The *preference* row's revision, which is a different counter: pin and
+   *  exclude write against it, and the engine refuses a write whose revision
+   *  does not match the preferences it holds (`set_preferences` compares
+   *  `memory_preferences.revision`, not `memories.revision`). A never-touched
+   *  entry has no preference row, so this is 0 while the memory may be at 2. */
+  preferencesRevision: number;
   status: string;
   title: string;
   body: string;
@@ -247,6 +254,7 @@ function memoryRow(entry: MemoryLensEntry): MemoryPanelRow {
     id: entry.memory.id,
     shortId: memoryLensId(entry),
     revision: entry.memory.revision,
+    preferencesRevision: entry.preferences.revision,
     status: entry.memory.status,
     title: draft.title || firstLine,
     body,
