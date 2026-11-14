@@ -227,6 +227,12 @@ function createRuntimeHarness() {
   let railClearCalls = 0;
   /** How many times the handler dropped the pinned turn prompt. */
   let turnContextClearCalls = 0;
+  /** The transcript batches the handler opened and closed, in order. A rebuild
+   *  outside a batch pins once per row, which is what this guards. */
+  const batchCalls: string[] = [];
+  /** What the handler asked the messages module to do about the reader's own
+   *  scroll position (setUserScrolledUp). */
+  const scrolledUpCalls: boolean[] = [];
   const composerTextCalls: string[] = [];
   // The streaming flag is the webview's one record of "a turn is running":
   // the input routing reads it and the send/stop button follows it. The
@@ -350,12 +356,20 @@ function createRuntimeHarness() {
         streamingTimers.push(value);
       },
       isStreaming: () => streaming,
-      setUserScrolledUp: () => {},
+      setUserScrolledUp: (value: boolean) => {
+        scrolledUpCalls.push(!!value);
+      },
       smartScrollToBottom: () => {
         scrollCalls.push("smart");
       },
       scrollToBottom: () => {
         scrollCalls.push("forced");
+      },
+      beginTranscriptBatch: () => {
+        batchCalls.push("begin");
+      },
+      endTranscriptBatch: () => {
+        batchCalls.push("end");
       },
       renderWelcome: () => {},
       createThinkingBlock: () => new FakeElement(),
@@ -532,6 +546,8 @@ function createRuntimeHarness() {
     clearPendingCalls: () => clearPendingCalls,
     railClearCalls: () => railClearCalls,
     turnContextClearCalls: () => turnContextClearCalls,
+    batchCalls,
+    scrolledUpCalls,
     composerTextCalls,
     streamingCalls,
     streamingTimers,
@@ -1011,6 +1027,38 @@ describe("webview-js-event-handler runtime", () => {
 
     harness.dispatchMessage({ type: "loadHistory", messages: [] });
     expect(harness.turnContextClearCalls()).toBe(2);
+  });
+
+  it("draws a rebuilt conversation in one batch, then pins it once", () => {
+    // A history load is one paint, not one per row. Drawn with a pin after
+    // every append, each of those assignments forced the layout the lazy rows
+    // exist to avoid, and all of them landed on the sum of the row height
+    // estimates rather than on the rows themselves.
+    const harness = createRuntimeHarness();
+
+    harness.dispatchMessage({
+      type: "loadHistory",
+      messages: [
+        { id: "u1", role: "user", content: "hi", status: "complete" },
+        { id: "a1", role: "assistant", content: "hello", status: "complete" },
+      ],
+    });
+
+    expect(harness.batchCalls).toEqual(["begin", "end"]);
+    // The handler itself no longer scrolls per row: the batch's close does.
+    expect(harness.scrollCalls).toEqual([]);
+  });
+
+  it("forgets the previous conversation's scroll position with the transcript", () => {
+    // A reader who had scrolled up in the conversation they came from carried
+    // that flag into the next one, where every auto-follow was then refused —
+    // a thread opened from the rail sat at its own top while its turns
+    // streamed in below the fold.
+    const harness = createRuntimeHarness();
+
+    harness.dispatchMessage({ type: "loadHistory", messages: [] });
+
+    expect(harness.scrolledUpCalls).toEqual([false]);
   });
 
   it("re-arms the running turn a rebuilt conversation still holds", () => {

@@ -120,6 +120,14 @@ ${PROVIDER_PICKER_JS}
     if (window.__wvMessages && window.__wvMessages.clearTurnContext) {
       window.__wvMessages.clearTurnContext();
     }
+    // The reader's position went with the rows. Without this drop, a reader who
+    // had scrolled up in the previous conversation carried that flag into the
+    // next one: every auto-follow in it was refused, so a thread opened from
+    // the rail (or a new chat started after reading back) sat at the top while
+    // its turns streamed in below the fold.
+    if (window.__wvMessages && window.__wvMessages.setUserScrolledUp) {
+      window.__wvMessages.setUserScrolledUp(false);
+    }
     hideApprovalFloat();
   }
 
@@ -1421,15 +1429,26 @@ ${PROVIDER_PICKER_JS}
         }
         setStreamingState(false, __i18n.ready);
         clearTranscript();
-        for (var i = 0; i < msg.messages.length; i++) {
-          var m = msg.messages[i];
-          var showRole = !msg.compactMode || !!m._realContent;
-          window.__wvMessages.addMessage(m, showRole);
-        }
-        // A rebuilt plan-mode conversation keeps the approve action it had
-        // live: the backend names the message that should carry it.
-        if (msg.planApprovalFor && window.__wvMessages.renderPlanApproveButton) {
-          window.__wvMessages.renderPlanApproveButton(msg.planApprovalFor);
+        // Draw the whole conversation inside one batch, then pin once. Row by
+        // row the transcript pinned after every append, and each of those
+        // assignments forces the layout the lazy rows exist to avoid — while
+        // still landing on the sum of the per-row height estimates rather than
+        // on the end the rows really take. Closing the batch is what scrolls,
+        // and it keeps re-pinning for the frames it takes those rows to paint.
+        if (window.__wvMessages.beginTranscriptBatch) window.__wvMessages.beginTranscriptBatch();
+        try {
+          for (var i = 0; i < msg.messages.length; i++) {
+            var m = msg.messages[i];
+            var showRole = !msg.compactMode || !!m._realContent;
+            window.__wvMessages.addMessage(m, showRole);
+          }
+          // A rebuilt plan-mode conversation keeps the approve action it had
+          // live: the backend names the message that should carry it.
+          if (msg.planApprovalFor && window.__wvMessages.renderPlanApproveButton) {
+            window.__wvMessages.renderPlanApproveButton(msg.planApprovalFor);
+          }
+        } finally {
+          if (window.__wvMessages.endTranscriptBatch) window.__wvMessages.endTranscriptBatch();
         }
         // A transcript that ends on a streaming assistant bubble is a turn the
         // engine is still running: adopting one while switching back, opening
@@ -2204,8 +2223,18 @@ ${PROVIDER_PICKER_JS}
         errEl.className = 'error-banner';
         errEl.innerHTML = '<span class="msg-label error">' + __wvEscapeHtml(__i18n.error) + '</span><span>' + __wvEscapeHtml(msg.message) + '</span>';
         messagesEl.appendChild(errEl);
-        window.__wvMessages.setUserScrolledUp(false);
-        messagesEl.scrollTop = messagesEl.scrollHeight;
+        // The reason a turn stopped is not something to leave below the fold.
+        // Asked for through the module so the pin it lands on is the module's
+        // own: assigning scrollTop here fires a scroll event the listener
+        // cannot tell from the reader moving, and one that lands short of the
+        // end (the rows around it are still estimates) then reports the reader
+        // as having scrolled away.
+        if (window.__wvMessages.scrollToBottom) {
+          window.__wvMessages.scrollToBottom();
+        } else {
+          window.__wvMessages.setUserScrolledUp(false);
+          messagesEl.scrollTop = messagesEl.scrollHeight;
+        }
         break;
       }
 
