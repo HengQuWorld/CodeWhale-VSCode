@@ -297,9 +297,17 @@ describe("Unavailable command reasons", () => {
     expect(help2).toContain("/skill");
   });
 
-  it("network: network rules managed by VSCode proxy settings", () => {
+  it("network: names the engine's policy and the terminal escape hatch", () => {
+    // The host allow/deny list is the engine's own policy; VSCode's proxy
+    // settings never reach it, so the help must not send users there. The
+    // banner is escaped plain text, so no backticks or other markdown.
     const help = getCommandHelpText("/network");
     expect(help).toContain("Not available");
+    expect(help).toContain("codewhale config edit");
+    expect(help).toContain("codewhale config get network");
+    expect(help).toContain("/network allow <host>");
+    expect(help).not.toContain("Configure via VSCode Settings > Proxy");
+    expect(help).not.toContain("`");
   });
 
   it("queue: available in GUI; stash stays TUI-specific", () => {

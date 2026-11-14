@@ -1,5 +1,11 @@
 # Change Log
 
+## Unreleased
+
+### Bug Fixes
+
+- **`/network` no longer blames VSCode's proxy** — The command answered that network rules are managed by VSCode's proxy settings, which sends you to a setting that cannot affect them: the host allow/deny list is the engine's own policy, and the engine is a separate process. The answer now says so and names what does work — read the list with `codewhale config get network`, change it with `codewhale config edit` under `[network]` allow/deny, or run `/network allow <host>` in the terminal — and adds that the engine re-reads that table on the next turn, so no restart is needed.
+
 ## 0.10.1
 
 Everything in this release is client-side and works on engine **v0.10.2**, the same floor 0.10.0 names; nothing here waits on an engine build.
