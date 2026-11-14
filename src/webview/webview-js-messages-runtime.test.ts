@@ -88,7 +88,25 @@ class FakeElement {
   public disabled = false;
   public style: Record<string, string> = {};
   public dataset: Record<string, string> = {};
-  public scrollTop = 0;
+  /** Every value assigned to scrollTop, oldest first. The settle is about
+   *  *when* the view is pinned (once per rebuild, then again per painted
+   *  frame), which the final value alone cannot show. */
+  public scrollTopWrites: number[] = [];
+  private scrollTopValue = 0;
+  get scrollTop(): number {
+    return this.scrollTopValue;
+  }
+  set scrollTop(value: number) {
+    // A real element cannot scroll past its content, and the module's pin leans
+    // on exactly that: an assignment that would land past the end moves
+    // nothing and emits no scroll event. Without the clamp here, a stand-in
+    // would report a move the browser never made — and the listener's record of
+    // its own pins could never be exercised at all.
+    this.scrollTopValue = this.scrollHeight > 0
+      ? Math.min(value, Math.max(0, this.scrollHeight - this.clientHeight))
+      : value;
+    this.scrollTopWrites.push(this.scrollTopValue);
+  }
   public scrollHeight = 0;
   public clientHeight = 0;
   /** What the browser reflects the `hidden` attribute to; the pinned prompt
@@ -1777,5 +1795,123 @@ describe("user-input option selection", () => {
 
     click(multi.confirm!);
     expect(progress.textContent).toBe("2/2 answered");
+  });
+});
+
+/**
+ * Where a rebuilt conversation comes to rest.
+ *
+ * The transcript draws with `content-visibility: auto`, so the height the
+ * container reports while a rebuild is still synchronous is the sum of the
+ * per-row estimates the script seeded (`estimateMessageHeight`) rather than the
+ * height the rows will really take. A single `scrollTop = scrollHeight`
+ * therefore lands on an *estimated* end, and the rows near it grow past that
+ * estimate the first time the browser paints them — leaving the view short of
+ * the real end by however much they grew.
+ */
+describe("pinning a rebuilt transcript to its end", () => {
+  function seeded(scrollHeight: number, clientHeight = 0) {
+    const frames: Array<() => void> = [];
+    const harness = createHarness({ frames });
+    harness.messagesEl.scrollHeight = scrollHeight;
+    harness.messagesEl.clientHeight = clientHeight;
+    harness.messagesEl.scrollTopWrites.length = 0;
+    const runFrames = () => {
+      frames.splice(0).forEach((callback) => callback());
+    };
+    return { ...harness, frames, runFrames };
+  }
+
+  it("does not scroll while a batch is being drawn", () => {
+    const h = seeded(5000);
+
+    h.messages.beginTranscriptBatch();
+    h.messages.addMessage({ id: "u1", role: "user", content: "one", timestamp: 1 });
+    h.messages.addMessage({ id: "a1", role: "assistant", content: "two", timestamp: 2 });
+
+    // Each of those appends used to pin, at an estimate rather than at the row.
+    expect(h.messagesEl.scrollTopWrites).toEqual([]);
+
+    h.messages.endTranscriptBatch();
+    expect(h.messagesEl.scrollTop).toBe(5000);
+  });
+
+  it("follows the rows the browser paints after the rebuild", () => {
+    const h = seeded(1000);
+
+    h.messages.scrollToBottom();
+    expect(h.messagesEl.scrollTopWrites).toEqual([1000]);
+
+    // The rows the browser had skipped are laid out for real, and the sheet is
+    // taller than the estimate the pin landed on.
+    h.messagesEl.scrollHeight = 1400;
+    h.runFrames();
+    expect(h.messagesEl.scrollTopWrites).toEqual([1000, 1400]);
+
+    // Settled: the frame after that finds nothing left to correct.
+    h.runFrames();
+    expect(h.messagesEl.scrollTopWrites).toHaveLength(2);
+  });
+
+  it("stops correcting once the reader scrolls somewhere else", () => {
+    const h = seeded(1000);
+
+    h.messages.scrollToBottom();
+    h.messagesEl.scrollTop = 200;
+    h.messagesEl.dispatch("scroll");
+    expect(h.messages.getUserScrolledUp()).toBe(true);
+
+    h.messagesEl.scrollHeight = 1400;
+    h.runFrames();
+
+    // Still where the reader put it: a pin that keeps correcting is a
+    // transcript that cannot be read.
+    expect(h.messagesEl.scrollTop).toBe(200);
+  });
+
+  it("reads its own pin as its own, not as the reader leaving", () => {
+    const h = seeded(1000);
+
+    h.messages.scrollToBottom();
+    // By the time the pin's own scroll event arrives, the lazy rows have been
+    // painted and the container is taller than the place the pin landed. Read
+    // as a gesture, that gap switched auto-follow off for the rest of the
+    // session — which is why a live turn stopped following the stream.
+    h.messagesEl.scrollHeight = 1400;
+    h.messagesEl.dispatch("scroll");
+
+    expect(h.messages.getUserScrolledUp()).toBe(false);
+  });
+
+  it("does not eat the reader's scroll for a pin that moved nothing", () => {
+    const h = seeded(1000, 500);
+    // Already at the end: the assignment below lands where the view already
+    // is, so the browser emits no scroll event for the listener to match.
+    h.messagesEl.scrollTop = 500;
+    h.messages.scrollToBottom();
+
+    // The transcript then grows underneath that pin, and the reader drags back
+    // to the place it landed — a place that is now short of the end. A target
+    // kept from a pin that never moved the view reads this as the module's own
+    // scroll, leaves auto-follow armed, and the next delta yanks them down.
+    h.messagesEl.scrollHeight = 2000;
+    h.messagesEl.scrollTop = 500;
+    h.messagesEl.dispatch("scroll");
+
+    expect(h.messages.getUserScrolledUp()).toBe(true);
+  });
+
+  it("brings a newly loaded conversation to its end even for a reader who had scrolled up", () => {
+    const h = seeded(2000);
+    h.messages.setUserScrolledUp(true);
+
+    h.messages.beginTranscriptBatch();
+    h.messages.addMessage({ id: "u1", role: "user", content: "one", timestamp: 1 });
+    h.messages.endTranscriptBatch();
+
+    // The rows the reader had scrolled to belonged to the previous
+    // conversation; this one has no position of its own for them to keep.
+    expect(h.messagesEl.scrollTop).toBe(2000);
+    expect(h.messages.getUserScrolledUp()).toBe(false);
   });
 });

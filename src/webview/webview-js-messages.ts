@@ -22,6 +22,16 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
   var userScrolledUp = false;
   var SCROLL_BOTTOM_THRESHOLD = 80;
   var _navScrollTimer = null;
+  /** How many nested transcript batches are open (see beginTranscriptBatch). */
+  var _batchDepth = 0;
+  /** Animation frames the settle may still spend re-pinning after a rebuild. */
+  var _settleFrames = 0;
+  var _settleFrame = 0;
+  /** Where the last programmatic scroll asked to land, or -1. The scroll event
+   *  that assignment fires is the module talking to itself; this is how the
+   *  listener below tells it from the reader moving. Consumed by one event. */
+  var _pinnedScrollTop = -1;
+  var SETTLE_FRAME_LIMIT = 4;
 
   // ── Approval handoff ──
   // An approval is state, not a one-shot event: every render that draws a tool
@@ -124,21 +134,109 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
     return Math.round(Math.max(64, Math.min(4000, estimate)));
   }
 
-  function smartScrollToBottom() {
-    if (userScrolledUp) return;
+  // ── Keeping the end of the transcript in view ──
+  //
+  // "The bottom" is not one number here. Rows are laid out lazily
+  // (content-visibility: auto in webview-css), so while a rebuild is still
+  // running synchronously the height the container reports is the sum of the
+  // per-row estimates this module handed each of them. scrollTop = scrollHeight
+  // lands on that *estimated* end, and the rows near it then grow past the
+  // estimate the first time the browser paints them — leaving the view short of
+  // the real end by however much they grew, which is the whole of a screen for
+  // a transcript of long answers. A rebuild also used to pin once per row, and
+  // each assignment forces the layout the lazy rows exist to avoid.
+  //
+  // So: a rebuild draws inside a batch, and the batch ends with one pin that
+  // repeats on the frames that follow while those rows are painted.
+
+  function cancelScrollSettle() {
+    if (_settleFrame && typeof cancelAnimationFrame === 'function') {
+      cancelAnimationFrame(_settleFrame);
+    }
+    _settleFrame = 0;
+    _settleFrames = 0;
+  }
+
+  /** One assignment to the end, remembering where it asked to land. */
+  function pinToEnd() {
+    var before = messagesEl.scrollTop;
     messagesEl.scrollTop = messagesEl.scrollHeight;
+    var after = messagesEl.scrollTop;
+    // Only an assignment that moved the view emits a scroll event. One that
+    // changed nothing leaves no event to match, and a target kept from here
+    // would swallow the reader's next scroll if it happened to land on the
+    // same offset — a scroll is the one signal that must never be eaten.
+    _pinnedScrollTop = after === before ? -1 : after;
+  }
+
+  function scrollGapFromBottom() {
+    return messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight;
+  }
+
+  function isNearBottom() {
+    return scrollGapFromBottom() < SCROLL_BOTTOM_THRESHOLD;
+  }
+
+  /** Pin to the end now, then again on the following frames while the rows the
+   *  browser had skipped are painted and the transcript grows underneath the
+   *  view. Bounded, and abandoned the moment the reader scrolls themselves: a
+   *  pin that never lets go is a transcript that cannot be read. */
+  function settleScrollToBottom() {
+    cancelScrollSettle();
+    pinToEnd();
+    _settleFrames = SETTLE_FRAME_LIMIT;
+    stepScrollSettle();
+  }
+
+  function stepScrollSettle() {
+    _settleFrame = requestAnimationFrame(function() {
+      _settleFrame = 0;
+      if (_settleFrames <= 0) return;
+      _settleFrames--;
+      // The reader took over, or the layout has already reached the pin.
+      if (userScrolledUp || scrollGapFromBottom() <= 2) {
+        _settleFrames = 0;
+        // Nothing more is going to be pinned. A target left behind could
+        // swallow the reader's next scroll if it happened to land on the same
+        // offset.
+        _pinnedScrollTop = -1;
+        return;
+      }
+      pinToEnd();
+      if (_settleFrames > 0) stepScrollSettle();
+    });
+  }
+
+  function smartScrollToBottom() {
+    // Inside a batch the whole conversation is drawn first and pinned once at
+    // the end; a pin per row would measure estimates anyway.
+    if (_batchDepth > 0) return;
+    if (userScrolledUp) return;
+    pinToEnd();
   }
 
   /** Bring the end of the conversation into view even if the reader had
    *  scrolled away. Reserved for what cannot wait: a turn is blocked on it and
-   *  the control that unblocks it is at the end of the transcript. */
+   *  the control that unblocks it is at the end of the transcript, or the whole
+   *  conversation was just replaced. */
   function scrollToBottomForced() {
     userScrolledUp = false;
-    messagesEl.scrollTop = messagesEl.scrollHeight;
+    settleScrollToBottom();
   }
 
-  function isNearBottom() {
-    return messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight < SCROLL_BOTTOM_THRESHOLD;
+  /** Open a batch for a wholesale rebuild of the transcript: rows drawn inside
+   *  it do not scroll, and the close pins the rebuilt conversation to its end. */
+  function beginTranscriptBatch() {
+    _batchDepth += 1;
+    cancelScrollSettle();
+  }
+
+  function endTranscriptBatch() {
+    if (_batchDepth > 0) _batchDepth -= 1;
+    if (_batchDepth > 0) return;
+    // A conversation the reader has not seen yet has no position of its own to
+    // keep: the rows they were looking at belonged to the previous one.
+    scrollToBottomForced();
   }
 
   // Single scroll listener: maintains userScrolledUp flag, and keeps the
@@ -148,7 +246,16 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
   // (syncNavRail is a hoisted function declaration, so it is callable here
   // even though it is defined later in the IIFE.)
   messagesEl.addEventListener('scroll', function() {
-    if (isNearBottom()) {
+    // A scroll this module asked for is not the reader moving. The event can
+    // arrive after the container grew — the lazy rows were just painted — so
+    // the gap it measures is the estimate's error, not an intent, and treating
+    // it as one switched off every later auto-follow for the session.
+    var askedForIt = _pinnedScrollTop >= 0 && Math.abs(messagesEl.scrollTop - _pinnedScrollTop) <= 2;
+    _pinnedScrollTop = -1;
+    if (askedForIt) {
+      // Leave the flag as the module left it; the settle decides what becomes
+      // of the remaining gap.
+    } else if (isNearBottom()) {
       userScrolledUp = false;
     } else {
       userScrolledUp = true;
@@ -1716,6 +1823,8 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
     revealFileChangeCard: revealFileChangeCard,
     smartScrollToBottom: smartScrollToBottom,
     scrollToBottom: scrollToBottomForced,
+    beginTranscriptBatch: beginTranscriptBatch,
+    endTranscriptBatch: endTranscriptBatch,
     isStreaming: function() { return isStreaming; },
     setStreaming: function(v) { isStreaming = v; },
     getStreamingTimeout: function() { return streamingTimeout; },
