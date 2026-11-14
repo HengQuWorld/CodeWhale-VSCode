@@ -93,6 +93,13 @@ export interface WebviewTranslations {
   sessionWorked: string;
   sessionWorkedTooltip: string;
   error: string;
+  /** The ending a tool row names when the call did not fail on its own: the
+   *  reader stopped the turn, or the shell ran out of time / had to be
+   *  killed. `{code}` in `toolExitCode` is a command's exit code. */
+  toolInterrupted: string;
+  toolTimedOut: string;
+  toolKilled: string;
+  toolExitCode: string;
   approvalAwaiting: string;
   noConversations: string;
   threadAttention: string;

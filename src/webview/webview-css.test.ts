@@ -273,6 +273,21 @@ describe("webview-css.ts", () => {
     expect(css).toContain("focus-visible");
   });
 
+  it("marks a tool card that ended badly, and styles what it says happened", () => {
+    const css = getWebviewCss();
+    // A failed row has to be findable among successful ones, and the reason it
+    // carries has to read as the sentence to look at.
+    expect(css).toContain(".tool-call.is-error {");
+    expect(css).toContain(".tool-call.is-error .tool-status {");
+    expect(css).toContain(".tool-call .tool-note {");
+    expect(css).toContain(".tool-call .tool-outcome {");
+    const reason = css.match(/\.tool-call \.tool-failure-reason \{([^}]*)\}/);
+    expect(reason).not.toBeNull();
+    expect(reason![1]).toContain("var(--vscode-errorForeground");
+    // The reason is prose from the engine; it wraps rather than scrolling away.
+    expect(reason![1]).toContain("white-space: pre-wrap");
+  });
+
   it("bounds the approval panel so stacked approvals stay reachable", () => {
     const css = getWebviewCss();
     const match = css.match(/\.approval-float \{([^}]*)\}/);

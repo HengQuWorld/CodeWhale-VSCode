@@ -1618,15 +1618,33 @@ ${PROVIDER_PICKER_JS}
       case 'updateToolCall': {
         var tcEl = document.getElementById('tc-' + msg.messageId + '-' + msg.toolCallIdx);
         if (tcEl) {
-          var statusSpan = tcEl.querySelector('.tool-status');
-          if (statusSpan) {
-            var statusIcon = '';
-            var statusText = msg.status;
-            if (msg.status === 'running') { statusIcon = '\\u27F3'; statusText = 'running...'; }
-            else if (msg.status === 'complete') { statusIcon = '\\u2713'; statusText = 'completed'; }
-            else if (msg.status === 'error') { statusIcon = '\\u2717'; statusText = 'error'; }
-            else if (msg.status === 'awaiting_approval') { statusIcon = '\\u26A0'; statusText = __i18n.approvalAwaiting; }
-            statusSpan.textContent = statusIcon + ' ' + statusText;
+          // The envelope now carries which ending the call had and the numbers
+          // behind it, so the card is re-settled as a whole — the status word,
+          // the exit line, and the reason a call that never answered left
+          // behind. Re-lettering the status alone is what left an interrupted
+          // command reading as a bare "error".
+          if (window.__wvMessages.applyToolOutcome) {
+            window.__wvMessages.applyToolOutcome(tcEl, {
+              status: msg.status,
+              terminalState: msg.terminalState,
+              failureReason: msg.failureReason,
+              shellStatus: msg.shellStatus,
+              exitCode: msg.exitCode,
+              durationMs: msg.durationMs,
+            });
+          } else {
+            // The messages module draws this card, so it is always loaded; this
+            // branch exists only so a bundle missing it still settles the row.
+            var statusSpan = tcEl.querySelector('.tool-status');
+            if (statusSpan) {
+              var statusIcon = '';
+              var statusText = msg.status;
+              if (msg.status === 'running') { statusIcon = '\\u27F3'; statusText = 'running...'; }
+              else if (msg.status === 'complete') { statusIcon = '\\u2713'; statusText = 'completed'; }
+              else if (msg.status === 'error') { statusIcon = '\\u2717'; statusText = 'error'; }
+              else if (msg.status === 'awaiting_approval') { statusIcon = '\\u26A0'; statusText = __i18n.approvalAwaiting; }
+              statusSpan.textContent = statusIcon + ' ' + statusText;
+            }
           }
           if (typeof msg.taskCommand === 'string' && msg.taskCommand) {
             // A background-task poll learns its command only from its result,
@@ -1680,8 +1698,14 @@ ${PROVIDER_PICKER_JS}
         var callTcEl = document.getElementById('tc-' + msg.messageId + '-' + msg.toolCallIdx);
         var callChanges = msg.fileChanges;
         if (callTcEl && Array.isArray(callChanges)) {
-          var callOutput = callTcEl.querySelector('.tool-output');
-          if (callOutput) callOutput.remove();
+          // Only a call that actually changed something loses its raw output:
+          // the cards stand in for it. An empty answer means "no changes", and
+          // deleting the output for it removed the only record of what the
+          // command printed.
+          if (callChanges.length > 0) {
+            var callOutput = callTcEl.querySelector('.tool-output');
+            if (callOutput) callOutput.remove();
+          }
           var prior = callTcEl.querySelectorAll('.file-change-card.is-from-call');
           for (var pi = 0; pi < prior.length; pi++) prior[pi].remove();
           var callApprovalBar = callTcEl.querySelector('.approval-bar');

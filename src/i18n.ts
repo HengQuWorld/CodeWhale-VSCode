@@ -58,6 +58,16 @@ interface Translations {
    *  failure itself is still the user's business, so it is said rather than
    *  letting the conversation stop without a word. */
   turnFailed: string;
+  /** A tool row whose call was cut off before it answered. It did not fail —
+   *  the user stopped the turn, or a newer turn superseded it — and a row that
+   *  says "error" for both teaches the reader to distrust the red dot. */
+  toolInterrupted: string;
+  /** The shell's own terminal statuses on a call that produced no result. */
+  toolTimedOut: string;
+  toolKilled: string;
+  /** A command's exit code, drawn beside a failed call: `{code}` is the
+   *  engine's number. Only shown when the engine recorded one. */
+  toolExitCode: string;
   approvalAwaiting: string;
   /** Checkbox label on an approval: allowing with it records a *session grant*
    *  scoped to the tool and its argument class for this conversation, and it
@@ -726,6 +736,7 @@ const en: Translations = {
   sessionWorked: "worked {duration}",
   sessionWorkedTooltip: "Model work so far: finished turns plus the running one",
   error: "Error", approvalAwaiting: "⏳ Awaiting approval...", approvalRemember: "Always allow calls like this in this conversation",
+  toolInterrupted: "interrupted", toolTimedOut: "timed out", toolKilled: "killed", toolExitCode: "exit {code}",
   turnFailed: "The turn failed without a reported reason.",
   userInputRequired: "Input required",
   userInputAwaiting: "⏳ Awaiting your input...",
@@ -1243,6 +1254,7 @@ const zhCn: Translations = {
   sessionWorked: "已工作 {duration}",
   sessionWorkedTooltip: "本会话的模型工作时长：已完成轮次加上当前轮次",
   error: "错误", approvalAwaiting: "⏳ 等待审批...", approvalRemember: "在本对话中始终允许此类调用",
+  toolInterrupted: "已中断", toolTimedOut: "已超时", toolKilled: "已终止", toolExitCode: "退出码 {code}",
   turnFailed: "本轮执行失败，引擎未给出原因。",
   userInputRequired: "需要输入",
   userInputAwaiting: "⏳ 等待您的输入...",
@@ -1801,6 +1813,10 @@ export function webviewTranslations(tr: Translations) {
     sessionWorked: tr.sessionWorked,
     sessionWorkedTooltip: tr.sessionWorkedTooltip,
     error: tr.error,
+    toolInterrupted: tr.toolInterrupted,
+    toolTimedOut: tr.toolTimedOut,
+    toolKilled: tr.toolKilled,
+    toolExitCode: tr.toolExitCode,
     approvalAwaiting: tr.approvalAwaiting,
     approvalRemember: tr.approvalRemember,
     userInputRequired: tr.userInputRequired,

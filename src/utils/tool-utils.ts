@@ -134,6 +134,71 @@ export function toolCallIdFromMetadata(
   return undefined;
 }
 
+/** How a call that did not succeed ended, in the engine's own terms. */
+export type ToolTerminalState = "failed" | "interrupted" | "canceled";
+
+/** The terminal state of an item, when it is one the row should name.
+ *
+ *  A live `item.failed` envelope says only that the item ended; the *reason*
+ *  is the item's own status. Reading it matters because an interrupted call is
+ *  not a broken one, and a card that calls every ending "error" teaches the
+ *  user to distrust the red dot. */
+export function toolTerminalState(
+  status: string | null | undefined,
+): ToolTerminalState | undefined {
+  if (status === "interrupted") return "interrupted";
+  if (status === "canceled") return "canceled";
+  if (status === "failed") return "failed";
+  return undefined;
+}
+
+/** Process facts the engine records on a call's item metadata. */
+export interface ToolOutcomeFacts {
+  /** `Completed` / `TimedOut` / `Killed` / … from the shell tool. */
+  shellStatus?: string;
+  exitCode?: number | null;
+  durationMs?: number;
+}
+
+/** Read the outcome facts a card can show beside a failed call.
+ *
+ *  Only the engine's numbers are passed through: an exit code, how long the
+ *  command ran, and the shell's own terminal status. The client never invents
+ *  one — a missing `exit_code` stays missing rather than reading as success. */
+export function toolOutcomeFacts(
+  metadata: Record<string, unknown> | null | undefined,
+): ToolOutcomeFacts {
+  const facts: ToolOutcomeFacts = {};
+  if (!metadata) return facts;
+  if (typeof metadata.status === "string" && metadata.status) {
+    facts.shellStatus = metadata.status;
+  }
+  if (typeof metadata.exit_code === "number") {
+    facts.exitCode = metadata.exit_code;
+  }
+  const duration = metadata.duration_ms;
+  if (typeof duration === "number" && Number.isFinite(duration) && duration >= 0) {
+    facts.durationMs = duration;
+  }
+  return facts;
+}
+
+/** Whether an item's `detail` is the call's arguments rather than its result.
+ *
+ *  A call that ended before answering keeps the arguments it started with in
+ *  `detail` (the engine settles the item where it lay and summarizes what is
+ *  there). Drawn as output, the card would print the command twice and call
+ *  the arguments an error.
+ */
+export function toolDetailIsArguments(
+  detail: string | null | undefined,
+  metadata: Record<string, unknown> | null | undefined,
+): boolean {
+  if (!detail || !metadata) return false;
+  const args = metadata.tool_input;
+  return typeof args === "string" && args !== "" && args === detail;
+}
+
 /**
  * Detects a file change for a completed tool call.
  *

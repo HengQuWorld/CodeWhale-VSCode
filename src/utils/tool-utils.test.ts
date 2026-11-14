@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { detectFileChange, friendlyToolName } from "./tool-utils";
+import {
+  detectFileChange,
+  friendlyToolName,
+  toolDetailIsArguments,
+  toolOutcomeFacts,
+  toolTerminalState,
+} from "./tool-utils";
 import {
   extractDiffForTool,
   extractMutationFromMetadata,
@@ -326,5 +332,53 @@ describe("friendlyToolName", () => {
 
   it("spaces and title-cases anything else", () => {
     expect(friendlyToolName("some_unknown_tool")).toBe("Some Unknown Tool");
+  });
+});
+
+describe("toolTerminalState", () => {
+  it("names the ending the engine recorded", () => {
+    expect(toolTerminalState("interrupted")).toBe("interrupted");
+    expect(toolTerminalState("canceled")).toBe("canceled");
+    expect(toolTerminalState("failed")).toBe("failed");
+  });
+
+  it("leaves anything else to the caller's default", () => {
+    // A completed (or absent) status is not an ending the row should name: an
+    // invented "failed" here would relabel a call that simply succeeded.
+    expect(toolTerminalState("completed")).toBeUndefined();
+    expect(toolTerminalState(undefined)).toBeUndefined();
+  });
+});
+
+describe("toolOutcomeFacts", () => {
+  it("passes through the engine's own numbers", () => {
+    expect(
+      toolOutcomeFacts({ status: "TimedOut", exit_code: 124, duration_ms: 1500 }),
+    ).toEqual({ shellStatus: "TimedOut", exitCode: 124, durationMs: 1500 });
+  });
+
+  it("invents nothing for a call the engine recorded no process facts for", () => {
+    // A validation refusal or a blocked command has no exit code at all, and a
+    // card that printed "exit 0" would claim the command ran and succeeded.
+    expect(toolOutcomeFacts({ is_error: true })).toEqual({});
+    expect(toolOutcomeFacts(null)).toEqual({});
+  });
+
+  it("drops a duration that is not a number", () => {
+    expect(toolOutcomeFacts({ duration_ms: "fast" as unknown as number })).toEqual({});
+  });
+});
+
+describe("toolDetailIsArguments", () => {
+  const args = JSON.stringify({ command: "make test" });
+
+  it("recognises the arguments a settled item kept in detail", () => {
+    expect(toolDetailIsArguments(args, { tool_input: args })).toBe(true);
+  });
+
+  it("keeps a real result, even one that happens to be the arguments", () => {
+    expect(toolDetailIsArguments(args, { actual_output: args })).toBe(false);
+    expect(toolDetailIsArguments(args, null)).toBe(false);
+    expect(toolDetailIsArguments("", { tool_input: args })).toBe(false);
   });
 });

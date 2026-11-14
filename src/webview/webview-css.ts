@@ -1373,6 +1373,36 @@ export function getWebviewCss(): string {
     .tool-call .tool-status {
       margin-left: 4px;
     }
+    /* A call that ended badly is tinted, not merely re-lettered. The rows above
+       and below it are successful calls, and the reader has to find the one
+       that isn't before reading why. */
+    .tool-call.is-error {
+      border-color: var(--vscode-errorForeground, #f44336);
+      background: rgba(244, 67, 54, 0.06);
+    }
+    .tool-call.is-error .tool-status {
+      color: var(--vscode-errorForeground, #f44336);
+    }
+    /* What the engine says happened, under the header and above the command:
+       the exit line in the monospace face (it is machine output) and the reason
+       in the error colour (it is the sentence to read). */
+    .tool-call .tool-note {
+      margin-top: 4px;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .tool-call .tool-outcome {
+      color: var(--muted);
+      font-size: 0.9em;
+      font-family: var(--vscode-editor-font-family, monospace);
+    }
+    .tool-call .tool-failure-reason {
+      color: var(--vscode-errorForeground, #f44336);
+      font-size: 0.9em;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
     .tool-call .tool-output {
       position: relative;
       margin-top: 4px;

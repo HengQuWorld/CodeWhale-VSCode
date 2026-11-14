@@ -116,6 +116,9 @@ import {
   extractToolNameFromSummary,
   buildApprovalSummary,
   toolCallIdFromMetadata,
+  toolDetailIsArguments,
+  toolOutcomeFacts,
+  toolTerminalState,
   detectFileChange,
 } from "./utils/tool-utils";
 
@@ -563,6 +566,16 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
    *  there, and would otherwise ring again on every re-delivery. Retiring the
    *  approval forgets it, which is what makes the next request audible. */
   private announcedApprovals = new Set<string>();
+  /** Tool cards whose call the engine settled without an answer, each with the
+   *  turn that settled it.
+   *
+   *  Those items carry no reason of their own, so the turn's terminal `error`
+   *  is backfilled onto them — but only onto cards settled by *that* turn. A
+   *  card from an earlier turn failed for its own reason, and a turn that
+   *  never completes (the user switched threads mid-run) leaves its entries
+   *  behind; the turn id is what keeps either from inheriting another turn's
+   *  sentence. Drained at `turn.completed`. */
+  private endedToolCards = new Map<ToolCallInfo, string>();
   private get activeItems() { return this.sessionState.data.activeItems; }
   private get currentTextBlockIdx(): number { return this.sessionState.data.currentTextBlockIdx; }
   private set currentTextBlockIdx(v: number) { this.sessionState.data.currentTextBlockIdx = v; }
@@ -1470,11 +1483,19 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
           output: string,
           isError: boolean,
           metadata?: Record<string, unknown>,
+          itemStatus?: string,
         ): void => {
           const tc = toolCallById.get(toolUseId);
           if (!tc) return;
-          tc.output = output;
+          // A call the engine settled before it answered puts its own arguments
+          // in `detail`; that is not a result to print.
+          const detailIsArguments = toolDetailIsArguments(output, metadata);
+          tc.output = output && !detailIsArguments ? output : undefined;
           tc.status = isError ? "error" : "complete";
+          // The result item's own status is the finer fact: a call interrupted
+          // or canceled onto this result must not read as a tool failure.
+          tc.terminalState = isError ? (toolTerminalState(itemStatus) ?? "failed") : undefined;
+          Object.assign(tc, toolOutcomeFacts(metadata));
           if (isError) {
             // A failed file tool never produced a mutation item live; keep the
             // replay aligned by dropping the provisional card we built from the
@@ -1676,6 +1697,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
                   item.detail || item.summary || "",
                   !!metadata.is_error,
                   metadata,
+                  item.status,
                 );
                 break;
               }
@@ -1732,9 +1754,25 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
                 input: toolInput,
                 output: toolOutput,
                 status: item.status === "completed" ? "complete" : "error",
+                // A rebuilt transcript used to fold every non-completed item
+                // into "error", so an interrupted call read as a tool that
+                // broke. The item's own status says which ending it was, and
+                // the terminal result carries the engine's numbers.
+                terminalState: item.status === "completed"
+                  ? undefined
+                  : (toolTerminalState(item.status) ?? "failed"),
+                ...toolOutcomeFacts(metadata),
                 itemId: typeof metadata.tool_use_id === "string" ? metadata.tool_use_id : item.id,
                 callId: toolCallIdFromMetadata(metadata),
               };
+              // A call the engine settled before it answered keeps its own
+              // arguments in `detail`. Drawn as output that would print the
+              // command a second time and blame it for the failure, so the
+              // arguments stay arguments and the card says what the runtime
+              // recorded instead.
+              if (toolOutput && toolDetailIsArguments(toolOutput, metadata)) {
+                tc.output = undefined;
+              }
               // A poll of a background task carries only its id: the command is
               // paired here from the call that started the task, or read off
               // the poll's own recorded result, so a reloaded card says what
@@ -1778,6 +1816,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
                   item.detail || item.summary || "",
                   !!metadata.is_error,
                   metadata,
+                  item.status,
                 );
               }
               toolCalls.push(tc);
@@ -5499,6 +5538,42 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     if (command) tc.taskCommand = command;
   }
 
+  /** Settle a card whose call ended without a result of its own.
+   *
+   *  Three things the live view used to drop, all of them on the record: the
+   *  item's own status (a call cut off by Stop or a newer turn is not a broken
+   *  tool), the engine's numbers for a command (`exit_code`, `duration_ms`, and
+   *  the shell's `TimedOut`/`Killed`), and — for a call the engine settled
+   *  before it answered — the reason, which the item does not carry at all.
+   *
+   *  A call that did answer is untouched: its own error text is the answer,
+   *  and it is already on the card. */
+  private settleEndedToolCall(
+    tc: ToolCallInfo,
+    item: {
+      detail?: string;
+      summary?: string;
+      status?: string;
+      metadata?: Record<string, unknown>;
+    } | undefined,
+    fallbackReason?: string,
+  ): void {
+    const metadata = item?.metadata;
+    const terminalState = toolTerminalState(item?.status) ?? "failed";
+    tc.status = "error";
+    tc.terminalState = terminalState;
+    Object.assign(tc, toolOutcomeFacts(metadata));
+
+    const detail = item?.detail || item?.summary || "";
+    // `detail` holds the arguments for a call interrupted before it answered;
+    // printing them as output would show the command twice and call it the
+    // error.
+    const hasResult = detail !== "" && !toolDetailIsArguments(detail, metadata);
+    tc.output = hasResult ? detail : undefined;
+    const reason = (fallbackReason || "").trim();
+    tc.failureReason = hasResult ? undefined : reason || undefined;
+  }
+
   /** Record what a call's `post-tool` receipt says changed in its span, then
    *  read the full records for it. */
   private noteCallSnapshot(
@@ -5541,6 +5616,22 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
   private changeTurnIndexOf(turnId: string | null | undefined): number | undefined {
     if (!turnId) return undefined;
     return this.changeTurns.find((turn) => turn.turnId === turnId)?.index;
+  }
+
+  /** The row holding this very card object.
+   *
+   *  A live card may carry no call id (an older engine's `item.started` had
+   *  none), so identity is the only handle the turn-end backfill can use. */
+  private findToolCallRowFor(
+    tc: ToolCallInfo,
+  ): { msg: ChatMessage; idx: number } | undefined {
+    for (const msg of this.messages) {
+      const calls = msg.toolCalls;
+      if (!calls) continue;
+      const idx = calls.indexOf(tc);
+      if (idx >= 0) return { msg, idx };
+    }
+    return undefined;
   }
 
   /** The tool call card a call id names, anywhere in the transcript. The
@@ -8737,28 +8828,47 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         // the turn into multiple assistant segments, and a tool started in
         // an earlier segment can still be running when the turn ends.
         const lastMsg = this.messages[this.messages.length - 1];
+        // Every ending but a clean one leaves the calls with no result of
+        // their own. `canceled` is included: the engine settles a canceled
+        // turn's calls too, and they must not read as a tool that broke.
+        const endedBadly =
+          turnStatus === "failed" || turnStatus === "interrupted" || turnStatus === "canceled";
+        const turnReason = (pl.turn?.error || "").trim();
         for (const msg of this.messages) {
           if (!msg.toolCalls) continue;
           for (let i = 0; i < msg.toolCalls.length; i++) {
             const tc = msg.toolCalls[i];
             if (tc.status === "running" || tc.status === "awaiting_approval") {
-              tc.status = isTerminalError ? "error" : "complete";
               tc.approvalId = undefined;
-              if (isTerminalError && !tc.output) {
-                tc.output = turnStatus === "interrupted"
-                  ? "Interrupted"
-                  : (pl.turn?.error || "Turn failed");
+              if (endedBadly) {
+                // No answer ever arrived. The reason is the turn's, and the
+                // ending is the turn's status — not a generic "error" with
+                // the word "Interrupted" printed as the tool's output.
+                this.settleEndedToolCall(tc, { status: turnStatus }, turnReason);
+              } else {
+                tc.status = "complete";
               }
-              this.postMessage({
-                type: "updateToolCall",
-                messageId: msg.id,
-                toolCallIdx: i,
-                toolName: tc.name,
-                status: tc.status,
-                output: tc.output,
-              });
+              this.postToolCallUpdate(msg.id, i, tc);
             }
           }
+        }
+        // A call the engine settled before it answered keeps its own arguments
+        // and no reason; the turn that ended it has one. The live
+        // `item.failed` envelope often carries none, so this is where those
+        // cards finally learn why they stopped — and only those: a card from
+        // an earlier turn keeps whatever reason its own turn gave it.
+        if (endedBadly && turnReason) {
+          const settledHere: ToolCallInfo[] = [];
+          for (const [tc, settledTurn] of this.endedToolCards) {
+            if (settledTurn !== (event.turn_id ?? "")) continue;
+            settledHere.push(tc);
+            if (tc.output || tc.failureReason) continue;
+            tc.terminalState = tc.terminalState ?? (toolTerminalState(turnStatus) ?? "failed");
+            tc.failureReason = turnReason;
+            const row = this.findToolCallRowFor(tc);
+            if (row) this.postToolCallUpdate(row.msg.id, row.idx, tc);
+          }
+          for (const tc of settledHere) this.endedToolCards.delete(tc);
         }
         // Clear pending approvals and active items for this turn.
         this.pendingApprovals.clear();
@@ -9544,6 +9654,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
             status?: string;
             metadata?: Record<string, unknown>;
           };
+          error?: string;
         };
         const kind = pl.item?.kind;
         const active = this.activeItems.get(itemId);
@@ -9555,16 +9666,11 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
           const tc = tcIdx !== undefined ? msg.toolCalls?.[tcIdx] : undefined;
 
           if (tc) {
-            tc.status = "error";
-            tc.output = pl.item?.detail || pl.item?.summary;
-            this.postMessage({
-              type: "updateToolCall",
-              messageId: msg.id,
-              toolCallIdx: tcIdx!,
-              toolName: tc.name,
-              status: "error",
-              output: tc.output,
-            });
+            // The envelope's own `error` is the monitor's sentence for a turn
+            // it had to end; the item's status says which ending this was.
+            this.settleEndedToolCall(tc, pl.item, pl.error);
+            this.endedToolCards.set(tc, event.turn_id ?? "");
+            this.postToolCallUpdate(msg.id, tcIdx!, tc);
           }
         }
         break;
@@ -9582,7 +9688,9 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
             summary?: string;
             detail?: string;
             status?: string;
+            metadata?: Record<string, unknown>;
           };
+          error?: string;
         };
         const kind = pl.item?.kind;
         const active = this.activeItems.get(itemId);
@@ -9594,22 +9702,39 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
           const tc = tcIdx !== undefined ? msg.toolCalls?.[tcIdx] : undefined;
 
           if (tc) {
-            tc.status = "error";
+            // An interrupted call did not fail: it was stopped. The item's own
+            // status says so, and an item that never answered keeps its
+            // arguments in `detail` — which `settleEndedToolCall` refuses to
+            // print as an error.
             tc.approvalId = undefined;
-            tc.output = pl.item?.detail || pl.item?.summary || "Interrupted";
-            this.postMessage({
-              type: "updateToolCall",
-              messageId: msg.id,
-              toolCallIdx: tcIdx!,
-              toolName: tc.name,
-              status: "error",
-              output: tc.output,
-            });
+            this.settleEndedToolCall(tc, pl.item, pl.error);
+            this.endedToolCards.set(tc, event.turn_id ?? "");
+            this.postToolCallUpdate(msg.id, tcIdx!, tc);
           }
         }
         break;
       }
     }
+  }
+
+  /** Send one card's settled state to the webview, including the parts the
+   *  old `updateToolCall` envelope could not carry: which ending it was, the
+   *  engine's exit code / duration / shell status, and the reason a call that
+   *  never answered left behind. */
+  private postToolCallUpdate(messageId: string, toolCallIdx: number, tc: ToolCallInfo): void {
+    this.postMessage({
+      type: "updateToolCall",
+      messageId,
+      toolCallIdx,
+      toolName: tc.name,
+      status: tc.status,
+      output: tc.output,
+      ...(tc.terminalState ? { terminalState: tc.terminalState } : {}),
+      ...(tc.failureReason ? { failureReason: tc.failureReason } : {}),
+      ...(tc.shellStatus ? { shellStatus: tc.shellStatus } : {}),
+      ...(tc.exitCode !== undefined ? { exitCode: tc.exitCode } : {}),
+      ...(tc.durationMs !== undefined ? { durationMs: tc.durationMs } : {}),
+    });
   }
 
   // ── Command handlers (called from extension.ts) ──

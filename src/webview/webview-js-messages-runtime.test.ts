@@ -180,6 +180,26 @@ class FakeElement {
     return this.children[0] ?? null;
   }
 
+  /** A settled card inserts its note beside the header, so the stand-in needs
+   *  the same pair of positional reads a real node offers there. A stand-in
+   *  without them would append and a test of where the note lands would pass
+   *  without ever looking. */
+  get nextSibling(): FakeElement | null {
+    const parent = this.parentElement;
+    if (!parent) return null;
+    const index = parent.children.indexOf(this);
+    return index >= 0 ? parent.children[index + 1] ?? null : null;
+  }
+
+  insertBefore(child: FakeElement, before: FakeElement | null): FakeElement {
+    this.detach(child);
+    child.parentElement = this;
+    const index = before ? this.children.indexOf(before) : -1;
+    if (index >= 0) this.children.splice(index, 0, child);
+    else this.children.push(child);
+    return child;
+  }
+
   removeChild(child: FakeElement): FakeElement {
     this.detach(child);
     return child;
@@ -1544,6 +1564,179 @@ describe("pinned turn prompt", () => {
     h.scroll();
 
     expect(h.bar.hidden).toBe(true);
+  });
+});
+
+/**
+ * A card whose call did not succeed says how it ended, and why. The row used
+ * to print one word — "error" — for a tool that broke, a call the reader
+ * stopped, and a shell that ran out of time, and said nothing at all when the
+ * call never answered.
+ */
+describe("tool card outcome", () => {
+  it("names an interruption as one, not as a tool failure", () => {
+    const { messages } = createHarness();
+    const html = messages.renderToolCall("msg-1", {
+      name: "Bash",
+      displayName: "Bash",
+      input: { command: "make test", description: "Full regression", timeout: 1500 },
+      status: "error",
+      terminalState: "interrupted",
+    }, 0);
+
+    // The header's own word, not merely the word somewhere in the markup.
+    expect(html).toContain("\u2717 interrupted");
+    expect(html).toContain('class="tool-call is-error"');
+    // The call never answered, so there is nothing to draw as its output.
+    expect(html).not.toContain('class="tool-output"');
+  });
+
+  it("shows the exit code and duration the engine recorded", () => {
+    const { messages } = createHarness();
+    const html = messages.renderToolCall("msg-1", {
+      name: "exec_shell",
+      input: { command: "npm test" },
+      status: "error",
+      terminalState: "failed",
+      exitCode: 2,
+      durationMs: 12_000,
+    }, 0);
+
+    expect(html).toContain('class="tool-note"');
+    expect(html).toContain("exit 2");
+    expect(html).toContain("12s");
+  });
+
+  it("says a timed-out command timed out", () => {
+    const { messages } = createHarness();
+    const html = messages.renderToolCall("msg-1", {
+      name: "exec_shell",
+      input: { command: "sleep 999" },
+      status: "error",
+      shellStatus: "TimedOut",
+      durationMs: 120_000,
+    }, 0);
+    expect(html).toContain("timed out");
+    expect(html).toContain("2m00s");
+  });
+
+  it("draws the reason a call that never answered left behind", () => {
+    const { messages } = createHarness();
+    const html = messages.renderToolCall("msg-1", {
+      name: "Bash",
+      input: { command: "make" },
+      status: "error",
+      terminalState: "failed",
+      failureReason: "engine process exited while the call was running",
+    }, 0);
+    expect(html).toContain('class="tool-failure-reason"');
+    expect(html).toContain("engine process exited while the call was running");
+  });
+
+  it("invents no exit chip for a failed call the engine recorded none for", () => {
+    const { messages } = createHarness();
+    const html = messages.renderToolCall("msg-1", {
+      name: "Bash",
+      input: { command: "rm -rf /" },
+      status: "error",
+      terminalState: "failed",
+    }, 0);
+    expect(html).not.toContain("exit 0");
+    expect(html).not.toContain('class="tool-outcome"');
+  });
+
+  it("leaves a successful call with no note at all", () => {
+    const { messages } = createHarness();
+    const html = messages.renderToolCall("msg-1", {
+      name: "read_file",
+      input: { path: "src/a.ts" },
+      status: "complete",
+      output: "hello",
+    }, 0);
+    expect(html).not.toContain('class="tool-note"');
+    expect(html).not.toContain("is-error");
+  });
+});
+
+/**
+ * A live card is drawn while its call runs and re-settled when it ends. The
+ * re-settle has to rewrite the header word and grow the note in place — the
+ * row a reader is already looking at cannot be replaced, and an update that
+ * only re-lettered the status is what left a stopped call saying "error".
+ */
+describe("applyToolOutcome", () => {
+  function cardWithStatus() {
+    const { messages, messagesEl } = createHarness();
+    const card = new FakeElement();
+    card.className = "tool-call";
+    const name = new FakeElement();
+    name.className = "tool-name";
+    const status = new FakeElement();
+    status.className = "tool-status status-muted";
+    const command = new FakeElement();
+    command.className = "tool-input-command";
+    card.appendChild(name);
+    card.appendChild(status);
+    card.appendChild(command);
+    messagesEl.appendChild(card);
+    return { messages, card, status, command };
+  }
+
+  it("names the ending, tints the card, and puts the note above the command", () => {
+    const { messages, card, status, command } = cardWithStatus();
+
+    messages.applyToolOutcome(card, {
+      status: "error",
+      terminalState: "interrupted",
+      failureReason: "interrupted by the user",
+    });
+
+    expect(status.textContent).toBe("\u2717 interrupted");
+    expect(card.classList.contains("is-error")).toBe(true);
+    // Directly under the header, above the command the note does not describe.
+    const note = card.children[2];
+    expect(note.className).toBe("tool-note");
+    expect(note.innerHTML).toContain("interrupted by the user");
+    expect(card.children[3]).toBe(command);
+  });
+
+  it("rewrites one note as the facts change instead of stacking another", () => {
+    const { messages, card } = cardWithStatus();
+
+    messages.applyToolOutcome(card, {
+      status: "error",
+      terminalState: "failed",
+      failureReason: "first reason",
+    });
+    messages.applyToolOutcome(card, {
+      status: "error",
+      terminalState: "failed",
+      failureReason: "second reason",
+      exitCode: 2,
+      durationMs: 12_000,
+    });
+
+    const notes = card.children.filter((child) => child.className === "tool-note");
+    expect(notes).toHaveLength(1);
+    expect(notes[0].innerHTML).toContain("second reason");
+    expect(notes[0].innerHTML).not.toContain("first reason");
+    expect(notes[0].innerHTML).toContain("exit 2");
+    expect(notes[0].innerHTML).toContain("12s");
+  });
+
+  it("clears the note when a later update has nothing to say", () => {
+    const { messages, card } = cardWithStatus();
+
+    messages.applyToolOutcome(card, {
+      status: "error",
+      terminalState: "failed",
+      failureReason: "transient",
+    });
+    expect(card.children.some((child) => child.className === "tool-note")).toBe(true);
+
+    messages.applyToolOutcome(card, { status: "running" });
+    expect(card.children.some((child) => child.className === "tool-note")).toBe(false);
+    expect(card.classList.contains("is-error")).toBe(false);
   });
 });
 

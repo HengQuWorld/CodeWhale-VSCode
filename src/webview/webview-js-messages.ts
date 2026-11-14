@@ -641,6 +641,129 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
   }
 
   // ── Render Tool Call ──
+
+  /** What a call that ended badly is called.
+   *
+   *  "error" alone is the one thing the old row ever said, and it conflated
+   *  three different endings: the tool failed, the reader stopped the turn,
+   *  or the shell ran out of time. The engine says which (the item's
+   *  terminalState and the shell's own shellStatus), so the row repeats it
+   *  instead of flattening all three into the same red word. */
+  function toolEndLabel(tc) {
+    if (tc.shellStatus === 'TimedOut') return __i18n.toolTimedOut;
+    if (tc.shellStatus === 'Killed' || tc.shellStatus === 'Canceled') {
+      // "Killed" is a process that had to be killed (a timeout, a stop);
+      // "Canceled" is a call the engine withdrew. Both are endings the reader
+      // caused or the engine imposed, never a broken tool.
+      return tc.shellStatus === 'Killed' ? __i18n.toolKilled : __i18n.agentStatusCancelled;
+    }
+    if (tc.terminalState === 'interrupted') return __i18n.toolInterrupted;
+    if (tc.terminalState === 'canceled') return __i18n.agentStatusCancelled;
+    return __i18n.agentStatusFailed;
+  }
+
+  /** The icon + word in a card's header for its current status. */
+  function toolStatusParts(tc) {
+    if (tc.status === 'running') return { icon: '\\u27F3', text: 'running...' };
+    if (tc.status === 'complete') return { icon: '\\u2713', text: 'completed' };
+    if (tc.status === 'error') return { icon: '\\u2717', text: toolEndLabel(tc) };
+    if (tc.status === 'awaiting_approval') return { icon: '\\u26A0', text: __i18n.approvalAwaiting };
+    if (tc.status === 'pending') return { icon: '\\u25EF', text: 'pending' };
+    return { icon: '', text: tc.status || '' };
+  }
+
+  /** The outcome line under a finished call's header: how it exited and how
+   *  long it ran.
+   *
+   *  Only what the engine recorded is drawn. A failed command with no recorded
+   *  exit code (a validation refusal, a blocked call) gets no "exit" chip
+   *  rather than an invented zero, and a call with no duration gets no clock. */
+  function toolOutcomeParts(tc) {
+    var parts = [];
+    // Only a failed call gets the note. A successful command's row already
+    // reads as done, and a duration under every other card would be noise on
+    // the rows nobody is asking about.
+    if (tc.status === 'error') {
+      if (tc.shellStatus === 'TimedOut') parts.push(__i18n.toolTimedOut);
+      else if (tc.shellStatus === 'Killed') parts.push(__i18n.toolKilled);
+      var exitsBadly = typeof tc.exitCode === 'number' && tc.exitCode !== 0;
+      if (exitsBadly) {
+        parts.push(__i18n.toolExitCode.replace('{code}', String(tc.exitCode)));
+      }
+      if (typeof tc.durationMs === 'number' && tc.durationMs >= 0 && window.__wvFormatElapsed) {
+        var elapsed = window.__wvFormatElapsed(tc.durationMs);
+        if (elapsed) parts.push(elapsed);
+      }
+    }
+    return parts;
+  }
+
+  /** The engine's reason under a call that ended without an answer.
+   *
+   *  An interrupted tool writes no error of its own, and a turn that died
+   *  mid-call leaves the sentence on the turn. Without this the card stops at
+   *  a red dot, which is exactly what made a failed turn look like a hang. */
+  function toolFailureReason(tc) {
+    return typeof tc.failureReason === 'string' ? tc.failureReason.trim() : '';
+  }
+
+  /** Everything the card knows about how the call ended, under its header.
+   *
+   *  One block rather than two siblings, because a live card grows this after
+   *  it was first drawn: a single host keeps the exit line and the reason in
+   *  their fixed order however many times the update arrives. */
+  function renderToolNote(tc) {
+    var inner = renderToolNoteInner(tc);
+    return inner ? '<div class="tool-note">' + inner + '</div>' : '';
+  }
+
+  /** The note's own rows, without the block around them. Split out because a
+   *  live card rewrites the block's contents from here. */
+  function renderToolNoteInner(tc) {
+    var parts = toolOutcomeParts(tc);
+    var reason = toolFailureReason(tc);
+    var html = '';
+    if (parts.length > 0) {
+      html += '<div class="tool-outcome">' + __wvEscapeHtml(parts.join(' \\u00B7 ')) + '</div>';
+    }
+    if (reason) {
+      html += '<div class="tool-failure-reason">' + __wvEscapeHtml(reason) + '</div>';
+    }
+    return html;
+  }
+
+  /** Re-settle a live card in place once its call ends.
+   *
+   *  The row used to be re-lettered only: status, then whatever output the
+   *  envelope carried. A call that ended without an answer therefore kept a
+   *  bare "error" and nothing else. The update says which ending it was and
+   *  why, so the header and the note are both rewritten here. */
+  function applyToolOutcome(tcEl, info) {
+    if (!tcEl) return;
+    var parts = toolStatusParts(info);
+    var statusSpan = tcEl.querySelector('.tool-status');
+    if (statusSpan) statusSpan.textContent = parts.icon + ' ' + parts.text;
+    if (info.status === 'error') tcEl.classList.add('is-error');
+    else tcEl.classList.remove('is-error');
+
+    var noteHtml = renderToolNoteInner(info);
+    var noteEl = tcEl.querySelector('.tool-note');
+    if (!noteHtml) {
+      if (noteEl) noteEl.remove();
+      return;
+    }
+    if (!noteEl) {
+      noteEl = document.createElement('div');
+      noteEl.className = 'tool-note';
+      // Directly under the header, where renderToolCall puts it: above the
+      // command and the output, never appended below them.
+      var anchor = tcEl.querySelector('.tool-status') || tcEl.querySelector('.tool-name');
+      if (anchor) tcEl.insertBefore(noteEl, anchor.nextSibling);
+      else tcEl.insertBefore(noteEl, tcEl.firstChild);
+    }
+    noteEl.innerHTML = noteHtml;
+  }
+
   function renderToolCall(msgId, tc, tcIdx) {
     // Delegate card for agent tools
     var toolName = tc.name || '';
@@ -648,29 +771,15 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
       return renderDelegateCard(msgId, tc, tcIdx);
     }
 
-    var statusIcon = '';
-    var statusText = tc.status;
+    var parts = toolStatusParts(tc);
+    var statusIcon = parts.icon;
+    var statusText = parts.text;
+    var cardClass = 'tool-call' + (tc.status === 'error' ? ' is-error' : '');
 
-    if (tc.status === 'running') {
-      statusIcon = '\\u27F3';
-      statusText = 'running...';
-    } else if (tc.status === 'complete') {
-      statusIcon = '\\u2713';
-      statusText = 'completed';
-    } else if (tc.status === 'error') {
-      statusIcon = '\\u2717';
-      statusText = 'error';
-    } else if (tc.status === 'awaiting_approval') {
-      statusIcon = '\\u26A0';
-      statusText = __i18n.approvalAwaiting;
-    } else if (tc.status === 'pending') {
-      statusIcon = '\\u25EF';
-      statusText = 'pending';
-    }
-
-    var html = '<div class="tool-call" id="tc-' + msgId + '-' + tcIdx + '">';
+    var html = '<div class="' + cardClass + '" id="tc-' + msgId + '-' + tcIdx + '">';
     html += '<span class="tool-name">\\uD83D\\uDD27 ' + __wvEscapeHtml(tc.displayName || tc.name) + '</span>';
     html += ' <span class="tool-status status-muted">' + statusIcon + ' ' + statusText + '</span>';
+    html += renderToolNote(tc);
     html += renderToolInput(tc);
     if (tc.fileChange) {
       html += renderFileChangeCard(tc.fileChange);
@@ -1818,6 +1927,7 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
     removeMessage: removeMessage,
     renderWelcome: renderWelcome,
     renderToolCall: renderToolCall,
+    applyToolOutcome: applyToolOutcome,
     renderToolInput: renderToolInput,
     renderFileChangeCard: renderFileChangeCard,
     revealFileChangeCard: revealFileChangeCard,

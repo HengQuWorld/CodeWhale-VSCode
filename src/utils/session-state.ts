@@ -23,6 +23,25 @@ export interface ToolCallInfo {
   status: "pending" | "running" | "complete" | "error" | "awaiting_approval";
   approvalId?: string;
   approvalSummary?: string;
+  /** How a call that ended badly ended, when the engine said more than
+   *  "error". An interrupted or canceled call is not a failure — the user or
+   *  a newer turn ended it — and the row says which instead of claiming the
+   *  tool broke. `status` stays `"error"` for all three so every existing
+   *  terminal-state check keeps working; this field refines the label. */
+  terminalState?: "failed" | "interrupted" | "canceled";
+  /** The engine's own sentence for why the call produced no result.
+   *
+   *  A failed tool usually answers with its error text (`output`), but a call
+   *  that was ended before it answered has no result at all: its record keeps
+   *  the arguments it started with, and the reason lives on the turn. The
+   *  card draws this instead of staying silent under a red status. */
+  failureReason?: string;
+  /** The engine's own shell status for the call (`Completed`, `TimedOut`,
+   *  `Killed`, ...). `TimedOut` and `Killed` are outcomes a red dot alone
+   *  cannot tell apart from a command that ran and exited non-zero. */
+  shellStatus?: string;
+  exitCode?: number | null;
+  durationMs?: number;
   itemId?: string;
   /** The engine's own id for this call: `metadata.tool_use_id` in a rebuilt
    *  transcript, the `tool.id` of a live `item.started` envelope. It is the

@@ -215,6 +215,8 @@ function createRuntimeHarness() {
   /** Which scroll the handler asked for: a blocking prompt must bring itself
    *  into view even when the reader had scrolled away. */
   const scrollCalls: string[] = [];
+  /** Every card re-settle the handler asked the messages module for. */
+  const toolOutcomeCalls: Array<{ element: FakeElement; info: Record<string, unknown> }> = [];
   /** What the handler told the rail to do, in order: the rail's filter state
    *  travels through these calls, so a message that stops calling them would
    *  otherwise leave the toggle describing a query nobody is running. */
@@ -390,6 +392,12 @@ function createRuntimeHarness() {
       clearTurnContext: () => {
         turnContextClearCalls += 1;
       },
+      // The messages module owns how a settled card is drawn; the double only
+      // records what it was asked to say. The drawing itself is asserted in
+      // the messages suite, where the real module runs.
+      applyToolOutcome: (element: FakeElement, info: Record<string, unknown>) => {
+        toolOutcomeCalls.push({ element, info });
+      },
     },
     __wvInput: {
       updateSendStopButton: (streaming: boolean) => {
@@ -512,6 +520,8 @@ function createRuntimeHarness() {
       return windowObj[name];
     },
     getElement: getEl,
+    /** Every re-settle the handler asked the messages module for. */
+    toolOutcomeCalls,
     /** The scrolls the handler asked the messages module for, in order. */
     scrollCalls,
     /** Treat an id as absent, as a document does for a node that is not there. */
@@ -2780,6 +2790,38 @@ describe("webview-js-event-handler runtime: the anchor follows the turn the view
     });
     expect(inputBox.children.filter((child) => child.className === "tool-input-command")).toHaveLength(1);
     expect(inputBox.children[0]?.textContent).toBe("$ cargo build --workspace --release");
+  });
+
+  it("hands a card that ended badly the ending and the reason", () => {
+    // The card was drawn while the call ran. When the call ends without an
+    // answer, the update has to carry which ending it was and why: re-lettering
+    // the status alone is what left the row saying a bare "error". Drawing is
+    // the messages module's job, so this checks the hand-off carries the facts
+    // to the card that the update names.
+    const harness = createRuntimeHarness();
+    const card = harness.getElement("tc-msg-3-0");
+    card.className = "tool-call";
+
+    harness.dispatchMessage({
+      type: "updateToolCall",
+      messageId: "msg-3",
+      toolCallIdx: 0,
+      status: "error",
+      terminalState: "interrupted",
+      failureReason: "interrupted by the user",
+    });
+
+    expect(harness.toolOutcomeCalls).toHaveLength(1);
+    const [call] = harness.toolOutcomeCalls;
+    expect(call.element).toBe(card);
+    expect(call.info).toEqual({
+      status: "error",
+      terminalState: "interrupted",
+      failureReason: "interrupted by the user",
+      shellStatus: undefined,
+      exitCode: undefined,
+      durationMs: undefined,
+    });
   });
 });
 
