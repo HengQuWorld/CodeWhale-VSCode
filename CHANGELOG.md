@@ -1,10 +1,28 @@
 # Change Log
 
-## Unreleased
+## 0.10.2
+
+Everything in this release is client-side and works on engine **v0.10.2**, the same floor 0.10.1 names; nothing here waits on an engine build. The memory panel reads the Context Lens routes that engine **v0.10.0** introduced.
+
+### New Features
+
+- **Memory is a panel you decide from** — The Activity tab has a **Memory** section, directly under Changes, listing what the engine remembers — including notes the model proposed that no one has reviewed yet — with approve, reject, exclude, pin and forget on each entry, and a box to add a note of your own. The list is the engine's Context Lens, so the review controls appear only on entries the runtime says you may decide, and a decision that lands on an entry which has since changed is refused and the list re-read instead of being applied to stale state. Approving or forgetting says plainly what it does and what it cannot: later turns are given the note, and context already sent cannot be taken back. The actions sit in the section's toolbar beside refresh, the way the MCP and Skills panels do, and a note's box is yours to size — one line until you drag it taller, and the height is remembered across reloads. Nothing is sent, decided or deleted without your click.
+
+### Improvements
+
+- **The Skills panel's Install is a button again** — its look was written inside the task-card scope only, so outside a card it fell back to the browser's default white-on-black. The shared style is global now and the card adds only the icon-sized shape, so Install (in the toolbar, as **+**, with the scope select beside the field) matches the MCP panel's controls.
 
 ### Bug Fixes
 
-- **`/network` no longer blames VSCode's proxy** — The command answered that network rules are managed by VSCode's proxy settings, which sends you to a setting that cannot affect them: the host allow/deny list is the engine's own policy, and the engine is a separate process. The answer now says so and names what does work — read the list with `codewhale config get network`, change it with `codewhale config edit` under `[network]` allow/deny, or run `/network allow <host>` in the terminal — and adds that the engine re-reads that table on the next turn, so no restart is needed.
+- **A failed tool call says how it ended** — A card used to show one word, "error", and a run stopped before the command answered showed nothing at all, so a cancelled test run read the same as a hung one. Cards now name the ending — failed, interrupted or cancelled — show the command's exit code and how long it ran, and carry the reason the engine recorded for the turn. Failures are tinted, and a command's output stays on its card when the engine reports that it changed no files.
+
+- **A conversation opens at its own end** — Opening or switching to a conversation used to land at an estimated bottom, sometimes a whole screen short of the real one, and the pin that put it there could switch auto-follow off for the rest of the session; a thread opened from the rail could even sit at its own top while its turns streamed in below the fold. A conversation is now drawn in one batch, pinned once, and followed for the frames the skipped rows take to paint, and a scroll the panel itself asked for no longer counts as you leaving.
+
+- **A question waiting for you is drawn where you are reading** — A question was appended inside the message the host named — the turn's first assistant segment, which in a long turn sits far above the end — so a turn with a hundred tool calls showed its question off-screen while the bottom of the transcript looked stuck. It now goes to the end of the conversation and the view is brought down to it, and every rebuild redraws it from the client's own copy instead of only from the latest snapshot; it is let go when the runtime reports it answered or cancelled, including from another client, and a bar whose named message is gone falls back to the end rather than being dropped.
+
+- **`/network` no longer blames VSCode's proxy** — The command answered that network rules are managed by VSCode's proxy settings, which sends you to a setting that cannot affect them: the host allow/deny list is the engine's own policy, and the engine is a separate process. The answer still says the command itself is a terminal job here, but it now says why — VSCode's proxy setting only routes VSCode's own traffic — and names what does work: read the list with `codewhale config get network`, change it with `codewhale config edit` under `[network]` allow/deny, or run `/network allow <host>` in the terminal. It also says the engine re-reads that table on the next turn, so no restart is needed.
+
+- **Command help text reads as prose** — `/memory`'s answer marked its `pending` subcommand in backticks, which reach the banner as literal characters because the note is escaped plain text. It reads as prose now, and a test holds the whole registry to that shape — no backticks, no embedded newlines, no empty help text — so a new command cannot quietly bring the same rough edge back.
 
 ## 0.10.1
 

@@ -1,11 +1,11 @@
 # CodeWhale for VS Code —— CodeWhale 代理的轻量图形前端
 
-[![Version](https://img.shields.io/badge/version-0.10.1-blue)](https://github.com/HengQuWorld/CodeWhale-VSCode)
+[![Version](https://img.shields.io/badge/version-0.10.2-blue)](https://github.com/HengQuWorld/CodeWhale-VSCode)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![CI](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/ci.yml/badge.svg)](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/ci.yml)
 [![Release](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/release.yml/badge.svg)](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/release.yml)
 [![VS Code](https://img.shields.io/badge/VS%20Code-1.85+-informational)](https://code.visualstudio.com/)
-[![VSIX](https://img.shields.io/badge/VSIX-~553%20KB-brightgreen)](https://github.com/HengQuWorld/CodeWhale-VSCode/releases)
+[![VSIX](https://img.shields.io/badge/VSIX-~576%20KB-brightgreen)](https://github.com/HengQuWorld/CodeWhale-VSCode/releases)
 [![macOS](https://img.shields.io/badge/macOS-supported-brightgreen)](#系统要求)
 [![Windows](https://img.shields.io/badge/Windows-supported-brightgreen)](#系统要求)
 [![Linux](https://img.shields.io/badge/Linux-supported-brightgreen)](#系统要求)
@@ -22,7 +22,7 @@ CodeWhale for VS Code 是 [CodeWhale](https://github.com/codewhale-hq/Codewhale)
 
 | | |
 |---|---|
-| VSIX 体积（0.10.1） | 约 553 KB |
+| VSIX 体积（0.10.2） | 约 576 KB |
 | 运行时 npm 依赖 | **零** —— 扩展自身的 TypeScript（以及用于渲染的 `marked`）都被 webpack 内联 |
 | 打包的引擎或模型 | **无** —— `codewhale` 是独立的原生二进制 |
 | 重复实现的代理逻辑 | **无** —— GUI 只是引擎本地 runtime API 之上的适配层 |
@@ -32,9 +32,9 @@ CodeWhale for VS Code 是 [CodeWhale](https://github.com/codewhale-hq/Codewhale)
 
 正因为代理的任何一部分都没有被复制进扩展，引擎可以独立发布新能力和修复，而不需要前端跟着发版。
 
-### 0.10.1 的引擎兼容性
+### 0.10.2 的引擎兼容性
 
-0.10.1 运行在引擎 **v0.10.2** 上，与 0.10.0 的底线相同，且本版本全部内容都在客户端侧：智能体需要你时的一声提示音、可多选的问题、Sessions 栏里归档的那一半，以及可粘贴配置、可设置环境变量的 MCP 添加对话框。三个各自有底线的面保持不变 —— 记忆审阅命令与 **MCP** 面板需要引擎 **v0.10.0**（正是那个版本引入了它们读取的 Context Lens 路由，以及 MCP 管理路由：清单会带上每个服务器所属的层级、每次修改都要呈上配置 revision），而工作区信任横幅、会话上报自己属于哪个客户端、以及在同机上开第二个窗口或并行另一个 CodeWhale 客户端，都需要 **v0.10.2**。
+0.10.2 运行在引擎 **v0.10.2** 上，与 0.10.1 的底线相同，且本版本全部内容都在客户端侧：Activity 栏里可审阅、可固定、可添加笔记的记忆面板，会说明失败的工具调用如何结束及其原因的工具卡片，以及在会话自己末端打开的对话。三个各自有底线的面保持不变 —— 记忆面板读取的路由（与 `/memory` 的审阅命令读的是同一批 Context Lens 路由）与 **MCP** 面板需要引擎 **v0.10.0**（正是那个版本引入了 Context Lens 路由，以及 MCP 管理路由：清单会带上每个服务器所属的层级、每次修改都要呈上配置 revision），而工作区信任横幅、会话上报自己属于哪个客户端、以及在同机上开第二个窗口或并行另一个 CodeWhale 客户端，都需要 **v0.10.2**。
 
 以下仍需要比任何已发布引擎 tag 更新的 Codewhale 构建：
 
@@ -140,12 +140,12 @@ npx @vscode/vsce package --no-dependencies
 然后安装生成的 `.vsix`（`Extensions: Install from VSIX...`），或在终端执行：
 
 ```bash
-code --install-extension ./brotherwhale-vscode-0.10.1.vsix --force
+code --install-extension ./brotherwhale-vscode-0.10.2.vsix --force
 ```
 
 > **Trae CN 用户：** 如果 `code` 不在 `PATH` 中，使用自带的 CLI：
 > ```bash
-> "/Applications/Trae CN.app/Contents/Resources/app/bin/code" --install-extension ./brotherwhale-vscode-0.10.1.vsix --force
+> "/Applications/Trae CN.app/Contents/Resources/app/bin/code" --install-extension ./brotherwhale-vscode-0.10.2.vsix --force
 > ```
 
 **方式 C —— Open VSX：** [Open VSX](https://open-vsx.org/extension/hengquworld/brotherwhale-vscode) 面向微软生态之外的编辑器提供同样的构建 —— VSCodium，以及鸿蒙 PC 上的 CodeArts（扩展面板自带一页 Open VSX）。搜 "CodeWhale" 直接安装，不必手动装 VSIX。
@@ -163,6 +163,7 @@ code --install-extension ./brotherwhale-vscode-0.10.1.vsix --force
 - **附件** —— `/attach`、📎 按钮，或在资源管理器中右键文件选择 **CodeWhale: 附加到对话**；截图可用 `Ctrl/Cmd+V` 粘贴，从 Finder 或其他窗口拖入的文件同样可以附加。（在 VS Code 窗口内部发起的拖拽 —— 从资源管理器文件树或编辑器标签页 —— 无法到达对话 webview：VS Code 会把它留给自己的编辑器组投放目标。这类情况请用右键菜单。）
 - **消息导航轨** —— 右侧边缘的圆点可跳转到任意用户消息；`Ctrl/Cmd+Up` / `Ctrl/Cmd+Down` 在消息间前后跳转。
 - **可多选的问题** —— 模型给出多个可选答案的提问，点击即勾选、再点即取消，确认按钮一次把你选中的整套答案发出去；一次请求包含多个问题时，会编号并统计已答数量。
+- **失败的工具调用会说清它是怎么结束的** —— 卡片会写明结局（失败、被中断、已取消），并附上退出码与命令运行了多久，还会带上引擎为这一轮记录的原因；即使引擎报告这次调用没有改动任何文件，命令的输出也不会消失。
 
 ### 模式与权限姿态
 两个彼此独立的控制项，词汇与引擎保持一致：
@@ -209,6 +210,7 @@ code --install-extension ./brotherwhale-vscode-0.10.1.vsix --force
 - **Thread Goal** —— 状态、token 预算（超支显示红色）、耗时与续跑次数，支持设置 / 编辑 / 完成 / 阻塞 / 删除。
 - **后台目标** —— 设置目标时勾选*在后台线程运行*，它会移到独立线程上，继承当前线程的模型、模式与权限姿态；工作面板会在当前目标下方列出这些目标，并提供**打开线程**。**恢复运行**用于重新唤醒被 Runtime 重启搁置的目标（引擎启动时不会自动扫它们）。
 - **Memory** —— `/memory` 通过 runtime API 读写引擎的原生记忆存储。模型提议的记忆会作为候选等你决定：`/memory pending` 列出它们，`/memory approve|reject|forget <id>` 逐条处理。这项审阅需要引擎 v0.10.0（Context Lens 路由）；更早的引擎会直接说明。
+- **记忆面板** —— Activity 栏里 Changes 之下的 **Memory** 区块列出引擎记住的内容，包括模型刚提议、还没人审过的笔记，并让你不离开对话就能批准、拒绝、排除、固定或遗忘一条，也可以自己记一条。列表来自引擎的 Context Lens，所以某个控件只在你确实拥有这项权限时才出现；决定落在一条已经变过的条目上时会被拒绝并重新读取列表，而不是拿旧状态去写。
 - **Notes** —— `/note` 记录按工作区的速记。
 - **Skills** —— `/skills` 与 `/skill` 列出、切换技能。
 - **MCP** —— Activity 标签的 **MCP** 面板列出引擎的 MCP 服务器，按配置来源分组（**项目** / **全局** / **插件**），并显示实时连接状态。可以逐个启用/禁用、连接并查看它提供的工具、移除，或用表单添加 stdio / HTTP / SSE 服务器（也可先选一个推荐项自动填表，或直接粘贴一段 JSON 配置），按每行一个 `KEY=value` 设置该服务器的环境变量，还能审阅本机其他工具已有的服务器配置（`~/.claude.json`、项目的 `.mcp.json`、marketplace），逐条批准或拒绝。`/mcp` 打开面板，`/mcp list` 在对话中打印服务器列表。改动由引擎完成 —— 配置归引擎所有、也只有它写入；属于项目或插件配置的条目只展示、不在此处编辑；引擎没有 MCP 接口时，面板会直接说明，而不是显示一个空列表。
@@ -222,7 +224,7 @@ code --install-extension ./brotherwhale-vscode-0.10.1.vsix --force
 - **配置面板** —— 设置栏的齿轮（或 `/config`）可读写引擎的 runtime 配置，包括 sandbox 模式、strict tool 模式、memory、search provider 与 prompt suggestion。
 
 ### 为编辑器而做
-- 活动栏容器，侧边栏包含 **Sessions**、**Threads**、**Activity** 三个标签页，最后者汇集 Work、Changes、Fleet、Tasks 与 Agents 面板。线程面板与对话并排显示，占用对话区的宽度而不是盖住它，且最多占用当前视图能匀出的宽度——侧边栏再窄，对话区也保留自己的一列；可用 ✕ 按钮或 `Esc` 收起。
+- 活动栏容器，侧边栏包含 **Sessions**、**Threads**、**Activity** 三个标签页，最后者汇集 Work、Changes、Memory、Fleet、Tasks、Agents、Skills 与 MCP 面板。线程面板与对话并排显示，占用对话区的宽度而不是盖住它，且最多占用当前视图能匀出的宽度——侧边栏再窄，对话区也保留自己的一列；可用 ✕ 按钮或 `Esc` 收起。
 - 状态栏显示引擎状态、模式、权限、提供商、模型与思考深度，以及本会话的成本、token 用量和模型上下文窗口的占用 —— 回合运行中成本与 token 会随每次模型调用上升，上下文占用从 80% 起转为醒目样式。
 - 侧边栏与输入区可拖拽调整；自动跟随 VS Code 主题。
 - **英文与简体中文**界面，跟随 VS Code 的显示语言。
@@ -323,7 +325,7 @@ codewhale serve（引擎 —— 单独安装与升级）
 
 **安装 VSIX**
 ```bash
-code --install-extension /path/to/brotherwhale-vscode-0.10.1.vsix --force
+code --install-extension /path/to/brotherwhale-vscode-0.10.2.vsix --force
 ```
 
 ## 隐私与数据
