@@ -399,6 +399,25 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
     return turnContextEl.offsetHeight || 0;
   }
 
+  /** How far below the transcript's top edge the readable area begins.
+   *
+   *  One number, asked by three questions that have to agree: where a jump
+   *  lands a row (scrollTargetFor), which dot is lit (syncNavRail), and which
+   *  turn a keyboard step counts as current (jumpToUserMessage). The 20px slack
+   *  is a reading margin — a row flush against the very top edge reads as cut
+   *  off — and the bar floats over that edge, so it is part of the margin
+   *  whenever it is showing.
+   *
+   *  The bar was the missing half of it. It was left out of the highlight rule
+   *  while the landing aimed with it, so a jump put its row exactly behind the
+   *  bar — 76px down, the bar being 56px tall — and a rule asking for 20px saw
+   *  the row as still below the edge. Every dot clicked lit the one before it,
+   *  measured in a browser on a forty-turn transcript: off by one, on all 6
+   *  dots tried, for exactly the bar's height. */
+  function readingMarginPx() {
+    return 20 + turnContextOverlayHeight();
+  }
+
   if (turnContextEl) {
     // The bar is a jump back to the prompt it names, the same move a rail dot
     // makes.
@@ -1464,6 +1483,10 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
       // moment a transcript that was hidden behind a collapsed panel has a
       // layout at all, so the rail may still be missing entirely.
       scheduleNavUpdate();
+      // The edge the rail is revealed from is the panel's right edge, and it
+      // has just moved. (Dots themselves are percentages of the rail and need
+      // no re-placing.)
+      _navEdgeRight = null;
     }, 150);
   });
 
@@ -1691,6 +1714,27 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
    *  frame loop spinning behind it. */
   var _navBuildWaits = 0;
   var NAV_BUILD_WAIT_LIMIT = 60;
+  /** How far into the rail's own track the first and last dots stop, in
+   *  percent. The reading is mapped into what is left, so no dot is ever
+   *  pushed off the strip and none are stacked on the ends. */
+  var NAV_TRACK_INSET = 1.5;
+  /** The dot's drawn size on a rail with room to spare, and the smallest it is
+   *  ever drawn. */
+  var NAV_DOT_MAX_PX = 6;
+  var NAV_DOT_MIN_PX = 1;  /** How much of the gap between two dots one dot's *mark* may take. Below 1 so
+   *  a crowded rail keeps daylight between the marks instead of drawing one
+   *  continuous bar. */
+  var NAV_DOT_GAP_SHARE = 0.75;
+  /** The tallest a dot's hit box gets. The box is as tall as the room the dot
+   *  has (so the boxes tile the strip exactly — no gaps, no overlap, and every
+   *  pixel of the rail picks the nearest dot), capped so a rail of a dozen
+   *  turns does not hand each dot a hit box a third of the screen tall. */
+  var NAV_HIT_MAX_PX = 18;
+  /** Which user messages the dots were built for. Their places are frozen at
+   *  that moment (see placeNavDots), so a rebuild is only owed when this
+   *  changes — an answer arriving changes no dot's place, and rebuilding the
+   *  rail for every streaming delta is what made it twitch. */
+  var _navSignature = null;
 
   // Opening a compaction note (a <details>) changes how tall its row is, and
   // every dot below it moves with it. The toggle event does not bubble, hence the
@@ -1738,6 +1782,7 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
     activeDotIndex = -1;
     // A replacement transcript is a fresh start for the wait below too.
     _navBuildWaits = 0;
+    _navSignature = null;
   }
 
   /** Light the dot of the turn the reader is inside, and only that one. */
@@ -1752,36 +1797,93 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
     activeDotIndex = idx;
   }
 
-  /** The transcript's geometry as it stands right now, read in one pass.
+  /** Give every dot its place, once, from a single reading of the transcript.
    *
-   *  Each dot marks a row, and the transcript lays its rows out lazily
-   *  (content-visibility: auto — see estimateMessageHeight): a row outside the
-   *  viewport holds its place at an *estimate*, and its real height replaces
-   *  that estimate the first time it is painted, which moves every row below
-   *  it. Where a dot belongs is therefore not a fact to record once, when the
-   *  dots are built; it is a reading, taken again whenever the transcript
-   *  moves.
+   *  This used to run again on every scroll, and that was the whole of the
+   *  "dots jumping" complaint. A dot's place was a fraction of
+   *  messagesEl.scrollHeight, and the transcript lays its rows out lazily
+   *  (content-visibility: auto — see estimateMessageHeight): the height that
+   *  divisor reports is the sum of the estimates for the rows nobody has
+   *  painted yet, and it grows as the reader reveals them. So the denominator
+   *  itself moved while the reader did nothing — measured in a browser, a
+   *  thirty-turn transcript went from 10115px to 12724px (+26%) just by
+   *  scrolling to the end, which walked the third dot from 6.6% to 5.2% and
+   *  squeezed its spacing from 3.1% to 2.4%. And one click was worse than any
+   *  scroll: jumping revealed a screenful of never-painted rows at once, the
+   *  height rose 18% in a frame, and 29 of 30 dots changed position — the rail
+   *  visibly rearranged itself under the pointer that had just clicked it.
    *
-   *  Read before anything is written: interleaving the two would force a
-   *  layout per dot. */
-  function measureNavRows() {
-    var tops = [];
-    var heights = [];
+   *  So the reading is taken once, when the dots are built, and the dots keep
+   *  it. The rail is its own control (its own strip beside the transcript, see
+   *  #message-nav) and does not claim to line up with the scrollbar's track,
+   *  which is the only way a fixed reading can be honest: the scale is "where
+   *  this turn sits in the conversation as the rail was drawn", and it stays
+   *  that until the rail is rebuilt — on a new turn, a switched conversation,
+   *  a removed row.
+   *
+   *  The reading is mapped into the rail's own [inset, 100 - inset] track
+   *  rather than being clamped to it: the clamp this replaces stacked the
+   *  first and last dots on top of each other (a 100-turn rail held three of
+   *  them at 2% and 98%), and a pile of dots is not a scale.
+   *
+   *  One pass over the layout, writing nothing until every row has been read:
+   *  interleaving reads and writes would force a layout per dot. */
+  function placeNavDots() {
+    var total = messagesEl.scrollHeight;
+    if (!total || navDots.length === 0) return false;
+    var centres = [];
     for (var i = 0; i < navDots.length; i++) {
       var msg = navDots[i].msg;
-      tops.push(msg.offsetTop);
-      heights.push(msg.offsetHeight);
+      centres.push(msg.offsetTop + msg.offsetHeight / 2);
     }
-    return {
-      tops: tops,
-      heights: heights,
-      total: messagesEl.scrollHeight,
-      scrollTop: messagesEl.scrollTop,
-    };
+    var span = 100 - 2 * NAV_TRACK_INSET;
+    for (var j = 0; j < navDots.length; j++) {
+      var raw = (centres[j] / total) * 100;
+      var pct = NAV_TRACK_INSET + (raw / 100) * span;
+      pct = Math.round(Math.min(100 - NAV_TRACK_INSET, Math.max(NAV_TRACK_INSET, pct)) * 10) / 10;
+      navDots[j].el.style.top = pct + '%';
+    }
+    sizeNavDots(span);
+    return true;
   }
 
-  /** Paint the rail from that geometry: where each dot sits along it, and
-   *  which one is the turn the reader is inside.
+  /** How big a dot's mark and its hit box are on a rail holding this many.
+   *
+   *  Six pixels is a comfortable mark on a rail with a dozen turns and a smear
+   *  of ink on one with a hundred and twenty: measured on a 557px rail, 120
+   *  turns sit 4.5px apart, so full-size marks touch and the rail stops reading
+   *  as separate turns. The mark shrinks to the gap it is given — a dense rail
+   *  reads as a fine scale, which is what it is — and the mark is never wider
+   *  than that gap, because two turns sharing a mark means neither can be
+   *  picked. (At 200 turns on this rail the mark is 2px.)
+   *
+   *  The hit box is a separate number and goes the other way: it is the whole
+   *  slot, so the boxes tile the rail without gaps or overlaps and a click
+   *  anywhere on it picks the nearest turn. Shrinking the mark without this
+   *  would have left a 200-turn rail with 2px targets. */
+  function sizeNavDots(span) {
+    var height = navRail.offsetHeight || 0;
+    var size = NAV_DOT_MAX_PX;
+    var hit = NAV_HIT_MAX_PX;
+    if (height > 0 && navDots.length > 1) {
+      var gapPx = (span / 100) * height / (navDots.length - 1);
+      size = Math.max(NAV_DOT_MIN_PX, Math.min(NAV_DOT_MAX_PX, gapPx * NAV_DOT_GAP_SHARE));
+      hit = Math.min(NAV_HIT_MAX_PX, Math.max(gapPx, 1));
+    }
+    setRailVar('--nav-dot-size', Math.round(size * 10) / 10 + 'px');
+    setRailVar('--nav-dot-hit', Math.round(hit * 10) / 10 + 'px');
+  }
+
+  /** Write one of the rail's own measurements, and only when it changed: this
+   *  runs while the rail is being built, and a write per scrolled frame would
+   *  cost a style recalc for a value that is usually the same. */
+  function setRailVar(name, value) {
+    if (navRail.style.getPropertyValue(name) !== value) {
+      navRail.style.setProperty(name, value);
+    }
+  }
+
+  /** Light the dot of the turn the reader is inside, and only that one.
    *
    *  "Inside" is the question the Ctrl+Up/Down jumps ask — the last prompt at
    *  or above the top edge — so the lit dot is the one a keyboard step would
@@ -1789,29 +1891,27 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
    *  a steer is a second bubble in the same turn, and the bar names that turn.)
    *  The rail used to ask something else entirely — nearest the viewport centre
    *  — which in the middle of a long answer lights the *next* turn's dot while
-   *  the bar still names this one. */
+   *  the bar still names this one.
+   *
+   *  This is the only thing that runs while the reader scrolls: the dots' places
+   *  were settled when they were built, so a scroll moves the mark and nothing
+   *  else. Reading three hundred offsetTops on every scroll only to conclude
+   *  they had not changed was the other half of the cost. */
   function syncNavRail() {
     if (!navRail || navDots.length === 0) return;
-    var shot = measureNavRows();
-    if (!shot.total) return;
-
-    for (var i = 0; i < navDots.length; i++) {
-      var pct = ((shot.tops[i] + shot.heights[i] / 2) / shot.total) * 100;
-      pct = Math.round(Math.min(98, Math.max(2, pct)) * 10) / 10;
-      // Writing a style the dot already has would still cost a style recalc,
-      // and this runs while the reader scrolls.
-      if (navDots[i].pct !== pct) {
-        navDots[i].pct = pct;
-        navDots[i].el.style.top = pct + '%';
-      }
-    }
-
-    // Rows are in document order, so their tops only grow: the first one
-    // below the top edge ends the search. The 20px slack is the same reading
-    // margin jumpToUserMessage uses, so the lit dot and the keyboard agree.
+    // The reading edge, not the container's top edge: the bar floats over the
+    // top and a jump lands a row below it (see readingMarginPx).
+    var edge = messagesEl.scrollTop + readingMarginPx();
     var activeIdx = 0;
     for (var j = 0; j < navDots.length; j++) {
-      if (shot.tops[j] <= shot.scrollTop + 20) activeIdx = j;
+      var msg = navDots[j].msg;
+      // A row can be gone (undo, retry) while its dot is still here; a
+      // detached row measures at the origin, which would read as "above the
+      // top edge" and hand the mark to a turn that is no longer on screen.
+      if (!msg || msg.isConnected === false) continue;
+      // 1px of slack: a landed row sits exactly on the edge, and rounding in a
+      // scrolled layout can leave it a fraction above.
+      if (msg.offsetTop <= edge + 1) activeIdx = j;
       else break;
     }
     setActiveDot(activeIdx);
@@ -1838,6 +1938,16 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
     }
     _navBuildWaits = 0;
 
+    // The same turns as the dots were built for: their places were settled
+    // then, and re-reading the layout here is exactly what used to move them.
+    // An answer arriving — every streaming delta adds one — changes no dot's
+    // place, so a rebuild is not owed, and only the mark is refreshed.
+    var signature = navSignatureOf(userMsgs);
+    if (signature === _navSignature && navDots.length === userMsgs.length) {
+      syncNavRail();
+      return;
+    }
+
     // Clear existing dots
     clearNavDots();
 
@@ -1845,8 +1955,8 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
       var msg = userMsgs[i];
       var dot = document.createElement('div');
       dot.className = 'msg-nav-dot';
-      // Where it belongs is worked out by syncNavRail below — and again on
-      // every scroll, because the rows under it are laid out lazily.
+      // Placed by placeNavDots below, and never moved again until the rail is
+      // rebuilt — see the note there for why a live reading cannot hold still.
       dot.style.top = '0%';
       dot.setAttribute('data-msg-id', msg.id);
       dot.setAttribute('data-preview', navDotTooltip(msg));
@@ -1859,18 +1969,32 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
       });
 
       navRail.appendChild(dot);
-      navDots.push({ el: dot, msg: msg, pct: null });
+      navDots.push({ el: dot, msg: msg });
     }
 
+    _navSignature = signature;
+    placeNavDots();
     syncNavRail();
+  }
+
+  /** Which turns the dots were built for: their ids, in order.
+   *
+   *  A row's identity is what a dot points at, so this is the whole of what a
+   *  rebuild depends on. A new bubble — a steer, a retried turn, a whole
+   *  conversation loaded — changes it; an answer being written does not. */
+  function navSignatureOf(rows) {
+    var parts = [];
+    for (var i = 0; i < rows.length; i++) parts.push(rows[i].id);
+    return parts.join('|');
   }
 
   /** Where a row's top should land, in the transcript's own coordinates.
    *
-   *  The 20px reading margin, plus the pinned prompt bar when it covers that
-   *  corner, so a jump never lands a row underneath it. */
+   *  The reading margin (see readingMarginPx) — the 20px slack plus the pinned
+   *  prompt bar when it covers that corner — so a jump never lands a row
+   *  underneath it, and so the dot it lights is the one that was asked for. */
   function scrollTargetFor(el) {
-    var gap = 20 + turnContextOverlayHeight();
+    var gap = readingMarginPx();
     return Math.max(
       0,
       el.getBoundingClientRect().top - messagesEl.getBoundingClientRect().top + messagesEl.scrollTop - gap
@@ -1893,6 +2017,67 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
 
   messagesEl.addEventListener('wheel', abandonJump, { passive: true });
   messagesEl.addEventListener('touchstart', abandonJump, { passive: true });
+
+  // ── Showing the rail ──
+  //
+  // The rail is an overlay over the conversation, and an overlay that is always
+  // on is something the reader has to read around. It appears as the pointer
+  // comes near the right edge — the side the transcript's scrollbar is on — and
+  // goes again once the pointer has left that edge for a moment. Deliberately
+  // pointer-only: nothing here changes what is on screen unless the reader is
+  // reaching for it.
+  //
+  // The listener sits on the wrapper, not on the transcript, because a dot is
+  // the wrapper's other child: moving onto a dot leaves #messages, and a hide
+  // armed there would take the dots away from under the cursor that was aiming
+  // at one. And the edge is measured from the wrapper, whose right edge is the
+  // scrollbar's — the transcript's own box ends inside it.
+  var navHostEl = document.getElementById('messages-wrapper');
+  /** How close to the right edge counts as reaching for the rail: the 15px
+   *  scrollbar, the 12px rail 22px in, and room to aim. */
+  var NAV_REVEAL_EDGE_PX = 64;
+  /** How long the rail stays after the pointer has left the edge. Long enough
+   *  for a diagonal move onto a dot, short enough that it is gone by the time
+   *  the reader is reading again. */
+  var NAV_HIDE_DELAY_MS = 260;
+  var _navHideTimer = null;
+  /** The right edge, cached: this is asked on every pointer move, and the edge
+   *  only changes when the panel is resized (which drops the cache). */
+  var _navEdgeRight = null;
+
+  function navEdgeRight() {
+    if (_navEdgeRight === null) {
+      var host = navHostEl || messagesEl;
+      var rect = host.getBoundingClientRect();
+      _navEdgeRight = (typeof rect.right === 'number' && !isNaN(rect.right))
+        ? rect.right
+        : (rect.left || 0) + (host.clientWidth || host.offsetWidth || 0);
+    }
+    return _navEdgeRight;
+  }
+
+  function showNavRail() {
+    if (!navRail) return;
+    if (_navHideTimer) { clearTimeout(_navHideTimer); _navHideTimer = null; }
+    if (!navRail.classList.contains('is-visible')) navRail.classList.add('is-visible');
+  }
+
+  function hideNavRail() {
+    if (!navRail || _navHideTimer || !navRail.classList.contains('is-visible')) return;
+    _navHideTimer = setTimeout(function() {
+      _navHideTimer = null;
+      navRail.classList.remove('is-visible');
+    }, NAV_HIDE_DELAY_MS);
+  }
+
+  if (navHostEl) {
+    navHostEl.addEventListener('pointermove', function(e) {
+      if (!e || typeof e.clientX !== 'number') return;
+      if (e.clientX >= navEdgeRight() - NAV_REVEAL_EDGE_PX) showNavRail();
+      else hideNavRail();
+    });
+    navHostEl.addEventListener('pointerleave', hideNavRail);
+  }
 
   /** Flash highlight and scroll a message into view. */
   function scrollToMessage(el) {
@@ -2058,8 +2243,12 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
     // *forward* to the first one and Ctrl+Down do nothing at all — and it
     // disagreed with the rail, which lights the first dot there.
     var currentIdx = -1;
+    // The same reading edge the rail lights its dot from (see readingMarginPx):
+    // a landed row sits below the prompt bar, and counting it as "below the top
+    // edge" made one keyboard step re-jump to the row already in view.
+    var edge = scrollTop + readingMarginPx();
     for (var i = 0; i < userMsgs.length; i++) {
-      if (userMsgs[i].offsetTop > scrollTop + 20) break;
+      if (userMsgs[i].offsetTop > edge + 1) break;
       currentIdx = i;
     }
 

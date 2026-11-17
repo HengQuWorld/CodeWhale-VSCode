@@ -542,3 +542,40 @@ describe("long transcripts", () => {
     expect(css).not.toMatch(/#[^{}]*\.skill-group-body/);
   });
 });
+
+describe("message navigation rail", () => {
+  /** The rail's own rule body, so an assertion cannot accidentally match the
+   *  dot's or the tooltip's. */
+  const railRule = (css: string): string =>
+    css.match(/(^|\n)\s*#message-nav \{([\s\S]*?)\n\s*\}/)?.[2] ?? "";
+
+  it("keeps the dots off the transcript's scrollbar", () => {
+    const css = getWebviewCss();
+    const rule = railRule(css);
+
+    // The dots used to sit 4px from the right edge of the transcript, and the
+    // webview draws its scrollbar in the rightmost 15px: the dots were *on* the
+    // bar, with pointer events on, so dragging the scrollbar landed on a dot.
+    // The rail is its own strip now, inset clear of that 15px.
+    const inset = Number(rule.match(/right:\s*(\d+)px;/)?.[1]);
+    expect(inset).toBeGreaterThan(15);
+    const width = Number(rule.match(/width:\s*(\d+)px;/)?.[1]);
+    expect(inset).toBeGreaterThanOrEqual(15 + width / 2);
+
+    // And a hidden rail is not a target either.
+    expect(css).toContain("#message-nav:not(.is-visible) .msg-nav-dot");
+  });
+
+  it("keeps the rail out of sight until it is reached for", () => {
+    const css = getWebviewCss();
+    const rule = railRule(css);
+
+    // Shown by the messages script (pointer near the right edge), so the sheet
+    // only has to draw the two states.
+    expect(rule).toMatch(/opacity:\s*0;/);
+    expect(css).toMatch(/#message-nav\.is-visible \{[\s\S]*?opacity:\s*1;/);
+    // The strip must not take a pointer event of its own: only the dots answer
+    // a press, and only while they are on screen.
+    expect(rule).toMatch(/pointer-events:\s*none;/);
+  });
+});

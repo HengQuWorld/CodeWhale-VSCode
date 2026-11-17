@@ -884,7 +884,7 @@ export function getWebviewCss(): string {
       position: absolute;
       top: 6px;
       left: 8px;
-      right: 18px; /* clear the navigation rail's dots */
+      right: 38px; /* clear the navigation rail's strip (22px inset, 12px wide) */
       z-index: 4;
       display: flex;
       align-items: flex-start;
@@ -934,43 +934,97 @@ export function getWebviewCss(): string {
       word-break: break-word;
     }
 
-    /* ── Message Navigation Rail ── */
+    /* ── Message Navigation Rail ──
 
+       The rail is its own strip, clear of the transcript's scrollbar. It used
+       to sit 4px from the right edge, squarely inside the 15px strip the
+       scrollbar occupies, with pointer events on — so a drag of the scrollbar
+       landed on a dot instead of the bar. The dots carry their own positions
+       (frozen when they are built, see placeNavDots), so this strip has no
+       reason to line up with the scrollbar's track, and the two no longer
+       pretend to share a scale.
+
+       Hidden until the pointer comes near the right edge (see the reveal in
+       the messages script): a rail across the conversation is an overlay the
+       reader did not ask to read, and it is only wanted while navigating. */
     #message-nav {
       position: absolute;
-      right: 2px;
-      top: 0;
-      bottom: 0;
-      width: 10px;
+      right: 22px;
+      top: 6px;
+      bottom: 6px;
+      width: 12px;
       pointer-events: none;
       z-index: 5;
+      opacity: 0;
+      transform: translateX(4px);
+      transition: opacity 0.14s ease, transform 0.14s ease;
+    }
+    #message-nav.is-visible {
+      opacity: 1;
+      transform: translateX(0);
+    }
+    /* A hidden dot is not a target: the strip is narrow and close to the
+       transcript's own controls, so nothing invisible may swallow a press. */
+    #message-nav:not(.is-visible) .msg-nav-dot {
+      pointer-events: none;
     }
     #message-nav:empty {
       display: none;
     }
+    /* The track the dots sit on, so the strip reads as one control rather than
+       as marks left on the text underneath it. */
+    #message-nav::before {
+      content: '';
+      position: absolute;
+      left: 50%;
+      top: 0;
+      bottom: 0;
+      width: 1px;
+      margin-left: -0.5px;
+      border-radius: 1px;
+      background: var(--border);
+      opacity: 0.7;
+    }
 
+    /* A dot is a hit box; the mark inside it is its ::before. Keeping the two
+       apart is what lets a crowded rail stay usable: the box is as tall as the
+       room the dot has, so the boxes tile the whole strip with no gaps and no
+       overlap, while the mark shrinks to stay visually separate (see
+       placeNavDots). It also keeps the hover scale off the tooltip, which used
+       to be a child of the scaled element and grew with it. */
     .msg-nav-dot {
       position: absolute;
-      right: 2px;
-      width: 6px;
-      height: 6px;
+      right: 0;
+      width: 100%;
+      height: var(--nav-dot-hit, 12px);
+      /* Centred on the place it was given, not hung below it: an uncentred
+         mark sat half its height lower than the turn it named. */
+      transform: translateY(-50%);
+      pointer-events: auto;
+      cursor: pointer;
+    }
+    .msg-nav-dot::before {
+      content: '';
+      position: absolute;
+      /* inset + auto margins centre the mark in the box on both axes. */
+      inset: 0;
+      margin: auto;
+      width: var(--nav-dot-size, 6px);
+      height: var(--nav-dot-size, 6px);
       border-radius: 50%;
       background: var(--brand-primary);
       opacity: 0.25;
-      pointer-events: auto;
-      cursor: pointer;
       transition: opacity 0.2s ease, transform 0.2s ease, background 0.2s ease;
-      transform: translateX(0);
     }
-    #messages:hover .msg-nav-dot {
+    #messages:hover .msg-nav-dot::before {
       opacity: 0.45;
     }
-    .msg-nav-dot:hover {
+    .msg-nav-dot:hover::before {
       opacity: 0.95 !important;
       transform: scale(1.8);
       background: var(--brand-primary-light);
     }
-    .msg-nav-dot.active {
+    .msg-nav-dot.active::before {
       opacity: 0.85 !important;
       transform: scale(1.4);
       background: var(--brand-primary-light);

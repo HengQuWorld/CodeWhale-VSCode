@@ -74,6 +74,44 @@ function matchesSelector(element: FakeElement, selector?: string): boolean {
   });
 }
 
+/** Read a custom property off a stand-in element's style. The stand-in's
+ *  `style` is declared as a plain record so property assignment reads like a
+ *  browser's, and only its custom-property half needs the cast. */
+function cssVar(el: FakeElement, name: string): string {
+  const style = el.style as unknown as { getPropertyValue(prop: string): string };
+  return String(style.getPropertyValue(name));
+}
+
+/** A `style` stand-in with both faces a browser's CSSStyleDeclaration
+ *  offers: plain property assignment (`el.style.top = '10%'`), which the
+ *  messages script uses for the dots' places and the rows' intrinsic sizes, and
+ *  custom properties (`setProperty('--nav-dot-size', ...)`), which the rail
+ *  uses to size its dots to the room between them. */
+function makeStyle(): Record<string, string> {
+  const values = new Map<string, string>();
+  const style = new Proxy({} as Record<string, string>, {
+    get(_target, prop: string) {
+      if (prop === "getPropertyValue") return (name: string) => values.get(name) ?? "";
+      if (prop === "setProperty") {
+        return (name: string, value: string) => {
+          values.set(name, String(value));
+        };
+      }
+      if (prop === "removeProperty") {
+        return (name: string) => {
+          values.delete(name);
+        };
+      }
+      return values.get(prop) ?? "";
+    },
+    set(_target, prop: string, value: unknown) {
+      values.set(prop, String(value));
+      return true;
+    },
+  });
+  return style;
+}
+
 class FakeElement {
   public className = "";
   public id = "";
@@ -86,7 +124,7 @@ class FakeElement {
   /** What the confirm button's own state hangs on; a real element reflects it
    *  to the `disabled` attribute, which the click handler's guard reads. */
   public disabled = false;
-  public style: Record<string, string> = {};
+  public style: Record<string, string> = makeStyle();
   public dataset: Record<string, string> = {};
   /** Every value assigned to scrollTop, oldest first. The settle is about
    *  *when* the view is pinned (once per rebuild, then again per painted
@@ -117,6 +155,9 @@ class FakeElement {
   public offsetTop = 0;
   /** Viewport top the scroll maths reads; 0 for the container itself. */
   public rectTop = 0;
+  /** Viewport right edge the rail's reveal measures from; 0 unless a test sets
+   *  it, which is what the transcript's scrollbar side is. */
+  public rectRight = 0;
   public parentElement: FakeElement | null = null;
   public children: FakeElement[] = [];
   public scrollCalls: Array<Record<string, unknown>> = [];
@@ -219,8 +260,8 @@ class FakeElement {
     return null;
   }
 
-  getBoundingClientRect(): { top: number; height: number } {
-    return { top: this.rectTop, height: this.offsetHeight };
+  getBoundingClientRect(): { top: number; height: number; right?: number } {
+    return { top: this.rectTop, height: this.offsetHeight, right: this.rectRight };
   }
 
   scrollTo(options: Record<string, unknown>): void {
@@ -293,16 +334,29 @@ function createHarness(options: { frames?: Array<() => void>; timers?: Array<() 
     addEventListener: () => {},
   };
 
+  // Timer callbacks are dropped unless a test asks to run them; the rail's
+  // scroll throttle is one of those, and a test that wants it collects it.
+  // clearTimeout has to bite, though: a delayed hide that was called off must
+  // not fire when the collected queue is run, which is the whole point of
+  // calling it off.
+  let timerSeq = 0;
+  const timerKills = new Map<number, () => void>();
   const context = vm.createContext({
     window: windowObj,
     document: documentObj,
-    // Timer callbacks are dropped unless a test asks to run them; the rail's
-    // scroll throttle is one of those, and a test that wants it collects it.
     setTimeout: (callback: () => void) => {
-      options.timers?.push(callback);
-      return options.timers ? options.timers.length : 0;
+      timerSeq += 1;
+      const id = timerSeq;
+      let alive = true;
+      timerKills.set(id, () => { alive = false; });
+      options.timers?.push(() => { if (alive) callback(); });
+      return id;
     },
-    clearTimeout: () => {},
+    clearTimeout: (id?: number) => {
+      if (typeof id !== "number") return;
+      const kill = timerKills.get(id);
+      if (kill) kill();
+    },
     // `addMessage` schedules its nav-dot refresh on a frame, and a jump onto a
     // row that was never painted re-anchors on the next one. Tests that wait for
     // a frame collect the callbacks; the rest only need the stand-in to exist.
@@ -1008,7 +1062,14 @@ describe("message navigation rail", () => {
     expect(rail.children[1].classList.contains("active")).toBe(false);
   });
 
-  it("re-places the dots when the rows the browser had skipped are painted", () => {
+  it("keeps every dot where it was placed when the transcript grows under it", () => {
+    // The dots used to be re-placed on every scroll, each place a fraction of
+    // messagesEl.scrollHeight — and that divisor grows as the reader reveals
+    // rows the browser had skipped (content-visibility: auto). Measured in a
+    // browser, a thirty-turn transcript gained 26% of its height just by
+    // scrolling to the end, which walked dots along a rail the reader was not
+    // touching. A place is now settled once, when the dots are built, and a
+    // scroll moves the mark and nothing else.
     const timers: Array<() => void> = [];
     const harness = createHarness({ timers });
     const rail = railOf(harness);
@@ -1024,20 +1085,21 @@ describe("message navigation rail", () => {
     second.offsetHeight = 40;
     harness.messages.updateNavDots();
 
-    expect(rail.children[0].style.top).toBe("10%");
-    expect(rail.children[1].style.top).toBe("42%");
+    // Centres 100 and 420 of a 1000px transcript, mapped into the rail's own
+    // [1.5%, 98.5%] track rather than clamped onto its ends.
+    expect(rail.children[0].style.top).toBe("11.2%");
+    expect(rail.children[1].style.top).toBe("42.2%");
 
-    // Scrolling paints the second row: its real height replaced the estimate
-    // and pushed it down, and the transcript grew with it. The dots were built
-    // before any of that happened, so the place they recorded is stale.
+    // Scrolling paints the second row: its real height replaced the estimate,
+    // pushed it down, and the transcript grew with it.
     harness.messagesEl.scrollHeight = 2000;
     second.offsetTop = 900;
     harness.messagesEl.scrollTop = 400;
     harness.messagesEl.dispatch("scroll");
     timers.splice(0).forEach((callback) => callback());
 
-    expect(rail.children[0].style.top).toBe("5%");
-    expect(rail.children[1].style.top).toBe("46%");
+    expect(rail.children[0].style.top).toBe("11.2%");
+    expect(rail.children[1].style.top).toBe("42.2%");
     // 400 is still above the second prompt at 900, so the mark has not moved.
     expect(rail.children[0].classList.contains("active")).toBe(true);
 
@@ -1047,6 +1109,209 @@ describe("message navigation rail", () => {
 
     expect(rail.children[1].classList.contains("active")).toBe(true);
     expect(rail.children[0].classList.contains("active")).toBe(false);
+    // The mark moved; the places still did not.
+    expect(rail.children[0].style.top).toBe("11.2%");
+    expect(rail.children[1].style.top).toBe("42.2%");
+  });
+
+  it("leaves the dots alone while an answer is being written", () => {
+    // Every streaming delta is an addMessage, and each one used to rebuild the
+    // rail: the dots were taken down and put back with freshly measured
+    // places, several times a second, for rows that had not changed. The places
+    // depend on the user bubbles alone, so an answer arriving owes no rebuild.
+    const frames: Array<() => void> = [];
+    const harness = createHarness({ frames });
+    const rail = railOf(harness);
+
+    const first = drawUserBubble(harness, "user-1", "one", 1);
+    first.offsetTop = 100;
+    first.offsetHeight = 40;
+    harness.messages.updateNavDots();
+    const placed = rail.children[0].style.top;
+    const dot = rail.children[0];
+
+    for (let i = 0; i < 5; i++) {
+      harness.messages.addMessage({
+        id: "a" + i,
+        role: "assistant",
+        content: "a delta " + i,
+        status: "streaming",
+        timestamp: 1,
+      });
+      frames.splice(0).forEach((callback) => callback());
+    }
+
+    expect(rail.children).toHaveLength(1);
+    // The same dot, not a replacement: a rebuild would have made a new one.
+    expect(rail.children[0]).toBe(dot);
+    expect(rail.children[0].style.top).toBe(placed);
+  });
+
+  it("keeps the rail out of the conversation until the pointer reaches the edge", () => {
+    // The rail is an overlay across the transcript, and one that is always on is
+    // something the reader has to read around. It appears as the pointer comes
+    // near the right edge — the side the scrollbar is on — and goes again a
+    // moment after the pointer leaves that edge.
+    const timers: Array<() => void> = [];
+    const harness = createHarness({ timers });
+    const rail = railOf(harness);
+    const host = harness.getEl("messages-wrapper");
+    host.rectRight = 600;
+
+    const row = drawUserBubble(harness, "user-1", "one", 1);
+    row.offsetTop = 100;
+    row.offsetHeight = 40;
+    harness.messages.updateNavDots();
+
+    // Hidden until reached for.
+    expect(rail.classList.contains("is-visible")).toBe(false);
+
+    // A pointer in the middle of the conversation is reading, not navigating.
+    host.dispatch("pointermove", { clientX: 200 });
+    expect(rail.classList.contains("is-visible")).toBe(false);
+
+    // 600 - 64 = 536; the scrollbar and the rail are both past that.
+    host.dispatch("pointermove", { clientX: 580 });
+    expect(rail.classList.contains("is-visible")).toBe(true);
+
+    // Leaving the edge does not blink it away under a diagonal reach, so the
+    // hide is delayed — and cancelled if the pointer comes back.
+    host.dispatch("pointermove", { clientX: 200 });
+    expect(rail.classList.contains("is-visible")).toBe(true);
+    host.dispatch("pointermove", { clientX: 590 });
+    timers.splice(0).forEach((callback) => callback());
+    expect(rail.classList.contains("is-visible")).toBe(true);
+
+    host.dispatch("pointermove", { clientX: 100 });
+    timers.splice(0).forEach((callback) => callback());
+    expect(rail.classList.contains("is-visible")).toBe(false);
+  });
+
+  it("keeps the rail up when the pointer moves onto a dot", () => {
+    // A dot is a sibling of the transcript, not part of it. Watching the
+    // transcript alone meant that reaching for a dot left it, and the hide that
+    // put the rail away took the dots out from under the cursor aiming at one.
+    const timers: Array<() => void> = [];
+    const harness = createHarness({ timers });
+    const rail = railOf(harness);
+    const host = harness.getEl("messages-wrapper");
+    host.rectRight = 600;
+
+    const row = drawUserBubble(harness, "user-1", "one", 1);
+    row.offsetTop = 100;
+    row.offsetHeight = 40;
+    harness.messages.updateNavDots();
+    host.dispatch("pointermove", { clientX: 575 });
+    expect(rail.classList.contains("is-visible")).toBe(true);
+
+    // The pointer crosses from the transcript onto the dot: the transcript
+    // itself is left behind, but the wrapper is not.
+    harness.messagesEl.dispatch("pointerleave", {});
+    timers.splice(0).forEach((callback) => callback());
+    expect(rail.classList.contains("is-visible")).toBe(true);
+
+    // Leaving the panel altogether does put it away.
+    host.dispatch("pointerleave", {});
+    timers.splice(0).forEach((callback) => callback());
+    expect(rail.classList.contains("is-visible")).toBe(false);
+  });
+
+  it("keeps the first and last dots inside the track instead of stacking them", () => {
+    // The place used to be clamped to [2%, 98%], which pinned every dot near
+    // either end to the same two rows: a hundred-turn rail held three dots on
+    // one spot. The reading is mapped into the track now, so a crowded rail is
+    // still a scale.
+    const harness = createHarness();
+    const rail = railOf(harness);
+
+    const rows = [];
+    for (let i = 0; i < 12; i++) {
+      const row = drawUserBubble(harness, "user-" + i, "q" + i, i + 1);
+      row.offsetTop = i * 20;
+      row.offsetHeight = 20;
+      rows.push(row);
+    }
+    harness.messages.updateNavDots();
+
+    const places = rail.children.map((dot) => parseFloat(dot.style.top as string));
+    expect(places).toHaveLength(12);
+    expect(new Set(places).size).toBe(12);
+    expect(Math.min(...places)).toBeGreaterThanOrEqual(1.5);
+    expect(Math.max(...places)).toBeLessThanOrEqual(98.5);
+    // Still in order, top to bottom.
+    expect([...places].sort((a, b) => a - b)).toEqual(places);
+  });
+
+  it("shrinks the dots to fit the room between them", () => {    // 120 turns on a 569px rail sit 4.5px apart, and a 6px dot there is not a
+    // dot: the marks touch and the rail reads as one bar. Measured in a
+    // browser, the crowded rail's smallest gap was 3.9px against 6px marks.
+    const harness = createHarness();
+    const rail = railOf(harness);
+    rail.offsetHeight = 569;
+
+    const build = (count: number): string => {
+      harness.messagesEl.innerHTML = "";
+      harness.messages.clearNavDots();
+      for (let i = 0; i < count; i++) {
+        const row = drawUserBubble(harness, "user-" + i, "q" + i, i + 1);
+        row.offsetTop = i * 10;
+        row.offsetHeight = 10;
+      }
+      harness.messages.updateNavDots();
+      return cssVar(rail, "--nav-dot-size");
+    };
+
+    // Roomy: the full mark.
+    expect(build(12)).toBe("6px");
+    // Crowded: smaller than the gap it is given, and still drawn.
+    const crowded = parseFloat(build(120));
+    const gapPx = (97 / 100) * 569 / 119;
+    expect(crowded).toBeLessThan(6);
+    expect(crowded).toBeGreaterThanOrEqual(1);
+    expect(crowded).toBeLessThan(gapPx);
+    // Very crowded: the mark never grows past the room between marks, or two
+    // turns would share one dot.
+    const dense = parseFloat(build(200));
+    const denseGapPx = (97 / 100) * 569 / 199;
+    expect(dense).toBeLessThan(denseGapPx);
+  });
+
+  it("gives every dot a hit box as tall as its slot", () => {
+    // Shrinking the mark to keep a crowded rail readable left 2px targets on a
+    // 200-turn one. The hit box is separate now: the whole slot, so the boxes
+    // tile the strip — no gaps to click through, no two turns sharing a box —
+    // and any point on the rail picks the nearest turn.
+    const harness = createHarness();
+    const rail = railOf(harness);
+    rail.offsetHeight = 569;
+
+    const build = (count: number): { mark: number; hit: number } => {
+      harness.messagesEl.innerHTML = "";
+      harness.messages.clearNavDots();
+      for (let i = 0; i < count; i++) {
+        const row = drawUserBubble(harness, "user-" + i, "q" + i, i + 1);
+        row.offsetTop = i * 10;
+        row.offsetHeight = 10;
+      }
+      harness.messages.updateNavDots();
+      return {
+        mark: parseFloat(cssVar(rail, "--nav-dot-size")),
+        hit: parseFloat(cssVar(rail, "--nav-dot-hit")),
+      };
+    };
+
+    // A dense rail: the boxes meet exactly, and are taller than the mark, so
+    // the whole strip is clickable however thin the marks get.
+    const dense = build(200);
+    const denseGap = (97 / 100) * 569 / 199;
+    expect(dense.hit).toBeCloseTo(denseGap, 0);
+    expect(dense.hit).toBeGreaterThan(dense.mark);
+
+    // A dozen turns: generous, but capped so one dot is not a third of the rail.
+    const roomy = build(12);
+    expect(roomy.mark).toBe(6);
+    expect(roomy.hit).toBe(18);
+    expect(roomy.hit).toBeLessThan((97 / 100) * 569 / 11);
   });
 
   it("empties the rail when the transcript it mirrors is replaced", () => {
@@ -1126,6 +1391,79 @@ describe("message navigation rail", () => {
     messages.jumpToUserMessage("next");
     expect(messagesEl.scrollCalls).toHaveLength(1);
     expect(messagesEl.scrollCalls[0].top).toBe(80);
+  });
+
+  it("lights the dot that was clicked, not the one before it", () => {
+    // A jump lands its row below the prompt bar, so the bar is part of the
+    // margin the row clears. The rule that decides which dot is lit asked for
+    // the 20px slack alone, so the row it had just landed on read as still
+    // below the top edge — and every click lit the previous dot. Measured in a
+    // browser on a forty-turn transcript: off by one on all six dots tried.
+    const frames: Array<() => void> = [];
+    const harness = createHarness({ frames });
+    const { messages, messagesEl } = harness;
+    const rail = railOf(harness);
+    messagesEl.clientHeight = 600;
+    messagesEl.scrollHeight = 6000;
+
+    const bar = harness.getEl("turn-context");
+    bar.offsetHeight = 56;
+
+    const first = drawUserBubble(harness, "user-1", "the first question", 1);
+    first.offsetTop = 100;
+    first.offsetHeight = 40;
+    first.getBoundingClientRect = () => ({ top: 100 - messagesEl.scrollTop, height: 40 });
+    const second = drawUserBubble(harness, "user-2", "the second one", 2);
+    second.offsetTop = 3000;
+    second.offsetHeight = 40;
+    second.getBoundingClientRect = () => ({ top: 3000 - messagesEl.scrollTop, height: 40 });
+
+    messagesEl.scrollTop = 0;
+    messages.updateNavDots();
+    expect(rail.children[0].classList.contains("active")).toBe(true);
+
+    messages.scrollToMessage(second);
+    runFrames(frames);
+
+    // Landed 76px down (20 slack + the 56px bar it uncovered), and lit.
+    expect(messagesEl.scrollTop).toBe(2924);
+    expect(bar.hidden).toBe(false);
+    expect(rail.children[1].classList.contains("active")).toBe(true);
+    expect(rail.children[0].classList.contains("active")).toBe(false);
+  });
+
+  it("counts the landed row as current for a keyboard step", () => {
+    // The same reading edge answers "which turn am I in" for Ctrl/Cmd+Up/Down.
+    // Counting the landed row as below the top edge made one step forward
+    // re-aim at the row already on screen, so the keyboard looked dead until
+    // it had been pressed twice.
+    const frames: Array<() => void> = [];
+    const harness = createHarness({ frames });
+    const { messages, messagesEl } = harness;
+    messagesEl.clientHeight = 600;
+    messagesEl.scrollHeight = 6000;
+    harness.getEl("turn-context").offsetHeight = 56;
+
+    const rows = [
+      drawUserBubble(harness, "user-1", "one", 1),
+      drawUserBubble(harness, "user-2", "two", 2),
+      drawUserBubble(harness, "user-3", "three", 3),
+    ];
+    rows.forEach((row, i) => {
+      row.offsetTop = 1000 + i * 1500;
+      row.offsetHeight = 40;
+      row.getBoundingClientRect = () => ({ top: row.offsetTop - messagesEl.scrollTop, height: 40 });
+    });
+
+    messages.scrollToMessage(rows[1]);
+    runFrames(frames);
+    expect(messagesEl.scrollTop).toBe(2424);
+
+    messages.jumpToUserMessage("next");
+    runFrames(frames);
+
+    // The third prompt, not the second one over again.
+    expect(messagesEl.scrollTop).toBe(3924);
   });
 
   it("leaves the reader alone once they scroll away from a jump", () => {
