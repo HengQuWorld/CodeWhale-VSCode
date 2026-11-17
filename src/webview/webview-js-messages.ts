@@ -212,6 +212,13 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
     // the end; a pin per row would measure estimates anyway.
     if (_batchDepth > 0) return;
     if (userScrolledUp) return;
+    // A jump in flight is the reader choosing where to read. Pinning to the end
+    // here would drag them back — and it did: a delta arriving in the frames a
+    // landing takes undid it completely, leaving the row they picked thousands
+    // of pixels above the view. _jumpTarget is declared below (var, hoisted);
+    // it is set for exactly as long as a landing is in flight, so this leaves
+    // no state behind once the jump lets go.
+    if (_jumpTarget) return;
     pinToEnd();
   }
 
@@ -1891,9 +1898,6 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
   function scrollToMessage(el) {
     if (!el) return;
 
-    // Disable user-scrolled-up flag so smartScrollToBottom won't fight us
-    userScrolledUp = false;
-
     var target = scrollTargetFor(el);
     var distance = Math.abs(target - messagesEl.scrollTop);
     // A far row has never been laid out, and every row a long scroll passes is
@@ -1918,20 +1922,64 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
    *  Scrolling to a row changes which rows are painted, and a painted row
    *  trades its estimated height for the real one — moving everything below
    *  it, the row just scrolled to included. So landing is not a one-shot: this
-   *  waits until the transcript has been still, re-aims if the row has
-   *  drifted, and stops. Bounded, because a transcript whose estimates keep
-   *  changing must not keep a frame loop alive.
+   *  re-aims whenever the row has drifted, and only lets go once the reading
+   *  has been the same twice running. Bounded, because a transcript whose
+   *  estimates keep changing must not keep a frame loop alive.
+   *
+   *  "The same twice" is the whole point. A single frame can agree with the
+   *  target while the rows the jump uncovered have not been painted yet — the
+   *  browser lays them out on the *next* frame, which then moves the row by
+   *  however much those estimates were wrong by, and a loop that released on
+   *  that first agreeing frame left the row hundreds of pixels off screen.
+   *  That is what a dot that "sometimes lands somewhere else" was: the click
+   *  was honored, the measurement was simply taken one frame too early. So
+   *  both the scroll offset and the row's place in the transcript have to be
+   *  unchanged from the previous frame before this stops.
    *
    *  Correcting is only safe once the scroll has stopped: a smooth scroll is
    *  still travelling, and snapping it would cut the animation short and land
-   *  somewhere nobody asked for. An instant jump has already arrived, so it is
-   *  corrected on the very next frame. */
+   *  somewhere nobody asked for. An instant jump — and every correction made
+   *  here, which is instant by construction — has already arrived, so it is
+   *  corrected on the next frame.
+   *
+   *  A long jump can need many corrections: each one is exact for the geometry
+   *  it measured, and the next frame reveals more of the transcript, so the
+   *  count is "however many screens the browser takes to settle" rather than a
+   *  handful. The loop is bounded by frames, which covers that and the
+   *  transcript that never settles alike. */
   function settleJump(el, instant) {
     _jumpTarget = el;
     var lastTop = null;
+    var lastWant = null;
     var still = 0;
     var rounds = 0;
-    var needStill = instant ? 0 : 2;
+    /** Re-aims made on the bar's account. Two, not more: the bar's height
+     *  decides whether the row has cleared it, and a row straddling that edge
+     *  could otherwise be pushed down and measured back up for ever. */
+    var barAims = 0;
+    /** Whether the scroll in flight has come to rest. A smooth scroll has to
+     *  be waited out; anything this loop sets itself is already there. */
+    var atRest = !!instant;
+    var STILL_FRAMES = 2;
+    var MAX_BAR_AIMS = 2;
+    var MAX_ROUNDS = 180;
+
+    function finish() {
+      _jumpTarget = null;
+      syncNavRail();
+    }
+
+    function aim() {
+      messagesEl.scrollTo({ top: lastWant, behavior: 'auto' });
+      still = 0;
+      atRest = true;
+      // The next reading is a fresh one: the correction moved the view, and
+      // what it moved to is what has to be measured again.
+      lastTop = null;
+      lastWant = null;
+      if (rounds > MAX_ROUNDS) { finish(); return; }
+      requestAnimationFrame(tick);
+    }
 
     function tick() {
       if (_jumpTarget !== el) return; // a newer jump took over
@@ -1940,30 +1988,56 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
       // origin, and correcting toward that would send the reader to the top of
       // the conversation.
       var rect = el.getBoundingClientRect();
-      if (rect.top === 0 && rect.height === 0) return;
-      rounds++;
-      var top = messagesEl.scrollTop;
-      if (top === lastTop) still++;
-      else still = 0;
-      lastTop = top;
-
-      var settled = still >= needStill;
-      if (settled) {
-        var want = scrollTargetFor(el);
-        if (Math.abs(want - top) > 2) {
-          messagesEl.scrollTo({ top: want, behavior: 'auto' });
-          still = 0;
-          // Corrections are finite: a handful of them, not one per estimate.
-          rounds += 8;
-          settled = false;
-        }
-      }
-
-      if (settled || rounds > 90) {
+      if (rect.top === 0 && rect.height === 0) {
+        // Nothing left to land on, so there is no jump in flight any more —
+        // and leaving the target set would keep smartScrollToBottom out of the
+        // way of a turn that is still streaming.
         _jumpTarget = null;
         syncNavRail();
         return;
       }
+
+      rounds++;
+      var top = messagesEl.scrollTop;
+      var want = scrollTargetFor(el);
+      // Two readings of "it has not moved": the view, and the row's place in
+      // the transcript. The second is what catches a layout change happening
+      // under a view that is standing perfectly still.
+      if (top === lastTop) atRest = true;
+      var steady = top === lastTop && want === lastWant;
+      lastTop = top;
+      lastWant = want;
+
+      var drifted = Math.abs(want - top) > 2;
+      if (drifted && !atRest) still = 0;
+      else if (steady && !drifted) still++;
+      else still = 0;
+
+      if (drifted && atRest) {
+        aim();
+        return;
+      }
+
+      if (!drifted && still >= STILL_FRAMES) {
+        // The bar floats over the top edge, and it is what the row has to
+        // clear. It can have appeared *because* of this jump, and its own
+        // update runs on a frame of its own — so it is brought up to date
+        // here, before the landing is called final, and the row is re-aimed
+        // if it is now sitting under it.
+        updateTurnContext();
+        var finalWant = scrollTargetFor(el);
+        if (barAims < MAX_BAR_AIMS &&
+            Math.abs(finalWant - messagesEl.scrollTop) > 2) {
+          barAims++;
+          lastWant = finalWant;
+          aim();
+          return;
+        }
+        finish();
+        return;
+      }
+
+      if (rounds > MAX_ROUNDS) { finish(); return; }
       requestAnimationFrame(tick);
     }
 

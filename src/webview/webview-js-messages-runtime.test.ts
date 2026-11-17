@@ -1153,6 +1153,124 @@ describe("message navigation rail", () => {
     expect(messagesEl.scrollCalls).toHaveLength(1);
     expect(messagesEl.scrollTop).toBe(1300);
   });
+
+  /** Run the frames the module has queued, in order, until it stops asking for
+   *  more. The settle schedules one frame per tick, so the queue drains by
+   *  itself once it lets go. */
+  const runFrames = (frames: Array<() => void>, limit = 60) => {
+    let ran = 0;
+    while (frames.length > 0 && ran++ < limit) frames.shift()!();
+    return ran;
+  };
+
+  it("re-aims a jump whose row moves on the frame after it lands", () => {
+    // The browser lays out the rows a jump uncovered on the frame *after* the
+    // landing, and a row that was sitting at its estimate can then be pushed
+    // hundreds of pixels away. The settle used to let go on the first frame
+    // that agreed with the aim — which is that landing frame — so the row came
+    // to rest wherever the new layout put it. Clicking a dot and being taken
+    // somewhere else entirely is exactly this.
+    const frames: Array<() => void> = [];
+    const { messages, messagesEl } = createHarness({ frames });
+    messagesEl.clientHeight = 600;
+    messagesEl.scrollHeight = 8000;
+    messages.addMessage({ id: "m1", role: "user", content: "go", timestamp: 1 });
+    const row = messagesEl.children.find((el) => el.id === "msg-m1")!;
+    // A row's viewport position is its place in the transcript minus the
+    // scroll; its place here is what the lazy layout is about to change.
+    let rowTop = 4000;
+    row.getBoundingClientRect = () => ({ top: rowTop - messagesEl.scrollTop, height: 120 });
+    runFrames(frames);
+
+    messages.scrollToMessage(row);
+    // Far enough to land immediately, on the reading margin the rail's
+    // highlight and the keyboard jumps share.
+    expect(messagesEl.scrollTop).toBe(3980);
+
+    // The landing frame agrees with the aim. Then the rows above are painted,
+    // trade their estimates for real heights, and push this row 300px down.
+    runFrames(frames, 1);
+    expect(messagesEl.scrollTop).toBe(3980);
+    rowTop = 4300;
+    messagesEl.scrollHeight = 8300;
+    runFrames(frames);
+
+    expect(messagesEl.scrollCalls.length).toBeGreaterThan(1);
+    expect(messagesEl.scrollTop).toBe(4280);
+    expect(row.getBoundingClientRect().top).toBe(20);
+  });
+
+  it("lands a jump clear of the prompt bar the jump itself uncovers", () => {
+    // The bar floats over the top edge, so it is part of the margin a jump
+    // aims for — and it appears *because* of the jump: reading the top of the
+    // conversation shows the first prompt, so no bar; landing past it does.
+    // Its own update runs on a frame of its own, so a settle that let go
+    // before that frame left the row it was asked to show sitting underneath
+    // the bar.
+    const frames: Array<() => void> = [];
+    const harness = createHarness({ frames });
+    const { messages, messagesEl } = harness;
+    messagesEl.clientHeight = 600;
+    messagesEl.scrollHeight = 8000;
+    const bar = harness.getEl("turn-context");
+    bar.offsetHeight = 60;
+
+    // The first prompt starts 400px into the transcript, so it is on screen
+    // (and the bar hidden) while the reader is at the top.
+    const first = drawUserBubble(harness, "user-1", "the first question", 1);
+    first.getBoundingClientRect = () => ({ top: 400 - messagesEl.scrollTop, height: 40 });
+    const target = drawUserBubble(harness, "user-2", "the second one", 2);
+    target.getBoundingClientRect = () => ({ top: 4000 - messagesEl.scrollTop, height: 120 });
+    runFrames(frames);
+    messagesEl.scrollTop = 0;
+    bar.hidden = true;
+
+    messages.scrollToMessage(target);
+    runFrames(frames);
+
+    // The 20px reading margin plus the 60px bar the jump uncovered.
+    expect(bar.hidden).toBe(false);
+    expect(messagesEl.scrollTop).toBe(3920);
+    expect(target.getBoundingClientRect().top).toBe(80);
+  });
+
+  it("holds the landing while a streaming turn keeps pinning the end", () => {
+    // A live turn pins the view to its own end as rows stream in. A reader who
+    // just picked an earlier turn off the rail did not ask to be dragged back,
+    // and a delta arriving in the frames the landing takes used to do exactly
+    // that: measured in a browser, the row came to rest 15599px above the top
+    // of the view. The pin stands down for as long as a jump is in flight, and
+    // only for as long as that.
+    const frames: Array<() => void> = [];
+    const harness = createHarness({ frames });
+    const { messages, messagesEl } = harness;
+    messagesEl.clientHeight = 600;
+    messagesEl.scrollHeight = 6000;
+    const row = drawUserBubble(harness, "user-1", "the question", 1);
+    row.getBoundingClientRect = () => ({ top: 3000 - messagesEl.scrollTop, height: 40 });
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+    runFrames(frames);
+
+    messages.scrollToMessage(row);
+    expect(messagesEl.scrollTop).toBe(2980);
+
+    // The delta lands mid-landing: the row must stay where it was put.
+    messages.addMessage({
+      id: "a1",
+      role: "assistant",
+      content: "streaming",
+      status: "streaming",
+      timestamp: 1,
+    });
+    expect(messagesEl.scrollTop).toBe(2980);
+    runFrames(frames);
+    expect(messagesEl.scrollTop).toBe(2980);
+
+    // And the stand-down is over: the jump let go, so nothing is left holding
+    // auto-follow off for the rest of the session.
+    messages.addMessage({ id: "a2", role: "assistant", content: "done", timestamp: 2 });
+    expect(messagesEl.scrollTop).toBe(messagesEl.scrollHeight - messagesEl.clientHeight);
+  });
 });
 
 /**

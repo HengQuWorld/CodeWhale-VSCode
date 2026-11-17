@@ -4,6 +4,8 @@
 
 ### Bug Fixes
 
+- **A navigation dot lands on the message it names** — Clicking a dot on the conversation's right edge sometimes stopped well short of its message: the row sat off the top of the view or down near the bottom, while the rail's own highlight named a different turn. A jump keeps re-aiming while the transcript settles, and it used to let go on the first frame that agreed with the aim — but the browser lays out the rows a jump uncovers on the *next* frame, and their real heights can move the target by hundreds of pixels. The landing is now only final once both the scroll and the row's place in the transcript have stood still for two frames, and the prompt bar that floats over the top edge is brought up to date before that, so a jumped-to row is never left sitting underneath it. A live turn also stops pinning the view back to its end while a landing is under way: picking a turn off the rail is you choosing where to read, not a request to be dragged to the bottom.
+
 - **A conversation that takes a while to open says so** — Reopening a window on a long conversation, or opening one from the Threads or Sessions rail, used to leave the welcome page (or the conversation you were reading) on screen for the seconds the client spends rebuilding it, so the click looked like it had missed. The transcript now says it is loading the conversation, and the notice gives way to the conversation the moment it is drawn — or to the error, if it cannot be read.
 
 ## 0.10.2
