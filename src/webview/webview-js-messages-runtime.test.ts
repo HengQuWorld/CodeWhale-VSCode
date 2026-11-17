@@ -158,6 +158,11 @@ class FakeElement {
   /** Viewport right edge the rail's reveal measures from; 0 unless a test sets
    *  it, which is what the transcript's scrollbar side is. */
   public rectRight = 0;
+  /** Viewport left edge, for the menu's "is this over the scrollbar" reading. */
+  public rectLeft = 0;
+  /** Width without the scrollbar: the transcript menu tells a right-click on the
+   *  bar from one on the words by whether it landed past this. */
+  public clientWidth = 0;
   public parentElement: FakeElement | null = null;
   public children: FakeElement[] = [];
   public scrollCalls: Array<Record<string, unknown>> = [];
@@ -260,8 +265,37 @@ class FakeElement {
     return null;
   }
 
-  getBoundingClientRect(): { top: number; height: number; right?: number } {
-    return { top: this.rectTop, height: this.offsetHeight, right: this.rectRight };
+  getBoundingClientRect(): {
+    top: number;
+    left?: number;
+    height: number;
+    right?: number;
+    width?: number;
+  } {
+    return {
+      top: this.rectTop,
+      left: this.rectLeft,
+      height: this.offsetHeight,
+      right: this.rectRight,
+      width: this.offsetWidth,
+    };
+  }
+
+  /** The transcript menu is removed through `parentNode`, the way a browser
+   *  node is; the stand-in otherwise speaks in `parentElement`. */
+  get parentNode(): FakeElement | null {
+    return this.parentElement;
+  }
+
+  /** Whether a node sits inside this one — the menu asks before treating a
+   *  press as "outside" and closing itself on the click that chose an entry. */
+  contains(node: FakeElement | null): boolean {
+    let current: FakeElement | null = node;
+    while (current) {
+      if (current === this) return true;
+      current = current.parentElement;
+    }
+    return false;
   }
 
   scrollTo(options: Record<string, unknown>): void {
@@ -316,6 +350,9 @@ function createHarness(options: { frames?: Array<() => void>; timers?: Array<() 
     __wvDiffIdCounter: { value: 0 },
     __wvApiCapabilities: {},
     addEventListener: () => {},
+    // No selection unless a test makes one: with text selected the transcript
+    // leaves its right-click to the host's own menu.
+    getSelection: () => "",
   };
 
   // Every element the script creates, so a lookup by id (`msg-<id>` for a
@@ -323,15 +360,31 @@ function createHarness(options: { frames?: Array<() => void>; timers?: Array<() 
   // `renderTurnForkAction` find their host) resolves to the element that is
   // actually in the tree instead of a fresh detached one.
   const created: FakeElement[] = [];
+  /** The document's own listeners: the transcript menu closes on a press
+   *  elsewhere and on Escape, and both are document-level. */
+  const docListeners = new Map<string, Array<(event: unknown) => void>>();
+  const bodyEl = new FakeElement();
   const documentObj = {
-    getElementById: (id: string) => created.find((el) => el.id === id) ?? getEl(id),
+    body: bodyEl,
+    // A later element with an id wins: the menu is built and torn down per
+    // right-click, and a lookup must find the one on screen, not the first one
+    // ever created.
+    getElementById: (id: string) =>
+      [...created].reverse().find((el) => el.id === id) ?? getEl(id),
     createElement: () => {
       const element = new FakeElement();
       created.push(element);
       return element;
     },
     querySelectorAll: () => [] as FakeElement[],
-    addEventListener: () => {},
+    addEventListener: (name: string, handler: (event: unknown) => void) => {
+      const list = docListeners.get(name) ?? [];
+      list.push(handler);
+      docListeners.set(name, list);
+    },
+  };
+  const dispatchDoc = (name: string, event: unknown = {}): void => {
+    for (const handler of docListeners.get(name) ?? []) handler(event);
   };
 
   // Timer callbacks are dropped unless a test asks to run them; the rail's
@@ -389,7 +442,7 @@ function createHarness(options: { frames?: Array<() => void>; timers?: Array<() 
     return card;
   };
 
-  return { messages, messagesEl, addCard, getEl, window: windowObj, postMessages };
+  return { messages, messagesEl, addCard, getEl, window: windowObj, postMessages, document: documentObj, dispatchDoc, bodyEl };
 }
 
 describe("revealFileChangeCard", () => {
@@ -2644,5 +2697,227 @@ describe("conversation loading screen", () => {
 
     expect(h.messagesEl.querySelector(".conversation-loading")).toBeNull();
     expect(h.messagesEl.querySelector(".welcome-screen")).not.toBeNull();
+  });
+});
+
+/**
+ * The transcript's right-click menu.
+ *
+ * What right-clicking the transcript used to offer was the webview's default
+ * menu — Cut/Copy/Paste over a panel with no editable field. It offers three
+ * scrolling commands now: to the point you right-clicked, to the top, to the
+ * bottom.
+ */
+describe("transcript right-click menu", () => {
+  /** A transcript with a real scroll range, as the browser would report it. */
+  const transcript = (frames?: Array<() => void>) => {
+    const harness = createHarness(frames ? { frames } : {});
+    const { messagesEl } = harness;
+    messagesEl.clientHeight = 600;
+    messagesEl.scrollHeight = 6000;
+    messagesEl.offsetWidth = 500;
+    // getBoundingClientRect().right is the panel's edge; clientWidth leaves out
+    // the 15px scrollbar, which is how the menu tells a right-click on the bar
+    // from one on the words.
+    messagesEl.rectRight = 500;
+    messagesEl.rectLeft = 0;
+    messagesEl.clientWidth = 485;
+    return harness;
+  };
+
+  const menuOf = (harness: ReturnType<typeof createHarness>) =>
+    harness.bodyEl.children.find((el) => el.id === "transcript-menu") ?? null;
+
+  /** Choose an entry the way a press does: the event arrives at the menu (that
+   *  is where the listener is) with the entry as its target. The stand-in has no
+   *  bubbling, so the target is handed over rather than walked to. */
+  const choose = (harness: ReturnType<typeof createHarness>, index: number) => {
+    const menu = menuOf(harness)!;
+    menu.dispatch("click", { target: menu.children[index], stopPropagation() {} });
+  };
+
+  const rightClick = (harness: ReturnType<typeof createHarness>, x: number, y: number) => {
+    const event = {
+      clientX: x,
+      clientY: y,
+      prevented: false,
+      preventDefault() {
+        this.prevented = true;
+      },
+    };
+    harness.messagesEl.dispatch("contextmenu", event);
+    return event;
+  };
+
+  it("offers the three scrolling commands instead of the host's menu", () => {
+    const harness = transcript();
+    const event = rightClick(harness, 100, 300);
+
+    const menu = menuOf(harness)!;
+    expect(menu).not.toBeNull();
+    expect(menu.children.map((item) => item.textContent)).toEqual([
+      "Scroll here",
+      "To the top",
+      "To the bottom",
+    ]);
+    // The webview's own menu must not come up on top of it.
+    expect(event.prevented).toBe(true);
+  });
+
+  it("leaves a right-click on a selection to the host", () => {
+    // Copying what you selected is the one thing the default menu is for, and
+    // there is no other way to do it. The three commands are for everywhere
+    // else — a transcript with no editable field, where Cut and Paste cannot
+    // do anything.
+    const harness = transcript();
+    harness.window.getSelection = () => "the words I selected";
+    const event = rightClick(harness, 100, 300);
+
+    expect(event.prevented).toBe(false);
+    expect(menuOf(harness)).toBeNull();
+  });
+
+  it("scrolls to the top", () => {
+    const frames: Array<() => void> = [];
+    const harness = transcript(frames);
+    harness.messagesEl.scrollTop = 3000;
+    rightClick(harness, 100, 300);
+
+    choose(harness, 1);
+    frames.splice(0).forEach((cb) => cb());
+
+    expect(harness.messagesEl.scrollTop).toBe(0);
+    // And the menu is gone: the click that chose an entry is also the click
+    // that dismisses it.
+    expect(menuOf(harness)).toBeNull();
+  });
+
+  it("scrolls to the real end, not the estimated one", () => {
+    // The bottom is not scrollHeight - clientHeight here: rows below the fold
+    // are laid out lazily, so the container grows as the end comes into view.
+    // The pin the rest of the module uses is what "to the bottom" has to reuse.
+    const frames: Array<() => void> = [];
+    const harness = transcript(frames);
+    harness.messagesEl.scrollTop = 0;
+    rightClick(harness, 100, 300);
+
+    choose(harness, 2);
+    frames.splice(0).forEach((cb) => cb());
+
+    expect(harness.messagesEl.scrollTop).toBe(5400);
+    expect(harness.messages.getUserScrolledUp()).toBe(false);
+  });
+
+  it("reads a right-click on the scrollbar as a place on the track", () => {
+    // On the bar the reader is pointing at a place in the whole conversation, so
+    // the point is that fraction of the range — the same mapping the thumb uses.
+    const frames: Array<() => void> = [];
+    const harness = transcript(frames);
+    // 15px scrollbar: 485..500. A click a quarter down the track.
+    const event = rightClick(harness, 492, 150);
+    expect(event.prevented).toBe(true);
+    choose(harness, 0);
+    frames.splice(0).forEach((cb) => cb());
+
+    // 150/600 of a 5400px range.
+    expect(harness.messagesEl.scrollTop).toBe(1350);
+    // And the stream must not drag the reader off the place they picked.
+    expect(harness.messages.getUserScrolledUp()).toBe(true);
+  });
+
+  it("keeps the pointer's place on the track as the transcript settles", () => {
+    // The range a fraction names grows while the rows a jump uncovers are laid
+    // out, so applying it once lands on a place that is no longer the one the
+    // pointer named. Measured in a browser: a click a quarter down the track
+    // came to rest at 22.9% of the settled transcript. The fraction is applied
+    // again as the range grows, so the thumb stays where it was put.
+    const frames: Array<() => void> = [];
+    const harness = transcript(frames);
+    rightClick(harness, 492, 150);
+    choose(harness, 0);
+    expect(harness.messagesEl.scrollTop).toBe(1350);
+
+    // The scroll lands, the rows it uncovered are painted, the transcript grows.
+    harness.messagesEl.scrollHeight = 8000;
+    frames.splice(0).forEach((cb) => cb());
+
+    // A quarter of the range it actually has now, not of the estimate.
+    expect(harness.messagesEl.scrollTop).toBe(1850);
+  });
+
+  it("reads a right-click on the words as that row's own offset", () => {
+    // Off the bar, the reader is pointing at a message: the point is where that
+    // message sits in the transcript, not a fraction of the viewport.
+    const frames: Array<() => void> = [];
+    const harness = transcript(frames);
+    harness.messagesEl.scrollTop = 2000;
+    rightClick(harness, 100, 300);
+    choose(harness, 0);
+    frames.splice(0).forEach((cb) => cb());
+
+    expect(harness.messagesEl.scrollTop).toBe(2300);
+  });
+
+  it("closes on escape and on a press elsewhere", () => {
+    const harness = transcript();
+    rightClick(harness, 100, 300);
+    expect(menuOf(harness)).not.toBeNull();
+    harness.dispatchDoc("keydown", { key: "Escape", preventDefault() {} });
+    expect(menuOf(harness)).toBeNull();
+
+    rightClick(harness, 100, 300);
+    expect(menuOf(harness)).not.toBeNull();
+    harness.dispatchDoc("mousedown", { target: harness.getEl("input") });
+    expect(menuOf(harness)).toBeNull();
+  });
+
+  it("stays open for a press inside it", () => {
+    // The press that chooses an entry lands inside the menu; treating it as
+    // "outside" would close the menu before the click could be read.
+    const harness = transcript();
+    rightClick(harness, 100, 300);
+    const menu = menuOf(harness)!;
+    harness.dispatchDoc("mousedown", { target: menu.children[1] });
+    expect(menuOf(harness)).not.toBeNull();
+  });
+
+  it("closes when the transcript scrolls out from under it", () => {
+    const harness = transcript();
+    rightClick(harness, 100, 300);
+    expect(menuOf(harness)).not.toBeNull();
+    harness.messagesEl.dispatch("scroll", {});
+    expect(menuOf(harness)).toBeNull();
+  });
+
+  it("anchors a keyboard-invoked menu inside the panel", () => {
+    // Shift+F10 and the context-menu key raise a contextmenu event with both
+    // coordinates at 0 — no pointer was involved. Anchored there the menu
+    // opened in the window's corner, outside the panel, and "Scroll here" read
+    // the 0 as the top of the conversation.
+    const frames: Array<() => void> = [];
+    const harness = transcript(frames);
+    harness.messagesEl.scrollTop = 2500;
+    harness.messagesEl.rectLeft = 40;
+    rightClick(harness, 0, 0);
+
+    const menu = menuOf(harness)!;
+    expect(menu).not.toBeNull();
+    // Just inside the transcript's visible top-left corner.
+    expect(menu.style.left).toBe("52px");
+    expect(menu.style.top).toBe("20px");
+    // And the first entry has focus, or a keyboard reader cannot reach any.
+    expect(menu.children[0].focusCalls).toBe(1);
+
+    choose(harness, 0);
+    frames.splice(0).forEach((cb) => cb());
+    // "Here" with no pointer means where the reader already is.
+    expect(harness.messagesEl.scrollTop).toBe(2500);
+  });
+
+  it("replaces itself rather than stacking on a second right-click", () => {
+    const harness = transcript();
+    rightClick(harness, 100, 300);
+    rightClick(harness, 120, 320);
+    expect(harness.bodyEl.children.filter((el) => el.id === "transcript-menu")).toHaveLength(1);
   });
 });

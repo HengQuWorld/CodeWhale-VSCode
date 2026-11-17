@@ -566,6 +566,18 @@ describe("message navigation rail", () => {
     expect(css).toContain("#message-nav:not(.is-visible) .msg-nav-dot");
   });
 
+  it("floats the transcript menu free of the transcript's own overflow", () => {
+    const css = getWebviewCss();
+    const rule = css.match(/(^|\n)\s*#transcript-menu \{([\s\S]*?)\n\s*\}/)?.[2] ?? "";
+
+    // The menu is placed at the pointer in viewport coordinates and has to be
+    // able to sit over the scrollbar and the rail. Inside the transcript it
+    // would be clipped by that element's own overflow the moment it opened near
+    // an edge.
+    expect(rule).toMatch(/position:\s*fixed;/);
+    expect(Number(rule.match(/z-index:\s*(\d+);/)?.[1])).toBeGreaterThan(5);
+  });
+
   it("keeps the rail out of sight until it is reached for", () => {
     const css = getWebviewCss();
     const rule = railRule(css);

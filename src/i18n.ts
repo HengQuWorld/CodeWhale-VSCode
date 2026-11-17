@@ -385,6 +385,13 @@ interface Translations {
   /** What the pinned bar says for a prompt that carried no text (an
    *  attachment-only send), so the bar is never blank. */
   turnPromptNoText: string;
+  /** The transcript's right-click menu, on the scrollbar: move the view so the
+   *  point you right-clicked comes to the top. */
+  transcriptScrollHere: string;
+  /** ... the first message. */
+  transcriptScrollTop: string;
+  /** ... the last message. */
+  transcriptScrollBottom: string;
   locateChange: string;
   locateChangeTooltip: string;
   viewDiff: string;
@@ -979,6 +986,9 @@ const en: Translations = {
   changeTurnLabel: "Turn {n}",
   turnPromptPinTooltip: "Jump back to this turn's prompt",
   turnPromptNoText: "This prompt has no text",
+  transcriptScrollHere: "Scroll here",
+  transcriptScrollTop: "To the top",
+  transcriptScrollBottom: "To the bottom",
   locateChange: "Locate",
   locateChangeTooltip: "Jump to the tool call card that made this change",
   viewDiff: "View Diff",
@@ -1529,6 +1539,9 @@ const zhCn: Translations = {
   changeTurnLabel: "第 {n} 轮",
   turnPromptPinTooltip: "跳回本轮的提示词",
   turnPromptNoText: "本轮提示词没有文字内容",
+  transcriptScrollHere: "到这里",
+  transcriptScrollTop: "到顶",
+  transcriptScrollBottom: "到底",
   locateChange: "定位",
   locateChangeTooltip: "跳转到产生此变更的工具调用卡片",
   viewDiff: "查看差异",
@@ -2135,6 +2148,9 @@ export function webviewTranslations(tr: Translations) {
     changeTurnLabel: tr.changeTurnLabel,
     turnPromptPinTooltip: tr.turnPromptPinTooltip,
     turnPromptNoText: tr.turnPromptNoText,
+    transcriptScrollHere: tr.transcriptScrollHere,
+    transcriptScrollTop: tr.transcriptScrollTop,
+    transcriptScrollBottom: tr.transcriptScrollBottom,
     locateChange: tr.locateChange,
     locateChangeTooltip: tr.locateChangeTooltip,
     viewDiff: tr.viewDiff,

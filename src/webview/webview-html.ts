@@ -363,6 +363,13 @@ export interface WebviewTranslations {
   /** What the pinned bar says for a prompt that carried no text (an
    *  attachment-only send), so the bar is never blank. */
   turnPromptNoText: string;
+  /** The transcript's right-click menu, on the scrollbar: move the view so the
+   *  point you right-clicked comes to the top. */
+  transcriptScrollHere: string;
+  /** ... the first message. */
+  transcriptScrollTop: string;
+  /** ... the last message. */
+  transcriptScrollBottom: string;
   locateChange: string;
   locateChangeTooltip: string;
   userInputAwaiting: string;

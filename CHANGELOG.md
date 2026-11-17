@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### New Features
+
+- **Right-clicking a conversation offers three ways to scroll** — Right-click the transcript and you get **Scroll here**, **To the top** and **To the bottom**, in place of the webview's default menu (Cut/Copy/Paste, over a panel that holds no editable field). Scroll here reads the gesture where it landed: on the scrollbar it means that place on the track, so a click a quarter down the bar puts you a quarter into the conversation, and it stays there as the rows it uncovers are laid out; on the words themselves it brings the message under the pointer to the top. To the bottom lands on the real end of the conversation rather than on an estimate of it. The menu closes on Escape, on a press elsewhere, and on a scroll — and a right-click on text you have selected is left to the default menu, which is the only way to copy it. Opened from the keyboard (Shift+F10) it appears inside the panel with the first entry focused, where it would otherwise have opened in the window's corner with "Scroll here" meaning the top of the conversation.
+
 ### Bug Fixes
 
 - **The dot you click is the one that lights up** — Clicking a dot on the conversation's right edge scrolled to the right message but highlighted the dot above it, so the rail always looked one turn behind and Ctrl/Cmd+Down needed two presses to move. A jump lands its message below the prompt bar pinned over the top edge, but the rule that decides which dot is lit only allowed for the 20px reading margin — so the message it had just landed on read as still off screen, by exactly the bar's height (56px, measured). The landing, the highlight and the keyboard now share one reading edge. A message you scroll to normally still lights its own turn.

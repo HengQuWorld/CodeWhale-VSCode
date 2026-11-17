@@ -268,6 +268,8 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
       userScrolledUp = true;
     }
     scheduleTurnContextUpdate();
+    // The menu names a place on a track that has just moved.
+    closeTranscriptMenu();
     if (_navScrollTimer) return;
     _navScrollTimer = setTimeout(function() {
       syncNavRail();
@@ -1487,6 +1489,10 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
       // has just moved. (Dots themselves are percentages of the rail and need
       // no re-placing.)
       _navEdgeRight = null;
+      // Its three entries name places in a transcript that has just been
+      // re-measured. It is placed in viewport coordinates, so it would sit over
+      // the wrong row if it stayed.
+      closeTranscriptMenu();
     }, 150);
   });
 
@@ -2078,6 +2084,208 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
     });
     navHostEl.addEventListener('pointerleave', hideNavRail);
   }
+
+  // ── The transcript's right-click menu ──
+  //
+  // Three scrolling commands, where the pointer already is. What right-clicking
+  // the transcript used to offer was the webview's default menu — Cut/Copy/
+  // Paste over a panel that holds no editable field, so half of it could not do
+  // anything. These three can.
+  //
+  // The menu is built on demand rather than kept in the template: it exists
+  // only between the right-click and the next thing the reader does, so there is
+  // nothing to keep in sync with the transcript behind it.
+  var _tmenuEl = null;
+  /** Where the right-click pointed, captured when the menu opens — the entries
+   *  are acted on later, and the pointer will have moved. frac is set for a
+   *  point on the scrollbar's track (a place in the whole conversation) and
+   *  null for a point on the words (a content offset). */
+  var _tmenuTarget = { y: 0, frac: null };
+
+  function closeTranscriptMenu() {
+    if (!_tmenuEl) return;
+    if (_tmenuEl.parentNode) _tmenuEl.parentNode.removeChild(_tmenuEl);
+    _tmenuEl = null;
+  }
+
+  /** Where a right-click on the transcript names.
+   *
+   *  Two readings, because the gesture means two things depending on where it
+   *  lands. On the scrollbar the reader is pointing at a place on the track, so
+   *  the answer is that fraction of the conversation — and it stays a fraction,
+   *  so a transcript that settles taller afterwards is still scrolled to the
+   *  place the pointer named rather than to a fixed offset that is no longer
+   *  that place. On the words themselves the answer is the offset of what is
+   *  under the pointer, which is where a jump would put it. */
+  function transcriptTargetAt(e) {
+    var rect = messagesEl.getBoundingClientRect();
+    var max = Math.max(0, messagesEl.scrollHeight - messagesEl.clientHeight);
+    var clientWidth = messagesEl.clientWidth || 0;
+    // The scrollbar occupies the strip clientWidth leaves out.
+    var onScrollbar = rect.width > 0 && clientWidth > 0 &&
+      e.clientX >= (rect.left || 0) + clientWidth - 1;
+    if (onScrollbar) {
+      var height = messagesEl.clientHeight || 1;
+      var frac = (e.clientY - rect.top) / height;
+      frac = Math.min(1, Math.max(0, frac));
+      return { y: Math.round(frac * max), frac: frac };
+    }
+    return {
+      y: Math.round(messagesEl.scrollTop + (e.clientY - rect.top)),
+      frac: null,
+    };
+  }
+
+  /** Put that point at the top of the view.
+   *
+   *  Applied again for the frames the transcript takes to settle: the rows a
+   *  long scroll uncovers are laid out lazily, so the range the point lives in
+   *  grows *after* it has been applied, and a single assignment lands short — or,
+   *  for a fraction, lands on a place that is no longer the one the pointer
+   *  named. Bounded, because a transcript that never settles must not own a
+   *  frame loop. */
+  function scrollTranscriptTo(target) {
+    abandonJump();
+    var rounds = 0;
+    var lastMax = -1;
+    var steady = 0;
+    /** Frames of a settled reading before this lets go. One is not enough: the
+     *  browser lays the rows a long scroll uncovered out on the frame *after*
+     *  the scroll, so a range that looks final on the frame it was measured can
+     *  still grow on the next one — which is how a click a quarter down the
+     *  track came to rest at 22.9% of the transcript it settled into. */
+    var STEADY_FRAMES = 3;
+    var MAX_ROUNDS = 60;
+    function step() {
+      var max = Math.max(0, messagesEl.scrollHeight - messagesEl.clientHeight);
+      var y = target.frac === null || target.frac === undefined
+        ? target.y
+        : target.frac * max;
+      var want = Math.max(0, Math.min(max, Math.round(y)));
+      var onTarget = true;
+      if (Math.abs(want - messagesEl.scrollTop) > 1) {
+        // A jumped-to place is the reader's choice, so the stream must not pull
+        // them off it (see the note in smartScrollToBottom). Landing at the end
+        // hands follow back on its own: the scroll recomputes the flag.
+        userScrolledUp = want < max;
+        messagesEl.scrollTo({ top: want, behavior: 'auto' });
+        onTarget = false;
+      }
+      if (max === lastMax && onTarget) steady++;
+      else steady = 0;
+      lastMax = max;
+      rounds++;
+      if (rounds < MAX_ROUNDS && steady < STEADY_FRAMES) {
+        requestAnimationFrame(step);
+      } else {
+        syncNavRail();
+      }
+    }
+    step();
+  }
+
+  /** Show the menu at the pointer, inside the panel.
+   *
+   *  focusFirst is for a menu opened from the keyboard: it has no pointer to be
+   *  near, and nothing else would put the reader inside it, so the first entry
+   *  takes focus and Escape/Enter work as a menu should. */
+  function openTranscriptMenu(x, y, target, focusFirst) {
+    closeTranscriptMenu();
+    _tmenuTarget = target;
+
+    var menu = document.createElement('div');
+    menu.id = 'transcript-menu';
+    menu.setAttribute('role', 'menu');
+
+    var entries = [
+      { action: 'here', label: __i18n.transcriptScrollHere },
+      { action: 'top', label: __i18n.transcriptScrollTop },
+      { action: 'bottom', label: __i18n.transcriptScrollBottom },
+    ];
+    for (var i = 0; i < entries.length; i++) {
+      var item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'transcript-menu-item';
+      item.setAttribute('role', 'menuitem');
+      item.setAttribute('data-action', entries[i].action);
+      item.textContent = entries[i].label;
+      menu.appendChild(item);
+    }
+
+    menu.addEventListener('click', function(ev) {
+      var item = ev && ev.target;
+      var action = item && item.getAttribute ? item.getAttribute('data-action') : null;
+      if (!action) return;
+      ev.stopPropagation();
+      closeTranscriptMenu();
+      if (action === 'top') scrollTranscriptTo({ y: 0, frac: null });
+      else if (action === 'bottom') scrollToBottomForced();
+      else scrollTranscriptTo(_tmenuTarget);
+    });
+
+    // Placed after it is in the document, so its own size is known: a menu
+    // opened near the bottom edge would otherwise hang out of the panel.
+    var host = navHostEl || messagesEl;
+    var hostRect = host.getBoundingClientRect();
+    document.body.appendChild(menu);
+    var menuRect = menu.getBoundingClientRect();
+    var left = x;
+    var top = y;
+    if (menuRect.width && left + menuRect.width > hostRect.right - 4) {
+      left = Math.max(hostRect.left + 4, x - menuRect.width);
+    }
+    if (menuRect.height && top + menuRect.height > hostRect.bottom - 4) {
+      top = Math.max(hostRect.top + 4, y - menuRect.height);
+    }
+    menu.style.left = Math.round(left) + 'px';
+    menu.style.top = Math.round(top) + 'px';
+    _tmenuEl = menu;
+    if (focusFirst && menu.firstChild && menu.firstChild.focus) menu.firstChild.focus();
+  }
+
+  messagesEl.addEventListener('contextmenu', function(e) {
+    if (!e) return;
+    closeTranscriptMenu();
+    if (!messagesEl.scrollHeight) return;
+    // Text the reader has selected is what the default menu is genuinely for —
+    // Copy is the only way to take it — so a right-click on a selection is left
+    // to the host. Everywhere else the default menu's Cut/Paste cannot do
+    // anything in a transcript that holds no editable field.
+    var sel = window.getSelection ? window.getSelection() : null;
+    if (sel && String(sel) && String(sel).trim()) return;
+    e.preventDefault();
+    if (typeof e.clientX !== 'number' || typeof e.clientY !== 'number') return;
+
+    // A menu opened from the keyboard — Shift+F10, or the context-menu key —
+    // carries no pointer position: both coordinates are 0, which cannot be a
+    // press inside the transcript. Anchored there the menu opened in the
+    // window's corner, outside the panel, and "Scroll here" read the 0 as the
+    // top of the conversation. Anchor it to the visible top-left instead, and
+    // let "here" mean "where I already am".
+    var keyboard = !e.clientX && !e.clientY;
+    var rect = messagesEl.getBoundingClientRect();
+    var x = keyboard ? (rect.left || 0) + 12 : e.clientX;
+    var y = keyboard ? rect.top + readingMarginPx() : e.clientY;
+    var target = keyboard
+      ? { y: Math.round(messagesEl.scrollTop), frac: null }
+      : transcriptTargetAt(e);
+    openTranscriptMenu(x, y, target, keyboard);
+  });
+
+  // Anything the reader does next puts it away: a press elsewhere, the escape
+  // key, a scroll, or the panel changing size under it.
+  document.addEventListener('mousedown', function(e) {
+    if (!_tmenuEl) return;
+    if (e && e.target && _tmenuEl.contains && _tmenuEl.contains(e.target)) return;
+    closeTranscriptMenu();
+  }, true);
+  document.addEventListener('keydown', function(e) {
+    if (!_tmenuEl) return;
+    if (e && (e.key === 'Escape' || e.key === 'Esc')) {
+      closeTranscriptMenu();
+      if (e.preventDefault) e.preventDefault();
+    }
+  }, true);
 
   /** Flash highlight and scroll a message into view. */
   function scrollToMessage(el) {

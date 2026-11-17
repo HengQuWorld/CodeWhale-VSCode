@@ -1059,6 +1059,52 @@ export function getWebviewCss(): string {
       transform: translateY(-50%) translateX(0);
     }
 
+    /* ── Transcript right-click menu ──
+
+       Fixed rather than absolute: it is placed at the pointer in viewport
+       coordinates, and it has to be able to sit over the rail and the
+       transcript's scrollbar without being clipped by the transcript's own
+       overflow. Its parent is the body for the same reason. */
+    #transcript-menu {
+      position: fixed;
+      z-index: 60;
+      min-width: 120px;
+      padding: 4px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      /* Opaque, with a fallback: this panel floats over the words, and a menu
+         the transcript shows through is unreadable. Every other popup uses
+         --card-bg alone, which the host always defines — this one sits over
+         text in a way the toolbar's menus do not. */
+      background: var(--card-bg, var(--vscode-editorWidget-background, #252526));
+      box-shadow: 0 6px 20px rgba(0, 0, 0, 0.28);
+      display: flex;
+      flex-direction: column;
+      gap: 1px;
+    }
+    .transcript-menu-item {
+      display: block;
+      width: 100%;
+      margin: 0;
+      padding: 5px 10px;
+      border: none;
+      border-radius: 4px;
+      background: transparent;
+      color: var(--fg);
+      font-family: inherit;
+      font-size: 0.9em;
+      line-height: 1.6;
+      text-align: left;
+      white-space: nowrap;
+      cursor: pointer;
+    }
+    .transcript-menu-item:hover,
+    .transcript-menu-item:focus-visible {
+      background: var(--brand-primary);
+      color: var(--brand-primary-foreground);
+      outline: none;
+    }
+
     /* ── Message Jump Highlight Animation ── */
 
     @keyframes msgJumpFlash {
