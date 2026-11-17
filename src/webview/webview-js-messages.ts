@@ -400,8 +400,103 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
     });
   }
 
+  // ── Loading Screen ──
+  // A conversation the host has to rebuild — a long thread, a large saved
+  // session — takes seconds to arrive. Without this the view kept whatever it
+  // already had (the welcome page on startup, the previous conversation on a
+  // rail click), which reads as if nothing had been asked for.
+  //
+  // The paint is delayed: a short conversation arrives inside the delay and
+  // the spinner would otherwise flash for a frame on every switch. The delay
+  // is also why the pending timer is tracked — a transcript that arrived first
+  // must be able to cancel the paint, not just remove what is on screen.
+  var LOADING_SHOW_DELAY_MS = 150;
+  var _loadingScreenEl = null;
+  var _loadingTimer = null;
+  // Which announcement the pending timer speaks for. A timer already in the
+  // queue cannot be relied on to stay cancelled, so the callback compares this
+  // token against its own and paints nothing once it has been superseded.
+  var _loadingToken = null;
+
+  function paintLoadingScreen(label) {
+    var screen = document.createElement('div');
+    screen.className = 'conversation-loading';
+    var spinner = document.createElement('span');
+    spinner.className = 'conversation-loading-spinner';
+    var text = document.createElement('span');
+    text.className = 'conversation-loading-text';
+    text.textContent = label;
+    screen.appendChild(spinner);
+    screen.appendChild(text);
+    // The welcome page describes an idle empty view, which is the opposite of
+    // what a load in flight means: it goes rather than sitting under the
+    // spinner and promising suggestions that are not clickable yet.
+    var welcome = messagesEl.querySelector('.welcome-screen');
+    if (welcome) welcome.remove();
+    messagesEl.appendChild(screen);
+    _loadingScreenEl = screen;
+    // The previous conversation is still above it, and a long one puts this
+    // row past the fold — the reader would be looking at the transcript they
+    // clicked away from and see no sign that anything started.
+    scrollToBottomForced();
+  }
+
+  /** Show that a conversation is on its way. Idempotent: the host may announce
+   *  the same load more than once (the startup restore reaches it from two
+   *  paths), and only the label would change. */
+  function renderLoading(text) {
+    var label = typeof text === 'string' && text !== '' ? text : __i18n.loadingConversation;
+    if (_loadingScreenEl) {
+      var current = _loadingScreenEl.querySelector('.conversation-loading-text');
+      if (current) current.textContent = label;
+      return;
+    }
+    if (_loadingTimer !== null) {
+      clearTimeout(_loadingTimer);
+      _loadingTimer = null;
+    }
+    var token = {};
+    _loadingToken = token;
+    _loadingTimer = setTimeout(function() {
+      if (_loadingToken !== token) return;
+      _loadingToken = null;
+      _loadingTimer = null;
+      // Something drew the conversation while the timer was pending; the
+      // screen that belongs there is already on screen.
+      if (_loadingScreenEl) return;
+      paintLoadingScreen(label);
+    }, LOADING_SHOW_DELAY_MS);
+  }
+
+  /** Take the loading screen away — the conversation it announced is here, or
+   *  the load failed and its own error says so. */
+  function clearLoading() {
+    if (_loadingTimer !== null) {
+      clearTimeout(_loadingTimer);
+      _loadingTimer = null;
+    }
+    _loadingToken = null;
+    if (_loadingScreenEl) {
+      // Detached already (a wholesale innerHTML replace took it) is not an
+      // error: remove() is a no-op for a node with no parent.
+      _loadingScreenEl.remove();
+      _loadingScreenEl = null;
+    }
+    // A screen painted before this module first held the reference (or left
+    // behind by a wholesale innerHTML replace) still names a wait that is
+    // over; nothing else knows how to take it away.
+    var stray = messagesEl.querySelector('.conversation-loading');
+    while (stray) {
+      stray.remove();
+      stray = messagesEl.querySelector('.conversation-loading');
+    }
+  }
+
   // ── Welcome Screen ──
   function renderWelcome() {
+    // An idle empty view is the answer to any pending load announcement: the
+    // two describe opposite states and must never share the transcript.
+    clearLoading();
     var existing = messagesEl.querySelector('.welcome-screen');
     if (existing) return;
     var welcome = document.createElement('div');
@@ -1926,6 +2021,8 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
     addMessage: addMessage,
     removeMessage: removeMessage,
     renderWelcome: renderWelcome,
+    renderLoading: renderLoading,
+    clearLoading: clearLoading,
     renderToolCall: renderToolCall,
     applyToolOutcome: applyToolOutcome,
     renderToolInput: renderToolInput,

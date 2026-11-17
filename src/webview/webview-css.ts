@@ -1107,6 +1107,45 @@ export function getWebviewCss(): string {
       background: rgba(109, 158, 166, 0.08);
     }
 
+    /* ── Loading Screen ──
+       The transcript's stand-in while the host rebuilds a conversation. It
+       sits in the same flow position the welcome page takes, so the swap
+       between the two does not move anything else on screen. */
+
+    .conversation-loading {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 40px 24px;
+      color: var(--muted);
+      font-size: 0.85em;
+      animation: welcomeFadeIn 200ms ease-out;
+    }
+    /* A wait with nothing else in the transcript is the whole view, so it
+       takes the height the welcome page it replaced had. With a previous
+       conversation still above it the row keeps its own height at the end,
+       where the reader is looking — filling the container there would push
+       that conversation off screen for a wait it is not part of. */
+    .conversation-loading:only-child {
+      min-height: 100%;
+    }
+    .conversation-loading-spinner {
+      flex: 0 0 auto;
+      width: 12px;
+      height: 12px;
+      /* Not the bare --muted the rail's spinner uses: a theme that leaves
+         descriptionForeground undefined makes that var() substitution fail,
+         and the declaration is dropped rather than falling back to a faint
+         ring — a spinner with no border is an empty gap beside the label. */
+      border: 2px solid var(--vscode-descriptionForeground, rgba(128, 128, 128, 0.6));
+      border-top-color: transparent;
+      border-radius: 50%;
+      /* The rail's own spinner already defines the turn; one keyframe for
+         every spinner in this sheet keeps them turning together. */
+      animation: thread-list-spin 0.8s linear infinite;
+    }
+
     /* ── Messages ── */
 
     .message {

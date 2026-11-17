@@ -2108,3 +2108,85 @@ describe("pinning a rebuilt transcript to its end", () => {
     expect(h.messages.getUserScrolledUp()).toBe(false);
   });
 });
+
+describe("conversation loading screen", () => {
+  it("names the wait once it lasts longer than a blink", () => {
+    const timers: Array<() => void> = [];
+    const h = createHarness({ timers });
+
+    // A short conversation arrives inside the delay, so nothing is painted for
+    // it — a spinner that flashed for a frame on every switch reads as a
+    // glitch, not as progress.
+    h.messages.renderLoading();
+    expect(h.messagesEl.querySelector(".conversation-loading")).toBeNull();
+
+    timers.forEach((paint) => paint());
+
+    const screen = h.messagesEl.querySelector(".conversation-loading");
+    expect(screen).not.toBeNull();
+    expect(screen!.querySelector(".conversation-loading-text")!.textContent)
+      .toBe("Loading conversation…");
+    expect(screen!.querySelector(".conversation-loading-spinner")).not.toBeNull();
+    // The welcome page describes an idle empty view; a load in flight is the
+    // opposite claim, so the two never share the transcript.
+    expect(h.messagesEl.querySelector(".welcome-screen")).toBeNull();
+  });
+
+  it("shows which conversation the host is opening", () => {
+    const timers: Array<() => void> = [];
+    const h = createHarness({ timers });
+
+    h.messages.renderLoading("Opening “Big thread”");
+    timers.forEach((paint) => paint());
+
+    expect(
+      h.messagesEl.querySelector(".conversation-loading-text")!.textContent,
+    ).toBe("Opening “Big thread”");
+  });
+
+  it("cancels the paint when the conversation arrives first", () => {
+    const timers: Array<() => void> = [];
+    const h = createHarness({ timers });
+
+    h.messages.renderLoading();
+    // The transcript was drawn (clearTranscript runs clearLoading) before the
+    // delay elapsed: the queued paint must not put a spinner back over rows
+    // that are already on screen.
+    h.messages.clearLoading();
+    timers.forEach((paint) => paint());
+
+    expect(h.messagesEl.querySelector(".conversation-loading")).toBeNull();
+  });
+
+  it("brings the wait into view even for a reader who had scrolled up", () => {
+    const timers: Array<() => void> = [];
+    const h = createHarness({ timers });
+    h.messagesEl.scrollHeight = 2000;
+    h.messagesEl.clientHeight = 500;
+    h.messages.setUserScrolledUp(true);
+
+    h.messages.renderLoading();
+    timers.forEach((paint) => paint());
+
+    // The row was appended under a long transcript the reader had scrolled
+    // back through; left where it was, the spinner would be past the fold and
+    // the click would still look unanswered.
+    expect(h.messagesEl.scrollTop).toBe(1500);
+    expect(h.messages.getUserScrolledUp()).toBe(false);
+  });
+
+  it("gives the view back to the welcome page when the wait is over", () => {
+    const timers: Array<() => void> = [];
+    const h = createHarness({ timers });
+
+    h.messages.renderLoading();
+    timers.forEach((paint) => paint());
+    expect(h.messagesEl.querySelector(".conversation-loading")).not.toBeNull();
+
+    h.messages.clearLoading();
+    h.messages.renderWelcome();
+
+    expect(h.messagesEl.querySelector(".conversation-loading")).toBeNull();
+    expect(h.messagesEl.querySelector(".welcome-screen")).not.toBeNull();
+  });
+});

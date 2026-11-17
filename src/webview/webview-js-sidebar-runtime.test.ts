@@ -237,6 +237,9 @@ function createHarness(options?: { storage?: Record<string, string> | null }) {
   // The Changes panel's Locate action scrolls the stream itself rather than
   // calling back into the extension, so it reaches the messages module here.
   const revealCalls: Array<Record<string, unknown>> = [];
+  // A row click announces the wait before it asks for the conversation, so the
+  // transcript says "loading" instead of sitting on the previous one.
+  const loadingCalls: string[] = [];
   const windowObj: Record<string, any> = {
     __wvI18n: makeTr(),
     __wvEscapeHtml: (value: unknown) => String(value ?? ""),
@@ -250,6 +253,9 @@ function createHarness(options?: { storage?: Record<string, string> | null }) {
       revealFileChangeCard: (ref: Record<string, unknown>) => {
         revealCalls.push(ref);
         return true;
+      },
+      renderLoading: (text?: string) => {
+        loadingCalls.push(text ?? "");
       },
     },
     addEventListener: () => {},
@@ -324,6 +330,8 @@ function createHarness(options?: { storage?: Record<string, string> | null }) {
   const rail = getEl("tab-threads-list");
   return {
     rail,
+    /** Every "a conversation is loading" announcement the rail made. */
+    loadingCalls,
     sessionRail: getEl("tab-sessions"),
     archiveToggle: getEl("archive-filter-toggle"),
     chip: getEl("agent-panel-toggle"),
@@ -648,6 +656,52 @@ function waitingThread(id: string, updatedAt: string, pending = 1, title?: strin
 function chipHint(chip: FakeElement): string {
   return chip.getAttribute("data-tooltip") || "";
 }
+
+describe("a clicked conversation announces its own load", () => {
+  it("says the thread is loading before it asks for it", () => {
+    const { loadingCalls, postMessages, rail, sidebar } = createHarness();
+    sidebar.setThreads([threadSummary("thread-a")]);
+    sidebar.renderThreads();
+
+    threadRow(rail, "thread-a").dispatch("click");
+
+    // The host has to read the thread and replay it before a row can be drawn,
+    // which is seconds on a large conversation. Saying so on the click is what
+    // keeps the previous conversation from looking like the answer.
+    expect(loadingCalls.length).toBe(1);
+    expect(postMessages).toContainEqual({ type: "loadThread", threadId: "thread-a" });
+  });
+
+  it("says a saved session is loading before it asks for it", () => {
+    const { loadingCalls, postMessages, sessionRail, sidebar } = createHarness();
+    sidebar.setSessions([savedSession("sess-1")]);
+    sidebar.renderSessions();
+
+    sessionRail.querySelector('[data-session-id="sess-1"]')!.dispatch("click");
+
+    expect(loadingCalls.length).toBe(1);
+    expect(postMessages).toContainEqual({ type: "loadSession", sessionId: "sess-1" });
+  });
+
+  it("says nothing for a row action that opens no conversation", () => {
+    const { loadingCalls, postMessages, sessionRail, sidebar } = createHarness();
+    sidebar.setSessions([savedSession("sess-1")]);
+    sidebar.renderSessions();
+
+    // Deleting a row is not a load; announcing one would put a spinner over a
+    // conversation nobody asked for.
+    sessionRail.querySelector('[data-session-id="sess-1"]')!
+      .querySelector(".session-delete-btn")!
+      .dispatch("click", { stopPropagation: () => {} });
+
+    expect(loadingCalls.length).toBe(0);
+    expect(postMessages).toContainEqual({
+      type: "deleteSession",
+      sessionId: "sess-1",
+      sessionTitle: "Session sess-1",
+    });
+  });
+});
 
 describe("toolbar Agent chip", () => {
   it("says what it counts and names the thread the click expands", () => {

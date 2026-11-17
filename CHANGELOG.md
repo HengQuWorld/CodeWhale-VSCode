@@ -1,5 +1,11 @@
 # Change Log
 
+## Unreleased
+
+### Bug Fixes
+
+- **A conversation that takes a while to open says so** — Reopening a window on a long conversation, or opening one from the Threads or Sessions rail, used to leave the welcome page (or the conversation you were reading) on screen for the seconds the client spends rebuilding it, so the click looked like it had missed. The transcript now says it is loading the conversation, and the notice gives way to the conversation the moment it is drawn — or to the error, if it cannot be read.
+
 ## 0.10.2
 
 Everything in this release is client-side and works on engine **v0.10.2**, the same floor 0.10.1 names; nothing here waits on an engine build. The memory panel reads the Context Lens routes that engine **v0.10.0** introduced.

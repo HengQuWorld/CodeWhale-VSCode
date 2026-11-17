@@ -108,6 +108,11 @@ interface Translations {
   /** Rail status when that fetch failed and the user can retry. */
   threadsLoadFailed: string;
   threadsRetry: string;
+  /** Shown in the transcript while a conversation is being rebuilt for the
+   *  view: the startup restore, a rail click, a fork or a resume. A large
+   *  session takes seconds to arrive, and a still welcome page reads as if
+   *  the click did nothing. */
+  loadingConversation: string;
   turnContinuesInBackground: string;
   backgroundGoalStarted: string;
   backgroundGoalAskHint: string;
@@ -793,6 +798,7 @@ const en: Translations = {
   userInputMultiSelectHint: "Select all that apply, then confirm.",
   noConversations: "No conversations yet", threadAttention: "Waiting for your approval or input — click to open", threadsNeedsYou: "Needs you", threadsRunning: "Running", threadsRecent: "Recent",
   threadsLoading: "Loading threads…", threadsLoadFailed: "Couldn't load the thread list", threadsRetry: "Retry",
+  loadingConversation: "Loading conversation…",
   turnContinuesInBackground: "Turn continues running in the background",
   backgroundGoalStarted: "Background goal started on its own thread — it works from the objective alone and keeps running while you work elsewhere.",
   backgroundGoalAskHint: "Note: the Ask posture blocks each tool approval in the background and auto-denies after the engine timeout — consider Auto-Review or Full Access for background goals.",
@@ -1342,6 +1348,7 @@ const zhCn: Translations = {
   userInputMultiSelectHint: "可多选，选好后点确认。",
   noConversations: "暂无会话", threadAttention: "等待你的审批或输入——点击打开", threadsNeedsYou: "等你处理", threadsRunning: "运行中", threadsRecent: "最近",
   threadsLoading: "正在加载线程…", threadsLoadFailed: "线程列表加载失败", threadsRetry: "重试",
+  loadingConversation: "正在加载会话…",
   turnContinuesInBackground: "回合将在后台继续运行",
   backgroundGoalStarted: "后台目标已在独立线程启动——它只依据目标本身工作，你在别处时不受影响。",
   backgroundGoalAskHint: "注意：Ask 姿态下后台的每次工具审批都会阻塞，超时后自动拒绝——后台目标建议使用 Auto-Review 或 Full Access。",
@@ -1942,6 +1949,7 @@ export function webviewTranslations(tr: Translations) {
     threadsLoading: tr.threadsLoading,
     threadsLoadFailed: tr.threadsLoadFailed,
     threadsRetry: tr.threadsRetry,
+    loadingConversation: tr.loadingConversation,
     goalBackgroundRun: tr.goalBackgroundRun,
     goalBackgroundHint: tr.goalBackgroundHint,
     goalBackgroundSection: tr.goalBackgroundSection,

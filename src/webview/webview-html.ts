@@ -109,6 +109,9 @@ export interface WebviewTranslations {
   threadsLoading: string;
   threadsLoadFailed: string;
   threadsRetry: string;
+  /** What the transcript says while a conversation is being rebuilt for the
+   *  view (startup restore, a rail click, a fork or a resume). */
+  loadingConversation: string;
   goalBackgroundRun: string;
   goalBackgroundHint: string;
   goalBackgroundSection: string;

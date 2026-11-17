@@ -266,6 +266,10 @@ function createRuntimeHarness() {
   const mcpToolsCalls: Array<{ server: unknown; tools: unknown[]; connections: unknown[] }> = [];
   const mcpImportsCalls: unknown[] = [];
   let mcpPanelCalls = 0;
+  /** "A conversation is loading" announcements the transcript was handed. */
+  const loadingAnnouncements: string[] = [];
+  /** How many times the handler took that announcement down again. */
+  let loadingCleared = 0;
 
   const windowObj: Record<string, any> = {
     __wvI18n: makeTr(),
@@ -374,6 +378,12 @@ function createRuntimeHarness() {
         batchCalls.push("end");
       },
       renderWelcome: () => {},
+      renderLoading: (text?: string) => {
+        loadingAnnouncements.push(text ?? "");
+      },
+      clearLoading: () => {
+        loadingCleared += 1;
+      },
       createThinkingBlock: () => new FakeElement(),
       updateThinkingBlock: () => {},
       renderPlanApproveButton: (messageId: string) => {
@@ -577,6 +587,8 @@ function createRuntimeHarness() {
     mcpToolsCalls,
     mcpImportsCalls,
     mcpPanelCalls: () => mcpPanelCalls,
+    loadingAnnouncements,
+    loadingCleared: () => loadingCleared,
   };
 }
 
@@ -2917,5 +2929,49 @@ describe("webview-js-event-handler runtime: a question that must be seen", () =>
     expect(
       barsIn(harness.getElement("messages")).map((bar) => bar.getAttribute("data-input-id")),
     ).toEqual(["input-1", "input-2"]);
+  });
+});
+
+describe("loading a conversation", () => {
+  it("passes on the wait the host says it is in", () => {
+    const harness = createRuntimeHarness();
+
+    harness.dispatchMessage({ type: "conversationLoading", loading: true });
+    harness.dispatchMessage({ type: "conversationLoading", loading: true, text: "Opening “Big thread”" });
+
+    // Both announcements reach the transcript: the module is idempotent, and a
+    // label is the only thing a second one may change.
+    expect(harness.loadingAnnouncements).toEqual(["", "Opening “Big thread”"]);
+  });
+
+  it("takes the wait down as soon as the transcript is drawn", () => {
+    const harness = createRuntimeHarness();
+
+    harness.dispatchMessage({ type: "conversationLoading", loading: true });
+    harness.dispatchMessage({ type: "loadHistory", messages: [] });
+
+    // Drawing the conversation is the announcement's answer; a spinner left
+    // over a rebuilt transcript would name a wait that is over — and the
+    // welcome page is the same answer for a conversation that turns out empty.
+    expect(harness.loadingCleared()).toBeGreaterThan(0);
+  });
+
+  it("takes the wait down when the load fails", () => {
+    const harness = createRuntimeHarness();
+
+    harness.dispatchMessage({ type: "conversationLoading", loading: true });
+    harness.dispatchMessage({ type: "error", message: "Failed to load thread: 404" });
+
+    // The banner is what the reader should be reading; a spinner above it
+    // would promise a conversation that is not coming.
+    expect(harness.loadingCleared()).toBeGreaterThan(0);
+  });
+
+  it("takes it down when the host says the wait ended without a load", () => {
+    const harness = createRuntimeHarness();
+
+    harness.dispatchMessage({ type: "conversationLoading", loading: false });
+
+    expect(harness.loadingCleared()).toBe(1);
   });
 });

@@ -923,6 +923,13 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
           this.postInputHistory();
           // Same for the parked memos: the queue outlives the panel.
           this.postMessageQueue();
+          // A reloaded view lost the transcript it had, and the answer is a
+          // conversation the restore below has to rebuild. The handshake is
+          // the first moment the webview is alive enough to be told, so the
+          // announcement goes before the reads, not after them.
+          if (this.currentThread?.id || loadLastThreadId(this.currentWorkspaceKey())) {
+            this.announceConversationLoad();
+          }
           await this.api.ensureReady();
           await this.syncWebviewState();
         } catch (err) {
@@ -1386,6 +1393,12 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         // to. Dropping it here is how a reload turned the next auto-save into a
         // second document for the same history.
         this.currentSessionId = threadWithContent.session_id ?? null;
+        // This branch runs before the webview has announced itself, so the
+        // announcement may land nowhere — the `webviewReady` handshake
+        // re-announces it, and either way `loadHistory` below is what the
+        // reader ends up looking at. Posted here too because it costs nothing
+        // and the handshake is not the only way in.
+        this.announceConversationLoad();
         await this.loadHistory();
         this.subscribeToEvents();
       } else if (threads.length > 0) {
@@ -2324,6 +2337,10 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
 
   public async loadSessionMessages(sessionId: string): Promise<void> {
     this.parkCurrentThread();
+    // A saved document is read and replayed before anything can be drawn, and
+    // a large one takes seconds; the view says so rather than leaving the
+    // previous conversation on screen.
+    this.announceConversationLoad();
     // Started before the document read and awaited only where the rebuild needs
     // it, so decoration never adds a serial round trip in front of a
     // conversation that is ready to draw.
@@ -2838,7 +2855,25 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     this.currentSessionId = null;
   }
 
+  /** Tell the view that a conversation is being rebuilt for it.
+   *
+   *  `GET /v1/threads/{id}` and the session read both cost seconds on a large
+   *  conversation, and the webview has nothing to draw until they land. The
+   *  announcement is what keeps the transcript from showing the previous
+   *  conversation — or the welcome page, on a startup restore — as if the view
+   *  were idle. Whatever draws next (loadHistory, clearChat) or fails (error)
+   *  takes it away again; nothing here has to remember to. */
+  private announceConversationLoad(): void {
+    this.postMessage({ type: "conversationLoading", loading: true });
+  }
+
   private async loadThread(threadId: string): Promise<void> {
+    // Every way into a conversation lands here — a rail row, the startup
+    // restore, a resumed session, undo/retry's fork — and each of them is a
+    // read the runtime has to replay before a single row can be drawn. The
+    // view says so instead of sitting on the previous conversation (or, at
+    // startup, the welcome page) as if the click had missed.
+    this.announceConversationLoad();
     // Switching parks the outgoing thread instead of interrupting it: the
     // runtime keeps the turn running server-side and the background watcher
     // keeps its badges/notifications alive (upstream web client behaviour).
@@ -2930,6 +2965,10 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       // Push the thread-scoped goal (or null) for the newly loaded thread.
       void this.refreshGoal();
     } catch (err) {
+      // The wait is over even though no conversation arrived; the error below
+      // is the answer, and a spinner left above it would promise a load that
+      // is not happening.
+      this.postMessage({ type: "conversationLoading", loading: false });
       this.postMessage({
         type: "error",
         message: formatError("Failed to load thread", err),

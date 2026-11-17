@@ -128,6 +128,11 @@ ${PROVIDER_PICKER_JS}
     if (window.__wvMessages && window.__wvMessages.setUserScrolledUp) {
       window.__wvMessages.setUserScrolledUp(false);
     }
+    // A loading screen announced a conversation that was on its way; drawing
+    // one (or emptying the view for a new chat) is that announcement's answer.
+    if (window.__wvMessages && window.__wvMessages.clearLoading) {
+      window.__wvMessages.clearLoading();
+    }
     hideApprovalFloat();
   }
 
@@ -1233,6 +1238,21 @@ ${PROVIDER_PICKER_JS}
         if (window.__wvGoal) window.__wvGoal.reset();
         break;
 
+      case 'conversationLoading':
+        // The host names a wait it is in: rebuilding a conversation for this
+        // view takes seconds when the session is large, and the view is not
+        // idle while it does. A loading:false reply is the host's own "the
+        // wait is over even though nothing was drawn"; a failed load reports
+        // that on its own, so this is only the quiet path.
+        if (window.__wvMessages) {
+          if (msg.loading === false) {
+            if (window.__wvMessages.clearLoading) window.__wvMessages.clearLoading();
+          } else if (window.__wvMessages.renderLoading) {
+            window.__wvMessages.renderLoading(msg.text);
+          }
+        }
+        break;
+
       case 'threadLoaded':
         showContinueSession(false);
         window.__wvSidebar.setActiveThreadId(msg.threadId || msg.thread?.id || null);
@@ -2249,6 +2269,9 @@ ${PROVIDER_PICKER_JS}
         // steering, which needs a turn, would be refused by the engine.
         var keepStreaming = msg.keepStreaming === true;
         if (!keepStreaming) {
+          // A load that failed has nothing left to wait for; the banner below
+          // is what the reader should be looking at instead of the spinner.
+          if (window.__wvMessages.clearLoading) window.__wvMessages.clearLoading();
           window.__wvMessages.setStreaming(false);
           var st = window.__wvMessages.getStreamingTimeout();
           if (st) { clearTimeout(st); window.__wvMessages.setStreamingTimeout(null); }

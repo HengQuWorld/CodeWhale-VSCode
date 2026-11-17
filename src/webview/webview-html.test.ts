@@ -59,6 +59,7 @@ function makeTr(): WebviewTranslations {
     threadsLoading: "Loading threads…",
     threadsLoadFailed: "Couldn't load the thread list",
     threadsRetry: "Retry",
+    loadingConversation: "Loading conversation…",
     goalBackgroundRun: "Run on a background thread",
     goalBackgroundHint: "Background goals keep working while you chat here.",
     goalBackgroundSection: "Background goals",

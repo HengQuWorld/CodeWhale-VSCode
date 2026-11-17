@@ -32,6 +32,20 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
   var __wvBackdropClickGuard = window.__wvBackdropClickGuard;
   var vscode = window.__wvVscode;
 
+  /** Say a conversation was asked for, before the host has answered.
+   *
+   *  Opening a row is a round trip: the provider reads the thread/session and
+   *  rebuilds it, which is seconds on a large conversation. The transcript
+   *  would otherwise keep the previous conversation (or the welcome page)
+   *  until then, so the click looks like it missed. The host's own
+   *  conversationLoading message and the rebuilt transcript both land on
+   *  the same screen, and any of them clears it. */
+  function announceConversationLoad() {
+    if (window.__wvMessages && window.__wvMessages.renderLoading) {
+      window.__wvMessages.renderLoading();
+    }
+  }
+
   // ── Sidebar state ──
   var sessions = [];
   var activeSessionId = null;
@@ -751,6 +765,7 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
 
     (function(sessionId) {
       el.addEventListener('click', function() {
+        announceConversationLoad();
         vscode.postMessage({ type: 'loadSession', sessionId: sessionId });
       });
     })(session.id);
@@ -911,6 +926,7 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
 
     (function(threadId) {
       el.addEventListener('click', function() {
+        announceConversationLoad();
         vscode.postMessage({ type: 'loadThread', threadId: threadId });
       });
     })(t.id);
