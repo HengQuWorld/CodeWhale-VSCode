@@ -553,14 +553,21 @@ describe("message navigation rail", () => {
     const css = getWebviewCss();
     const rule = railRule(css);
 
-    // The dots used to sit 4px from the right edge of the transcript, and the
-    // webview draws its scrollbar in the rightmost 15px: the dots were *on* the
-    // bar, with pointer events on, so dragging the scrollbar landed on a dot.
-    // The rail is its own strip now, inset clear of that 15px.
+    // The dots used to sit 4px from the right edge of the transcript, squarely
+    // on the bar, with pointer events on: dragging the scrollbar landed on a
+    // dot. How far out the rail sits is the host's scrollbar geometry, and the
+    // hosts differ — a classic native bar reserves a ~15px strip, a macOS
+    // overlay bar reserves nothing and paints an ~11px thumb over the content
+    // while scrolling. This sheet can only hold the overlay-mode default
+    // (thumb plus a 2px breathing gap); when a strip is reserved the messages
+    // script measures it live and pins the rail just outside it (see
+    // applyNavRailInset, covered by the runtime suite). What must never happen
+    // in either mode is overlap: the dots carry pointer events, and a dot
+    // pixel over the live scrollbar steals its drag. (While hidden the rail
+    // slides 4px toward the edge, but a hidden rail's dots take no pointer
+    // events at all.)
     const inset = Number(rule.match(/right:\s*(\d+)px;/)?.[1]);
-    expect(inset).toBeGreaterThan(15);
-    const width = Number(rule.match(/width:\s*(\d+)px;/)?.[1]);
-    expect(inset).toBeGreaterThanOrEqual(15 + width / 2);
+    expect(inset).toBeGreaterThanOrEqual(11 + 2);
 
     // And a hidden rail is not a target either.
     expect(css).toContain("#message-nav:not(.is-visible) .msg-nav-dot");

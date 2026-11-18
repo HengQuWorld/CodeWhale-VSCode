@@ -1742,6 +1742,12 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
    *  rail for every streaming delta is what made it twitch. */
   var _navSignature = null;
 
+  /** The breathing gap the rail keeps from whatever scrollbar the host is
+   *  drawing, and how wide an overlay thumb paints when nothing is reserved.
+   *  The inset itself is measured, not assumed — see applyNavRailInset. */
+  var NAV_RAIL_GAP_PX = 2;
+  var NAV_OVERLAY_THUMB_PX = 11;
+
   // Opening a compaction note (a <details>) changes how tall its row is, and
   // every dot below it moves with it. The toggle event does not bubble, hence the
   // capture listener; the thinking-block toggle asks for the same refresh
@@ -1803,6 +1809,28 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
     activeDotIndex = idx;
   }
 
+  /** Pin the rail just outside the scrollbar the host actually draws.
+   *
+   *  The scrollbar's geometry is the host's, not ours: a classic native bar
+   *  reserves a strip on the right (measured live — ~15px), a macOS overlay
+   *  bar reserves nothing and paints its thumb over the content while
+   *  scrolling (~11px wide). The sheet's 'right' is the overlay-mode default;
+   *  when a strip is reserved this overwrites it so the rail hugs the strip.
+   *  Either way the dot hit boxes — pointer-events on while the rail shows —
+   *  stay out of the live scrollbar, so a scrollbar drag never lands on a
+   *  dot. Runs when the dots are placed (a rebuild is also when the strip can
+   *  have changed: a zoom or a resize re-laid the panel) and writes only on
+   *  change, like setRailVar. */
+  function applyNavRailInset() {
+    if (!navRail) return;
+    var reserved = messagesEl.offsetWidth - messagesEl.clientWidth;
+    if (!(reserved > 0)) return;
+    var inset = reserved + NAV_RAIL_GAP_PX;
+    if (navRail.style.right !== inset + 'px') {
+      navRail.style.right = inset + 'px';
+    }
+  }
+
   /** Give every dot its place, once, from a single reading of the transcript.
    *
    *  This used to run again on every scroll, and that was the whole of the
@@ -1850,6 +1878,7 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
       navDots[j].el.style.top = pct + '%';
     }
     sizeNavDots(span);
+    applyNavRailInset();
     return true;
   }
 

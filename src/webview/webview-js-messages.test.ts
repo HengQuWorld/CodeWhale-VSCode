@@ -35,6 +35,16 @@ describe("webview-js-messages.ts", () => {
     expect(script).toContain("function addMessage");
   });
 
+  it("measures the scrollbar to place the rail beside it", () => {
+    const script = getMessagesScript(makeTr());
+    // The rail's inset is the host's scrollbar geometry, so it is measured
+    // rather than assumed: a reserved strip (classic bars) is hugged live,
+    // and where nothing is reserved (overlay bars) the sheet's overlay
+    // default stands.
+    expect(script).toContain("function applyNavRailInset");
+    expect(script).toContain(".offsetWidth - ");
+  });
+
   it("renders the per-turn usage chip from persisted messages", () => {
     const script = getMessagesScript(makeTr());
     expect(script).toContain("msg.usage");

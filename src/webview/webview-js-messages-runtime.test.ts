@@ -1115,6 +1115,38 @@ describe("message navigation rail", () => {
     expect(rail.children[1].classList.contains("active")).toBe(false);
   });
 
+  it("hugs a reserved scrollbar strip by measuring it, not by guessing it", () => {
+    const harness = createHarness();
+    const rail = railOf(harness);
+
+    // A classic native bar reserves the rightmost 15px of the transcript.
+    harness.messagesEl.offsetWidth = 500;
+    harness.messagesEl.clientWidth = 485;
+
+    drawUserBubble(harness, "user-1", "the question", 1);
+    harness.messages.updateNavDots();
+
+    // The strip, plus the breathing gap, written live onto the rail — not a
+    // constant, so a host that reserves a different width is still hugged.
+    expect(rail.style.right).toBe("17px");
+  });
+
+  it("leaves the overlay-mode default in place when nothing is reserved", () => {
+    const harness = createHarness();
+    const rail = railOf(harness);
+
+    // An overlay bar reserves no strip — its thumb paints over the content
+    // while scrolling — so the sheet's own default (thumb width plus gap) is
+    // the right answer and the script has nothing to add.
+    harness.messagesEl.offsetWidth = 500;
+    harness.messagesEl.clientWidth = 500;
+
+    drawUserBubble(harness, "user-1", "the question", 1);
+    harness.messages.updateNavDots();
+
+    expect(rail.style.right).toBe("");
+  });
+
   it("keeps every dot where it was placed when the transcript grows under it", () => {
     // The dots used to be re-placed on every scroll, each place a fraction of
     // messagesEl.scrollHeight — and that divisor grows as the reader reveals

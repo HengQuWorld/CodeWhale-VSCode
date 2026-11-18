@@ -846,7 +846,11 @@ export function getWebviewCss(): string {
     #messages {
       height: 100%;
       overflow-y: auto;
-      padding: 8px;
+      /* The right side keeps only a sliver of its own room: the nav rail and
+         the scrollbar already draw over that strip, and the bubble's own
+         12px padding is what keeps glyphs readable. What is lost here is
+         bought there. */
+      padding: 8px 2px 8px 8px;
     }
 
     /* The transcript is a container, not a control, but it takes focus on a
@@ -937,19 +941,28 @@ export function getWebviewCss(): string {
     /* ── Message Navigation Rail ──
 
        The rail is its own strip, clear of the transcript's scrollbar. It used
-       to sit 4px from the right edge, squarely inside the 15px strip the
-       scrollbar occupies, with pointer events on — so a drag of the scrollbar
-       landed on a dot instead of the bar. The dots carry their own positions
-       (frozen when they are built, see placeNavDots), so this strip has no
-       reason to line up with the scrollbar's track, and the two no longer
-       pretend to share a scale.
+       to sit 4px from the right edge, squarely inside the strip the scrollbar
+       occupies, with pointer events on — so a drag of the scrollbar landed on
+       a dot instead of the bar.
+
+       How far out it sits is the host's scrollbar geometry, and the hosts
+       differ: a classic native bar reserves a strip on the right (~15px),
+       while a macOS overlay bar reserves nothing and paints its thumb over
+       the content while scrolling (~11px wide). A constant guessed one host,
+       and on the other the thumb drew straight over the rail. So this value
+       is only the overlay-mode default — 11px of thumb plus a 2px breathing
+       gap — and the messages script measures a reserved strip when there is
+       one, pinning the rail just outside it (see applyNavRailInset). Either
+       way the dots stay fully outside the live scrollbar — a dot press must
+       never land on the bar — and the earlier 22px constant is what read as
+       a wide dead gutter around the scrollbar.
 
        Hidden until the pointer comes near the right edge (see the reveal in
        the messages script): a rail across the conversation is an overlay the
        reader did not ask to read, and it is only wanted while navigating. */
     #message-nav {
       position: absolute;
-      right: 22px;
+      right: 13px;
       top: 6px;
       bottom: 6px;
       width: 12px;
