@@ -1,11 +1,11 @@
 # CodeWhale for VS Code — a lightweight GUI frontend for the CodeWhale agent
 
-[![Version](https://img.shields.io/badge/version-0.10.2-blue)](https://github.com/HengQuWorld/CodeWhale-VSCode)
+[![Version](https://img.shields.io/badge/version-0.10.3-blue)](https://github.com/HengQuWorld/CodeWhale-VSCode)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![CI](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/ci.yml/badge.svg)](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/ci.yml)
 [![Release](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/release.yml/badge.svg)](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/release.yml)
 [![VS Code](https://img.shields.io/badge/VS%20Code-1.85+-informational)](https://code.visualstudio.com/)
-[![VSIX](https://img.shields.io/badge/VSIX-~576%20KB-brightgreen)](https://github.com/HengQuWorld/CodeWhale-VSCode/releases)
+[![VSIX](https://img.shields.io/badge/VSIX-~589%20KB-brightgreen)](https://github.com/HengQuWorld/CodeWhale-VSCode/releases)
 [![macOS](https://img.shields.io/badge/macOS-supported-brightgreen)](#requirements)
 [![Windows](https://img.shields.io/badge/Windows-supported-brightgreen)](#requirements)
 [![Linux](https://img.shields.io/badge/Linux-supported-brightgreen)](#requirements)
@@ -22,7 +22,7 @@ The split is deliberate: **the agent stays in the engine, the ergonomics stay in
 
 | | |
 |---|---|
-| VSIX size (0.10.2) | ~576 KB |
+| VSIX size (0.10.3) | ~589 KB |
 | Runtime npm dependencies | **none** — webpack inlines the extension's own TypeScript (and `marked` for rendering) |
 | Bundled engine or model | **none** — `codewhale` is a separate native binary |
 | Duplicated agent logic | **none** — the GUI is an adapter over the engine's local runtime API |
@@ -32,9 +32,9 @@ The frontend is a webview. `ChatProvider` runs in the extension host, speaks HTT
 
 Because nothing about the agent is copied into the extension, the engine can ship new capabilities and fixes without a frontend release.
 
-### Engine compatibility for 0.10.2
+### Engine compatibility for 0.10.3
 
-0.10.2 runs on engine **v0.10.2**, the same floor 0.10.1 names, and everything it ships is client-side: a Memory section in the Activity tab to review, pin and add notes from, tool cards that name how a failed call ended and why, and conversations that open at their own end. The three surfaces with a floor of their own are unchanged — the memory routes the panel reads (the same Context Lens routes the `/memory` review commands use) and the **MCP** panel arrive with engine **v0.10.0** (the release that introduced the Context Lens routes, and the MCP management routes whose listing names the layer each server belongs to and carries the configuration revision every edit presents), while the workspace-trust banner, the client a session reports itself as, and a second window or a second CodeWhale client on the same machine all need **v0.10.2**.
+0.10.3 runs on engine **v0.10.2**, the same floor 0.10.2 names, and everything it ships is client-side: a scrolling menu of your own on the conversation's scrollbar and words, a navigation rail whose dots hold their place and land on the turn they name, and a notice while a long conversation is still being opened. The three surfaces with a floor of their own are unchanged — the memory routes the panel reads (the same Context Lens routes the `/memory` review commands use) and the **MCP** panel arrive with engine **v0.10.0** (the release that introduced the Context Lens routes, and the MCP management routes whose listing names the layer each server belongs to and carries the configuration revision every edit presents), while the workspace-trust banner, the client a session reports itself as, and a second window or a second CodeWhale client on the same machine all need **v0.10.2**.
 
 What still needs a Codewhale build newer than any tagged engine release:
 
@@ -140,12 +140,12 @@ npx @vscode/vsce package --no-dependencies
 Then install the generated `.vsix` (`Extensions: Install from VSIX...`), or from a terminal:
 
 ```bash
-code --install-extension ./brotherwhale-vscode-0.10.2.vsix --force
+code --install-extension ./brotherwhale-vscode-0.10.3.vsix --force
 ```
 
 > **Trae CN users:** if `code` is not on your `PATH`, use the bundled CLI:
 > ```bash
-> "/Applications/Trae CN.app/Contents/Resources/app/bin/code" --install-extension ./brotherwhale-vscode-0.10.2.vsix --force
+> "/Applications/Trae CN.app/Contents/Resources/app/bin/code" --install-extension ./brotherwhale-vscode-0.10.3.vsix --force
 > ```
 
 **Option C — Open VSX:** [Open VSX](https://open-vsx.org/extension/hengquworld/brotherwhale-vscode) carries the same builds for editors outside Microsoft's ecosystem — VSCodium, and CodeArts on HarmonyOS PC, whose extension panel has an Open VSX page. Search "CodeWhale" and install; no VSIX to side-load.
@@ -161,7 +161,8 @@ Click the **CodeWhale icon** in the activity bar. The extension starts the engin
 - **Mid-turn steering** — while a turn is running, pressing Enter sends guidance into that turn instead of starting a new one (mirrors the engine's steering input); the steered message is marked with a steer badge, and guidance the engine discarded before the model read it says **not delivered** instead.
 - **One send/stop button** that reflects the real turn state, plus **Undo** and **Retry** for the last turn.
 - **Attachments** — `/attach`, the 📎 button, or **CodeWhale: Attach to Conversation** on a file in the Explorer's context menu; images can be pasted with `Ctrl/Cmd+V`, and a file dragged in from Finder or another window attaches the same way. (A drag that starts inside VS Code — from the Explorer tree or an editor tab — never reaches the chat webview: VS Code keeps it for its own editor-group drop target. Use the context-menu entry for those.)
-- **Message navigation rail** — dots along the right edge jump to each user message; `Ctrl/Cmd+Up` / `Ctrl/Cmd+Down` step between them.
+- **Message navigation rail** — dots along the right edge jump to each user message; `Ctrl/Cmd+Up` / `Ctrl/Cmd+Down` step between them. The dots hold still as a conversation is laid out, sit in a strip clear of the scrollbar, and light the one that was clicked.
+- **Scrolling from the conversation itself** — right-click the transcript for **Scroll here**, **To the top** and **To the bottom**; on the scrollbar, *Scroll here* means that place on the track, and on the words it brings the message under the pointer to the top. A right-click on selected text keeps the default menu, so copying still works.
 - **Questions you can answer more than once** — a question the model offers several answers to ticks and unticks as you click, and a confirm button sends the whole set at once; a request carrying several questions numbers them and counts the answered ones.
 - **A failed tool call says how it ended** — a card names the ending (failed, interrupted, cancelled) beside the exit code and how long the command ran, carries the reason the engine recorded for the turn, and keeps the command's output even when it changed no files.
 
@@ -323,7 +324,7 @@ Reloading or closing the extension stops that window's Runtime and interrupts ac
 
 **Installing a VSIX**
 ```bash
-code --install-extension /path/to/brotherwhale-vscode-0.10.2.vsix --force
+code --install-extension /path/to/brotherwhale-vscode-0.10.3.vsix --force
 ```
 
 ## Privacy & data

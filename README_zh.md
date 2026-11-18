@@ -1,11 +1,11 @@
 # CodeWhale for VS Code —— CodeWhale 代理的轻量图形前端
 
-[![Version](https://img.shields.io/badge/version-0.10.2-blue)](https://github.com/HengQuWorld/CodeWhale-VSCode)
+[![Version](https://img.shields.io/badge/version-0.10.3-blue)](https://github.com/HengQuWorld/CodeWhale-VSCode)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![CI](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/ci.yml/badge.svg)](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/ci.yml)
 [![Release](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/release.yml/badge.svg)](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/release.yml)
 [![VS Code](https://img.shields.io/badge/VS%20Code-1.85+-informational)](https://code.visualstudio.com/)
-[![VSIX](https://img.shields.io/badge/VSIX-~576%20KB-brightgreen)](https://github.com/HengQuWorld/CodeWhale-VSCode/releases)
+[![VSIX](https://img.shields.io/badge/VSIX-~589%20KB-brightgreen)](https://github.com/HengQuWorld/CodeWhale-VSCode/releases)
 [![macOS](https://img.shields.io/badge/macOS-supported-brightgreen)](#系统要求)
 [![Windows](https://img.shields.io/badge/Windows-supported-brightgreen)](#系统要求)
 [![Linux](https://img.shields.io/badge/Linux-supported-brightgreen)](#系统要求)
@@ -22,7 +22,7 @@ CodeWhale for VS Code 是 [CodeWhale](https://github.com/codewhale-hq/Codewhale)
 
 | | |
 |---|---|
-| VSIX 体积（0.10.2） | 约 576 KB |
+| VSIX 体积（0.10.3） | 约 589 KB |
 | 运行时 npm 依赖 | **零** —— 扩展自身的 TypeScript（以及用于渲染的 `marked`）都被 webpack 内联 |
 | 打包的引擎或模型 | **无** —— `codewhale` 是独立的原生二进制 |
 | 重复实现的代理逻辑 | **无** —— GUI 只是引擎本地 runtime API 之上的适配层 |
@@ -32,9 +32,9 @@ CodeWhale for VS Code 是 [CodeWhale](https://github.com/codewhale-hq/Codewhale)
 
 正因为代理的任何一部分都没有被复制进扩展，引擎可以独立发布新能力和修复，而不需要前端跟着发版。
 
-### 0.10.2 的引擎兼容性
+### 0.10.3 的引擎兼容性
 
-0.10.2 运行在引擎 **v0.10.2** 上，与 0.10.1 的底线相同，且本版本全部内容都在客户端侧：Activity 栏里可审阅、可固定、可添加笔记的记忆面板，会说明失败的工具调用如何结束及其原因的工具卡片，以及在会话自己末端打开的对话。三个各自有底线的面保持不变 —— 记忆面板读取的路由（与 `/memory` 的审阅命令读的是同一批 Context Lens 路由）与 **MCP** 面板需要引擎 **v0.10.0**（正是那个版本引入了 Context Lens 路由，以及 MCP 管理路由：清单会带上每个服务器所属的层级、每次修改都要呈上配置 revision），而工作区信任横幅、会话上报自己属于哪个客户端、以及在同机上开第二个窗口或并行另一个 CodeWhale 客户端，都需要 **v0.10.2**。
+0.10.3 运行在引擎 **v0.10.2** 上，与 0.10.2 的底线相同，且本版本全部内容都在客户端侧：对话的滚动条与文字上自有一套滚动菜单，导航轨的圆点既站得住、也会落在它指的那一条消息上，以及长对话仍在打开时的一句说明。三个各自有底线的面保持不变 —— 记忆面板读取的路由（与 `/memory` 的审阅命令读的是同一批 Context Lens 路由）与 **MCP** 面板需要引擎 **v0.10.0**（正是那个版本引入了 Context Lens 路由，以及 MCP 管理路由：清单会带上每个服务器所属的层级、每次修改都要呈上配置 revision），而工作区信任横幅、会话上报自己属于哪个客户端、以及在同机上开第二个窗口或并行另一个 CodeWhale 客户端，都需要 **v0.10.2**。
 
 以下仍需要比任何已发布引擎 tag 更新的 Codewhale 构建：
 
@@ -140,12 +140,12 @@ npx @vscode/vsce package --no-dependencies
 然后安装生成的 `.vsix`（`Extensions: Install from VSIX...`），或在终端执行：
 
 ```bash
-code --install-extension ./brotherwhale-vscode-0.10.2.vsix --force
+code --install-extension ./brotherwhale-vscode-0.10.3.vsix --force
 ```
 
 > **Trae CN 用户：** 如果 `code` 不在 `PATH` 中，使用自带的 CLI：
 > ```bash
-> "/Applications/Trae CN.app/Contents/Resources/app/bin/code" --install-extension ./brotherwhale-vscode-0.10.2.vsix --force
+> "/Applications/Trae CN.app/Contents/Resources/app/bin/code" --install-extension ./brotherwhale-vscode-0.10.3.vsix --force
 > ```
 
 **方式 C —— Open VSX：** [Open VSX](https://open-vsx.org/extension/hengquworld/brotherwhale-vscode) 面向微软生态之外的编辑器提供同样的构建 —— VSCodium，以及鸿蒙 PC 上的 CodeArts（扩展面板自带一页 Open VSX）。搜 "CodeWhale" 直接安装，不必手动装 VSIX。
@@ -161,7 +161,8 @@ code --install-extension ./brotherwhale-vscode-0.10.2.vsix --force
 - **回合中引导（steering）** —— 回合运行期间按 Enter 会把内容作为指引送进当前回合，而不是开启新回合（与引擎的 steering 输入一致）；被引导的消息会带一个 steer 徽标，而引擎在模型读到之前就丢弃的引导会标为 **未送达**。
 - **统一的发送/停止按钮**，反映真实的回合状态；并提供上一回合的 **Undo** 与 **Retry**。
 - **附件** —— `/attach`、📎 按钮，或在资源管理器中右键文件选择 **CodeWhale: 附加到对话**；截图可用 `Ctrl/Cmd+V` 粘贴，从 Finder 或其他窗口拖入的文件同样可以附加。（在 VS Code 窗口内部发起的拖拽 —— 从资源管理器文件树或编辑器标签页 —— 无法到达对话 webview：VS Code 会把它留给自己的编辑器组投放目标。这类情况请用右键菜单。）
-- **消息导航轨** —— 右侧边缘的圆点可跳转到任意用户消息；`Ctrl/Cmd+Up` / `Ctrl/Cmd+Down` 在消息间前后跳转。
+- **消息导航轨** —— 右侧边缘的圆点可跳转到任意用户消息；`Ctrl/Cmd+Up` / `Ctrl/Cmd+Down` 在消息间前后跳转。对话逐行排版时圆点不再漂移，它们占的是一条避开滚动条的独立窄带，并且点亮的就是被点的那一颗。
+- **直接在对话上滚动** —— 右键对话区会给出 **滚动到这里**、**到顶部**、**到底部**；在滚动条上，*滚动到这里* 指的是轨道上的那个位置，在文字上则把指针下的那条消息带到顶部。右键选中的文字仍是默认菜单，所以复制照样可用。
 - **可多选的问题** —— 模型给出多个可选答案的提问，点击即勾选、再点即取消，确认按钮一次把你选中的整套答案发出去；一次请求包含多个问题时，会编号并统计已答数量。
 - **失败的工具调用会说清它是怎么结束的** —— 卡片会写明结局（失败、被中断、已取消），并附上退出码与命令运行了多久，还会带上引擎为这一轮记录的原因；即使引擎报告这次调用没有改动任何文件，命令的输出也不会消失。
 
@@ -325,7 +326,7 @@ codewhale serve（引擎 —— 单独安装与升级）
 
 **安装 VSIX**
 ```bash
-code --install-extension /path/to/brotherwhale-vscode-0.10.2.vsix --force
+code --install-extension /path/to/brotherwhale-vscode-0.10.3.vsix --force
 ```
 
 ## 隐私与数据
