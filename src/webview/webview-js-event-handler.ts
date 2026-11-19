@@ -1426,6 +1426,15 @@ ${PROVIDER_PICKER_JS}
         });
         break;
 
+      case 'memosState':
+        // The Activity tab's Memos section: every conversation's parked prompts,
+        // grouped by the conversation they wait in. The host owns the read; this
+        // only paints what it sent.
+        if (window.__wvSidebar && window.__wvSidebar.renderMemos) {
+          window.__wvSidebar.renderMemos({ groups: Array.isArray(msg.groups) ? msg.groups : [] });
+        }
+        break;
+
       case 'apiCapabilities':
         apiCapabilities = Object.assign({}, apiCapabilities, msg.capabilities || {});
         window.__wvApiCapabilities = apiCapabilities;

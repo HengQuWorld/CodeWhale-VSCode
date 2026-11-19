@@ -534,6 +534,11 @@ export interface WebviewTranslations {
   memoryTruncated: string;
   memoryPinnedBadge: string;
   memorySuppressedBadge: string;
+  // Memos panel
+  memos: string;
+  memosRefresh: string;
+  memosEmpty: string;
+  memosOpenThread: string;
   noAgentRuns: string;
   agentStatusQueued: string;
   agentStatusStarting: string;
@@ -753,6 +758,13 @@ ${css}
               <span class="sidebar-section-arrow">▼</span>
             </div>
             <div class="sidebar-section-body" id="tab-memory"></div>
+          </div>
+          <div class="sidebar-section" id="sidebar-memos">
+            <div class="sidebar-section-header" id="memos-section-toggle">
+              <span class="sidebar-section-title">📌 ${tr.memos}</span>
+              <span class="sidebar-section-arrow">▼</span>
+            </div>
+            <div class="sidebar-section-body" id="tab-memos"></div>
           </div>
           <div class="sidebar-section" id="sidebar-fleet">
             <div class="sidebar-section-header" id="fleet-section-toggle">

@@ -347,6 +347,7 @@ function createHarness(options?: { storage?: Record<string, string> | null }) {
     changesPanel: getEl("tab-changes"),
     skillPanel: getEl("tab-skills"),
     memoryPanel: getEl("tab-memory"),
+    memosPanel: getEl("tab-memos"),
     mcpPanel: getEl("tab-mcp"),
     taskPanel: getEl("tab-tasks"),
     mcpAddOverlay: getEl("mcp-add-overlay"),
@@ -359,6 +360,7 @@ function createHarness(options?: { storage?: Record<string, string> | null }) {
       work: getEl("sidebar-work"),
       changes: getEl("sidebar-changes"),
       memory: getEl("sidebar-memory"),
+      memos: getEl("sidebar-memos"),
       fleet: getEl("sidebar-fleet"),
       tasks: getEl("sidebar-tasks"),
       agents: getEl("sidebar-agents"),
@@ -371,6 +373,7 @@ function createHarness(options?: { storage?: Record<string, string> | null }) {
       work: getEl("work-section-toggle"),
       changes: getEl("changes-section-toggle"),
       memory: getEl("memory-section-toggle"),
+      memos: getEl("memos-section-toggle"),
       fleet: getEl("fleet-section-toggle"),
       tasks: getEl("tasks-section-toggle"),
       agents: getEl("agents-section-toggle"),
@@ -3734,6 +3737,98 @@ describe("memory panel", () => {
 
     expect(memoryPanel.querySelectorAll(".skill-capability-note")[0].textContent).toContain(
       "More entries exist.",
+    );
+  });
+});
+
+describe("Memos panel", () => {
+  function memoGroup(overrides: Record<string, unknown> = {}) {
+    return {
+      kind: "thread",
+      id: "thread-1",
+      title: "Release 0.10.4",
+      count: 1,
+      items: [{ id: "q-1", text: "run the suite", ts: 100, attachments: 0 }],
+      ...overrides,
+    };
+  }
+
+  it("lists every conversation's memos under the conversation that holds them", () => {
+    const { sidebar, memosPanel } = createHarness();
+
+    sidebar.renderMemos({
+      groups: [
+        memoGroup({
+          count: 2,
+          items: [
+            { id: "q-1", text: "run the suite", ts: 200, attachments: 1 },
+            { id: "q-2", text: "then tag it\nand push", ts: 100, attachments: 0 },
+          ],
+        }),
+        memoGroup({
+          kind: "draft",
+          id: ":draft",
+          title: "Draft",
+          items: [{ id: "q-3", text: "a note for a new chat", ts: 50, attachments: 0 }],
+        }),
+      ],
+    });
+
+    // The host's order is the panel's order: it sorts conversations by their
+    // newest memo, and the panel does not second-guess that.
+    expect(
+      memosPanel.querySelectorAll(".memo-group-name").map((el) => el.textContent),
+    ).toEqual(["Release 0.10.4", "Draft"]);
+    expect(
+      memosPanel.querySelectorAll(".memo-row-text").map((el) => el.textContent),
+    ).toEqual(["run the suite", "then tag it", "a note for a new chat"]);
+    // A memo is one line in the list; the tooltip carries it whole.
+    const rows = memosPanel.querySelectorAll(".memo-row");
+    expect(rows[1].title).toContain("then tag it\nand push");
+    // Attachments ride with the memo and are counted, not re-read here.
+    expect(rows[0].querySelector(".memo-row-meta")!.textContent).toBe("📎 1");
+  });
+
+  it("opens the conversation a memo is parked in — it never runs it from the list", () => {
+    const { sidebar, memosPanel, postMessages, loadingCalls } = createHarness();
+    sidebar.renderMemos({ groups: [memoGroup({ id: "thread-42" })] });
+
+    postMessages.length = 0;
+    memosPanel.querySelectorAll(".memo-row")[0].dispatch("click");
+
+    expect(postMessages).toEqual([{ type: "loadThread", threadId: "thread-42" }]);
+    // The transcript says it is loading before the host answers, the way the
+    // rail's own rows do.
+    expect(loadingCalls.length).toBe(1);
+  });
+
+  it("sends the reader to a new chat for the draft bucket, where those memos wait", () => {
+    const { sidebar, memosPanel, postMessages } = createHarness();
+    sidebar.renderMemos({ groups: [memoGroup({ kind: "draft", id: ":draft", title: "Draft" })] });
+
+    postMessages.length = 0;
+    memosPanel.querySelectorAll(".memo-row")[0].dispatch("click");
+
+    expect(postMessages).toEqual([{ type: "newThread" }]);
+  });
+
+  it("asks the host to re-read the disk from the toolbar", () => {
+    const { sidebar, memosPanel, postMessages } = createHarness();
+    sidebar.renderMemos({ groups: [] });
+
+    postMessages.length = 0;
+    memosPanel.querySelector(".task-toolbar")!.children[0].dispatch("click");
+
+    expect(postMessages).toEqual([{ type: "refreshMemosPanel" }]);
+  });
+
+  it("says no conversation has a parked memo, rather than drawing an empty list", () => {
+    const { sidebar, memosPanel } = createHarness();
+    sidebar.renderMemos({ groups: [] });
+
+    expect(memosPanel.querySelectorAll(".work-empty").length).toBe(1);
+    expect(memosPanel.querySelector(".work-empty-text")!.textContent).toBe(
+      "No parked memos in any conversation.",
     );
   });
 });

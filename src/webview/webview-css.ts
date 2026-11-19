@@ -3259,6 +3259,85 @@ export function getWebviewCss(): string {
       opacity: 0.85;
     }
 
+    /* ── Memos panel (sidebar) ──
+     * Every conversation's parked prompts, grouped by the conversation they
+     * wait in. The header names the conversation and opens it, like every row
+     * under it: looking at a memo must never run it. */
+    .memo-group {
+      padding-bottom: 4px;
+    }
+    /* A caption over its rows, not a card heading: the conversation names are
+     * secondary to the memos themselves. */
+    .memo-group-title {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      width: 100%;
+      box-sizing: border-box;
+      text-align: left;
+      background: none;
+      border: none;
+      color: inherit;
+      cursor: pointer;
+      font-family: inherit;
+      font-size: 10px;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      opacity: 0.7;
+      padding: 4px 10px 2px;
+    }
+    .memo-group-title:hover {
+      opacity: 1;
+    }
+    .memo-group-name {
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-weight: 600;
+    }
+    .memo-group-count {
+      flex: none;
+      text-transform: none;
+      letter-spacing: 0;
+    }
+    .memo-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      width: 100%;
+      box-sizing: border-box;
+      text-align: left;
+      background: none;
+      border: 1px solid transparent;
+      border-radius: 4px;
+      color: inherit;
+      cursor: pointer;
+      font-family: inherit;
+      font-size: 11px;
+      line-height: 1.4;
+      padding: 3px 10px;
+      min-width: 0;
+    }
+    .memo-row:hover {
+      background: rgba(128,128,128,0.14);
+      border-color: rgba(128,128,128,0.3);
+    }
+    .memo-row-text {
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      opacity: 0.85;
+    }
+    .memo-row-meta {
+      flex: none;
+      opacity: 0.6;
+      font-size: 10px;
+    }
+
     /* ── MCP panel (sidebar) ── */
 
     /* The group headings are plain labels, not fold controls: the panel's

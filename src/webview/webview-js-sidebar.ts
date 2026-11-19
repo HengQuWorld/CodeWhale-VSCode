@@ -12,7 +12,7 @@ import { recommendedMcpServers } from "../utils/mcp-utils";
  * the sections whose fold is remembered, and the header each fold is bound to.
  * It is injected into the script below rather than written twice, and the
  * template's own ids are checked against it by `webview-html.test.ts`. */
-export const ACTIVITY_SECTION_KEYS = ['work', 'changes', 'memory', 'fleet', 'tasks', 'agents', 'skills', 'mcp'] as const;
+export const ACTIVITY_SECTION_KEYS = ['work', 'changes', 'memory', 'memos', 'fleet', 'tasks', 'agents', 'skills', 'mcp'] as const;
 
 /** The Skills panel's scope groups, in the order it draws them.
  *
@@ -2457,6 +2457,122 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
     }
   }
 
+  // ── Render Memos ──
+  // The whole workspace's parked prompts, grouped by the conversation they
+  // wait in. The composer's strip shows the conversation on screen; this is
+  // the one place that answers "what is parked, and where". A row opens its
+  // conversation — running a memo stays a deliberate act there, never a side
+  // effect of looking at the list.
+  var memosState = { groups: [] };
+
+  /** One scannable line for a memo: its first line, capped. */
+  function memoPreviewLine(text) {
+    var head = String(text || '').split(/\\r?\\n/)[0].trim();
+    return head.length > 100 ? head.slice(0, 99) + '\u2026' : head;
+  }
+
+  function openMemoGroup(group) {
+    if (!group) return;
+    // A draft group is the bucket memos park into before any thread exists:
+    // the conversation those memos are waiting for is a new chat.
+    if (group.kind === 'draft') {
+      announceConversationLoad();
+      vscode.postMessage({ type: 'newThread' });
+      return;
+    }
+    if (!group.id) return;
+    announceConversationLoad();
+    vscode.postMessage({ type: 'loadThread', threadId: group.id });
+  }
+
+  function renderMemos(next) {
+    var container = document.getElementById('tab-memos');
+    if (!container) return;
+    if (next) memosState = { groups: Array.isArray(next.groups) ? next.groups : [] };
+    container.innerHTML = '';
+
+    // The refresh sits in a toolbar like every other panel's, so the reader
+    // can re-read the disk after parking a memo in another window.
+    var controls = document.createElement('div');
+    controls.className = 'task-toolbar';
+    var refreshBtn = document.createElement('button');
+    refreshBtn.className = 'task-icon-btn';
+    refreshBtn.type = 'button';
+    refreshBtn.title = __i18n.memosRefresh;
+    refreshBtn.setAttribute('aria-label', __i18n.memosRefresh);
+    refreshBtn.textContent = '\u21BB';
+    refreshBtn.onclick = function() {
+      vscode.postMessage({ type: 'refreshMemosPanel' });
+    };
+    controls.appendChild(refreshBtn);
+    container.appendChild(controls);
+
+    if (memosState.groups.length === 0) {
+      var empty = document.createElement('div');
+      empty.className = 'work-empty';
+      var emptyIcon = document.createElement('div');
+      emptyIcon.className = 'work-empty-icon';
+      emptyIcon.textContent = '\uD83D\uDCCC';
+      empty.appendChild(emptyIcon);
+      var emptyText = document.createElement('div');
+      emptyText.className = 'work-empty-text';
+      emptyText.textContent = __i18n.memosEmpty;
+      empty.appendChild(emptyText);
+      container.appendChild(empty);
+      return;
+    }
+
+    memosState.groups.forEach(function(group) {
+      var box = document.createElement('div');
+      box.className = 'memo-group';
+
+      // The group header names the conversation and is a way into it, the
+      // same click every row under it makes.
+      var head = document.createElement('button');
+      head.type = 'button';
+      head.className = 'memo-group-title';
+      head.title = __i18n.memosOpenThread;
+      var nameEl = document.createElement('span');
+      nameEl.className = 'memo-group-name';
+      nameEl.textContent = String(group.title || group.id || '');
+      head.appendChild(nameEl);
+      var countEl = document.createElement('span');
+      countEl.className = 'memo-group-count';
+      countEl.textContent = '\uD83D\uDCCE ' + Number(group.count || 0);
+      head.appendChild(countEl);
+      head.onclick = function() { openMemoGroup(group); };
+      box.appendChild(head);
+
+      (Array.isArray(group.items) ? group.items : []).forEach(function(item) {
+        var row = document.createElement('button');
+        row.type = 'button';
+        row.className = 'memo-row';
+        // The preview is one capped line; the tooltip carries the memo whole.
+        row.title = String(item.text || '') + '\\n\\n' + __i18n.memosOpenThread;
+        var textEl = document.createElement('span');
+        textEl.className = 'memo-row-text';
+        textEl.textContent = memoPreviewLine(item.text);
+        row.appendChild(textEl);
+        if (Number(item.attachments) > 0) {
+          var clipEl = document.createElement('span');
+          clipEl.className = 'memo-row-meta';
+          clipEl.textContent = '\uD83D\uDCCE ' + Number(item.attachments);
+          row.appendChild(clipEl);
+        }
+        if (Number(item.ts) > 0) {
+          var timeEl = document.createElement('span');
+          timeEl.className = 'memo-row-meta';
+          timeEl.textContent = __wvFormatRelativeTime(item.ts);
+          row.appendChild(timeEl);
+        }
+        row.onclick = function() { openMemoGroup(group); };
+        box.appendChild(row);
+      });
+
+      container.appendChild(box);
+    });
+  }
+
   // ── Render MCP ──
   // The engine's MCP servers, grouped by the config layer that owns each one:
   // a project entry lives in the workspace's .mcp.json, a plugin entry came
@@ -4064,6 +4180,7 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
       work: __i18n.work,
       changes: __i18n.changes,
       memory: __i18n.memory,
+      memos: __i18n.memos,
       fleet: __i18n.fleet,
       tasks: __i18n.tasks,
       agents: __i18n.agents,
@@ -4078,6 +4195,7 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
       work: '\uD83C\uDFAF',
       changes: '\uD83D\uDCDD',
       memory: '\uD83E\uDDE0',
+      memos: '\uD83D\uDCCC',
       fleet: '\uD83D\uDE80',
       tasks: '\u2699',
       agents: '\uD83E\uDD16',
@@ -4381,6 +4499,7 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
     renderAgents: renderAgents,
     renderSkills: renderSkills,
     renderMemory: renderMemory,
+    renderMemos: renderMemos,
     renderMcp: renderMcp,
     renderMcpTools: renderMcpTools,
     renderMcpImports: renderMcpImports,

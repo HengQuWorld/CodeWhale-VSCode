@@ -626,6 +626,14 @@ interface Translations {
   memoryTruncated: string;
   memoryPinnedBadge: string;
   memorySuppressedBadge: string;
+  // Memos panel
+  /** Activity section: the prompts parked across every conversation. */
+  memos: string;
+  memosRefresh: string;
+  memosEmpty: string;
+  /** Row tooltip: clicking a memo opens the conversation holding it; the
+   *  memo itself still waits for the reader there. */
+  memosOpenThread: string;
   noAgentRuns: string;
   agentRunGone: string;
   agentStatusQueued: string;
@@ -1186,6 +1194,11 @@ const en: Translations = {
   memoryTruncated: "Showing the first page of the store; more entries exist.",
   memoryPinnedBadge: "Pinned",
   memorySuppressedBadge: "Excluded",
+  // Memos panel
+  memos: "Memos",
+  memosRefresh: "Refresh memos",
+  memosEmpty: "No parked memos in any conversation. Park one with the composer's queue button — it waits here until you choose to run it.",
+  memosOpenThread: "Open this conversation — its memos stay parked until you run them",
   noAgentRuns: "No agent runs",
   agentRunGone: "That agent run is no longer in this runtime — a finished run is dropped from the run list about an hour after it settles.",
   agentStatusQueued: "Queued",
@@ -1738,6 +1751,11 @@ const zhCn: Translations = {
   memoryTruncated: "只显示第一页；库中还有更多条目。",
   memoryPinnedBadge: "已固定",
   memorySuppressedBadge: "已排除",
+  // Memos panel
+  memos: "备忘",
+  memosRefresh: "刷新备忘",
+  memosEmpty: "所有会话都没有待执行的备忘。用输入框的队列按钮压入一条，它会在这里等你决定何时执行。",
+  memosOpenThread: "打开此会话——其中的备忘在你执行前不会运行",
   noAgentRuns: "暂无子代理运行",
   agentRunGone: "该子代理运行已不在当前引擎中——已结束的运行约一小时后会从运行列表里清理。",
   agentStatusQueued: "排队中",
@@ -2322,6 +2340,10 @@ export function webviewTranslations(tr: Translations) {
     memoryTruncated: tr.memoryTruncated,
     memoryPinnedBadge: tr.memoryPinnedBadge,
     memorySuppressedBadge: tr.memorySuppressedBadge,
+    memos: tr.memos,
+    memosRefresh: tr.memosRefresh,
+    memosEmpty: tr.memosEmpty,
+    memosOpenThread: tr.memosOpenThread,
     noAgentRuns: tr.noAgentRuns,
     agentRunGone: tr.agentRunGone,
     agentStatusQueued: tr.agentStatusQueued,

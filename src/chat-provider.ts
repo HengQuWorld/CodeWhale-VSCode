@@ -341,6 +341,10 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
    *  large store, so overlapping refreshes (sidebar opens, watcher errors) do
    *  finish out of order and a stale list must not clobber a newer one. */
   private threadListRefreshToken: number = 0;
+  /** The same guard for the Memos panel: every queue mutation republishes it,
+   *  and the title lookup is an async round trip, so an older answer must not
+   *  land on top of a newer one. */
+  private memosPanelRefreshToken: number = 0;
   /** The same guard for the Sessions rail. It has one more reason to need it:
    *  the archive toggle can be clicked twice while the first listing is still
    *  in flight, and the two answers land in either order. Whichever pass owns
@@ -904,6 +908,9 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       case "queuedClear":
         this.handleClearQueuedPrompts();
         break;
+      case "refreshMemosPanel":
+        await this.refreshMemosPanel();
+        break;
       case "webviewReady":
         try {
           // A question from the webview that just went away can never be
@@ -951,6 +958,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
           void this.refreshGoal();
           void this.refreshSkillList();
           void this.refreshMemoryPanel();
+          void this.refreshMemosPanel();
           void this.refreshMcpServers();
           void this.postCommandCatalog();
         }
@@ -3187,12 +3195,59 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
   }
 
   /** The queue strip's only feed: after every mutation, and whenever the
-   *  thread on screen changes, the webview repaints from this. */
+   *  thread on screen changes, the webview repaints from this. The Memos panel
+   *  rides along: it shows every conversation's bucket, so the same moments
+   *  that change this one change it too. */
   private postMessageQueue(): void {
     this.postMessage({
       type: "messageQueue",
       items: this.messageQueueFor(this.queueThreadKey()),
     });
+    void this.refreshMemosPanel();
+  }
+
+  /** Every conversation's parked memos, for the Activity tab's Memos panel —
+   *  the whole-workspace view `/queue list` prints, kept as a panel the reader
+   *  can leave open. Titles are the rail's titles; a thread the engine no
+   *  longer lists falls back to its id. */
+  public async refreshMemosPanel(): Promise<void> {
+    const token = ++this.memosPanelRefreshToken;
+    const byThread = loadMessageQueue(this.currentWorkspaceKey());
+    const holding = Object.entries(byThread).filter(([, list]) => list.length > 0);
+    // Titles are decoration. With nothing parked there is nothing to name and
+    // no reason to ask the engine.
+    const titleById = new Map<string, string>();
+    if (holding.length > 0) {
+      try {
+        const records = await this.api.listThreads({ limit: 200, timeoutMs: 5000 });
+        for (const rec of records) {
+          if (rec?.id) titleById.set(rec.id, rec.title || rec.id);
+        }
+      } catch {
+        // The ids degrade fine.
+      }
+    }
+    if (token !== this.memosPanelRefreshToken) return;
+    const groups = holding.map(([key, list]) => ({
+      // The webview routes a draft group to a new chat and a thread group to
+      // loadThread; the id names which one.
+      kind: key === DRAFT_QUEUE_KEY ? "draft" : "thread",
+      id: key,
+      title: key === DRAFT_QUEUE_KEY ? t().queueDraftTitle : titleById.get(key) || key,
+      count: list.length,
+      items: list.map((p) => ({
+        id: p.id,
+        text: p.text,
+        ts: p.ts,
+        attachments: (p.attachments ?? []).length,
+      })),
+    }));
+    // Newest activity first: the conversation just parked into is the one the
+    // reader is looking for. Ties keep the store's own order.
+    const latestTs = (group: (typeof groups)[number]): number =>
+      group.items.reduce((max, item) => Math.max(max, item.ts || 0), 0);
+    groups.sort((a, b) => latestTs(b) - latestTs(a));
+    this.postMessage({ type: "memosState", groups });
   }
 
   /** Park the composer's text — and the composer's attachments with it.
