@@ -327,6 +327,25 @@ Reloading or closing the extension stops that window's Runtime and interrupts ac
 code --install-extension /path/to/brotherwhale-vscode-0.10.3.vsix --force
 ```
 
+## FAQ
+
+**How do I make the model think in Chinese?**
+
+There is no separate "thinking language" switch. The engine's `locale` setting decides it, and the extension exposes that setting:
+
+- In the chat input, run `/config locale zh-Hans`.
+- Or open the config panel (`/config`), set **Display → Locale** to `zh-Hans`, and save.
+- Or set it in the engine's own config: `codewhale config set locale zh-Hans`, or `locale = "zh-Hans"` in `~/.codewhale/config.toml`.
+
+The engine then anchors the language rule with a native-language passage at both ends of the system prompt, so `reasoning_content` and the final reply stay in Simplified Chinese even as English code, logs, and search results pile up in the context.
+
+Things worth knowing:
+
+- With no `locale` (the default, `auto`), replies and reasoning follow the language of your latest message. An English UI locale does not force English — but it also does not reinforce Chinese, which is where the drift back to English thinking comes from.
+- The prompt-level reinforcement ships for `zh-Hans` / `zh-CN` / `zh` only. `zh-Hant` localizes the interface but adds no reinforcement, so Traditional Chinese reasoning relies on you writing in Traditional Chinese.
+- `brotherwhale.reasoningEffort` controls how *much* the model thinks, not the language it thinks in.
+- For a single turn, just say "think in Chinese" in the message; `locale` is the session-wide default.
+
 ## Privacy & data
 
 The extension talks to a **locally running** engine on `127.0.0.1`. Conversation data reaches your model provider only through the engine, using the provider, model and credentials you configured there. You control the provider, the model, and the data flow.

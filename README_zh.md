@@ -329,6 +329,25 @@ codewhale serve（引擎 —— 单独安装与升级）
 code --install-extension /path/to/brotherwhale-vscode-0.10.3.vsix --force
 ```
 
+## FAQ
+
+**怎么让模型用中文思考？**
+
+没有单独的「思考语言」开关，决定它的是引擎的 `locale` 设置，扩展把这个设置暴露了出来：
+
+- 在聊天输入框执行 `/config locale zh-Hans`。
+- 或打开配置面板（`/config`），把 **Display → Locale** 设为 `zh-Hans` 并保存。
+- 或在引擎自身的配置里设置：`codewhale config set locale zh-Hans`，或写 `locale = "zh-Hans"` 到 `~/.codewhale/config.toml`。
+
+之后引擎会在 system prompt 的首尾各插入一段中文指令，把语言规则钉在离模型输出最近的位置，这样即使上下文里堆满了英文代码、日志和搜索结果，`reasoning_content` 和最终回复也仍保持简体中文。
+
+几点需要知道：
+
+- 不设 `locale`（默认 `auto`）时，回复与思考跟随你最新一条消息的语言。英文界面语言不会强制英文 —— 但也不会强化中文，英文思考通常就是从这种漂移开始的。
+- prompt 层的中文强化只对 `zh-Hans` / `zh-CN` / `zh` 生效。`zh-Hant` 会把界面本地化，但不加这段强化，繁体中文思考仍需靠你用繁体中文提问来维持。
+- `brotherwhale.reasoningEffort` 控制的是思考**深度**，不是思考语言。
+- 只想在某一轮强制，直接在消息里写「用中文思考」即可；`locale` 是会话级默认值。
+
 ## 隐私与数据
 
 扩展只与 `127.0.0.1` 上**本地运行**的引擎通信。对话数据只会经由引擎、使用你在引擎中配置的提供商、模型与凭据送达模型提供商。提供商、模型与数据流向都由你掌控。
