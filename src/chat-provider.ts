@@ -26,6 +26,7 @@ import type {
   CallChangesResponse,
 } from "./types";
 import { formatError, getErrorMessage, isApiNotFoundError, isTransientFetchError } from "./utils/error-handler";
+import { promptWithAttachments as withAttachments } from "./utils/attachment-prompt";
 import {
   providerEntryRouteKey,
   providerRouteKey,
@@ -3267,6 +3268,10 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         text: p.text,
         ts: p.ts,
         attachments: (p.attachments ?? []).length,
+        // The whole thing a pick should fill the content box with — text and
+        // its attachment lines — written by the same rule a send uses. The
+        // panel must not carry a second copy of that rule.
+        pickPrompt: withAttachments(p.text, p.attachments ?? []),
       })),
     }));
     // Newest activity first: the conversation just parked into is the one the
@@ -3767,13 +3772,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     text: string,
     attachments: readonly AttachmentRecord[]
   ): string {
-    if (attachments.length === 0) return text;
-    const lines = attachments
-      .map((a) =>
-        a.kind === "file" ? `@${a.path}` : `[Attached ${a.kind}: ${a.path}]`
-      )
-      .join("\n");
-    return text.trim() ? text.trimEnd() + "\n" + lines : lines;
+    return withAttachments(text, attachments);
   }
 
   /** Send the composer's text as a new turn.

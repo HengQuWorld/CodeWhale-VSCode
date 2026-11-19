@@ -3521,6 +3521,11 @@ export function getWebviewCss(): string {
       text-overflow: ellipsis;
       white-space: nowrap;
     }
+    .automation-memo-clip {
+      flex: none;
+      font-size: 10px;
+      opacity: 0.7;
+    }
     .automation-memo-from {
       flex: none;
       max-width: 40%;

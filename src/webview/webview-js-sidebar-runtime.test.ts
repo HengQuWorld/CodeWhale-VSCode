@@ -4423,6 +4423,65 @@ describe("Automations panel", () => {
     );
   });
 
+  it("carries a memo's attachments into the content as readable paths", () => {
+    const { sidebar, automationCreateOverlay, postMessages } = createHarness();
+    sidebar.renderMemos({
+      groups: [
+        memoGroup({
+          items: [
+            {
+              id: "q-1",
+              text: "check these\nand report",
+              ts: 100,
+              attachments: 2,
+              // What the host writes for a pick: text, then one line per
+              // attachment in the same form a send uses.
+              pickPrompt:
+                "check these\nand report\n@/w/src/a.ts\n[Attached image: /w/shot.png]",
+            },
+          ],
+        }),
+      ],
+    });
+    sidebar.openAutomationCreateDialog();
+
+    // The row says how many ride along, so the reader is not surprised later.
+    const row = automationCreateOverlay.querySelectorAll(".automation-memo-row")[0];
+    expect(row.querySelector(".automation-memo-clip")!.textContent).toBe("📎 2");
+
+    row.dispatch("click");
+
+    // Text first, then the same lines a send would write: a file as a mention
+    // the run can read, an image as a path it can open.
+    const prompt = automationCreateOverlay.querySelector(".automation-prompt-input")!;
+    expect(prompt.value).toBe(
+      "check these\nand report\n@/w/src/a.ts\n[Attached image: /w/shot.png]",
+    );
+
+    postMessages.length = 0;
+    automationCreateOverlay.querySelector(".automation-create-submit")!.dispatch("click");
+
+    expect(postMessages[0].prompt).toBe(
+      "check these\nand report\n@/w/src/a.ts\n[Attached image: /w/shot.png]",
+    );
+  });
+
+  it("takes a memo with no attachments as its text alone", () => {
+    const { sidebar, automationCreateOverlay } = createHarness();
+    sidebar.renderMemos({ groups: [memoGroup()] });
+    sidebar.openAutomationCreateDialog();
+
+    const row = automationCreateOverlay.querySelectorAll(".automation-memo-row")[0];
+    // No badge and no trailing newline: nothing to say about attachments.
+    expect(row.querySelector(".automation-memo-clip")).toBe(null);
+
+    row.dispatch("click");
+
+    expect(automationCreateOverlay.querySelector(".automation-prompt-input")!.value).toBe(
+      "run the suite",
+    );
+  });
+
   it("names an unnamed schedule from the memo it takes", () => {
     const { sidebar, automationCreateOverlay } = createHarness();
     sidebar.renderMemos({ groups: [memoGroup()] });

@@ -3096,12 +3096,25 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
       text.className = 'automation-memo-text';
       text.textContent = memoPreviewLine(item.text);
       row.appendChild(text);
+      // A memo's attachments come with it, so the row says how many instead
+      // of letting the reader discover it in the content afterwards.
+      if (Number(item.attachments) > 0) {
+        var clip = document.createElement('span');
+        clip.className = 'automation-memo-clip';
+        clip.textContent = '\uD83D\uDCCE ' + Number(item.attachments);
+        row.appendChild(clip);
+      }
       var from = document.createElement('span');
       from.className = 'automation-memo-from';
       from.textContent = String(entry.group.title || entry.group.id || '');
       row.appendChild(from);
       row.onclick = function() {
-        automationDraft.prompt = String(item.text || '');
+        // The host writes what a pick fills in, attachments included: a path
+        // the scheduled run can read, rather than a picture the memo pointed
+        // at and the schedule cannot see.
+        automationDraft.prompt = String(
+          item.pickPrompt != null ? item.pickPrompt : (item.text || '')
+        );
         automationDraft.memoId = item.id;
         // A schedule still needs a name, and the memo's first line is the
         // honest guess. It is only a guess: typing over it is one keystroke,
