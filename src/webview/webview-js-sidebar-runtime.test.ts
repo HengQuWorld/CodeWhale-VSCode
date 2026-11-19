@@ -348,6 +348,8 @@ function createHarness(options?: { storage?: Record<string, string> | null }) {
     skillPanel: getEl("tab-skills"),
     memoryPanel: getEl("tab-memory"),
     memosPanel: getEl("tab-memos"),
+    automationsPanel: getEl("tab-automations"),
+    automationCreateOverlay: getEl("automation-create-overlay"),
     mcpPanel: getEl("tab-mcp"),
     taskPanel: getEl("tab-tasks"),
     mcpAddOverlay: getEl("mcp-add-overlay"),
@@ -361,6 +363,7 @@ function createHarness(options?: { storage?: Record<string, string> | null }) {
       changes: getEl("sidebar-changes"),
       memory: getEl("sidebar-memory"),
       memos: getEl("sidebar-memos"),
+      automations: getEl("sidebar-automations"),
       fleet: getEl("sidebar-fleet"),
       tasks: getEl("sidebar-tasks"),
       agents: getEl("sidebar-agents"),
@@ -374,6 +377,7 @@ function createHarness(options?: { storage?: Record<string, string> | null }) {
       changes: getEl("changes-section-toggle"),
       memory: getEl("memory-section-toggle"),
       memos: getEl("memos-section-toggle"),
+      automations: getEl("automations-section-toggle"),
       fleet: getEl("fleet-section-toggle"),
       tasks: getEl("tasks-section-toggle"),
       agents: getEl("agents-section-toggle"),
@@ -3859,5 +3863,391 @@ describe("Memos panel", () => {
     expect(memosPanel.querySelector(".work-empty-text")!.textContent).toBe(
       "No parked memos in any conversation.",
     );
+  });
+});
+
+describe("Automations panel", () => {
+  /** The memos panel's group shape, since a schedule can take its prompt from
+   *  one of these. */
+  function memoGroup(overrides: Record<string, unknown> = {}) {
+    return {
+      kind: "thread",
+      id: "thread-1",
+      title: "Release 0.10.4",
+      count: 1,
+      items: [{ id: "q-1", text: "run the suite", ts: 100, attachments: 0 }],
+      ...overrides,
+    };
+  }
+
+  function automation(overrides: Record<string, unknown> = {}) {
+    return {
+      id: "auto-1",
+      name: "Nightly sweep",
+      prompt: "run the suite",
+      rrule: "FREQ=CRON;EXPR=0 2 * * *",
+      status: "active",
+      next_run_at: "2026-11-20T02:00:00Z",
+      last_run_at: null,
+      ...overrides,
+    };
+  }
+
+  it("paints one card per schedule, with its state and next run", () => {
+    const { sidebar, automationsPanel } = createHarness();
+
+    sidebar.renderAutomations({
+      automations: [
+        automation(),
+        automation({ id: "auto-2", name: "Paused one", status: "paused", next_run_at: null }),
+      ],
+    });
+
+    const cards = automationsPanel.querySelectorAll(".automation-card");
+    expect(cards).toHaveLength(2);
+    expect(
+      automationsPanel.querySelectorAll(".automation-name").map((el) => el.textContent),
+    ).toEqual(["Nightly sweep", "Paused one"]);
+    // Paused is a state of the row, not a second label.
+    expect(cards[1].className.split(/\s+/)).toContain("is-paused");
+    expect(cards[0].className.split(/\s+/)).not.toContain("is-paused");
+    expect(cards[1].querySelector(".automation-meta")!.textContent).toContain("Not scheduled");
+  });
+
+  it("forwards each row action to the host", () => {
+    const { sidebar, automationsPanel, postMessages } = createHarness();
+    sidebar.renderAutomations({ automations: [automation()] });
+
+    postMessages.length = 0;
+    const buttons = automationsPanel
+      .querySelectorAll(".automation-card")[0]
+      .querySelectorAll(".task-action-btn");
+    // Run now, pause (the row is active), delete — in that order.
+    buttons[0].dispatch("click");
+    buttons[1].dispatch("click");
+    buttons[2].dispatch("click");
+
+    expect(postMessages).toEqual([
+      { type: "automationAction", action: "run", id: "auto-1" },
+      { type: "automationAction", action: "pause", id: "auto-1" },
+      { type: "automationAction", action: "delete", id: "auto-1" },
+    ]);
+  });
+
+  it("asks the host to re-read the schedules from the toolbar", () => {
+    const { sidebar, automationsPanel, postMessages } = createHarness();
+    sidebar.renderAutomations({ automations: [] });
+
+    postMessages.length = 0;
+    // The create button sits first; the refresh is the one after it.
+    automationsPanel.querySelector(".task-toolbar")!.children[1].dispatch("click");
+
+    expect(postMessages).toEqual([{ type: "refreshAutomations" }]);
+  });
+
+  it("says a failed read failed instead of claiming there are no schedules", () => {
+    const { sidebar, automationsPanel } = createHarness();
+
+    sidebar.renderAutomations({
+      automations: [],
+      problem: "Could not read automations.",
+    });
+
+    expect(automationsPanel.querySelector(".work-empty-text")!.textContent).toBe(
+      "Could not read automations.",
+    );
+    expect(automationsPanel.querySelectorAll(".work-empty").length).toBe(1);
+  });
+
+  it("takes the prompt from a parked memo, leaving the memo itself alone", () => {
+    const { sidebar, automationCreateOverlay, postMessages } = createHarness();
+    sidebar.renderMemos({
+      groups: [
+        memoGroup({
+          items: [{ id: "q-1", text: "run the suite\nand push", ts: 100, attachments: 0 }],
+        }),
+      ],
+    });
+
+    sidebar.openAutomationCreateDialog();
+    automationCreateOverlay.querySelectorAll(".automation-source-btn")[1].dispatch("click");
+
+    const rows = automationCreateOverlay.querySelectorAll(".automation-memo-row");
+    expect(rows).toHaveLength(1);
+    expect(rows[0].querySelector(".automation-memo-text")!.textContent).toBe("run the suite");
+
+    rows[0].dispatch("click");
+
+    // One click copies the memo whole — the second line included — into the
+    // prompt box; picking is not running, so nothing has been sent yet.
+    const prompt = automationCreateOverlay.querySelector(".automation-prompt-input")!;
+    expect(prompt.value).toBe("run the suite\nand push");
+    expect(
+      automationCreateOverlay.querySelectorAll(".automation-memo-row.is-selected"),
+    ).toHaveLength(1);
+
+    const nameInput = automationCreateOverlay.querySelector(".automation-name-input")!;
+    nameInput.value = "Nightly";
+    nameInput.dispatch("input");
+
+    postMessages.length = 0;
+    automationCreateOverlay.querySelector(".automation-create-submit")!.dispatch("click");
+
+    expect(postMessages).toEqual([
+      {
+        type: "createAutomation",
+        name: "Nightly",
+        prompt: "run the suite\nand push",
+        // Default schedule: daily at 09:00, as a standard five-field cron.
+        rrule: "FREQ=CRON;EXPR=0 9 * * *",
+        // Executing is a choice the form makes explicitly, and it starts off.
+        allowShell: false,
+      },
+    ]);
+    // Still open: the host has not answered yet, and only its answer may close
+    // a form holding what the reader typed.
+    expect(automationCreateOverlay.style.display).toBe("flex");
+    expect(
+      automationCreateOverlay.querySelector(".automation-create-submit")!.disabled,
+    ).toBe(true);
+  });
+
+  it("closes the form when the engine accepts the schedule", () => {
+    const { sidebar, automationCreateOverlay } = createHarness();
+    sidebar.openAutomationCreateDialog();
+
+    sidebar.settleAutomationCreate(true);
+
+    expect(automationCreateOverlay.style.display).toBe("none");
+  });
+
+  it("keeps the form and shows why the engine refused", () => {
+    const { sidebar, automationCreateOverlay } = createHarness();
+    sidebar.openAutomationCreateDialog();
+
+    sidebar.settleAutomationCreate(false, "Unsupported RRULE FREQ 'DAILY'");
+
+    expect(automationCreateOverlay.style.display).toBe("flex");
+    expect(
+      automationCreateOverlay.querySelector(".automation-form-problem")!.textContent,
+    ).toBe("Unsupported RRULE FREQ 'DAILY'");
+    // The button is live again, so the reader can fix the schedule and retry.
+    expect(
+      automationCreateOverlay.querySelector(".automation-create-submit")!.disabled,
+    ).toBe(false);
+  });
+
+  it("builds a weekly rrule from the picked days", () => {
+    const { sidebar, automationCreateOverlay, postMessages } = createHarness();
+    sidebar.openAutomationCreateDialog();
+
+    const preset = automationCreateOverlay.querySelector(".automation-preset-select")!;
+    preset.value = "weekly";
+    preset.dispatch("change");
+
+    // Wednesday is added to Monday, which starts picked.
+    automationCreateOverlay.querySelectorAll(".automation-day-btn")[2].dispatch("click");
+
+    const nameInput = automationCreateOverlay.querySelector(".automation-name-input")!;
+    nameInput.value = "Weekly report";
+    nameInput.dispatch("input");
+    const prompt = automationCreateOverlay.querySelector(".automation-prompt-input")!;
+    prompt.value = "summarize the week";
+    prompt.dispatch("input");
+
+    postMessages.length = 0;
+    automationCreateOverlay.querySelector(".automation-create-submit")!.dispatch("click");
+
+    expect(postMessages).toEqual([
+      {
+        type: "createAutomation",
+        name: "Weekly report",
+        prompt: "summarize the week",
+        rrule: "FREQ=WEEKLY;BYDAY=MO,WE;BYHOUR=9;BYMINUTE=0",
+        allowShell: false,
+      },
+    ]);
+  });
+
+  it("picks up a memo parked while the form is open", () => {
+    const { sidebar, automationCreateOverlay } = createHarness();
+    sidebar.renderMemos({ groups: [] });
+    sidebar.openAutomationCreateDialog();
+    automationCreateOverlay.querySelectorAll(".automation-source-btn")[1].dispatch("click");
+    expect(automationCreateOverlay.querySelectorAll(".automation-memo-row")).toHaveLength(0);
+
+    // The host pushes the queue after every mutation; the picker follows that
+    // snapshot instead of keeping the empty list it opened with.
+    sidebar.renderMemos({ groups: [memoGroup()] });
+
+    expect(automationCreateOverlay.querySelectorAll(".automation-memo-row")).toHaveLength(1);
+  });
+
+  it("carries the execute switch when the reader turns it on", () => {
+    const { sidebar, automationCreateOverlay, postMessages } = createHarness();
+    sidebar.openAutomationCreateDialog();
+
+    const nameInput = automationCreateOverlay.querySelector(".automation-name-input")!;
+    nameInput.value = "Nightly";
+    nameInput.dispatch("input");
+    const prompt = automationCreateOverlay.querySelector(".automation-prompt-input")!;
+    prompt.value = "run the suite";
+    prompt.dispatch("input");
+    const allowShell = automationCreateOverlay.querySelector(".automation-allow-shell-input")!;
+    allowShell.checked = true;
+    allowShell.dispatch("change");
+
+    postMessages.length = 0;
+    automationCreateOverlay.querySelector(".automation-create-submit")!.dispatch("click");
+
+    expect(postMessages[0].allowShell).toBe(true);
+  });
+
+  it("refuses to create from an empty form, and says what it is waiting for", () => {
+    const { sidebar, automationCreateOverlay, postMessages } = createHarness();
+    sidebar.openAutomationCreateDialog();
+
+    postMessages.length = 0;
+    automationCreateOverlay.querySelector(".automation-create-submit")!.dispatch("click");
+
+    expect(postMessages).toEqual([]);
+    // Still open, so the reader can see what is missing.
+    expect(automationCreateOverlay.style.display).toBe("flex");
+    // A Create that does nothing reads as a broken button. The form names the
+    // two fields it still needs instead of silently refusing.
+    const problem = automationCreateOverlay.querySelector(".automation-form-problem")!;
+    // The separator follows the language: an English sentence does not borrow
+    // the Chinese list comma.
+    expect(problem.textContent).toBe("Still needed: a name, the content");
+    expect(problem.style.display).toBe("block");
+  });
+
+  it("offers no time box for an hourly schedule, which has no hour to pick", () => {
+    const { sidebar, automationCreateOverlay, postMessages } = createHarness();
+    sidebar.openAutomationCreateDialog();
+
+    const preset = automationCreateOverlay.querySelector(".automation-preset-select")!;
+    preset.value = "hourly";
+    preset.dispatch("change");
+
+    // An hour-of-day would be ignored by an every-hour schedule, so offering
+    // one would be a control that does nothing.
+    expect(automationCreateOverlay.querySelector(".automation-time-input")).toBe(null);
+
+    const nameInput = automationCreateOverlay.querySelector(".automation-name-input")!;
+    nameInput.value = "Hourly";
+    nameInput.dispatch("input");
+    const prompt = automationCreateOverlay.querySelector(".automation-prompt-input")!;
+    prompt.value = "poll the queue";
+    prompt.dispatch("input");
+
+    postMessages.length = 0;
+    automationCreateOverlay.querySelector(".automation-create-submit")!.dispatch("click");
+
+    expect(postMessages[0].rrule).toBe("FREQ=HOURLY;INTERVAL=1;BYMINUTE=0");
+  });
+
+  it("orders the picked days from Monday, not in click order", () => {
+    const { sidebar, automationCreateOverlay, postMessages } = createHarness();
+    sidebar.openAutomationCreateDialog();
+
+    const preset = automationCreateOverlay.querySelector(".automation-preset-select")!;
+    preset.value = "weekly";
+    preset.dispatch("change");
+    // Sunday, then Tuesday. Monday is picked by default; the expression should
+    // still read MO,TU,SU rather than in the order the buttons were clicked.
+    const days = automationCreateOverlay.querySelectorAll(".automation-day-btn");
+    days[6].dispatch("click");
+    days[1].dispatch("click");
+
+    const nameInput = automationCreateOverlay.querySelector(".automation-name-input")!;
+    nameInput.value = "Twice";
+    nameInput.dispatch("input");
+    const prompt = automationCreateOverlay.querySelector(".automation-prompt-input")!;
+    prompt.value = "check";
+    prompt.dispatch("input");
+
+    postMessages.length = 0;
+    automationCreateOverlay.querySelector(".automation-create-submit")!.dispatch("click");
+
+    expect(postMessages[0].rrule).toBe("FREQ=WEEKLY;BYDAY=MO,TU,SU;BYHOUR=9;BYMINUTE=0");
+  });
+
+  it("does not resurrect a form the reader closed while a create was in flight", () => {
+    const { sidebar, automationCreateOverlay } = createHarness();
+    sidebar.openAutomationCreateDialog();
+    const nameInput = automationCreateOverlay.querySelector(".automation-name-input")!;
+    nameInput.value = "Nightly";
+    nameInput.dispatch("input");
+    const prompt = automationCreateOverlay.querySelector(".automation-prompt-input")!;
+    prompt.value = "run the suite";
+    prompt.dispatch("input");
+    automationCreateOverlay.querySelector(".automation-create-submit")!.dispatch("click");
+
+    // Dismissed before the host answers: the form is gone and stays gone.
+    automationCreateOverlay.querySelector(".automation-create-cancel")!.dispatch("click");
+
+    expect(automationCreateOverlay.style.display).toBe("none");
+    // A late answer settles nothing that is still open.
+    sidebar.settleAutomationCreate(false, "too late");
+    expect(automationCreateOverlay.style.display).toBe("none");
+  });
+
+  it("clears the refusal as soon as the reader answers it", () => {
+    const { sidebar, automationCreateOverlay } = createHarness();
+    sidebar.openAutomationCreateDialog();
+    automationCreateOverlay.querySelector(".automation-create-submit")!.dispatch("click");
+
+    const nameInput = automationCreateOverlay.querySelector(".automation-name-input")!;
+    nameInput.value = "Nightly";
+    nameInput.dispatch("input");
+
+    const problem = automationCreateOverlay.querySelector(".automation-form-problem")!;
+    expect(problem.textContent).toBe("");
+    expect(problem.style.display).toBe("none");
+  });
+
+  it("creates a one-off with the date the box already shows", () => {
+    // The date box is pre-filled with tomorrow and its value only reaches the
+    // draft through an input event. Submitting without touching it must still
+    // carry that day, rather than failing on a field that looks filled in.
+    const { sidebar, automationCreateOverlay, postMessages } = createHarness();
+    sidebar.openAutomationCreateDialog();
+
+    const preset = automationCreateOverlay.querySelector(".automation-preset-select")!;
+    preset.value = "once";
+    preset.dispatch("change");
+
+    const dateInput = automationCreateOverlay.querySelector(".automation-date-input")!;
+    expect(dateInput.value).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+
+    const nameInput = automationCreateOverlay.querySelector(".automation-name-input")!;
+    nameInput.value = "One shot";
+    nameInput.dispatch("input");
+    const prompt = automationCreateOverlay.querySelector(".automation-prompt-input")!;
+    prompt.value = "check the release notes";
+    prompt.dispatch("input");
+
+    postMessages.length = 0;
+    automationCreateOverlay.querySelector(".automation-create-submit")!.dispatch("click");
+
+    expect(postMessages).toHaveLength(1);
+    expect(postMessages[0].type).toBe("createAutomation");
+    expect(String(postMessages[0].rrule)).toBe(
+      `FREQ=ONCE;AT=${dateInput.value}T09:00`,
+    );
+  });
+
+  it("names an unnamed schedule from the memo it takes", () => {
+    const { sidebar, automationCreateOverlay } = createHarness();
+    sidebar.renderMemos({ groups: [memoGroup()] });
+    sidebar.openAutomationCreateDialog();
+
+    automationCreateOverlay.querySelectorAll(".automation-memo-row")[0].dispatch("click");
+
+    // The name field is filled from the memo's first line, so Create is not
+    // refused for a field the reader never saw as empty.
+    const nameInput = automationCreateOverlay.querySelector(".automation-name-input")!;
+    expect(nameInput.value).toBe("run the suite");
   });
 });

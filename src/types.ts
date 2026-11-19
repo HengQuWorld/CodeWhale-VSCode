@@ -1059,6 +1059,17 @@ export interface CreateAutomationRequest {
   rrule: string;
   cwds?: string[];
   status?: AutomationStatus;
+  /** Task mode for each run; the runtime's default when omitted. */
+  mode?: string;
+  /** Whether a run may execute commands. Omitted keeps the engine's default
+   *  (false: read and answer only). */
+  allow_shell?: boolean;
+  /** Whether the run trusts its workspace. Left unset by the panel: it is a
+   *  trust-boundary decision the user makes in their own settings. */
+  trust_mode?: boolean;
+  /** Whether a run proceeds without approval cards — the only workable
+   *  setting for a schedule nobody is watching. */
+  auto_approve?: boolean;
 }
 
 export interface UpdateAutomationRequest {

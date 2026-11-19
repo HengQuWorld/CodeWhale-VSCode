@@ -3343,6 +3343,212 @@ export function getWebviewCss(): string {
       font-size: 10px;
     }
 
+    /* ── Automations panel (sidebar) ── */
+
+    /* One card per schedule. The status dot carries the state, the name the
+     * identity, the meta line the schedule — a paused row dims its dot and
+     * name rather than growing a second label. */
+    .automation-card {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      padding: 6px 10px;
+      border-bottom: 1px solid rgba(128, 128, 128, 0.08);
+    }
+    .automation-card.is-paused .automation-name {
+      opacity: 0.62;
+    }
+    .automation-head {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      min-width: 0;
+    }
+    .automation-status-dot {
+      flex: none;
+      font-size: 9px;
+      color: #4caf50;
+    }
+    .automation-card.is-paused .automation-status-dot {
+      color: var(--muted);
+    }
+    .automation-name {
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 12px;
+      color: var(--fg);
+    }
+    .automation-meta {
+      font-size: 10px;
+      opacity: 0.65;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .automation-actions {
+      display: flex;
+      gap: 4px;
+      margin-top: 2px;
+    }
+    .automation-problem {
+      font-size: 10px;
+      padding: 5px 10px;
+      color: #f44336;
+      line-height: 1.4;
+    }
+
+    /* The create dialog: a form, not prose, so its fields are compact and
+     * stack in the order they are answered — name, source, prompt, schedule. */
+    .automation-create-body {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      max-height: 64vh;
+      overflow-y: auto;
+    }
+    .automation-input,
+    .automation-time-input,
+    .automation-date-input,
+    .automation-rrule-input,
+    .automation-preset-select {
+      box-sizing: border-box;
+      padding: 5px 8px;
+      font: inherit;
+      font-size: 12px;
+      color: var(--fg);
+      background: rgba(128, 128, 128, 0.06);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+    }
+    .automation-input:focus,
+    .automation-time-input:focus,
+    .automation-date-input:focus,
+    .automation-rrule-input:focus,
+    .automation-preset-select:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+    .automation-create-body .automation-prompt-input {
+      min-height: 84px;
+    }
+    .automation-allow-shell {
+      display: flex;
+      align-items: flex-start;
+      gap: 6px;
+      font-size: 11px;
+      line-height: 1.35;
+      cursor: pointer;
+      opacity: 0.85;
+    }
+    .automation-allow-shell-input {
+      flex: none;
+      margin: 2px 0 0;
+    }
+    .automation-source-row,
+    .automation-day-row {
+      display: flex;
+      gap: 4px;
+      flex-wrap: wrap;
+    }
+    .automation-source-btn,
+    .automation-day-btn {
+      padding: 3px 10px;
+      font: inherit;
+      font-size: 11px;
+      color: var(--fg);
+      background: transparent;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      cursor: pointer;
+    }
+    .automation-source-btn:hover,
+    .automation-day-btn:hover {
+      background: rgba(128, 128, 128, 0.12);
+    }
+    .automation-source-btn.is-active,
+    .automation-day-btn.is-active {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: var(--vscode-button-foreground);
+    }
+    .automation-form-problem {
+      font-size: 11px;
+      line-height: 1.4;
+      color: #f44336;
+    }
+    .automation-memo-list {
+      display: flex;
+      flex-direction: column;
+      max-height: 150px;
+      overflow-y: auto;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+    }
+    .automation-memo-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      width: 100%;
+      padding: 4px 8px;
+      font: inherit;
+      font-size: 11px;
+      color: var(--fg);
+      text-align: left;
+      background: transparent;
+      border: 0;
+      border-bottom: 1px solid rgba(128, 128, 128, 0.08);
+      cursor: pointer;
+      box-sizing: border-box;
+    }
+    .automation-memo-row:last-child {
+      border-bottom: 0;
+    }
+    .automation-memo-row:hover {
+      background: rgba(128, 128, 128, 0.1);
+    }
+    .automation-memo-row.is-selected {
+      background: color-mix(in srgb, var(--accent) 24%, transparent);
+    }
+    .automation-memo-text {
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .automation-memo-from {
+      flex: none;
+      max-width: 40%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 10px;
+      opacity: 0.6;
+    }
+    .automation-memo-empty {
+      padding: 8px;
+      font-size: 11px;
+      opacity: 0.7;
+      line-height: 1.4;
+    }
+    .automation-schedule-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .automation-field-label {
+      font-size: 11px;
+      opacity: 0.75;
+    }
+    .automation-rrule-input {
+      flex: 1 1 220px;
+      min-width: 0;
+    }
+
     /* ── MCP panel (sidebar) ── */
 
     /* The group headings are plain labels, not fold controls: the panel's

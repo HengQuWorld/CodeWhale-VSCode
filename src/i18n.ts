@@ -634,6 +634,62 @@ interface Translations {
   /** Row tooltip: clicking a memo opens the conversation holding it; the
    *  memo itself still waits for the reader there. */
   memosOpenThread: string;
+  // Automations panel
+  /** Activity section: the schedules that run on their own. */
+  automations: string;
+  automationsRefresh: string;
+  automationsEmpty: string;
+  automationsCreate: string;
+  automationsCreateTitle: string;
+  automationsNamePlaceholder: string;
+  automationsPromptPlaceholder: string;
+  /** Source picker: the prompt is typed in the form. */
+  automationsSourceManual: string;
+  /** Source picker: the prompt is taken from a parked memo. */
+  automationsSourceMemos: string;
+  automationsMemosEmpty: string;
+  /** Tooltip on a memo row in the source picker. */
+  automationsMemosPick: string;
+  /** Tooltip on the prompt box once a memo filled it. */
+  automationsPromptFromMemo: string;
+  automationsScheduleLabel: string;
+  automationsPresetDaily: string;
+  automationsPresetWeekly: string;
+  automationsPresetHourly: string;
+  automationsPresetOnce: string;
+  automationsPresetCustom: string;
+  automationsTimeLabel: string;
+  /** Seven weekday short labels, comma-separated, Monday first. */
+  automationsDayLabels: string;
+  automationsRrulePlaceholder: string;
+  automationsCreateSubmit: string;
+  automationsRunNow: string;
+  automationsPause: string;
+  automationsResume: string;
+  automationsDelete: string;
+  /** Row meta; `{when}` is a formatted local time. */
+  automationsNextRun: string;
+  automationsNeverRun: string;
+  automationsNotScheduled: string;
+  /** Confirmation posted after a create; `{name}` is the automation's name. */
+  automationsCreated: string;
+  automationsFailed: string;
+  /** The panel's read failed; its rows (if any) are what an earlier read left. */
+  automationsLoadFailed: string;
+  /** Create-form switch: a run without it may read and answer but not execute. */
+  automationsAllowShell: string;
+  /** Posted after "run now"; the run itself proceeds in the background. */
+  automationsRunTriggered: string;
+  /** Create-form validation: what is still missing, `{fields}` lists them. */
+  automationsCreateNeeds: string;
+  automationsFieldName: string;
+  automationsFieldPrompt: string;
+  automationsFieldDate: string;
+  automationsFieldSchedule: string;
+  /** A one-off schedule whose moment has already passed. */
+  automationsTimePast: string;
+  /** Delete confirmation; `{name}` is the schedule's name. */
+  automationsDeleteConfirm: string;
   noAgentRuns: string;
   agentRunGone: string;
   agentStatusQueued: string;
@@ -1199,6 +1255,48 @@ const en: Translations = {
   memosRefresh: "Refresh memos",
   memosEmpty: "No parked memos in any conversation. Park one with the composer's queue button — it waits here until you choose to run it.",
   memosOpenThread: "Open this conversation — its memos stay parked until you run them",
+  // Automations panel
+  automations: "Automations",
+  automationsRefresh: "Refresh automations",
+  automationsEmpty: "No scheduled automations. Create one and it runs on its own — the prompt can come from a parked memo.",
+  automationsCreate: "New automation",
+  automationsCreateTitle: "Create automation",
+  automationsNamePlaceholder: "Name — what this schedule is for",
+  automationsPromptPlaceholder: "What should run on each occurrence…",
+  automationsSourceManual: "Write it",
+  automationsSourceMemos: "From a memo",
+  automationsMemosEmpty: "No parked memos to take a prompt from. Park one with the composer's queue button first.",
+  automationsMemosPick: "Use this memo as the prompt",
+  automationsPromptFromMemo: "Filled from a parked memo — edit it here and the memo itself is left untouched",
+  automationsScheduleLabel: "Schedule",
+  automationsPresetDaily: "Daily",
+  automationsPresetWeekly: "Weekly",
+  automationsPresetHourly: "Hourly",
+  automationsPresetOnce: "Once",
+  automationsPresetCustom: "Custom",
+  automationsTimeLabel: "Time",
+  automationsDayLabels: "Mon,Tue,Wed,Thu,Fri,Sat,Sun",
+  automationsRrulePlaceholder: "FREQ=… (e.g. FREQ=CRON;EXPR=30 9 * * 1-5)",
+  automationsCreateSubmit: "Create",
+  automationsRunNow: "Run now",
+  automationsPause: "Pause",
+  automationsResume: "Resume",
+  automationsDelete: "Delete",
+  automationsNextRun: "Next {when}",
+  automationsNeverRun: "Never run",
+  automationsNotScheduled: "Not scheduled",
+  automationsCreated: "Automation created: {name}",
+  automationsFailed: "Automation request failed",
+  automationsLoadFailed: "Could not read the automations from the engine. The rows below are from an earlier read.",
+  automationsAllowShell: "Allow shell commands — a run without this can read and answer but not execute",
+  automationsRunTriggered: "Automation triggered — it runs in the background.",
+  automationsCreateNeeds: "Still needed: {fields}",
+  automationsFieldName: "a name",
+  automationsFieldPrompt: "the content to run",
+  automationsFieldDate: "a date",
+  automationsFieldSchedule: "a schedule expression",
+  automationsTimePast: "That moment has already passed — pick a later time.",
+  automationsDeleteConfirm: "Delete the scheduled task “{name}”? Its run history goes with it.",
   noAgentRuns: "No agent runs",
   agentRunGone: "That agent run is no longer in this runtime — a finished run is dropped from the run list about an hour after it settles.",
   agentStatusQueued: "Queued",
@@ -1756,6 +1854,48 @@ const zhCn: Translations = {
   memosRefresh: "刷新备忘",
   memosEmpty: "所有会话都没有待执行的备忘。用输入框的队列按钮压入一条，它会在这里等你决定何时执行。",
   memosOpenThread: "打开此会话——其中的备忘在你执行前不会运行",
+  // Automations panel
+  automations: "定时任务",
+  automationsRefresh: "刷新定时任务",
+  automationsEmpty: "还没有定时任务。新建一个，它就会按计划自己运行——内容可以直接从备忘里选。",
+  automationsCreate: "新建定时任务",
+  automationsCreateTitle: "新建定时任务",
+  automationsNamePlaceholder: "名称——这个计划是做什么的",
+  automationsPromptPlaceholder: "每次运行时执行什么……",
+  automationsSourceManual: "自己写",
+  automationsSourceMemos: "从备忘选择",
+  automationsMemosEmpty: "没有可选的备忘。先用输入框的队列按钮压入一条。",
+  automationsMemosPick: "用这条备忘作为执行内容",
+  automationsPromptFromMemo: "内容来自一条备忘——在这里修改不会改动备忘本身",
+  automationsScheduleLabel: "计划",
+  automationsPresetDaily: "每天",
+  automationsPresetWeekly: "每周",
+  automationsPresetHourly: "每小时",
+  automationsPresetOnce: "一次",
+  automationsPresetCustom: "自定义",
+  automationsTimeLabel: "时间",
+  automationsDayLabels: "一,二,三,四,五,六,日",
+  automationsRrulePlaceholder: "FREQ=…（例如 FREQ=CRON;EXPR=30 9 * * 1-5）",
+  automationsCreateSubmit: "创建",
+  automationsRunNow: "立即运行",
+  automationsPause: "暂停",
+  automationsResume: "恢复",
+  automationsDelete: "删除",
+  automationsNextRun: "下次 {when}",
+  automationsNeverRun: "从未运行",
+  automationsNotScheduled: "未排期",
+  automationsCreated: "已创建定时任务：{name}",
+  automationsFailed: "定时任务操作失败",
+  automationsLoadFailed: "无法从引擎读取定时任务；下面显示的是上一次读到的内容。",
+  automationsAllowShell: "允许执行命令——不勾选时，任务只能读取和回答，不能执行",
+  automationsRunTriggered: "已触发定时任务——它会在后台运行。",
+  automationsCreateNeeds: "还差：{fields}",
+  automationsFieldName: "名称",
+  automationsFieldPrompt: "要执行的内容",
+  automationsFieldDate: "日期",
+  automationsFieldSchedule: "计划表达式",
+  automationsTimePast: "这个时间已经过去了——请选一个更晚的时间。",
+  automationsDeleteConfirm: "删除定时任务「{name}」？它的运行历史也会一并删除。",
   noAgentRuns: "暂无子代理运行",
   agentRunGone: "该子代理运行已不在当前引擎中——已结束的运行约一小时后会从运行列表里清理。",
   agentStatusQueued: "排队中",
@@ -2344,6 +2484,47 @@ export function webviewTranslations(tr: Translations) {
     memosRefresh: tr.memosRefresh,
     memosEmpty: tr.memosEmpty,
     memosOpenThread: tr.memosOpenThread,
+    automations: tr.automations,
+    automationsRefresh: tr.automationsRefresh,
+    automationsEmpty: tr.automationsEmpty,
+    automationsCreate: tr.automationsCreate,
+    automationsCreateTitle: tr.automationsCreateTitle,
+    automationsNamePlaceholder: tr.automationsNamePlaceholder,
+    automationsPromptPlaceholder: tr.automationsPromptPlaceholder,
+    automationsSourceManual: tr.automationsSourceManual,
+    automationsSourceMemos: tr.automationsSourceMemos,
+    automationsMemosEmpty: tr.automationsMemosEmpty,
+    automationsMemosPick: tr.automationsMemosPick,
+    automationsPromptFromMemo: tr.automationsPromptFromMemo,
+    automationsScheduleLabel: tr.automationsScheduleLabel,
+    automationsPresetDaily: tr.automationsPresetDaily,
+    automationsPresetWeekly: tr.automationsPresetWeekly,
+    automationsPresetHourly: tr.automationsPresetHourly,
+    automationsPresetOnce: tr.automationsPresetOnce,
+    automationsPresetCustom: tr.automationsPresetCustom,
+    automationsTimeLabel: tr.automationsTimeLabel,
+    automationsDayLabels: tr.automationsDayLabels,
+    automationsRrulePlaceholder: tr.automationsRrulePlaceholder,
+    automationsCreateSubmit: tr.automationsCreateSubmit,
+    automationsRunNow: tr.automationsRunNow,
+    automationsPause: tr.automationsPause,
+    automationsResume: tr.automationsResume,
+    automationsDelete: tr.automationsDelete,
+    automationsNextRun: tr.automationsNextRun,
+    automationsNeverRun: tr.automationsNeverRun,
+    automationsNotScheduled: tr.automationsNotScheduled,
+    automationsCreated: tr.automationsCreated,
+    automationsFailed: tr.automationsFailed,
+    automationsLoadFailed: tr.automationsLoadFailed,
+    automationsAllowShell: tr.automationsAllowShell,
+    automationsRunTriggered: tr.automationsRunTriggered,
+    automationsCreateNeeds: tr.automationsCreateNeeds,
+    automationsFieldName: tr.automationsFieldName,
+    automationsFieldPrompt: tr.automationsFieldPrompt,
+    automationsFieldDate: tr.automationsFieldDate,
+    automationsFieldSchedule: tr.automationsFieldSchedule,
+    automationsTimePast: tr.automationsTimePast,
+    automationsDeleteConfirm: tr.automationsDeleteConfirm,
     noAgentRuns: tr.noAgentRuns,
     agentRunGone: tr.agentRunGone,
     agentStatusQueued: tr.agentStatusQueued,

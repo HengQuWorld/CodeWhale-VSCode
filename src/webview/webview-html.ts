@@ -539,6 +539,48 @@ export interface WebviewTranslations {
   memosRefresh: string;
   memosEmpty: string;
   memosOpenThread: string;
+  // Automations panel
+  automations: string;
+  automationsRefresh: string;
+  automationsEmpty: string;
+  automationsCreate: string;
+  automationsCreateTitle: string;
+  automationsNamePlaceholder: string;
+  automationsPromptPlaceholder: string;
+  automationsSourceManual: string;
+  automationsSourceMemos: string;
+  automationsMemosEmpty: string;
+  automationsMemosPick: string;
+  automationsPromptFromMemo: string;
+  automationsScheduleLabel: string;
+  automationsPresetDaily: string;
+  automationsPresetWeekly: string;
+  automationsPresetHourly: string;
+  automationsPresetOnce: string;
+  automationsPresetCustom: string;
+  automationsTimeLabel: string;
+  automationsDayLabels: string;
+  automationsRrulePlaceholder: string;
+  automationsCreateSubmit: string;
+  automationsRunNow: string;
+  automationsPause: string;
+  automationsResume: string;
+  automationsDelete: string;
+  automationsNextRun: string;
+  automationsNeverRun: string;
+  automationsNotScheduled: string;
+  automationsCreated: string;
+  automationsFailed: string;
+  automationsLoadFailed: string;
+  automationsAllowShell: string;
+  automationsRunTriggered: string;
+  automationsCreateNeeds: string;
+  automationsFieldName: string;
+  automationsFieldPrompt: string;
+  automationsFieldDate: string;
+  automationsFieldSchedule: string;
+  automationsTimePast: string;
+  automationsDeleteConfirm: string;
   noAgentRuns: string;
   agentStatusQueued: string;
   agentStatusStarting: string;
@@ -699,6 +741,7 @@ ${css}
   <div id="fleet-detail-overlay" class="task-detail-overlay"></div>
   <div id="fleet-create-overlay" class="task-detail-overlay"></div>
   <div id="task-create-overlay" class="task-detail-overlay"></div>
+  <div id="automation-create-overlay" class="task-detail-overlay"></div>
   <div id="mcp-add-overlay" class="task-detail-overlay"></div>
   <div id="mcp-imports-overlay" class="task-detail-overlay"></div>
   <div id="route-move-overlay" class="route-move-overlay">
@@ -765,6 +808,13 @@ ${css}
               <span class="sidebar-section-arrow">▼</span>
             </div>
             <div class="sidebar-section-body" id="tab-memos"></div>
+          </div>
+          <div class="sidebar-section" id="sidebar-automations">
+            <div class="sidebar-section-header" id="automations-section-toggle">
+              <span class="sidebar-section-title">⏰ ${tr.automations}</span>
+              <span class="sidebar-section-arrow">▼</span>
+            </div>
+            <div class="sidebar-section-body" id="tab-automations"></div>
           </div>
           <div class="sidebar-section" id="sidebar-fleet">
             <div class="sidebar-section-header" id="fleet-section-toggle">

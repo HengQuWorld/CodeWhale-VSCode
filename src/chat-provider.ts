@@ -911,6 +911,20 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       case "refreshMemosPanel":
         await this.refreshMemosPanel();
         break;
+      case "refreshAutomations":
+        await this.refreshAutomationsPanel();
+        break;
+      case "createAutomation":
+        await this.handleCreateAutomation(
+          String(msg.name ?? ""),
+          String(msg.prompt ?? ""),
+          String(msg.rrule ?? ""),
+          msg.allowShell === true
+        );
+        break;
+      case "automationAction":
+        await this.handleAutomationAction(String(msg.action ?? ""), String(msg.id ?? ""));
+        break;
       case "webviewReady":
         try {
           // A question from the webview that just went away can never be
@@ -959,6 +973,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
           void this.refreshSkillList();
           void this.refreshMemoryPanel();
           void this.refreshMemosPanel();
+          void this.refreshAutomationsPanel();
           void this.refreshMcpServers();
           void this.postCommandCatalog();
         }
@@ -1217,6 +1232,8 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     // Same for memory: a reloaded webview lost the rows, and the store may
     // have changed while it was gone.
     void this.refreshMemoryPanel();
+    // And for the schedules: they fire while no window is looking.
+    void this.refreshAutomationsPanel();
     // The MCP panel's list travels on its own message; it is re-asked here so
     // a reloaded webview does not paint an empty panel until the next sidebar
     // refresh happens to fire.
@@ -4818,6 +4835,140 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       void this.enrichTaskList(result.tasks, refreshToken);
     } catch {
       // best-effort
+    }
+  }
+
+  // ── Automations panel (Activity → Automations) ──
+  // The GUI's room for the schedules `/automation` lists in the terminal. The
+  // engine owns them (`~/.codewhale/automations`, user-global); this side only
+  // reads the list and forwards the four Runtime API actions. Creation goes
+  // through `POST /v1/automations` — the same route the agent's `automation`
+  // tool uses — so a schedule made here and one made in a conversation are the
+  // same record.
+
+  /** Publish the engine's schedules to the panel.
+   *
+   *  A failed read keeps the rows the last good read painted and says the read
+   *  failed: answering with an empty list would claim there are no schedules,
+   *  which is a different fact from "the engine did not answer". */
+  public async refreshAutomationsPanel(): Promise<void> {
+    try {
+      await this.api.ensureReady();
+      const records = await this.api.listAutomations();
+      const automations = (Array.isArray(records) ? records : []).map((record) => ({
+        id: record.id,
+        name: record.name,
+        prompt: record.prompt,
+        rrule: record.rrule,
+        status: record.status,
+        next_run_at: record.next_run_at ?? null,
+        last_run_at: record.last_run_at ?? null,
+      }));
+      this.lastAutomations = automations;
+      this.postMessage({ type: "automationsState", automations, loaded: true });
+    } catch (err) {
+      this.debugLog(`refreshAutomationsPanel failed: ${getErrorMessage(err)}`);
+      this.postMessage({ type: "automationsState", automations: this.lastAutomations, problem: t().automationsLoadFailed });
+    }
+  }
+
+  /** The last list a successful read published, so a failed re-read does not
+   *  blank the panel. */
+  private lastAutomations: Array<Record<string, unknown>> = [];
+
+  /** Create one schedule from the panel's form. The workspace the window has
+   *  open becomes the run's directory unless the record already names one; the
+   *  engine validates the rrule and the trust of that directory. */
+  private async handleCreateAutomation(
+    name: string,
+    prompt: string,
+    rrule: string,
+    allowShell: boolean
+  ): Promise<void> {
+    const trimmedName = name.trim();
+    const trimmedPrompt = prompt.trim();
+    const trimmedRrule = rrule.trim();
+    if (!trimmedName || !trimmedPrompt || !trimmedRrule) {
+      // The form checks this before sending, so reaching here means the two
+      // sides disagree about what is filled in. Answer anyway: a form left
+      // waiting on an acknowledgment that never comes is worse than a refusal.
+      // Naming one field here would guess which one is missing, so the form's
+      // own validation message is not reused for a check it cannot see.
+      this.postMessage({ type: "automationCreateFailed", message: t().automationsFailed });
+      return;
+    }
+    try {
+      await this.api.ensureReady();
+      const workspace = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+      const created = await this.api.createAutomation({
+        name: trimmedName,
+        prompt: trimmedPrompt,
+        rrule: trimmedRrule,
+        ...(workspace ? { cwds: [workspace] } : {}),
+        // One switch, two bits: a run nobody is watching cannot answer an
+        // approval card, so executing and proceeding without approval travel
+        // together. Workspace trust is left to the engine and the user's own
+        // settings — widening that here would grant more than the switch says.
+        // Without the switch the engine's defaults apply (read and answer).
+        ...(allowShell ? { allow_shell: true, auto_approve: true } : {}),
+      });
+      const createdName = created?.name || trimmedName;
+      this.postMessage({
+        type: "info",
+        message: t().automationsCreated.replace("{name}", createdName),
+      });
+      // The form is still open on the other side; this is what closes it.
+      this.postMessage({ type: "automationCreated", name: createdName });
+      await this.refreshAutomationsPanel();
+    } catch (err) {
+      // The refusal goes back to the form, which holds what the reader typed.
+      const reason = getErrorMessage(err);
+      this.postMessage({
+        type: "error",
+        message: `${t().automationsFailed}: ${reason}`,
+      });
+      this.postMessage({ type: "automationCreateFailed", message: reason });
+    }
+  }
+
+  /** Run now / pause / resume / delete, then repaint from the engine rather
+   *  than from the click: a pause the engine refused must not look paused. */
+  private async handleAutomationAction(action: string, id: string): Promise<void> {
+    if (!id) return;
+    // Deleting is the one action with no undo — the record and its history go.
+    // It asks first, and a no is a complete answer (nothing is written).
+    if (action === "delete") {
+      const known = this.lastAutomations.find((row) => row.id === id);
+      const name = typeof known?.name === "string" ? known.name : id;
+      const answer = await vscode.window.showWarningMessage(
+        t().automationsDeleteConfirm.replace("{name}", name),
+        { modal: true },
+        t().automationsDelete
+      );
+      if (answer !== t().automationsDelete) return;
+    }
+    try {
+      await this.api.ensureReady();
+      if (action === "run") {
+        const triggered = await this.api.runAutomation(id);
+        this.postMessage({
+          type: "info",
+          message: `${t().automationsRunTriggered}${triggered?.name ? ` (${triggered.name})` : ""}`,
+        });
+      } else if (action === "pause") await this.api.pauseAutomation(id);
+      else if (action === "resume") await this.api.resumeAutomation(id);
+      else if (action === "delete") await this.api.deleteAutomation(id);
+      else return;
+      await this.refreshAutomationsPanel();
+    } catch (err) {
+      const reason = getErrorMessage(err);
+      this.postMessage({
+        type: "error",
+        message: `${t().automationsFailed}: ${reason}`,
+      });
+      // The engine refuses some of these by design (a delete while a run is
+      // still active); saying so in a dialog means the click is not silent.
+      void vscode.window.showWarningMessage(`${t().automationsFailed}: ${reason}`);
     }
   }
 

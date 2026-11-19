@@ -1435,6 +1435,35 @@ ${PROVIDER_PICKER_JS}
         }
         break;
 
+      case 'automationCreated':
+        // The form waits for this: only the host knows whether the engine
+        // accepted the schedule, so the dialog closes on the answer rather
+        // than on the click.
+        if (window.__wvSidebar && window.__wvSidebar.settleAutomationCreate) {
+          window.__wvSidebar.settleAutomationCreate(true);
+        }
+        break;
+
+      case 'automationCreateFailed':
+        if (window.__wvSidebar && window.__wvSidebar.settleAutomationCreate) {
+          window.__wvSidebar.settleAutomationCreate(false, msg.message ? String(msg.message) : '');
+        }
+        break;
+
+      case 'automationsState':
+        // The Activity tab's Automations section. Rows and their actions are
+        // posted by the host, which is the only half that talks to the
+        // Runtime API; a create is acknowledged with a fresh list, not with
+        // the row painted here.
+        if (window.__wvSidebar && window.__wvSidebar.renderAutomations) {
+          window.__wvSidebar.renderAutomations({
+            automations: Array.isArray(msg.automations) ? msg.automations : [],
+            loaded: msg.loaded !== false,
+            problem: msg.problem ? String(msg.problem) : null
+          });
+        }
+        break;
+
       case 'apiCapabilities':
         apiCapabilities = Object.assign({}, apiCapabilities, msg.capabilities || {});
         window.__wvApiCapabilities = apiCapabilities;

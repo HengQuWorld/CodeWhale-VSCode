@@ -12,7 +12,7 @@ import { recommendedMcpServers } from "../utils/mcp-utils";
  * the sections whose fold is remembered, and the header each fold is bound to.
  * It is injected into the script below rather than written twice, and the
  * template's own ids are checked against it by `webview-html.test.ts`. */
-export const ACTIVITY_SECTION_KEYS = ['work', 'changes', 'memory', 'memos', 'fleet', 'tasks', 'agents', 'skills', 'mcp'] as const;
+export const ACTIVITY_SECTION_KEYS = ['work', 'changes', 'memory', 'memos', 'automations', 'fleet', 'tasks', 'agents', 'skills', 'mcp'] as const;
 
 /** The Skills panel's scope groups, in the order it draws them.
  *
@@ -2572,6 +2572,691 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
 
       container.appendChild(box);
     });
+
+    // The create dialog's picker is a live view of this snapshot, not a copy
+    // taken when it opened: a memo parked while the form is open becomes
+    // pickable without closing and reopening it.
+    var automationOverlay = document.getElementById('automation-create-overlay');
+    if (automationDraft && automationDraft.source === 'memos' && automationOverlay &&
+        automationOverlay.style.display === 'flex') {
+      paintAutomationCreateDialog(false);
+    }
+  }
+
+  // ── Render Automations ──
+  // The schedules that run on their own — the panel behind the terminal's
+  // /automation command, created here instead of only by typing a prompt at the
+  // agent. One row per schedule: its state, when it next runs, and the four
+  // actions the Runtime API offers. The prompt of a new schedule can be
+  // written in the form or taken from a parked memo, which is what turns
+  // "remind me about this later" into "run this every morning".
+  var automationsState = { automations: [], problem: null };
+
+  var AUTOMATION_DAY_CODES = ['MO', 'TU', 'WE', 'TH', 'FR', 'SA', 'SU'];
+
+  function automationIsPaused(automation) {
+    return !!automation && automation.status === 'paused';
+  }
+
+  /** Local wall-clock text for an engine timestamp; empty when unusable. */
+  function automationTimeText(iso) {
+    if (!iso) return '';
+    var when = new Date(iso);
+    if (isNaN(when.getTime())) return '';
+    return when.toLocaleString();
+  }
+
+  function automationActionButton(label, glyph, className, handler) {
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'task-action-btn' + (className ? ' ' + className : '');
+    btn.title = label;
+    btn.setAttribute('aria-label', label);
+    btn.textContent = glyph;
+    btn.onclick = function(e) {
+      if (e && e.stopPropagation) e.stopPropagation();
+      handler();
+    };
+    return btn;
+  }
+
+  function renderAutomations(next) {
+    var container = document.getElementById('tab-automations');
+    if (!container) return;
+    if (next) {
+      automationsState = {
+        automations: Array.isArray(next.automations) ? next.automations : [],
+        problem: next.problem || null,
+      };
+    }
+    container.innerHTML = '';
+
+    // The create button and the refresh sit in a toolbar like every other
+    // panel's, so a schedule added from another window can be re-read here.
+    var controls = document.createElement('div');
+    controls.className = 'task-toolbar';
+    var createBtn = document.createElement('button');
+    createBtn.className = 'task-icon-btn primary';
+    createBtn.type = 'button';
+    createBtn.title = __i18n.automationsCreate;
+    createBtn.setAttribute('aria-label', __i18n.automationsCreate);
+    createBtn.textContent = '+';
+    createBtn.onclick = function() { openAutomationCreateDialog(); };
+    controls.appendChild(createBtn);
+    var refreshBtn = document.createElement('button');
+    refreshBtn.className = 'task-icon-btn';
+    refreshBtn.type = 'button';
+    refreshBtn.title = __i18n.automationsRefresh;
+    refreshBtn.setAttribute('aria-label', __i18n.automationsRefresh);
+    refreshBtn.textContent = '\u21BB';
+    refreshBtn.onclick = function() {
+      vscode.postMessage({ type: 'refreshAutomations' });
+    };
+    controls.appendChild(refreshBtn);
+    container.appendChild(controls);
+
+    // A failed read is not an empty schedule list: the rows kept below are
+    // what an earlier read left, so the note sits above them. With no rows to
+    // keep, the empty state below carries the same words once instead.
+    if (automationsState.problem && automationsState.automations.length > 0) {
+      var problem = document.createElement('div');
+      problem.className = 'automation-problem';
+      problem.textContent = String(automationsState.problem);
+      container.appendChild(problem);
+    }
+
+    if (automationsState.automations.length === 0) {
+      var empty = document.createElement('div');
+      empty.className = 'work-empty';
+      var emptyIcon = document.createElement('div');
+      emptyIcon.className = 'work-empty-icon';
+      emptyIcon.textContent = '\u23F0';
+      empty.appendChild(emptyIcon);
+      var emptyText = document.createElement('div');
+      emptyText.className = 'work-empty-text';
+      emptyText.textContent = automationsState.problem
+        ? String(automationsState.problem)
+        : __i18n.automationsEmpty;
+      empty.appendChild(emptyText);
+      container.appendChild(empty);
+      return;
+    }
+
+    automationsState.automations.forEach(function(automation) {
+      var paused = automationIsPaused(automation);
+      var card = document.createElement('div');
+      card.className = 'automation-card' + (paused ? ' is-paused' : '');
+
+      var head = document.createElement('div');
+      head.className = 'automation-head';
+      var dot = document.createElement('span');
+      dot.className = 'automation-status-dot';
+      dot.textContent = paused ? '\u25CB' : '\u25CF';
+      head.appendChild(dot);
+      var nameEl = document.createElement('span');
+      nameEl.className = 'automation-name';
+      nameEl.textContent = String(automation.name || automation.id || '');
+      // The prompt is what the schedule actually runs; the row says it on
+      // hover instead of spending a line per schedule on it.
+      nameEl.title = String(automation.prompt || '');
+      head.appendChild(nameEl);
+      card.appendChild(head);
+
+      var meta = document.createElement('div');
+      meta.className = 'automation-meta';
+      var bits = [];
+      if (automation.rrule) bits.push(String(automation.rrule));
+      var nextText = automationTimeText(automation.next_run_at);
+      bits.push(nextText
+        ? __i18n.automationsNextRun.replace('{when}', nextText)
+        : __i18n.automationsNotScheduled);
+      bits.push(automationTimeText(automation.last_run_at) || __i18n.automationsNeverRun);
+      meta.textContent = bits.join(' \u00B7 ');
+      meta.title = meta.textContent;
+      card.appendChild(meta);
+
+      var actions = document.createElement('div');
+      actions.className = 'automation-actions';
+      var id = String(automation.id || '');
+      actions.appendChild(automationActionButton(
+        __i18n.automationsRunNow, '\u25B6', '',
+        function() { vscode.postMessage({ type: 'automationAction', action: 'run', id: id }); }
+      ));
+      actions.appendChild(automationActionButton(
+        paused ? __i18n.automationsResume : __i18n.automationsPause,
+        paused ? '\u25B6' : '\u23F8',
+        '',
+        function() {
+          vscode.postMessage({
+            type: 'automationAction',
+            action: paused ? 'resume' : 'pause',
+            id: id,
+          });
+        }
+      ));
+      actions.appendChild(automationActionButton(
+        __i18n.automationsDelete, '\u2715', 'danger',
+        function() { vscode.postMessage({ type: 'automationAction', action: 'delete', id: id }); }
+      ));
+      card.appendChild(actions);
+
+      container.appendChild(card);
+    });
+  }
+
+  // ── Automation create dialog ──
+  // The draft lives here rather than in the DOM so a repaint (switching the
+  // source, changing the preset) cannot eat what the reader typed. Nothing is
+  // written until Create: the host asks the engine and reports its receipt.
+  var automationDraft = null;
+  /** Kept out of the draft so a repaint (switching the source or the preset)
+   *  cannot swallow the reason the last Create was refused. */
+  var automationFormProblem = '';
+  /** A create is in flight. The form stays open until the host answers, so a
+   *  refusal lands in front of the reader instead of in the transcript behind
+   *  a dialog that already closed. */
+  var automationSubmitting = false;
+  var automationSubmitTimer = null;
+
+  /** YYYY-MM-DD for a local day, which is what a date input reads back. */
+  function automationLocalDate(dayOffset) {
+    var when = new Date();
+    when.setDate(when.getDate() + (dayOffset || 0));
+    return when.getFullYear() + '-' + pad2(when.getMonth() + 1) + '-' + pad2(when.getDate());
+  }
+
+  function newAutomationDraft() {
+    return {
+      name: '',
+      prompt: '',
+      // The memo picker is the point of this form, so it opens on it. With no
+      // parked memo the list says so and the reader switches to writing.
+      source: 'memos',
+      memoId: null,
+      preset: 'daily',
+      time: '09:00',
+      days: ['MO'],
+      // Tomorrow: a one-off defaults to a moment that has not passed, so the
+      // form never opens pre-filled with an impossible answer.
+      date: automationLocalDate(1),
+      rrule: '',
+      allowShell: false,
+    };
+  }
+
+  /** The rrule the form describes. Empty means the form is not answerable
+   *  yet (a custom schedule with no expression, a one-off with no date), and
+   *  Create refuses rather than sending a schedule the engine would reject. */
+  function automationRruleFromDraft(draft) {
+    var timeParts = String(draft.time || '09:00').split(':');
+    var hour = parseInt(timeParts[0], 10);
+    var minute = parseInt(timeParts[1], 10);
+    if (isNaN(hour)) hour = 9;
+    if (isNaN(minute)) minute = 0;
+    if (draft.preset === 'daily') {
+      return 'FREQ=CRON;EXPR=' + minute + ' ' + hour + ' * * *';
+    }
+    if (draft.preset === 'weekly') {
+      var picked = draft.days && draft.days.length > 0 ? draft.days : ['MO'];
+      // Monday-first, whatever order they were clicked in: the expression is
+      // read by people, and click order means nothing outside this form.
+      var days = AUTOMATION_DAY_CODES.filter(function(code) {
+        return picked.indexOf(code) >= 0;
+      });
+      return 'FREQ=WEEKLY;BYDAY=' + days.join(',') +
+        ';BYHOUR=' + hour + ';BYMINUTE=' + minute;
+    }
+    if (draft.preset === 'hourly') {
+      // On the hour, like the preset says. An hour-of-day would be ignored by
+      // an every-hour schedule, so the form does not offer one.
+      return 'FREQ=HOURLY;INTERVAL=1;BYMINUTE=0';
+    }
+    if (draft.preset === 'once') {
+      if (!draft.date) return '';
+      return 'FREQ=ONCE;AT=' + draft.date + 'T' + pad2(hour) + ':' + pad2(minute);
+    }
+    return String(draft.rrule || '').trim();
+  }
+
+  function closeAutomationCreateDialog() {
+    // A close ends the attempt as far as the form is concerned: the timer that
+    // guards a silent host must not repaint a dialog the reader dismissed.
+    if (automationSubmitTimer) {
+      clearTimeout(automationSubmitTimer);
+      automationSubmitTimer = null;
+    }
+    automationSubmitting = false;
+    var overlay = document.getElementById('automation-create-overlay');
+    if (!overlay) return;
+    overlay.style.display = 'none';
+    overlay.innerHTML = '';
+    overlay.onclick = null;
+  }
+
+  /** Pull whatever is in the form into the draft.
+   *
+   *  The draft is updated on input, but a field the reader never typed into
+   *  (a date picker left on its default, a control the browser filled) has no
+   *  input event to record — so the submit reads the DOM as the truth about
+   *  what is on screen rather than trusting the draft alone. */
+  function readAutomationForm() {
+    if (!automationDraft) return;
+    var overlay = document.getElementById('automation-create-overlay');
+    if (!overlay) return;
+    function valueOf(selector) {
+      var el = overlay.querySelector ? overlay.querySelector(selector) : null;
+      return el && typeof el.value === 'string' ? el.value : null;
+    }
+    var name = valueOf('.automation-name-input');
+    if (name !== null) automationDraft.name = name;
+    var prompt = valueOf('.automation-prompt-input');
+    if (prompt !== null) automationDraft.prompt = prompt;
+    var time = valueOf('.automation-time-input');
+    if (time) automationDraft.time = time;
+    var date = valueOf('.automation-date-input');
+    if (date !== null) automationDraft.date = date;
+    var rrule = valueOf('.automation-rrule-input');
+    if (rrule !== null) automationDraft.rrule = rrule;
+    var allow = overlay.querySelector ? overlay.querySelector('.automation-allow-shell-input') : null;
+    if (allow && typeof allow.checked === 'boolean') automationDraft.allowShell = allow.checked;
+  }
+
+  /** Say in the form itself what is still missing. A Create that does nothing
+   *  is the worst answer: it reads as a broken button rather than as a form
+   *  still waiting on an answer. */
+  function setAutomationFormProblem(message) {
+    automationFormProblem = message || '';
+    var overlay = document.getElementById('automation-create-overlay');
+    if (!overlay) return;
+    var slot = overlay.querySelector ? overlay.querySelector('.automation-form-problem') : null;
+    if (!slot) return;
+    slot.textContent = message || '';
+    slot.style.display = message ? 'block' : 'none';
+  }
+
+  function submitAutomationDraft() {
+    if (!automationDraft) return;
+    readAutomationForm();
+    var name = String(automationDraft.name || '').trim();
+    var prompt = String(automationDraft.prompt || '').trim();
+
+    var missing = [];
+    if (!name) missing.push(__i18n.automationsFieldName);
+    if (!prompt) missing.push(__i18n.automationsFieldPrompt);
+    // A one-off needs its day as well as its clock, and the date box may still
+    // be showing the browser's suggested day rather than the draft's.
+    if (automationDraft.preset === 'once' && !String(automationDraft.date || '').trim()) {
+      missing.push(__i18n.automationsFieldDate);
+    }
+    if (automationDraft.preset === 'custom' && !String(automationDraft.rrule || '').trim()) {
+      missing.push(__i18n.automationsFieldSchedule);
+    }
+    if (missing.length > 0) {
+      var separator = String(__i18n.locale || '').indexOf('zh') === 0 ? '\u3001' : ', ';
+      setAutomationFormProblem(
+        __i18n.automationsCreateNeeds.replace('{fields}', missing.join(separator))
+      );
+      return;
+    }
+
+    var rrule = automationRruleFromDraft(automationDraft);
+    if (!rrule) {
+      setAutomationFormProblem(
+        __i18n.automationsCreateNeeds.replace('{fields}', __i18n.automationsFieldSchedule)
+      );
+      return;
+    }
+    // A one-off in the past would be accepted by the engine and then never
+    // fire; say so now, while the reader is still looking at the form.
+    if (automationDraft.preset === 'once') {
+      var when = new Date(rrule.slice('FREQ=ONCE;AT='.length));
+      if (!isNaN(when.getTime()) && when.getTime() <= Date.now()) {
+        setAutomationFormProblem(__i18n.automationsTimePast);
+        return;
+      }
+    }
+
+    automationSubmitting = true;
+    setAutomationFormProblem('');
+    paintAutomationCreateDialog(false);
+    if (automationSubmitTimer) clearTimeout(automationSubmitTimer);
+    // A host that never answers must not leave the button dead forever.
+    automationSubmitTimer = setTimeout(function() {
+      automationSubmitTimer = null;
+      if (!automationSubmitting) return;
+      automationSubmitting = false;
+      var overlay = document.getElementById('automation-create-overlay');
+      if (!overlay || overlay.style.display !== 'flex') return;
+      paintAutomationCreateDialog(false);
+      setAutomationFormProblem(__i18n.automationsFailed);
+    }, 30000);
+
+    vscode.postMessage({
+      type: 'createAutomation',
+      name: name,
+      prompt: prompt,
+      rrule: rrule,
+      allowShell: !!automationDraft.allowShell,
+    });
+  }
+
+  /** The host's answer to a create. Success closes the form — the row it made
+   *  arrives on its own; failure leaves the form standing with the reason, so
+   *  nothing the reader typed is lost to a refusal. */
+  function settleAutomationCreate(ok, message) {
+    if (automationSubmitTimer) {
+      clearTimeout(automationSubmitTimer);
+      automationSubmitTimer = null;
+    }
+    automationSubmitting = false;
+    if (ok) {
+      automationFormProblem = '';
+      closeAutomationCreateDialog();
+      return;
+    }
+    // A refusal only has a form to land on if the reader has not dismissed it.
+    // Reopening a dialog they closed would take the failure and put it in front
+    // of them a second time, as if the click had just happened.
+    var overlay = document.getElementById('automation-create-overlay');
+    if (!overlay || overlay.style.display !== 'flex') return;
+    setAutomationFormProblem(message || __i18n.automationsFailed);
+    paintAutomationCreateDialog(false);
+  }
+
+  /** The parked memos, newest conversation first (the host's order), each row
+   *  one click that copies its text into the prompt box. The memo on disk is
+   *  never consumed: it stays parked, and this schedule gets its own copy. */
+  function buildAutomationMemoPicker() {
+    var list = document.createElement('div');
+    list.className = 'automation-memo-list';
+    var entries = [];
+    memosState.groups.forEach(function(group) {
+      (Array.isArray(group.items) ? group.items : []).forEach(function(item) {
+        entries.push({ group: group, item: item });
+      });
+    });
+    if (entries.length === 0) {
+      var empty = document.createElement('div');
+      empty.className = 'automation-memo-empty';
+      empty.textContent = __i18n.automationsMemosEmpty;
+      list.appendChild(empty);
+      return list;
+    }
+    entries.forEach(function(entry) {
+      var item = entry.item;
+      var row = document.createElement('button');
+      row.type = 'button';
+      row.className = 'automation-memo-row' +
+        (automationDraft.memoId === item.id ? ' is-selected' : '');
+      row.title = __i18n.automationsMemosPick;
+      var text = document.createElement('span');
+      text.className = 'automation-memo-text';
+      text.textContent = memoPreviewLine(item.text);
+      row.appendChild(text);
+      var from = document.createElement('span');
+      from.className = 'automation-memo-from';
+      from.textContent = String(entry.group.title || entry.group.id || '');
+      row.appendChild(from);
+      row.onclick = function() {
+        automationDraft.prompt = String(item.text || '');
+        automationDraft.memoId = item.id;
+        // A schedule still needs a name, and the memo's first line is the
+        // honest guess. It is only a guess: typing over it is one keystroke,
+        // and leaving it blank would refuse the Create for a field the reader
+        // never saw as empty.
+        if (!String(automationDraft.name || '').trim()) {
+          automationDraft.name = memoPreviewLine(item.text).slice(0, 60);
+        }
+        automationFormProblem = '';
+        paintAutomationCreateDialog(false);
+      };
+      list.appendChild(row);
+    });
+    return list;
+  }
+
+  function automationSelectField(className, options, selected) {
+    var select = document.createElement('select');
+    select.className = className;
+    options.forEach(function(pair) {
+      var option = document.createElement('option');
+      option.value = pair[0];
+      option.textContent = pair[1];
+      if (selected === pair[0]) option.selected = true;
+      select.appendChild(option);
+    });
+    return select;
+  }
+
+  /** Repaint the form from the draft. Focus is taken only by the open that
+   *  started it: changing the source or the preset must not pull the cursor
+   *  out of the field the reader is in. */
+  function paintAutomationCreateDialog(focusName) {
+    var overlay = document.getElementById('automation-create-overlay');
+    if (!overlay || !automationDraft) return;
+    overlay.innerHTML = '';
+
+    var panel = document.createElement('div');
+    panel.className = 'task-create-panel automation-create-panel';
+
+    var header = document.createElement('div');
+    header.className = 'task-create-header';
+    var heading = document.createElement('h3');
+    heading.textContent = __i18n.automationsCreateTitle;
+    header.appendChild(heading);
+    var closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.className = 'close-btn automation-create-close';
+    closeBtn.textContent = '\u2715';
+    closeBtn.title = __i18n.cancel;
+    closeBtn.setAttribute('aria-label', __i18n.cancel);
+    closeBtn.onclick = function() { closeAutomationCreateDialog(); };
+    header.appendChild(closeBtn);
+    panel.appendChild(header);
+
+    var body = document.createElement('div');
+    body.className = 'task-create-body automation-create-body';
+
+    var problem = document.createElement('div');
+    problem.className = 'automation-form-problem';
+    problem.textContent = automationFormProblem;
+    problem.style.display = automationFormProblem ? 'block' : 'none';
+    body.appendChild(problem);
+
+    var nameInput = document.createElement('input');
+    nameInput.type = 'text';
+    nameInput.className = 'automation-input automation-name-input';
+    nameInput.placeholder = __i18n.automationsNamePlaceholder;
+    nameInput.value = automationDraft.name;
+    nameInput.addEventListener('input', function() {
+      automationDraft.name = nameInput.value;
+      setAutomationFormProblem('');
+    });
+    body.appendChild(nameInput);
+
+    var sourceRow = document.createElement('div');
+    sourceRow.className = 'automation-source-row';
+    [['manual', __i18n.automationsSourceManual], ['memos', __i18n.automationsSourceMemos]]
+      .forEach(function(pair) {
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'automation-source-btn' +
+          (automationDraft.source === pair[0] ? ' is-active' : '');
+        btn.setAttribute('data-source', pair[0]);
+        btn.textContent = pair[1];
+        btn.onclick = function() {
+          automationDraft.source = pair[0];
+          paintAutomationCreateDialog();
+        };
+        sourceRow.appendChild(btn);
+      });
+    body.appendChild(sourceRow);
+
+    if (automationDraft.source === 'memos') {
+      body.appendChild(buildAutomationMemoPicker());
+    }
+
+    var promptInput = document.createElement('textarea');
+    promptInput.className = 'task-create-textarea automation-prompt-input';
+    promptInput.placeholder = __i18n.automationsPromptPlaceholder;
+    promptInput.value = automationDraft.prompt;
+    if (automationDraft.memoId) promptInput.title = __i18n.automationsPromptFromMemo;
+    promptInput.addEventListener('input', function() {
+      automationDraft.prompt = promptInput.value;
+      // Typing over a memo-filled prompt makes it the reader's own text, so
+      // the "filled from a memo" hint and any stale refusal both go.
+      if (automationDraft.memoId) {
+        automationDraft.memoId = null;
+        promptInput.title = '';
+      }
+      setAutomationFormProblem('');
+    });
+    body.appendChild(promptInput);
+
+    // An unattended run cannot answer an approval card, so the permission is
+    // decided here, before the schedule exists. Off means the run may read and
+    // answer but not execute — the Runtime's own default, said out loud.
+    var allowShellRow = document.createElement('label');
+    allowShellRow.className = 'automation-allow-shell';
+    var allowShellBox = document.createElement('input');
+    allowShellBox.type = 'checkbox';
+    allowShellBox.className = 'automation-allow-shell-input';
+    allowShellBox.checked = !!automationDraft.allowShell;
+    allowShellBox.addEventListener('change', function() {
+      automationDraft.allowShell = !!allowShellBox.checked;
+    });
+    allowShellRow.appendChild(allowShellBox);
+    var allowShellText = document.createElement('span');
+    allowShellText.className = 'automation-allow-shell-text';
+    allowShellText.textContent = __i18n.automationsAllowShell;
+    allowShellRow.appendChild(allowShellText);
+    body.appendChild(allowShellRow);
+
+    var scheduleRow = document.createElement('div');
+    scheduleRow.className = 'automation-schedule-row';
+    var scheduleLabel = document.createElement('span');
+    scheduleLabel.className = 'automation-field-label';
+    scheduleLabel.textContent = __i18n.automationsScheduleLabel;
+    scheduleRow.appendChild(scheduleLabel);
+
+    var presetOptions = [
+      ['daily', __i18n.automationsPresetDaily],
+      ['weekly', __i18n.automationsPresetWeekly],
+      ['hourly', __i18n.automationsPresetHourly],
+      ['once', __i18n.automationsPresetOnce],
+      ['custom', __i18n.automationsPresetCustom],
+    ];
+    var presetSelect = automationSelectField(
+      'automation-preset-select', presetOptions, automationDraft.preset
+    );
+    presetSelect.addEventListener('change', function() {
+      automationDraft.preset = presetSelect.value || 'daily';
+      paintAutomationCreateDialog();
+    });
+    scheduleRow.appendChild(presetSelect);
+
+    if (automationDraft.preset !== 'custom' && automationDraft.preset !== 'hourly') {
+      var timeInput = document.createElement('input');
+      timeInput.type = 'time';
+      timeInput.className = 'automation-time-input';
+      timeInput.title = __i18n.automationsTimeLabel;
+      timeInput.setAttribute('aria-label', __i18n.automationsTimeLabel);
+      timeInput.value = automationDraft.time;
+      timeInput.addEventListener('input', function() {
+        automationDraft.time = timeInput.value || '09:00';
+      });
+      scheduleRow.appendChild(timeInput);
+    }
+
+    if (automationDraft.preset === 'once') {
+      var dateInput = document.createElement('input');
+      dateInput.type = 'date';
+      dateInput.className = 'automation-date-input';
+      dateInput.min = automationLocalDate(0);
+      dateInput.value = automationDraft.date;
+      dateInput.addEventListener('input', function() {
+        automationDraft.date = dateInput.value || '';
+        setAutomationFormProblem('');
+      });
+      scheduleRow.appendChild(dateInput);
+    }
+
+    if (automationDraft.preset === 'custom') {
+      var rruleInput = document.createElement('input');
+      rruleInput.type = 'text';
+      rruleInput.className = 'automation-rrule-input';
+      rruleInput.placeholder = __i18n.automationsRrulePlaceholder;
+      rruleInput.value = automationDraft.rrule;
+      rruleInput.addEventListener('input', function() {
+        automationDraft.rrule = rruleInput.value;
+        setAutomationFormProblem('');
+      });
+      scheduleRow.appendChild(rruleInput);
+    }
+    body.appendChild(scheduleRow);
+
+    if (automationDraft.preset === 'weekly') {
+      var dayRow = document.createElement('div');
+      dayRow.className = 'automation-day-row';
+      var dayCodes = AUTOMATION_DAY_CODES;
+      var dayLabels = String(__i18n.automationsDayLabels || '').split(',');
+      dayCodes.forEach(function(code, index) {
+        var dayBtn = document.createElement('button');
+        dayBtn.type = 'button';
+        var picked = automationDraft.days.indexOf(code) >= 0;
+        dayBtn.className = 'automation-day-btn' + (picked ? ' is-active' : '');
+        dayBtn.setAttribute('data-day', code);
+        dayBtn.textContent = dayLabels[index] || code;
+        dayBtn.onclick = function() {
+          var at = automationDraft.days.indexOf(code);
+          if (at >= 0) automationDraft.days.splice(at, 1);
+          else automationDraft.days.push(code);
+          paintAutomationCreateDialog();
+        };
+        dayRow.appendChild(dayBtn);
+      });
+      body.appendChild(dayRow);
+    }
+
+    panel.appendChild(body);
+
+    var footer = document.createElement('div');
+    footer.className = 'task-create-footer';
+    var cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.className = 'detail-action-btn automation-create-cancel';
+    cancelBtn.textContent = __i18n.cancel;
+    cancelBtn.onclick = function() { closeAutomationCreateDialog(); };
+    footer.appendChild(cancelBtn);
+    var submitBtn = document.createElement('button');
+    submitBtn.type = 'button';
+    submitBtn.className = 'detail-action-btn primary automation-create-submit';
+    submitBtn.textContent = __i18n.automationsCreateSubmit;
+    submitBtn.disabled = automationSubmitting;
+    submitBtn.onclick = function() { submitAutomationDraft(); };
+    footer.appendChild(submitBtn);
+    panel.appendChild(footer);
+
+    overlay.appendChild(panel);
+    overlay.style.display = 'flex';
+    // A press that slips off the panel is not a cancel: the same guard the
+    // task dialog uses keeps a released drag from closing the form.
+    var backdropClicked = __wvBackdropClickGuard(overlay);
+    overlay.onclick = function(e) {
+      if (backdropClicked(e)) closeAutomationCreateDialog();
+    };
+
+    if (focusName) nameInput.focus();
+  }
+
+  function openAutomationCreateDialog() {
+    automationDraft = newAutomationDraft();
+    automationFormProblem = '';
+    automationSubmitting = false;
+    paintAutomationCreateDialog(true);
+    // The picker reads the panel's last snapshot; ask for a fresh one so a memo
+    // parked in another window is pickable here too.
+    vscode.postMessage({ type: 'refreshMemosPanel' });
   }
 
   // ── Render MCP ──
@@ -4182,6 +4867,7 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
       changes: __i18n.changes,
       memory: __i18n.memory,
       memos: __i18n.memos,
+      automations: __i18n.automations,
       fleet: __i18n.fleet,
       tasks: __i18n.tasks,
       agents: __i18n.agents,
@@ -4197,6 +4883,7 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
       changes: '\uD83D\uDCDD',
       memory: '\uD83E\uDDE0',
       memos: '\uD83D\uDCCC',
+      automations: '\u23F0',
       fleet: '\uD83D\uDE80',
       tasks: '\u2699',
       agents: '\uD83E\uDD16',
@@ -4387,6 +5074,11 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
         if (!collapsing && key === 'agents') {
           vscode.postMessage({ type: 'refreshAgentRuns' });
         }
+        // Same for Automations: the schedule may have run (or been paused in
+        // another window) while this section was folded away.
+        if (!collapsing && key === 'automations') {
+          vscode.postMessage({ type: 'refreshAutomations' });
+        }
       });
     })(ACTIVITY_SECTION_KEYS[sectionToggleIndex]);
   }
@@ -4501,6 +5193,11 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
     renderSkills: renderSkills,
     renderMemory: renderMemory,
     renderMemos: renderMemos,
+    renderAutomations: renderAutomations,
+    openAutomationCreateDialog: openAutomationCreateDialog,
+    closeAutomationCreateDialog: closeAutomationCreateDialog,
+    settleAutomationCreate: settleAutomationCreate,
+    setAutomationFormProblem: setAutomationFormProblem,
     renderMcp: renderMcp,
     renderMcpTools: renderMcpTools,
     renderMcpImports: renderMcpImports,
