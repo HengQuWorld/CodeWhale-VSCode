@@ -1564,6 +1564,21 @@ ${PROVIDER_PICKER_JS}
         break;
       }
 
+      case 'renderBlocks': {
+        // The turn is paused here — a question or an approval is waiting for
+        // the reader — so it will not reach messageComplete to turn its plain
+        // streamed text into markdown. The host renders the blocks it has
+        // finished writing and names them by the content-<message>-<idx> ids
+        // updateMessage writes them into; one that is no longer on screen (a
+        // rebuild raced this) is skipped.
+        var renderedBlocks = msg.blockHtmls || [];
+        for (var bi = 0; bi < renderedBlocks.length; bi++) {
+          var renderedEl = document.getElementById('content-' + msg.messageId + '-' + renderedBlocks[bi].blockIdx);
+          if (renderedEl) renderedEl.innerHTML = renderedBlocks[bi].contentHtml;
+        }
+        break;
+      }
+
       case 'updateThinking': {
         var blockIdx = msg.blockIdx !== undefined ? msg.blockIdx : 0;
         var thinkingEl = document.getElementById('thinking-' + msg.messageId + '-' + blockIdx);

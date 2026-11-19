@@ -9233,6 +9233,10 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         const actualInput = tc?.input || toolInput;
         const summary = buildApprovalSummary(toolName, actualInput);
 
+        // Same pause, same unrendered answer: the turn waits here too, so the
+        // markdown written above the card is rendered before the card lands.
+        this.renderSpokenBlocks(tcMsg?.id ?? lastMsg?.id);
+
         if (tc) {
           tc.status = "awaiting_approval";
           tc.approvalId = approvalId;
@@ -9353,6 +9357,11 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         if (!messageId) {
           messageId = lastMsg?.id;
         }
+
+        // The prompt is about to sit under the answer it is asking about, so
+        // that answer is drawn as markdown first: the turn is blocked here and
+        // will not reach `messageComplete` until the reader replies.
+        this.renderSpokenBlocks(messageId);
 
         // A re-delivered event for a question already held here is the same
         // request, so it is not a second reason to ring.
@@ -10338,6 +10347,39 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
   private endHostOperation(): void {
     this.hostOperationInFlight = false;
     this.postMessage({ type: "hostOperation", active: false });
+  }
+
+  /** Render the markdown a live turn has already written into its text blocks.
+   *
+   *  Streaming text arrives as plain text (`updateMessage`) and is turned into
+   *  HTML only when the turn ends (`messageComplete`). A turn that stops to ask
+   *  the reader a question — or to wait on an approval — does not end, so the
+   *  answer above the prompt stayed markdown source: `**bold**`, lists and
+   *  fenced code sat there unrendered for as long as the prompt was open. These
+   *  boundaries are the moments the engine has finished a text block (a tool
+   *  call is what follows), so the blocks can be rendered without cutting one
+   *  in half.
+   *
+   *  Text blocks only: a thinking block's collapsed preview is meant to be
+   *  plain, and its next delta would replace rendered HTML with the plain
+   *  stream anyway. */
+  private renderSpokenBlocks(messageId?: string): void {
+    if (!messageId) return;
+    const msg = this.messages.find((m) => m.id === messageId);
+    if (!msg || msg.role !== "assistant" || !msg.blocks?.length) return;
+    const blockHtmls: { blockIdx: number; contentHtml: string }[] = [];
+    for (let i = 0; i < msg.blocks.length; i++) {
+      const block = msg.blocks[i];
+      if (block.type !== "text" || !block.content) continue;
+      try {
+        block.contentHtml = renderMarkdown(block.content);
+      } catch {
+        block.contentHtml = block.content;
+      }
+      blockHtmls.push({ blockIdx: i, contentHtml: block.contentHtml });
+    }
+    if (blockHtmls.length === 0) return;
+    this.postMessage({ type: "renderBlocks", messageId, blockHtmls });
   }
 
   /** Post a message to the webview, pre-rendering markdown fields */

@@ -1312,6 +1312,32 @@ describe("webview-js-event-handler runtime", () => {
     expect(harness.getElement("input").focusCount).toBe(1);
   });
 
+  it("renders the markdown a paused turn already wrote", () => {
+    const harness = createRuntimeHarness();
+    // What `updateMessage` left on screen: the streamed text, unrendered.
+    const content = harness.getElement("content-a1-0");
+    content.className = "content streaming-indicator";
+    content.textContent = "Here is **bold**.";
+
+    harness.dispatchMessage({
+      type: "renderBlocks",
+      messageId: "a1",
+      blockHtmls: [{ blockIdx: 0, contentHtml: "<p>Here is <strong>bold</strong>.</p>" }],
+    });
+
+    expect(content.innerHTML).toContain("<strong>bold</strong>");
+
+    // A block that is no longer on screen (a rebuild raced the flush) is left
+    // alone rather than conjured as an orphan node.
+    harness.hideElement("content-a1-1");
+    harness.dispatchMessage({
+      type: "renderBlocks",
+      messageId: "a1",
+      blockHtmls: [{ blockIdx: 1, contentHtml: "<p>gone</p>" }],
+    });
+    expect(harness.getElement("content-a1-1").innerHTML).not.toContain("gone");
+  });
+
   it("renders the plan-approve action only when messageComplete carries planApproval", () => {
     const harness = createRuntimeHarness();
 
