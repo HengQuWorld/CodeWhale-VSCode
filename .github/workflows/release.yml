@@ -1,8 +1,13 @@
 name: Release
 
 # Pushing a vX.Y.Z tag builds the VSIX, attaches it (with SHA-256 checksums)
-# to a GitHub Release using the matching CHANGELOG section as notes, and —
-# when a VSCE_PAT secret is configured — publishes to the VS Code Marketplace.
+# to a GitHub Release using the matching CHANGELOG section as notes, and
+# publishes to the VS Code Marketplace through Trusted Publishing.
+#
+# The Marketplace side binds this repository and this workflow file to the
+# publisher (Marketplace → publisher → Trusted Publishing). No PAT secret is
+# stored: the workflow asks GitHub for a short-lived OIDC token, and vsce
+# exchanges it for a Marketplace credential.
 on:
   push:
     tags:
@@ -16,9 +21,9 @@ on:
 
 permissions:
   contents: write
-
-env:
-  HAS_VSCE_PAT: ${{ secrets.VSCE_PAT != '' }}
+  # Required by Trusted Publishing: without it GitHub refuses to hand the
+  # workflow an OIDC token and vsce falls back to nothing (it never uses a PAT).
+  id-token: write
 
 jobs:
   release:
@@ -31,7 +36,8 @@ jobs:
 
       - uses: actions/setup-node@v7
         with:
-          node-version: 20
+          # vsce 4 (the first release that understands --oidc) requires Node 22.
+          node-version: 22
           cache: npm
 
       - name: Install dependencies
@@ -52,8 +58,10 @@ jobs:
             exit 1
           fi
 
+      # Pin the vsce used for publishing: the devDependency is still 2.x, and
+      # npx would otherwise pick that local copy, where --oidc does not exist.
       - name: Package VSIX
-        run: npx @vscode/vsce package --no-dependencies
+        run: npx --yes @vscode/vsce@4.1.1 package --no-dependencies
 
       - name: SHA-256 checksums
         run: |
@@ -99,5 +107,4 @@ jobs:
             checksums.txt
 
       - name: Publish to VS Code Marketplace
-        if: github.event_name == 'push' && env.HAS_VSCE_PAT == 'true'
-        run: npx @vscode/vsce publish --no-dependencies -p ${{ secrets.VSCE_PAT }}
+        run: npx --yes @vscode/vsce@4.1.1 publish --oidc --packagePath brotherwhale-vscode-*.vsix --skip-duplicate
