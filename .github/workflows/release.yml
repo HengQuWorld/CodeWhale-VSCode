@@ -2,12 +2,15 @@ name: Release
 
 # Pushing a vX.Y.Z tag builds the VSIX, attaches it (with SHA-256 checksums)
 # to a GitHub Release using the matching CHANGELOG section as notes, and
-# publishes to the VS Code Marketplace through Trusted Publishing.
+# publishes to the VS Code Marketplace and to Open VSX through Trusted
+# Publishing.
 #
-# The Marketplace side binds this repository and this workflow file to the
-# publisher (Marketplace → publisher → Trusted Publishing). No PAT secret is
-# stored: the workflow asks GitHub for a short-lived OIDC token, and vsce
-# exchanges it for a Marketplace credential.
+# Both registries bind this repository and this workflow file to the
+# publisher (Marketplace → publisher → Trusted Publishing, Open VSX → user
+# settings → trusted publishers). No token secret is stored: the workflow asks
+# GitHub for a short-lived OIDC token, and each CLI exchanges it for a registry
+# credential. Open VSX refuses the exchange until that trusted publisher is
+# registered, so the last step fails loudly rather than skipping silently.
 on:
   push:
     tags:
@@ -108,3 +111,9 @@ jobs:
 
       - name: Publish to VS Code Marketplace
         run: npx --yes @vscode/vsce@4.1.1 publish --oidc --packagePath brotherwhale-vscode-*.vsix --skip-duplicate
+
+      # Same package as the release asset, not a repack: --packagePath hands
+      # ovsx the file already built above. ovsx 1.4 is the first release with
+      # --trusted-publishing, and it needs Node 22 like vsce 4.
+      - name: Publish to Open VSX
+        run: npx --yes ovsx@1.4.0 publish --trusted-publishing --packagePath brotherwhale-vscode-*.vsix --skip-duplicate
