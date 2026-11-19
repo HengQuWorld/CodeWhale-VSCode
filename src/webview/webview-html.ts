@@ -559,6 +559,7 @@ export interface WebviewTranslations {
   automationsPresetOnce: string;
   automationsPresetCustom: string;
   automationsTimeLabel: string;
+  automationsMinuteLabel: string;
   automationsDayLabels: string;
   automationsRrulePlaceholder: string;
   automationsCreateSubmit: string;

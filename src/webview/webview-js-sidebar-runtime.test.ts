@@ -4034,6 +4034,72 @@ describe("Automations panel", () => {
     expect(postMessages[0].rrule).toBe("FREQ=CRON;EXPR=*/17 * * * *");
   });
 
+  it("keeps an hourly schedule's minute instead of resetting it to the hour", () => {
+    // Editing used to rewrite every hourly record as minute zero, which moves
+    // when it runs. The minute is part of the record and comes back with it.
+    const { sidebar, automationsPanel, automationCreateOverlay, postMessages } = createHarness();
+    sidebar.renderAutomations({
+      automations: [automation({ revision: 3, rrule: "FREQ=HOURLY;INTERVAL=1;BYMINUTE=30" })],
+    });
+    automationsPanel
+      .querySelectorAll(".automation-card")[0]
+      .querySelectorAll(".task-action-btn")[2]
+      .dispatch("click");
+
+    expect(automationCreateOverlay.querySelector(".automation-preset-select")!.value).toBe(
+      "hourly",
+    );
+    expect(automationCreateOverlay.querySelector(".automation-minute-input")!.value).toBe("30");
+
+    postMessages.length = 0;
+    automationCreateOverlay.querySelector(".automation-create-submit")!.dispatch("click");
+
+    expect(postMessages[0].rrule).toBe("FREQ=HOURLY;INTERVAL=1;BYMINUTE=30");
+  });
+
+  it("leaves an hourly record it cannot reproduce in the custom field", () => {
+    // Every three hours is not the hourly preset, and claiming it would reset
+    // the interval to one hour on save.
+    const { sidebar, automationsPanel, automationCreateOverlay, postMessages } = createHarness();
+    sidebar.renderAutomations({
+      automations: [automation({ revision: 1, rrule: "FREQ=HOURLY;INTERVAL=3;BYMINUTE=10" })],
+    });
+    automationsPanel
+      .querySelectorAll(".automation-card")[0]
+      .querySelectorAll(".task-action-btn")[2]
+      .dispatch("click");
+
+    expect(automationCreateOverlay.querySelector(".automation-preset-select")!.value).toBe(
+      "custom",
+    );
+
+    postMessages.length = 0;
+    automationCreateOverlay.querySelector(".automation-create-submit")!.dispatch("click");
+
+    expect(postMessages[0].rrule).toBe("FREQ=HOURLY;INTERVAL=3;BYMINUTE=10");
+  });
+
+  it("leaves a one-off with seconds in the custom field", () => {
+    // The form has no seconds, so adopting the one-off preset would drop them.
+    const { sidebar, automationsPanel, automationCreateOverlay, postMessages } = createHarness();
+    sidebar.renderAutomations({
+      automations: [automation({ revision: 1, rrule: "FREQ=ONCE;AT=2026-12-01T09:00:30" })],
+    });
+    automationsPanel
+      .querySelectorAll(".automation-card")[0]
+      .querySelectorAll(".task-action-btn")[2]
+      .dispatch("click");
+
+    expect(automationCreateOverlay.querySelector(".automation-preset-select")!.value).toBe(
+      "custom",
+    );
+
+    postMessages.length = 0;
+    automationCreateOverlay.querySelector(".automation-create-submit")!.dispatch("click");
+
+    expect(postMessages[0].rrule).toBe("FREQ=ONCE;AT=2026-12-01T09:00:30");
+  });
+
   it("saves an old one-off whose moment has passed", () => {
     // Editing is not creating: a finished one-off is edited for its name or
     // text, and refusing that because its date is in the past would trap it.

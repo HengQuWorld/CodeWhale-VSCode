@@ -3411,6 +3411,7 @@ export function getWebviewCss(): string {
     }
     .automation-input,
     .automation-time-input,
+    .automation-minute-input,
     .automation-date-input,
     .automation-rrule-input,
     .automation-preset-select {
@@ -3425,6 +3426,7 @@ export function getWebviewCss(): string {
     }
     .automation-input:focus,
     .automation-time-input:focus,
+    .automation-minute-input:focus,
     .automation-date-input:focus,
     .automation-rrule-input:focus,
     .automation-preset-select:focus {

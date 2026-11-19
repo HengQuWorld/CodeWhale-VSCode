@@ -398,6 +398,7 @@ function makeTr(): WebviewTranslations {
     automationsPresetOnce: "Once",
     automationsPresetCustom: "Custom",
     automationsTimeLabel: "Time",
+    automationsMinuteLabel: "Minute past the hour",
     automationsDayLabels: "Mon,Tue,Wed,Thu,Fri,Sat,Sun",
     automationsRrulePlaceholder: "FREQ=…",
     automationsCreateSubmit: "Create",

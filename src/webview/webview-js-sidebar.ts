@@ -2780,6 +2780,7 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
     var draft = {
       preset: 'custom',
       time: '09:00',
+      minute: 0,
       days: ['MO'],
       date: automationLocalDate(1),
       rrule: raw,
@@ -2800,12 +2801,18 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
       draft.time = pad2(parseInt(weekly[2], 10)) + ':' + pad2(parseInt(weekly[3], 10));
       return draft;
     }
-    var hourly = /^FREQ=HOURLY;(?:INTERVAL=\\d+;)?BYMINUTE=(\\d{1,2})$/.exec(raw);
+    // Only every hour: any other INTERVAL would be silently reset to 1 if
+    // the form claimed it. An hour-of-day anchor is not part of this preset
+    // either, so a record carrying one stays in the custom field, untouched.
+    var hourly = /^FREQ=HOURLY;(?:INTERVAL=1;)?BYMINUTE=(\\d{1,2})$/.exec(raw);
     if (hourly) {
       draft.preset = 'hourly';
+      draft.minute = parseInt(hourly[1], 10) || 0;
       return draft;
     }
-    var once = /^FREQ=ONCE;AT=(\\d{4}-\\d{2}-\\d{2})T(\\d{2}):(\\d{2})/.exec(raw);
+    // Anchored: a record whose moment carries seconds cannot be written back
+    // from a minute field, so it stays in the custom field with its seconds.
+    var once = /^FREQ=ONCE;AT=(\\d{4}-\\d{2}-\\d{2})T(\\d{2}):(\\d{2})$/.exec(raw);
     if (once) {
       draft.preset = 'once';
       draft.date = once[1];
@@ -2828,6 +2835,8 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
       memoId: null,
       preset: 'daily',
       time: '09:00',
+      /** Hourly schedules fire at this minute past the hour. */
+      minute: 0,
       days: ['MO'],
       // Tomorrow: a one-off defaults to a moment that has not passed, so the
       // form never opens pre-filled with an impossible answer.
@@ -2849,6 +2858,7 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
     draft.source = 'manual';
     draft.preset = schedule.preset;
     draft.time = schedule.time;
+    draft.minute = schedule.minute;
     draft.days = schedule.days;
     draft.date = schedule.date;
     draft.rrule = schedule.rrule;
@@ -2879,9 +2889,12 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
         ';BYHOUR=' + hour + ';BYMINUTE=' + minute;
     }
     if (draft.preset === 'hourly') {
-      // On the hour, like the preset says. An hour-of-day would be ignored by
-      // an every-hour schedule, so the form does not offer one.
-      return 'FREQ=HOURLY;INTERVAL=1;BYMINUTE=0';
+      // An hour-of-day would be ignored by an every-hour schedule, so the form
+      // offers the minute past the hour instead — and writes back the minute
+      // the record already had rather than resetting it.
+      var minuteOfHour = parseInt(draft.minute, 10);
+      if (isNaN(minuteOfHour) || minuteOfHour < 0 || minuteOfHour > 59) minuteOfHour = 0;
+      return 'FREQ=HOURLY;INTERVAL=1;BYMINUTE=' + minuteOfHour;
     }
     if (draft.preset === 'once') {
       if (!draft.date) return '';
@@ -2925,6 +2938,8 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
     if (prompt !== null) automationDraft.prompt = prompt;
     var time = valueOf('.automation-time-input');
     if (time) automationDraft.time = time;
+    var minute = valueOf('.automation-minute-input');
+    if (minute !== null && minute !== '') automationDraft.minute = parseInt(minute, 10) || 0;
     var date = valueOf('.automation-date-input');
     if (date !== null) automationDraft.date = date;
     var rrule = valueOf('.automation-rrule-input');
@@ -3262,6 +3277,21 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
       scheduleRow.appendChild(timeInput);
     }
 
+    if (automationDraft.preset === 'hourly') {
+      var minuteInput = document.createElement('input');
+      minuteInput.type = 'number';
+      minuteInput.min = '0';
+      minuteInput.max = '59';
+      minuteInput.className = 'automation-minute-input';
+      minuteInput.title = __i18n.automationsMinuteLabel;
+      minuteInput.setAttribute('aria-label', __i18n.automationsMinuteLabel);
+      minuteInput.value = String(automationDraft.minute);
+      minuteInput.addEventListener('input', function() {
+        automationDraft.minute = parseInt(minuteInput.value, 10) || 0;
+      });
+      scheduleRow.appendChild(minuteInput);
+    }
+
     if (automationDraft.preset === 'once') {
       var dateInput = document.createElement('input');
       dateInput.type = 'date';
@@ -3342,7 +3372,14 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
       if (backdropClicked(e)) closeAutomationCreateDialog();
     };
 
-    if (focusName) nameInput.focus();
+    if (focusName) {
+      nameInput.focus();
+      // Editing opens on a name that is already there, so it is selected
+      // rather than merely pointed at: typing replaces it in one keystroke.
+      if (editing && nameInput.setSelectionRange) {
+        nameInput.setSelectionRange(0, String(nameInput.value || '').length);
+      }
+    }
   }
 
   function openAutomationCreateDialog() {

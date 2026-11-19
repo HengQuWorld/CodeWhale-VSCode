@@ -4974,8 +4974,11 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         rrule,
         // The switch is the record's own state, so an unticked box turns
         // execution off rather than leaving the old permission in place.
+        // `auto_approve` is deliberately not sent: an edit changes what the
+        // schedule does, and widening a record's approval exemption is not
+        // part of that. A record created here already carries what the create
+        // form asked for; one made elsewhere keeps its own posture.
         allow_shell: edit.allowShell,
-        auto_approve: edit.allowShell,
         ...(edit.revision !== undefined ? { expected_revision: edit.revision } : {}),
       });
       const updatedName = updated?.name || name;

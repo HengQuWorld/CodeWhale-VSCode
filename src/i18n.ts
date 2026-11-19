@@ -659,6 +659,8 @@ interface Translations {
   automationsPresetOnce: string;
   automationsPresetCustom: string;
   automationsTimeLabel: string;
+  /** Hourly schedules pick a minute past the hour, not an hour of the day. */
+  automationsMinuteLabel: string;
   /** Seven weekday short labels, comma-separated, Monday first. */
   automationsDayLabels: string;
   automationsRrulePlaceholder: string;
@@ -1283,6 +1285,7 @@ const en: Translations = {
   automationsPresetOnce: "Once",
   automationsPresetCustom: "Custom",
   automationsTimeLabel: "Time",
+  automationsMinuteLabel: "Minute past the hour",
   automationsDayLabels: "Mon,Tue,Wed,Thu,Fri,Sat,Sun",
   automationsRrulePlaceholder: "FREQ=… (e.g. FREQ=CRON;EXPR=30 9 * * 1-5)",
   automationsCreateSubmit: "Create",
@@ -1887,6 +1890,7 @@ const zhCn: Translations = {
   automationsPresetOnce: "一次",
   automationsPresetCustom: "自定义",
   automationsTimeLabel: "时间",
+  automationsMinuteLabel: "每小时的分钟",
   automationsDayLabels: "一,二,三,四,五,六,日",
   automationsRrulePlaceholder: "FREQ=…（例如 FREQ=CRON;EXPR=30 9 * * 1-5）",
   automationsCreateSubmit: "创建",
@@ -2521,6 +2525,7 @@ export function webviewTranslations(tr: Translations) {
     automationsPresetOnce: tr.automationsPresetOnce,
     automationsPresetCustom: tr.automationsPresetCustom,
     automationsTimeLabel: tr.automationsTimeLabel,
+    automationsMinuteLabel: tr.automationsMinuteLabel,
     automationsDayLabels: tr.automationsDayLabels,
     automationsRrulePlaceholder: tr.automationsRrulePlaceholder,
     automationsCreateSubmit: tr.automationsCreateSubmit,
