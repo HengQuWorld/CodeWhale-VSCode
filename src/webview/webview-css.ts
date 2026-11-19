@@ -3261,32 +3261,48 @@ export function getWebviewCss(): string {
 
     /* ── Memos panel (sidebar) ──
      * Every conversation's parked prompts, grouped by the conversation they
-     * wait in. The header names the conversation and opens it, like every row
-     * under it: looking at a memo must never run it. */
+     * wait in. One click target per group: the whole block is the button, so
+     * the conversation name and its memos never compete as two ways to do the
+     * same thing. Hover and focus light the block, not a line inside it. */
     .memo-group {
-      padding-bottom: 4px;
+      display: flex;
+      flex-direction: column;
+      width: 100%;
+      box-sizing: border-box;
+      text-align: left;
+      font-family: inherit;
+      background: none;
+      border: 1px solid transparent;
+      border-radius: 4px;
+      color: inherit;
+      cursor: pointer;
+      padding: 2px 0 4px;
+      margin-bottom: 2px;
+      min-width: 0;
+    }
+    .memo-group:hover {
+      background: rgba(128,128,128,0.14);
+      border-color: rgba(128,128,128,0.3);
+    }
+    .memo-group:focus-visible {
+      outline: 1px solid var(--accent, rgba(128,128,128,0.6));
+      outline-offset: -1px;
     }
     /* A caption over its rows, not a card heading: the conversation names are
-     * secondary to the memos themselves. */
+     * secondary to the memos themselves. It is content now, not a control. */
     .memo-group-title {
       display: flex;
       align-items: center;
       gap: 6px;
       width: 100%;
       box-sizing: border-box;
-      text-align: left;
-      background: none;
-      border: none;
-      color: inherit;
-      cursor: pointer;
-      font-family: inherit;
       font-size: 10px;
       letter-spacing: 0.04em;
       text-transform: uppercase;
       opacity: 0.7;
-      padding: 4px 10px 2px;
+      padding: 2px 10px 2px;
     }
-    .memo-group-title:hover {
+    .memo-group:hover .memo-group-title {
       opacity: 1;
     }
     .memo-group-name {
@@ -3308,21 +3324,10 @@ export function getWebviewCss(): string {
       gap: 6px;
       width: 100%;
       box-sizing: border-box;
-      text-align: left;
-      background: none;
-      border: 1px solid transparent;
-      border-radius: 4px;
-      color: inherit;
-      cursor: pointer;
-      font-family: inherit;
       font-size: 11px;
       line-height: 1.4;
       padding: 3px 10px;
       min-width: 0;
-    }
-    .memo-row:hover {
-      background: rgba(128,128,128,0.14);
-      border-color: rgba(128,128,128,0.3);
     }
     .memo-row-text {
       flex: 1;

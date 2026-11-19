@@ -3794,7 +3794,7 @@ describe("Memos panel", () => {
     sidebar.renderMemos({ groups: [memoGroup({ id: "thread-42" })] });
 
     postMessages.length = 0;
-    memosPanel.querySelectorAll(".memo-row")[0].dispatch("click");
+    memosPanel.querySelectorAll(".memo-group")[0].dispatch("click");
 
     expect(postMessages).toEqual([{ type: "loadThread", threadId: "thread-42" }]);
     // The transcript says it is loading before the host answers, the way the
@@ -3807,9 +3807,38 @@ describe("Memos panel", () => {
     sidebar.renderMemos({ groups: [memoGroup({ kind: "draft", id: ":draft", title: "Draft" })] });
 
     postMessages.length = 0;
-    memosPanel.querySelectorAll(".memo-row")[0].dispatch("click");
+    memosPanel.querySelectorAll(".memo-group")[0].dispatch("click");
 
     expect(postMessages).toEqual([{ type: "newThread" }]);
+  });
+
+  it("makes each conversation one click target, not one per line", () => {
+    // The name and the memos under it open the same conversation, so a second
+    // button inside the group would only ask the reader which one is real.
+    const { sidebar, memosPanel } = createHarness();
+    sidebar.renderMemos({
+      groups: [
+        memoGroup({
+          count: 2,
+          items: [
+            { id: "q-1", text: "run the suite", ts: 200, attachments: 0 },
+            { id: "q-2", text: "then tag it", ts: 100, attachments: 0 },
+          ],
+        }),
+        memoGroup({ kind: "draft", id: ":draft", title: "Draft" }),
+      ],
+    });
+
+    const groups = memosPanel.querySelectorAll(".memo-group");
+    expect(groups.map((el) => el.tagName)).toEqual(["BUTTON", "BUTTON"]);
+    // Nothing nested inside a group is a control of its own: the rows are
+    // contents, and a click on one bubbles to the group in a real document.
+    for (const group of groups) {
+      expect(group.children.filter((child) => child.tagName === "BUTTON")).toEqual([]);
+      expect(group.children.every((child) => child.tagName === "SPAN")).toBe(true);
+    }
+    // Hovering the memo line therefore means hovering the conversation.
+    expect(memosPanel.querySelectorAll(".memo-row").length).toBe(3);
   });
 
   it("asks the host to re-read the disk from the toolbar", () => {

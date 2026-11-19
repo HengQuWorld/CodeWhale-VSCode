@@ -2523,15 +2523,19 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
     }
 
     memosState.groups.forEach(function(group) {
-      var box = document.createElement('div');
+      // One click target per conversation, not two. The header and its rows
+      // would otherwise each be a button doing the same thing, and the second
+      // one only asks the reader which of them is the real one. The group is
+      // the button; the name and the memos are its content.
+      var box = document.createElement('button');
+      box.type = 'button';
       box.className = 'memo-group';
+      box.title = __i18n.memosOpenThread;
+      box.setAttribute('aria-label', String(group.title || group.id || '') + ' — ' + __i18n.memosOpenThread);
+      box.onclick = function() { openMemoGroup(group); };
 
-      // The group header names the conversation and is a way into it, the
-      // same click every row under it makes.
-      var head = document.createElement('button');
-      head.type = 'button';
+      var head = document.createElement('span');
       head.className = 'memo-group-title';
-      head.title = __i18n.memosOpenThread;
       var nameEl = document.createElement('span');
       nameEl.className = 'memo-group-name';
       nameEl.textContent = String(group.title || group.id || '');
@@ -2540,15 +2544,13 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
       countEl.className = 'memo-group-count';
       countEl.textContent = '\uD83D\uDCCE ' + Number(group.count || 0);
       head.appendChild(countEl);
-      head.onclick = function() { openMemoGroup(group); };
       box.appendChild(head);
 
       (Array.isArray(group.items) ? group.items : []).forEach(function(item) {
-        var row = document.createElement('button');
-        row.type = 'button';
+        var row = document.createElement('span');
         row.className = 'memo-row';
         // The preview is one capped line; the tooltip carries the memo whole.
-        row.title = String(item.text || '') + '\\n\\n' + __i18n.memosOpenThread;
+        row.title = String(item.text || '');
         var textEl = document.createElement('span');
         textEl.className = 'memo-row-text';
         textEl.textContent = memoPreviewLine(item.text);
@@ -2565,7 +2567,6 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
           timeEl.textContent = __wvFormatRelativeTime(item.ts);
           row.appendChild(timeEl);
         }
-        row.onclick = function() { openMemoGroup(group); };
         box.appendChild(row);
       });
 
