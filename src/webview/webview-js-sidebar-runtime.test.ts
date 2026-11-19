@@ -3922,16 +3922,135 @@ describe("Automations panel", () => {
     const buttons = automationsPanel
       .querySelectorAll(".automation-card")[0]
       .querySelectorAll(".task-action-btn");
-    // Run now, pause (the row is active), delete — in that order.
+    // Run now, pause (the row is active), edit, delete — in that order.
     buttons[0].dispatch("click");
     buttons[1].dispatch("click");
-    buttons[2].dispatch("click");
+    buttons[3].dispatch("click");
 
     expect(postMessages).toEqual([
       { type: "automationAction", action: "run", id: "auto-1" },
       { type: "automationAction", action: "pause", id: "auto-1" },
       { type: "automationAction", action: "delete", id: "auto-1" },
     ]);
+  });
+
+  it("opens the form on the row's own schedule, not a fresh draft", () => {
+    const { sidebar, automationsPanel, automationCreateOverlay } = createHarness();
+    sidebar.renderAutomations({
+      automations: [
+        automation({
+          revision: 4,
+          allow_shell: true,
+          rrule: "FREQ=WEEKLY;BYDAY=MO,WE;BYHOUR=7;BYMINUTE=15",
+        }),
+      ],
+    });
+
+    // The edit action is the third button on the row.
+    automationsPanel
+      .querySelectorAll(".automation-card")[0]
+      .querySelectorAll(".task-action-btn")[2]
+      .dispatch("click");
+
+    expect(automationCreateOverlay.querySelector(".automation-name-input")!.value).toBe(
+      "Nightly sweep",
+    );
+    expect(automationCreateOverlay.querySelector(".automation-prompt-input")!.value).toBe(
+      "run the suite",
+    );
+    // The expression is read back into the form's own words: weekly, these two
+    // days, this clock.
+    const preset = automationCreateOverlay.querySelector(".automation-preset-select")!;
+    expect(preset.value).toBe("weekly");
+    expect(automationCreateOverlay.querySelector(".automation-time-input")!.value).toBe("07:15");
+    const dayButtons = automationCreateOverlay.querySelectorAll(".automation-day-btn");
+    expect(
+      dayButtons.filter((btn) => btn.className.split(/\s+/).includes("is-active")).map(
+        (btn) => btn.getAttribute("data-day"),
+      ),
+    ).toEqual(["MO", "WE"]);
+    // The permission is part of the record, so the box shows what it holds.
+    expect(
+      automationCreateOverlay.querySelector(".automation-allow-shell-input")!.checked,
+    ).toBe(true);
+    // The title and the submit label say this is an edit.
+    expect(
+      automationCreateOverlay.querySelector(".automation-create-title")!.textContent,
+    ).toBe("Edit automation");
+  });
+
+  it("saves the edit against the revision it read", () => {
+    const { sidebar, automationsPanel, automationCreateOverlay, postMessages } = createHarness();
+    sidebar.renderAutomations({
+      automations: [automation({ revision: 4, rrule: "FREQ=CRON;EXPR=0 2 * * *" })],
+    });
+    automationsPanel
+      .querySelectorAll(".automation-card")[0]
+      .querySelectorAll(".task-action-btn")[2]
+      .dispatch("click");
+
+    const nameInput = automationCreateOverlay.querySelector(".automation-name-input")!;
+    nameInput.value = "Nightly, renamed";
+    nameInput.dispatch("input");
+
+    postMessages.length = 0;
+    automationCreateOverlay.querySelector(".automation-create-submit")!.dispatch("click");
+
+    expect(postMessages).toEqual([
+      {
+        type: "updateAutomation",
+        id: "auto-1",
+        revision: 4,
+        name: "Nightly, renamed",
+        prompt: "run the suite",
+        // A daily cron comes back as the daily preset, so the rrule is the one
+        // the form builds rather than the bytes it read.
+        rrule: "FREQ=CRON;EXPR=0 2 * * *",
+        allowShell: false,
+      },
+    ]);
+  });
+
+  it("keeps an expression the form cannot express, rather than rewriting it", () => {
+    const { sidebar, automationsPanel, automationCreateOverlay, postMessages } = createHarness();
+    sidebar.renderAutomations({
+      automations: [automation({ revision: 1, rrule: "FREQ=CRON;EXPR=*/17 * * * *" })],
+    });
+    automationsPanel
+      .querySelectorAll(".automation-card")[0]
+      .querySelectorAll(".task-action-btn")[2]
+      .dispatch("click");
+
+    // No preset matches, so the form shows the custom field with the text intact.
+    const preset = automationCreateOverlay.querySelector(".automation-preset-select")!;
+    expect(preset.value).toBe("custom");
+    expect(automationCreateOverlay.querySelector(".automation-rrule-input")!.value).toBe(
+      "FREQ=CRON;EXPR=*/17 * * * *",
+    );
+
+    postMessages.length = 0;
+    automationCreateOverlay.querySelector(".automation-create-submit")!.dispatch("click");
+
+    expect(postMessages[0].rrule).toBe("FREQ=CRON;EXPR=*/17 * * * *");
+  });
+
+  it("saves an old one-off whose moment has passed", () => {
+    // Editing is not creating: a finished one-off is edited for its name or
+    // text, and refusing that because its date is in the past would trap it.
+    const { sidebar, automationsPanel, automationCreateOverlay, postMessages } = createHarness();
+    sidebar.renderAutomations({
+      automations: [automation({ revision: 2, rrule: "FREQ=ONCE;AT=2020-01-01T09:00" })],
+    });
+    automationsPanel
+      .querySelectorAll(".automation-card")[0]
+      .querySelectorAll(".task-action-btn")[2]
+      .dispatch("click");
+
+    postMessages.length = 0;
+    automationCreateOverlay.querySelector(".automation-create-submit")!.dispatch("click");
+
+    expect(postMessages).toHaveLength(1);
+    expect(postMessages[0].rrule).toBe("FREQ=ONCE;AT=2020-01-01T09:00");
   });
 
   it("asks the host to re-read the schedules from the toolbar", () => {
@@ -4016,7 +4135,7 @@ describe("Automations panel", () => {
     const { sidebar, automationCreateOverlay } = createHarness();
     sidebar.openAutomationCreateDialog();
 
-    sidebar.settleAutomationCreate(true);
+    sidebar.settleAutomationSave(true);
 
     expect(automationCreateOverlay.style.display).toBe("none");
   });
@@ -4025,7 +4144,7 @@ describe("Automations panel", () => {
     const { sidebar, automationCreateOverlay } = createHarness();
     sidebar.openAutomationCreateDialog();
 
-    sidebar.settleAutomationCreate(false, "Unsupported RRULE FREQ 'DAILY'");
+    sidebar.settleAutomationSave(false, "Unsupported RRULE FREQ 'DAILY'");
 
     expect(automationCreateOverlay.style.display).toBe("flex");
     expect(
@@ -4189,7 +4308,7 @@ describe("Automations panel", () => {
 
     expect(automationCreateOverlay.style.display).toBe("none");
     // A late answer settles nothing that is still open.
-    sidebar.settleAutomationCreate(false, "too late");
+    sidebar.settleAutomationSave(false, "too late");
     expect(automationCreateOverlay.style.display).toBe("none");
   });
 

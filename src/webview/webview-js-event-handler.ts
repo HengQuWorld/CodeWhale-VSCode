@@ -1436,17 +1436,20 @@ ${PROVIDER_PICKER_JS}
         break;
 
       case 'automationCreated':
+      case 'automationUpdated':
         // The form waits for this: only the host knows whether the engine
         // accepted the schedule, so the dialog closes on the answer rather
-        // than on the click.
-        if (window.__wvSidebar && window.__wvSidebar.settleAutomationCreate) {
-          window.__wvSidebar.settleAutomationCreate(true);
+        // than on the click. Creating and editing share one form, so they
+        // share one acknowledgment.
+        if (window.__wvSidebar && window.__wvSidebar.settleAutomationSave) {
+          window.__wvSidebar.settleAutomationSave(true);
         }
         break;
 
       case 'automationCreateFailed':
-        if (window.__wvSidebar && window.__wvSidebar.settleAutomationCreate) {
-          window.__wvSidebar.settleAutomationCreate(false, msg.message ? String(msg.message) : '');
+      case 'automationUpdateFailed':
+        if (window.__wvSidebar && window.__wvSidebar.settleAutomationSave) {
+          window.__wvSidebar.settleAutomationSave(false, msg.message ? String(msg.message) : '');
         }
         break;
 

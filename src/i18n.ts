@@ -690,6 +690,14 @@ interface Translations {
   automationsTimePast: string;
   /** Delete confirmation; `{name}` is the schedule's name. */
   automationsDeleteConfirm: string;
+  /** Row action: reopen this schedule in the form. */
+  automationsEdit: string;
+  automationsEditTitle: string;
+  automationsUpdateSubmit: string;
+  /** Confirmation after an edit; `{name}` is the schedule's name. */
+  automationsUpdated: string;
+  /** The record changed elsewhere between the read and the save. */
+  automationsUpdateConflict: string;
   noAgentRuns: string;
   agentRunGone: string;
   agentStatusQueued: string;
@@ -1297,6 +1305,11 @@ const en: Translations = {
   automationsFieldSchedule: "a schedule expression",
   automationsTimePast: "That moment has already passed — pick a later time.",
   automationsDeleteConfirm: "Delete the scheduled task “{name}”? Its run history goes with it.",
+  automationsEdit: "Edit",
+  automationsEditTitle: "Edit automation",
+  automationsUpdateSubmit: "Save",
+  automationsUpdated: "Automation updated: {name}",
+  automationsUpdateConflict: "This schedule was changed somewhere else while you were editing. The list is refreshed — reopen it and try again.",
   noAgentRuns: "No agent runs",
   agentRunGone: "That agent run is no longer in this runtime — a finished run is dropped from the run list about an hour after it settles.",
   agentStatusQueued: "Queued",
@@ -1896,6 +1909,11 @@ const zhCn: Translations = {
   automationsFieldSchedule: "计划表达式",
   automationsTimePast: "这个时间已经过去了——请选一个更晚的时间。",
   automationsDeleteConfirm: "删除定时任务「{name}」？它的运行历史也会一并删除。",
+  automationsEdit: "编辑",
+  automationsEditTitle: "编辑定时任务",
+  automationsUpdateSubmit: "保存",
+  automationsUpdated: "已更新定时任务：{name}",
+  automationsUpdateConflict: "这个任务在你编辑期间被别处修改了。列表已刷新，请重新打开再试。",
   noAgentRuns: "暂无子代理运行",
   agentRunGone: "该子代理运行已不在当前引擎中——已结束的运行约一小时后会从运行列表里清理。",
   agentStatusQueued: "排队中",
@@ -2525,6 +2543,11 @@ export function webviewTranslations(tr: Translations) {
     automationsFieldSchedule: tr.automationsFieldSchedule,
     automationsTimePast: tr.automationsTimePast,
     automationsDeleteConfirm: tr.automationsDeleteConfirm,
+    automationsEdit: tr.automationsEdit,
+    automationsEditTitle: tr.automationsEditTitle,
+    automationsUpdateSubmit: tr.automationsUpdateSubmit,
+    automationsUpdated: tr.automationsUpdated,
+    automationsUpdateConflict: tr.automationsUpdateConflict,
     noAgentRuns: tr.noAgentRuns,
     agentRunGone: tr.agentRunGone,
     agentStatusQueued: tr.agentStatusQueued,

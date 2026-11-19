@@ -581,6 +581,11 @@ export interface WebviewTranslations {
   automationsFieldSchedule: string;
   automationsTimePast: string;
   automationsDeleteConfirm: string;
+  automationsEdit: string;
+  automationsEditTitle: string;
+  automationsUpdateSubmit: string;
+  automationsUpdated: string;
+  automationsUpdateConflict: string;
   noAgentRuns: string;
   agentStatusQueued: string;
   agentStatusStarting: string;

@@ -925,6 +925,16 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       case "automationAction":
         await this.handleAutomationAction(String(msg.action ?? ""), String(msg.id ?? ""));
         break;
+      case "updateAutomation":
+        await this.handleUpdateAutomation({
+          id: String(msg.id ?? ""),
+          revision: typeof msg.revision === "number" ? msg.revision : undefined,
+          name: String(msg.name ?? ""),
+          prompt: String(msg.prompt ?? ""),
+          rrule: String(msg.rrule ?? ""),
+          allowShell: msg.allowShell === true,
+        });
+        break;
       case "webviewReady":
         try {
           // A question from the webview that just went away can never be
@@ -4863,6 +4873,10 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         status: record.status,
         next_run_at: record.next_run_at ?? null,
         last_run_at: record.last_run_at ?? null,
+        // Carried so an edit can name the revision it read: the save is then
+        // refused, not silently applied, if the record moved meanwhile.
+        revision: typeof record.revision === "number" ? record.revision : null,
+        allow_shell: record.allow_shell ?? null,
       }));
       this.lastAutomations = automations;
       this.postMessage({ type: "automationsState", automations, loaded: true });
@@ -4928,6 +4942,61 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         message: `${t().automationsFailed}: ${reason}`,
       });
       this.postMessage({ type: "automationCreateFailed", message: reason });
+    }
+  }
+
+  /** Save an edit to an existing schedule.
+   *
+   *  The whole editable surface is sent every time rather than just the fields
+   *  that differ: the form is the record's editor, and a diff computed here
+   *  would have to trust that the panel's snapshot and the engine's record
+   *  agree — which is exactly what `expected_revision` exists to doubt. */
+  private async handleUpdateAutomation(edit: {
+    id: string;
+    revision?: number;
+    name: string;
+    prompt: string;
+    rrule: string;
+    allowShell: boolean;
+  }): Promise<void> {
+    const name = edit.name.trim();
+    const prompt = edit.prompt.trim();
+    const rrule = edit.rrule.trim();
+    if (!edit.id || !name || !prompt || !rrule) {
+      this.postMessage({ type: "automationUpdateFailed", message: t().automationsFailed });
+      return;
+    }
+    try {
+      await this.api.ensureReady();
+      const updated = await this.api.updateAutomation(edit.id, {
+        name,
+        prompt,
+        rrule,
+        // The switch is the record's own state, so an unticked box turns
+        // execution off rather than leaving the old permission in place.
+        allow_shell: edit.allowShell,
+        auto_approve: edit.allowShell,
+        ...(edit.revision !== undefined ? { expected_revision: edit.revision } : {}),
+      });
+      const updatedName = updated?.name || name;
+      this.postMessage({
+        type: "info",
+        message: t().automationsUpdated.replace("{name}", updatedName),
+      });
+      this.postMessage({ type: "automationUpdated", name: updatedName });
+      await this.refreshAutomationsPanel();
+    } catch (err) {
+      const reason = getErrorMessage(err);
+      // A revision conflict is not a typo in the form: the record moved on,
+      // so the list is re-read and the form says to reopen it.
+      const conflict = reason.includes("409") || reason.includes("revision_conflict");
+      const message = conflict ? t().automationsUpdateConflict : reason;
+      this.postMessage({
+        type: "error",
+        message: `${t().automationsFailed}: ${message}`,
+      });
+      this.postMessage({ type: "automationUpdateFailed", message });
+      if (conflict) await this.refreshAutomationsPanel();
     }
   }
 

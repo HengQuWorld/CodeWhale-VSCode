@@ -1036,6 +1036,11 @@ export interface AutomationRecord {
   updated_at: string;
   next_run_at?: string | null;
   last_run_at?: string | null;
+  /** Bumped by every mutation; `expected_revision` makes a save conditional so
+   *  two windows editing one schedule cannot silently overwrite each other. */
+  revision?: number;
+  allow_shell?: boolean | null;
+  auto_approve?: boolean | null;
 }
 
 export interface AutomationRunRecord {
@@ -1078,6 +1083,12 @@ export interface UpdateAutomationRequest {
   rrule?: string;
   cwds?: string[];
   status?: AutomationStatus;
+  mode?: string;
+  allow_shell?: boolean;
+  trust_mode?: boolean;
+  auto_approve?: boolean;
+  /** Refuse the write unless the record is still at this revision. */
+  expected_revision?: number;
 }
 
 export type EventListener = (event: RuntimeEvent) => void;

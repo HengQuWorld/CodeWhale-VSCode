@@ -2735,6 +2735,10 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
         }
       ));
       actions.appendChild(automationActionButton(
+        __i18n.automationsEdit, '\u270E', '',
+        function() { openAutomationEditDialog(automation); }
+      ));
+      actions.appendChild(automationActionButton(
         __i18n.automationsDelete, '\u2715', 'danger',
         function() { vscode.postMessage({ type: 'automationAction', action: 'delete', id: id }); }
       ));
@@ -2765,8 +2769,57 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
     return when.getFullYear() + '-' + pad2(when.getMonth() + 1) + '-' + pad2(when.getDate());
   }
 
+  /** Read one schedule back into the form's own vocabulary.
+   *
+   *  The expression is the record's truth, so a shape the form cannot express
+   *  falls back to the custom preset with the text intact — the reader can then
+   *  edit it directly. Guessing a preset from an unfamiliar expression would
+   *  silently rewrite the schedule on save. */
+  function automationDraftFromRrule(rrule) {
+    var raw = String(rrule || '').trim();
+    var draft = {
+      preset: 'custom',
+      time: '09:00',
+      days: ['MO'],
+      date: automationLocalDate(1),
+      rrule: raw,
+    };
+    var cron = /^FREQ=CRON;EXPR=(\\d{1,2}) (\\d{1,2}) \\* \\* \\*$/.exec(raw);
+    if (cron) {
+      draft.preset = 'daily';
+      draft.time = pad2(parseInt(cron[2], 10)) + ':' + pad2(parseInt(cron[1], 10));
+      return draft;
+    }
+    var weekly = /^FREQ=WEEKLY;BYDAY=([A-Z,]+);BYHOUR=(\\d{1,2});BYMINUTE=(\\d{1,2})$/.exec(raw);
+    if (weekly) {
+      draft.preset = 'weekly';
+      draft.days = weekly[1].split(',').filter(function(code) {
+        return AUTOMATION_DAY_CODES.indexOf(code) >= 0;
+      });
+      if (draft.days.length === 0) draft.days = ['MO'];
+      draft.time = pad2(parseInt(weekly[2], 10)) + ':' + pad2(parseInt(weekly[3], 10));
+      return draft;
+    }
+    var hourly = /^FREQ=HOURLY;(?:INTERVAL=\\d+;)?BYMINUTE=(\\d{1,2})$/.exec(raw);
+    if (hourly) {
+      draft.preset = 'hourly';
+      return draft;
+    }
+    var once = /^FREQ=ONCE;AT=(\\d{4}-\\d{2}-\\d{2})T(\\d{2}):(\\d{2})/.exec(raw);
+    if (once) {
+      draft.preset = 'once';
+      draft.date = once[1];
+      draft.time = once[2] + ':' + once[3];
+      return draft;
+    }
+    return draft;
+  }
+
   function newAutomationDraft() {
     return {
+      /** The record being edited; null means this form creates a new one. */
+      editingId: null,
+      revision: null,
       name: '',
       prompt: '',
       // The memo picker is the point of this form, so it opens on it. With no
@@ -2782,6 +2835,25 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
       rrule: '',
       allowShell: false,
     };
+  }
+
+  function automationDraftFromRecord(record) {
+    var draft = newAutomationDraft();
+    var schedule = automationDraftFromRrule(record && record.rrule);
+    draft.editingId = String((record && record.id) || '');
+    draft.revision = record && typeof record.revision === 'number' ? record.revision : null;
+    draft.name = String((record && record.name) || '');
+    draft.prompt = String((record && record.prompt) || '');
+    // Editing starts on the text box, not the memo list: the content is
+    // already the record's, and the picker is there for replacing it.
+    draft.source = 'manual';
+    draft.preset = schedule.preset;
+    draft.time = schedule.time;
+    draft.days = schedule.days;
+    draft.date = schedule.date;
+    draft.rrule = schedule.rrule;
+    draft.allowShell = !!record && record.allow_shell === true;
+    return draft;
   }
 
   /** The rrule the form describes. Empty means the form is not answerable
@@ -2907,8 +2979,10 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
       return;
     }
     // A one-off in the past would be accepted by the engine and then never
-    // fire; say so now, while the reader is still looking at the form.
-    if (automationDraft.preset === 'once') {
+    // fire; say so now, while the reader is still looking at the form. Only
+    // for a new schedule: an existing one whose moment has passed is being
+    // edited for its name or text, and refusing that would block the edit.
+    if (!automationDraft.editingId && automationDraft.preset === 'once') {
       var when = new Date(rrule.slice('FREQ=ONCE;AT='.length));
       if (!isNaN(when.getTime()) && when.getTime() <= Date.now()) {
         setAutomationFormProblem(__i18n.automationsTimePast);
@@ -2931,6 +3005,20 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
       setAutomationFormProblem(__i18n.automationsFailed);
     }, 30000);
 
+    if (automationDraft.editingId) {
+      vscode.postMessage({
+        type: 'updateAutomation',
+        id: automationDraft.editingId,
+        // Only when the snapshot carried one: an engine that does not report
+        // revisions must not be sent a precondition it never advertised.
+        revision: automationDraft.revision,
+        name: name,
+        prompt: prompt,
+        rrule: rrule,
+        allowShell: !!automationDraft.allowShell,
+      });
+      return;
+    }
     vscode.postMessage({
       type: 'createAutomation',
       name: name,
@@ -2940,10 +3028,10 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
     });
   }
 
-  /** The host's answer to a create. Success closes the form — the row it made
-   *  arrives on its own; failure leaves the form standing with the reason, so
-   *  nothing the reader typed is lost to a refusal. */
-  function settleAutomationCreate(ok, message) {
+  /** The host's answer to a create or an edit. Success closes the form — the
+   *  row it made arrives on its own; failure leaves the form standing with the
+   *  reason, so nothing the reader typed is lost to a refusal. */
+  function settleAutomationSave(ok, message) {
     if (automationSubmitTimer) {
       clearTimeout(automationSubmitTimer);
       automationSubmitTimer = null;
@@ -3025,6 +3113,10 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
       if (selected === pair[0]) option.selected = true;
       select.appendChild(option);
     });
+    // Set on the control as well as the option: a select with a selected option
+    // reports it through its value in a real document, and the tests' stand-in
+    // only carries what is written to it.
+    if (selected) select.value = selected;
     return select;
   }
 
@@ -3041,8 +3133,10 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
 
     var header = document.createElement('div');
     header.className = 'task-create-header';
+    var editing = !!automationDraft.editingId;
     var heading = document.createElement('h3');
-    heading.textContent = __i18n.automationsCreateTitle;
+    heading.className = 'automation-create-title';
+    heading.textContent = editing ? __i18n.automationsEditTitle : __i18n.automationsCreateTitle;
     header.appendChild(heading);
     var closeBtn = document.createElement('button');
     closeBtn.type = 'button';
@@ -3231,7 +3325,9 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
     var submitBtn = document.createElement('button');
     submitBtn.type = 'button';
     submitBtn.className = 'detail-action-btn primary automation-create-submit';
-    submitBtn.textContent = __i18n.automationsCreateSubmit;
+    submitBtn.textContent = editing
+      ? __i18n.automationsUpdateSubmit
+      : __i18n.automationsCreateSubmit;
     submitBtn.disabled = automationSubmitting;
     submitBtn.onclick = function() { submitAutomationDraft(); };
     footer.appendChild(submitBtn);
@@ -3256,6 +3352,18 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
     paintAutomationCreateDialog(true);
     // The picker reads the panel's last snapshot; ask for a fresh one so a memo
     // parked in another window is pickable here too.
+    vscode.postMessage({ type: 'refreshMemosPanel' });
+  }
+
+  /** Reopen one schedule in the same form, prefilled from the row the panel is
+   *  showing. Its revision rides along so the save is refused rather than
+   *  silently applied if the record moved in the meantime. */
+  function openAutomationEditDialog(record) {
+    if (!record) return;
+    automationDraft = automationDraftFromRecord(record);
+    automationFormProblem = '';
+    automationSubmitting = false;
+    paintAutomationCreateDialog(true);
     vscode.postMessage({ type: 'refreshMemosPanel' });
   }
 
@@ -5196,7 +5304,8 @@ export function getSidebarScript(_tr: WebviewTranslations): string {
     renderAutomations: renderAutomations,
     openAutomationCreateDialog: openAutomationCreateDialog,
     closeAutomationCreateDialog: closeAutomationCreateDialog,
-    settleAutomationCreate: settleAutomationCreate,
+    openAutomationEditDialog: openAutomationEditDialog,
+    settleAutomationSave: settleAutomationSave,
     setAutomationFormProblem: setAutomationFormProblem,
     renderMcp: renderMcp,
     renderMcpTools: renderMcpTools,
