@@ -1,11 +1,11 @@
 # CodeWhale for VS Code — a lightweight GUI frontend for the CodeWhale agent
 
-[![Version](https://img.shields.io/badge/version-0.10.3-blue)](https://github.com/HengQuWorld/CodeWhale-VSCode)
+[![Version](https://img.shields.io/badge/version-0.10.4-blue)](https://github.com/HengQuWorld/CodeWhale-VSCode)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![CI](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/ci.yml/badge.svg)](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/ci.yml)
 [![Release](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/release.yml/badge.svg)](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/release.yml)
 [![VS Code](https://img.shields.io/badge/VS%20Code-1.85+-informational)](https://code.visualstudio.com/)
-[![VSIX](https://img.shields.io/badge/VSIX-~589%20KB-brightgreen)](https://github.com/HengQuWorld/CodeWhale-VSCode/releases)
+[![VSIX](https://img.shields.io/badge/VSIX-~608%20KB-brightgreen)](https://github.com/HengQuWorld/CodeWhale-VSCode/releases)
 [![macOS](https://img.shields.io/badge/macOS-supported-brightgreen)](#requirements)
 [![Windows](https://img.shields.io/badge/Windows-supported-brightgreen)](#requirements)
 [![Linux](https://img.shields.io/badge/Linux-supported-brightgreen)](#requirements)
@@ -22,7 +22,7 @@ The split is deliberate: **the agent stays in the engine, the ergonomics stay in
 
 | | |
 |---|---|
-| VSIX size (0.10.3) | ~589 KB |
+| VSIX size (0.10.4) | ~608 KB |
 | Runtime npm dependencies | **none** — webpack inlines the extension's own TypeScript (and `marked` for rendering) |
 | Bundled engine or model | **none** — `codewhale` is a separate native binary |
 | Duplicated agent logic | **none** — the GUI is an adapter over the engine's local runtime API |
@@ -32,9 +32,9 @@ The frontend is a webview. `ChatProvider` runs in the extension host, speaks HTT
 
 Because nothing about the agent is copied into the extension, the engine can ship new capabilities and fixes without a frontend release.
 
-### Engine compatibility for 0.10.3
+### Engine compatibility for 0.10.4
 
-0.10.3 runs on engine **v0.10.2**, the same floor 0.10.2 names, and everything it ships is client-side: a scrolling menu of your own on the conversation's scrollbar and words, a navigation rail whose dots hold their place and land on the turn they name, and a notice while a long conversation is still being opened. The three surfaces with a floor of their own are unchanged — the memory routes the panel reads (the same Context Lens routes the `/memory` review commands use) and the **MCP** panel arrive with engine **v0.10.0** (the release that introduced the Context Lens routes, and the MCP management routes whose listing names the layer each server belongs to and carries the configuration revision every edit presents), while the workspace-trust banner, the client a session reports itself as, and a second window or a second CodeWhale client on the same machine all need **v0.10.2**.
+0.10.4 runs on engine **v0.10.2**, the same floor 0.10.3 names, and everything it ships is client-side: a **Memos** section listing every conversation's parked memos, an **Automations** section that lists, creates, runs, pauses and deletes the engine's schedules, markdown rendered above a question while the question is still waiting, and a navigation rail placed against the scrollbar the host draws. The three surfaces with a floor of their own are unchanged — the memory routes the panel reads (the same Context Lens routes the `/memory` review commands use), the **MCP** panel, and the automation routes the new panel edits all arrive with engine **v0.10.0** (the release that introduced the Context Lens routes, the MCP management routes whose listing names the layer each server belongs to and carries the configuration revision every edit presents, and the automation routes `/automation` uses), while the workspace-trust banner, the client a session reports itself as, and a second window or a second CodeWhale client on the same machine all need **v0.10.2**.
 
 What still needs a Codewhale build newer than any tagged engine release:
 
@@ -140,12 +140,12 @@ npx @vscode/vsce package --no-dependencies
 Then install the generated `.vsix` (`Extensions: Install from VSIX...`), or from a terminal:
 
 ```bash
-code --install-extension ./brotherwhale-vscode-0.10.3.vsix --force
+code --install-extension ./brotherwhale-vscode-0.10.4.vsix --force
 ```
 
 > **Trae CN users:** if `code` is not on your `PATH`, use the bundled CLI:
 > ```bash
-> "/Applications/Trae CN.app/Contents/Resources/app/bin/code" --install-extension ./brotherwhale-vscode-0.10.3.vsix --force
+> "/Applications/Trae CN.app/Contents/Resources/app/bin/code" --install-extension ./brotherwhale-vscode-0.10.4.vsix --force
 > ```
 
 **Option C — Open VSX:** [Open VSX](https://open-vsx.org/extension/hengquworld/brotherwhale-vscode) carries the same builds for editors outside Microsoft's ecosystem — VSCodium, and CodeArts on HarmonyOS PC, whose extension panel has an Open VSX page. Search "CodeWhale" and install; no VSIX to side-load.
@@ -193,7 +193,7 @@ Switch from the status bar or with `/mode` (shortcuts `1`/`2`/`3`) and `/auto`. 
 - **Attention surfacing** — a thread waiting on an approval or your input carries a count on its rail card (grouped under *Needs you*) and a total on the toolbar's **Agent** label, which names the longest-waiting thread. Approvals and questions from another thread can be answered inline in its rail card, without switching to it.
 - **A chime when a turn finishes, and when the agent needs you** — audible from wherever you are: the cue rings for the conversation you are watching and for a parked thread finishing in the background, and a third, rising cue rings when an approval or a question is waiting — on the thread you are reading or on a parked one. A failed turn has its own low, rough cue; an interrupted turn stays silent, and anything arriving at the same moment is heard once. `brotherwhale.completionSound` turns it off.
 - **Watched, not polled** — every background thread that is running or waiting on you holds one lightweight SSE stream, so the rail badge and the auto-save stay live without a polling timer, and a request that arrives while you are elsewhere shows up on the rail instead of waiting for a poll.
-- Three peer sidebar tabs — **Sessions** (saved conversations), **Threads** (the active ones) and **Activity** (live agent status: Work, Changes, Memory, Fleet, Tasks, Agents) — each with a hint line saying what it holds.
+- Three peer sidebar tabs — **Sessions** (saved conversations), **Threads** (the active ones) and **Activity** (live agent status: Work, Changes, Memory, Memos, Automations, Fleet, Tasks, Agents) — each with a hint line saying what it holds.
 
 ### Changes and diffs in the editor
 - A **Changes** section per conversation, with one card per recorded change, built from the engine's authoritative mutation metadata.
@@ -201,6 +201,10 @@ Switch from the status bar or with `/mode` (shortcuts `1`/`2`/`3`) and `/auto`. 
 - **Open** a changed file directly in the editor, or **Diff** it inline.
 - **Revert** restores one recorded change through the engine's file-scoped endpoint, naming the restore point taken before that change; the rest of the file's changes — and every other file — are left alone.
 - Replayed sessions rebuild diffs from the recorded replacements — and deliberately show *no* diff rather than a fabricated one when the chain no longer lines up.
+
+### Memos and scheduled work
+- **Memos across conversations** — the Activity tab's **Memos** section lists every memo parked beside a composer, grouped by the conversation holding it with the most recently used conversation first. Clicking a group opens that conversation, where its memos still wait for you to run them; nothing runs from the list itself, and the list is read off the same queue the strip above the composer shows.
+- **Automations** — the Activity tab's **Automations** section lists the engine's schedules with their state, next run and last run, and offers **Run now**, **Pause**, **Resume** and **Delete** on the row; a delete asks first. New schedules can be daily, weekly, hourly, one-off or a written expression, and can take their content from a parked memo, which fills the prompt and leaves the memo untouched. Running shell commands is a switch the form asks for and leaves off, so a schedule that does not need to execute gets only read-and-answer. A refusal from the engine — an expression it will not accept, a delete while a run is going — is shown where you typed, not swallowed.
 
 ### Tasks, agents, and Fleet
 - **Tasks** — create from a modal, track progress, open a detail overlay, filter by workspace; background threads raise attention when they need you.
@@ -225,7 +229,7 @@ Switch from the status bar or with `/mode` (shortcuts `1`/`2`/`3`) and `/auto`. 
 - **Config panel** — the gear in the settings bar (or `/config`) reads and writes engine runtime config, including sandbox mode, strict tool mode, memory, search provider and prompt suggestion.
 
 ### Built for the editor
-- Activity-bar container whose sidebar holds the **Sessions**, **Threads** and **Activity** tabs, the last grouping the Work, Changes, Memory, Fleet, Tasks, Agents, Skills and MCP panels. The threads panel sits beside the chat and takes its width from it rather than covering it, up to what that view can spare — the conversation keeps a column of its own however narrow the sidebar is — and closes with its ✕ button or `Esc`.
+- Activity-bar container whose sidebar holds the **Sessions**, **Threads** and **Activity** tabs, the last grouping the Work, Changes, Memory, Memos, Automations, Fleet, Tasks, Agents, Skills and MCP panels. The threads panel sits beside the chat and takes its width from it rather than covering it, up to what that view can spare — the conversation keeps a column of its own however narrow the sidebar is — and closes with its ✕ button or `Esc`.
 - Status bar for engine state, mode, posture, provider, model and reasoning effort, plus the session's cost, its token counts and how full the model's context window is — the cost and tokens rise with each model call while a turn runs, and the context reading turns emphatic from 80%.
 - Resizable sidebar and input area; follows your VS Code theme.
 - **English and Simplified Chinese** UI, following VS Code's display language.
@@ -324,7 +328,7 @@ Reloading or closing the extension stops that window's Runtime and interrupts ac
 
 **Installing a VSIX**
 ```bash
-code --install-extension /path/to/brotherwhale-vscode-0.10.3.vsix --force
+code --install-extension /path/to/brotherwhale-vscode-0.10.4.vsix --force
 ```
 
 ## FAQ

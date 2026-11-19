@@ -1,11 +1,11 @@
 # CodeWhale for VS Code —— CodeWhale 代理的轻量图形前端
 
-[![Version](https://img.shields.io/badge/version-0.10.3-blue)](https://github.com/HengQuWorld/CodeWhale-VSCode)
+[![Version](https://img.shields.io/badge/version-0.10.4-blue)](https://github.com/HengQuWorld/CodeWhale-VSCode)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![CI](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/ci.yml/badge.svg)](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/ci.yml)
 [![Release](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/release.yml/badge.svg)](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/release.yml)
 [![VS Code](https://img.shields.io/badge/VS%20Code-1.85+-informational)](https://code.visualstudio.com/)
-[![VSIX](https://img.shields.io/badge/VSIX-~589%20KB-brightgreen)](https://github.com/HengQuWorld/CodeWhale-VSCode/releases)
+[![VSIX](https://img.shields.io/badge/VSIX-~608%20KB-brightgreen)](https://github.com/HengQuWorld/CodeWhale-VSCode/releases)
 [![macOS](https://img.shields.io/badge/macOS-supported-brightgreen)](#系统要求)
 [![Windows](https://img.shields.io/badge/Windows-supported-brightgreen)](#系统要求)
 [![Linux](https://img.shields.io/badge/Linux-supported-brightgreen)](#系统要求)
@@ -22,7 +22,7 @@ CodeWhale for VS Code 是 [CodeWhale](https://github.com/codewhale-hq/Codewhale)
 
 | | |
 |---|---|
-| VSIX 体积（0.10.3） | 约 589 KB |
+| VSIX 体积（0.10.4） | 约 608 KB |
 | 运行时 npm 依赖 | **零** —— 扩展自身的 TypeScript（以及用于渲染的 `marked`）都被 webpack 内联 |
 | 打包的引擎或模型 | **无** —— `codewhale` 是独立的原生二进制 |
 | 重复实现的代理逻辑 | **无** —— GUI 只是引擎本地 runtime API 之上的适配层 |
@@ -32,9 +32,9 @@ CodeWhale for VS Code 是 [CodeWhale](https://github.com/codewhale-hq/Codewhale)
 
 正因为代理的任何一部分都没有被复制进扩展，引擎可以独立发布新能力和修复，而不需要前端跟着发版。
 
-### 0.10.3 的引擎兼容性
+### 0.10.4 的引擎兼容性
 
-0.10.3 运行在引擎 **v0.10.2** 上，与 0.10.2 的底线相同，且本版本全部内容都在客户端侧：对话的滚动条与文字上自有一套滚动菜单，导航轨的圆点既站得住、也会落在它指的那一条消息上，以及长对话仍在打开时的一句说明。三个各自有底线的面保持不变 —— 记忆面板读取的路由（与 `/memory` 的审阅命令读的是同一批 Context Lens 路由）与 **MCP** 面板需要引擎 **v0.10.0**（正是那个版本引入了 Context Lens 路由，以及 MCP 管理路由：清单会带上每个服务器所属的层级、每次修改都要呈上配置 revision），而工作区信任横幅、会话上报自己属于哪个客户端、以及在同机上开第二个窗口或并行另一个 CodeWhale 客户端，都需要 **v0.10.2**。
+0.10.4 运行在引擎 **v0.10.2** 上，与 0.10.3 的底线相同，且本版本全部内容都在客户端侧：列出每个会话停着的备忘的 **Memos** 区块、可列出／新建／运行／暂停／删除引擎计划的 **Automations** 区块、提问仍在等待时就已写好内容的 Markdown 渲染，以及贴着宿主实际绘制的滚动条摆放的导航轨。三个各自有底线的面保持不变 —— 记忆面板读取的路由（与 `/memory` 的审阅命令读的是同一批 Context Lens 路由）、**MCP** 面板，以及新面板所用的自动化路由，都需要引擎 **v0.10.0**（正是那个版本引入了 Context Lens 路由、MCP 管理路由——清单会带上每个服务器所属的层级、每次修改都要呈上配置 revision——以及 `/automation` 所用的自动化路由），而工作区信任横幅、会话上报自己属于哪个客户端、以及在同机上开第二个窗口或并行另一个 CodeWhale 客户端，都需要 **v0.10.2**。
 
 以下仍需要比任何已发布引擎 tag 更新的 Codewhale 构建：
 
@@ -140,12 +140,12 @@ npx @vscode/vsce package --no-dependencies
 然后安装生成的 `.vsix`（`Extensions: Install from VSIX...`），或在终端执行：
 
 ```bash
-code --install-extension ./brotherwhale-vscode-0.10.3.vsix --force
+code --install-extension ./brotherwhale-vscode-0.10.4.vsix --force
 ```
 
 > **Trae CN 用户：** 如果 `code` 不在 `PATH` 中，使用自带的 CLI：
 > ```bash
-> "/Applications/Trae CN.app/Contents/Resources/app/bin/code" --install-extension ./brotherwhale-vscode-0.10.3.vsix --force
+> "/Applications/Trae CN.app/Contents/Resources/app/bin/code" --install-extension ./brotherwhale-vscode-0.10.4.vsix --force
 > ```
 
 **方式 C —— Open VSX：** [Open VSX](https://open-vsx.org/extension/hengquworld/brotherwhale-vscode) 面向微软生态之外的编辑器提供同样的构建 —— VSCodium，以及鸿蒙 PC 上的 CodeArts（扩展面板自带一页 Open VSX）。搜 "CodeWhale" 直接安装，不必手动装 VSIX。
@@ -193,7 +193,7 @@ code --install-extension ./brotherwhale-vscode-0.10.3.vsix --force
 - **注意力提示** —— 等待审批或等待你输入的线程，会在它的卡片上显示待办数量（归入 *Needs you* 分组），工具栏 **Agent** 标签上显示总数并点名等待最久的线程。其它线程的审批与提问可以直接在它的卡片内联回答，不用先切过去。
 - **一轮跑完、以及智能体需要你时的一声提示音** —— 人不在屏幕前也听得见：正在看的会话、以及后台线程跑完的轮次都会响；等待批准或等待你回答提问时，会响另一种上行的提示音（正在看的会话与后台线程都包括）。失败的轮次有自己的低沉发涩提示音；用户自己中断的轮次不发声，同一时刻到达的事件只响一次。`brotherwhale.completionSound` 可关闭。
 - **监视而非轮询** —— 每个正在运行或等待你的后台线程各持有一条轻量 SSE 流，侧栏徽章与自动保存都是实时的，不再有定时轮询；别处到来、需要你处理的请求会立刻出现在侧栏上，而不是等下一次轮询。
-- 侧边栏三个并列标签页 —— **Sessions**（已保存的会话）、**Threads**（进行中的线程）、**Activity**（智能体实时状态：工作、变更、车队、任务、子代理），每个标签下都有一行说明它装了什么。
+- 侧边栏三个并列标签页 —— **Sessions**（已保存的会话）、**Threads**（进行中的线程）、**Activity**（智能体实时状态：工作、变更、记忆、备忘、定时任务、车队、任务、子代理），每个标签下都有一行说明它装了什么。
 
 ### 编辑器内的变更与差异
 - 每个会话一个 **Changes** 区块，文件变更卡片由引擎权威的 mutation 元数据构建。
@@ -201,6 +201,10 @@ code --install-extension ./brotherwhale-vscode-0.10.3.vsix --force
 - 可直接在编辑器中 **Open** 变更文件，或内联 **Diff**。
 - **Revert** 通过引擎的文件级端点恢复单条记录变更，并指明该变更之前所取的还原点；同一文件中其余的变更 —— 以及其它所有文件 —— 都保持不动。
 - 重放历史会话时会依据记录中的替换内容重建差异；当链条无法对齐时，会**明确不显示差异**，而不是编造一份。
+
+### 备忘与定时任务
+- **跨会话的备忘** —— Activity 栏的 **Memos** 区块列出所有停在输入框旁的备忘，按持有它的会话分组，最近用过的会话排在前面；点一个分组就会打开那个会话，备忘仍在那里等你运行，列表本身不执行任何一条。它读的就是输入框上方那条队列条的同一份数据。
+- **定时任务** —— Activity 栏的 **Automations** 区块列出引擎持有的计划，带上状态、下次运行与上次运行，行内提供 **Run now**、**Pause**、**Resume** 与 **Delete**；删除会先问一次。新建可选每天、每周、每小时、一次性或自定义表达式，内容也可以取自一条停着的备忘——这会填入提示词并建议一个名字，备忘本身原封不动。运行 shell 命令是表单里一个默认关闭的开关，所以不需要执行命令的计划只获得读与回答的能力。引擎的拒绝（不接受某个表达式、任务还在跑时删除）会显示在你输入的地方，而不是被吞掉。
 
 ### 任务、代理与 Fleet
 - **Tasks** —— 弹窗创建、跟踪进度、打开详情浮层、按工作区过滤；后台线程需要你时会给出提示。
@@ -225,7 +229,7 @@ code --install-extension ./brotherwhale-vscode-0.10.3.vsix --force
 - **配置面板** —— 设置栏的齿轮（或 `/config`）可读写引擎的 runtime 配置，包括 sandbox 模式、strict tool 模式、memory、search provider 与 prompt suggestion。
 
 ### 为编辑器而做
-- 活动栏容器，侧边栏包含 **Sessions**、**Threads**、**Activity** 三个标签页，最后者汇集 Work、Changes、Memory、Fleet、Tasks、Agents、Skills 与 MCP 面板。线程面板与对话并排显示，占用对话区的宽度而不是盖住它，且最多占用当前视图能匀出的宽度——侧边栏再窄，对话区也保留自己的一列；可用 ✕ 按钮或 `Esc` 收起。
+- 活动栏容器，侧边栏包含 **Sessions**、**Threads**、**Activity** 三个标签页，最后者汇集 Work、Changes、Memory、Memos、Automations、Fleet、Tasks、Agents、Skills 与 MCP 面板。线程面板与对话并排显示，占用对话区的宽度而不是盖住它，且最多占用当前视图能匀出的宽度——侧边栏再窄，对话区也保留自己的一列；可用 ✕ 按钮或 `Esc` 收起。
 - 状态栏显示引擎状态、模式、权限、提供商、模型与思考深度，以及本会话的成本、token 用量和模型上下文窗口的占用 —— 回合运行中成本与 token 会随每次模型调用上升，上下文占用从 80% 起转为醒目样式。
 - 侧边栏与输入区可拖拽调整；自动跟随 VS Code 主题。
 - **英文与简体中文**界面，跟随 VS Code 的显示语言。
@@ -326,7 +330,7 @@ codewhale serve（引擎 —— 单独安装与升级）
 
 **安装 VSIX**
 ```bash
-code --install-extension /path/to/brotherwhale-vscode-0.10.3.vsix --force
+code --install-extension /path/to/brotherwhale-vscode-0.10.4.vsix --force
 ```
 
 ## FAQ

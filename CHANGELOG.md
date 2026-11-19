@@ -1,5 +1,27 @@
 # Change Log
 
+## 0.10.4
+
+Everything in this release is client-side and works on engine **v0.10.2**, the same floor 0.10.3 names; nothing here waits on an engine build. The schedules the new panel lists and edits are served by the automation routes engine **v0.10.0** introduced, the same ones `/automation` uses.
+
+### New Features
+
+- **Every conversation's parked memos in one panel** — A memo parked beside the composer was only visible inside the conversation holding it, so a memo left in another chat was easy to forget. The Activity tab now has a **Memos** section listing them all, grouped by the conversation they belong to with the most recently used conversation first; each group carries its conversation's name and the memos under it, and clicking one opens that conversation. The memos still wait there for you to run them — nothing runs from the list itself — and a conversation whose title cannot be read is named by its id rather than dropped.
+
+- **Scheduled work is a panel, not a prompt** — The Activity tab now has an **Automations** section: each schedule the engine holds, with its state, next run and last run, and **Run now**, **Pause**, **Resume** and **Delete** on the row. Deleting asks first, and anything the engine refuses — a delete while a run is still going, an expression it will not accept — is said out loud instead of being a click that does nothing. The create form can take its content from a parked memo, which fills the prompt and suggests a name while leaving the memo where it is; schedules can be daily, weekly, hourly, one-off or a written expression, and the form stays open until the engine answers, so a refusal lands on the text you typed rather than in the conversation behind the dialog. Running commands is a switch the form asks for and leaves off: without it a scheduled run can read and answer but not execute. A failed read keeps the rows the last good read painted and says the read failed, rather than claiming there are no schedules.
+
+### Improvements
+
+- **Ways into the model's reasoning language, written down** — The README answers how to keep the model thinking in Chinese: the engine's `locale` setting is the switch, with the config panel, `/config locale zh-Hans` and the engine's own config as the three ways to set it, and the answer names what the setting does not cover (`zh-Hant` localizes the interface but adds no prompt-level reinforcement, and reasoning effort is not a language choice). The welcome page's first suggestion now offers a scheduled docs consistency check instead of a generic "explain a concept" prompt.
+
+### Bug Fixes
+
+- **Markdown written before a question renders while the question waits** — When a turn stopped to ask a question or wait on an approval, the text the model had already written sat there as raw source — asterisks, list dashes, code fences — for as long as the prompt stayed open, because only a finished turn was ever rendered. What the turn has completed is now rendered as the prompt is drawn, so the conversation above it reads the way it will after the turn ends. Streaming itself is unchanged: the next token still arrives as plain text, and saved conversations are untouched — the engine writes those from its own turn records.
+
+- **A conversation's memos are one click target** — A memo group offered two ways in — its conversation name and each memo line below it — and both did the same thing, so which one to press was a guess. The whole group is the button now: the name and its memos are its contents, and hover and focus light the block as a single thing.
+
+- **The navigation rail sits against the scrollbar the host actually draws** — The rail read as a wide blank band beside the scrollbar, and where the host overlays its scrollbar on the content (the macOS default) the dots ended up underneath the moving thumb. The rail now takes its place from the scrollbar the host draws — measured rather than assumed — and the transcript keeps only a sliver of right padding, so the conversation sits closer to the edge.
+
 ## 0.10.3
 
 Everything in this release is client-side and works on engine **v0.10.2**, the same floor 0.10.2 names; nothing here waits on an engine build.
