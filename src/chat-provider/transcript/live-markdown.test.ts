@@ -73,6 +73,19 @@ function approvalEvent(approvalId: string, callId: string) {
   } as any;
 }
 
+function toolStartedEvent(itemId: string, callId: string, name = "shell") {
+  return {
+    seq: 14,
+    event: "item.started",
+    turn_id: "turn-1",
+    item_id: itemId,
+    payload: {
+      item: { kind: "tool_call", id: itemId, summary: `${name} started` },
+      tool: { id: callId, name, input: { command: "ls" } },
+    },
+  } as any;
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
 });
@@ -127,6 +140,53 @@ describe("the markdown a waiting prompt sits under", () => {
     const approvalAt = posted.findIndex((message) => message.type === "approvalRequired");
     expect(renderedAt).toBeGreaterThanOrEqual(0);
     expect(renderedAt).toBeLessThan(approvalAt);
+  });
+
+  it("is rendered as the next tool call starts", () => {
+    const { provider, postMessage } = createProvider();
+
+    // The model wrote a paragraph, then asked for a tool. The paragraph is
+    // finished there, and its card lands under it: prose, not `**markdown**`.
+    (provider as any).handleRuntimeEvent(toolStartedEvent("item-1", "call-1"));
+
+    const posted = postedMessages(postMessage);
+    const rendered = posted.find((message) => message.type === "renderBlocks");
+    expect(rendered?.messageId).toBe("a1");
+    expect(rendered?.blockHtmls[0].contentHtml).toContain("<strong>bold</strong>");
+
+    // Drawn before the row it precedes on screen.
+    const renderedAt = posted.findIndex((message) => message.type === "renderBlocks");
+    const rowAt = posted.findIndex((message) => message.type === "addToolCall");
+    expect(renderedAt).toBeGreaterThanOrEqual(0);
+    expect(rowAt).toBeGreaterThanOrEqual(0);
+    expect(renderedAt).toBeLessThan(rowAt);
+  });
+
+  it("does not re-render a paragraph it has already drawn", () => {
+    const { provider, postMessage } = createProvider();
+
+    (provider as any).handleRuntimeEvent(toolStartedEvent("item-1", "call-1"));
+    (provider as any).handleRuntimeEvent(toolStartedEvent("item-2", "call-2"));
+
+    // The second call follows the same, unchanged paragraph: rendering it
+    // again would be the same picture and a parse nobody sees.
+    const renders = postedMessages(postMessage).filter((message) => message.type === "renderBlocks");
+    expect(renders).toHaveLength(1);
+  });
+
+  it("renders a paragraph that grew after the last boundary", () => {
+    const { provider, postMessage } = createProvider();
+
+    (provider as any).handleRuntimeEvent(toolStartedEvent("item-1", "call-1"));
+    // The model carried on in a new block after the tool, then called another.
+    (provider as any).messages[1].blocks.push({ type: "text", content: "Then *this* happened." });
+    (provider as any).handleRuntimeEvent(toolStartedEvent("item-2", "call-2"));
+
+    const renders = postedMessages(postMessage).filter((message) => message.type === "renderBlocks");
+    expect(renders).toHaveLength(2);
+    // Only the new block is re-sent; the drawn one is left alone.
+    expect(renders[1].blockHtmls).toHaveLength(1);
+    expect(renders[1].blockHtmls[0].contentHtml).toContain("<em>this</em>");
   });
 
   it("says nothing when the turn has written only tool calls so far", () => {

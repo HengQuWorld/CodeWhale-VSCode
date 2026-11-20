@@ -9813,6 +9813,12 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         this.activeItems.set(itemId, { kind, msgId: lastMsg.id });
 
         if (kind === "tool_call" || kind === "file_change" || kind === "command_execution") {
+          // The text before this call is finished — the engine starts a tool
+          // only after it stopped writing — so it is the prose that would
+          // otherwise stay raw markdown under the tool's card until the turn
+          // ends. Drawn before the row, so the card lands under prose that
+          // already reads as prose.
+          this.renderSpokenBlocks(lastMsg.id);
           this.currentTextBlockIdx = -1;
           this.currentThinkingBlockIdx = -1;
 
@@ -10571,16 +10577,25 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     this.postMessage({ type: "hostOperation", active: false });
   }
 
+  /** Markdown already flushed for a message's text blocks, keyed by the block
+   *  array each render saw: the source length of every block it has drawn.
+   *  A block whose text has not grown since cannot render differently, so the
+   *  next boundary skips it — a long turn starts a tool call after every
+   *  paragraph, and re-parsing the whole message each time would be work the
+   *  reader never sees. Held weakly: the record belongs to the message object
+   *  and goes with it. */
+  private spokenRendered = new WeakMap<object, number[]>();
+
   /** Render the markdown a live turn has already written into its text blocks.
    *
    *  Streaming text arrives as plain text (`updateMessage`) and is turned into
    *  HTML only when the turn ends (`messageComplete`). A turn that stops to ask
    *  the reader a question — or to wait on an approval — does not end, so the
    *  answer above the prompt stayed markdown source: `**bold**`, lists and
-   *  fenced code sat there unrendered for as long as the prompt was open. These
-   *  boundaries are the moments the engine has finished a text block (a tool
-   *  call is what follows), so the blocks can be rendered without cutting one
-   *  in half.
+   *  fenced code sat there unrendered for as long as the prompt was open. The
+   *  prose between tool calls had the same problem for the whole turn: a
+   *  paragraph the model wrote before calling a tool is finished there, and the
+   *  next tool's card lands under raw markdown.
    *
    *  Text blocks only: a thinking block's collapsed preview is meant to be
    *  plain, and its next delta would replace rendered HTML with the plain
@@ -10589,18 +10604,23 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     if (!messageId) return;
     const msg = this.messages.find((m) => m.id === messageId);
     if (!msg || msg.role !== "assistant" || !msg.blocks?.length) return;
+    const rendered = this.spokenRendered.get(msg) ?? [];
     const blockHtmls: { blockIdx: number; contentHtml: string }[] = [];
     for (let i = 0; i < msg.blocks.length; i++) {
       const block = msg.blocks[i];
       if (block.type !== "text" || !block.content) continue;
+      const source = block.content;
+      if (rendered[i] === source.length) continue;
       try {
-        block.contentHtml = renderMarkdown(block.content);
+        block.contentHtml = renderMarkdown(source);
       } catch {
-        block.contentHtml = block.content;
+        block.contentHtml = source;
       }
+      rendered[i] = source.length;
       blockHtmls.push({ blockIdx: i, contentHtml: block.contentHtml });
     }
     if (blockHtmls.length === 0) return;
+    this.spokenRendered.set(msg, rendered);
     this.postMessage({ type: "renderBlocks", messageId, blockHtmls });
   }
 
