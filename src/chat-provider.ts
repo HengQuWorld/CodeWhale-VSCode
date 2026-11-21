@@ -280,6 +280,15 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
    * thing that breaks the rail.
    */
   private static readonly THREAD_SUMMARY_TIMEOUT_MS = 60_000;
+  /** How long to wait before reopening a dropped event stream, by consecutive
+   *  failure. The first retry is nearly immediate (a socket reset by an engine
+   *  that is still there); the tail is long enough to stop hammering one that
+   *  is not, without giving up on it. */
+  private static readonly EVENT_STREAM_RETRY_DELAYS_MS = [250, 500, 1000, 2000, 4000, 8000];
+  /** Failures in a row before a drop is worth telling the reader about. One or
+   *  two are routine; a stream that has not delivered anything across five
+   *  retries is not. */
+  private static readonly EVENT_STREAM_REPORT_AFTER = 5;
 
   /** How long the optional steer-provenance read may take before a viewed
    *  session opens without its steer badges. A badge is never worth delaying a
@@ -309,6 +318,20 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
   private sessionState = new SessionStateStore();
   private slashHandler: SlashCommandHandler;
   private eventController: AbortController | null = null;
+  /** A stream that dropped is reopened after this many milliseconds; the delay
+   *  grows with consecutive failures and resets on the first event. */
+  private eventStreamRetryTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Consecutive dropped streams since the last event arrived. */
+  private eventStreamFailures = 0;
+  /** Whether the current run of failures has already been reported. The retry
+   *  keeps going after it, so the message is said once per outage rather than
+   *  once per attempt. */
+  private eventStreamErrorReported = false;
+  /** The thread the last-opened stream was for. Held separately from
+   *  `currentThread` because a retry fires later, and it must reopen the
+   *  conversation it was scheduled for rather than whichever one is on screen
+   *  by then — or nothing at all if the view has moved on. */
+  private eventControllerThreadId: string | null = null;
   private taskRefreshTimer: ReturnType<typeof setInterval> | null = null;
   private taskDetailRefreshTimer: ReturnType<typeof setInterval> | null = null;
   private activeTaskDetailId: string | null = null;
@@ -7726,6 +7749,15 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
   private abortEventStream(): void {
     this.eventController?.abort();
     this.eventController = null;
+    // A retry scheduled for the conversation being left would reopen a stream
+    // for a thread the view no longer shows.
+    if (this.eventStreamRetryTimer) {
+      clearTimeout(this.eventStreamRetryTimer);
+      this.eventStreamRetryTimer = null;
+    }
+    this.eventStreamFailures = 0;
+    this.eventStreamErrorReported = false;
+    this.eventControllerThreadId = null;
   }
 
   private stopPeriodicTaskRefresh(): void {
@@ -9034,15 +9066,97 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
   private subscribeToEvents(): void {
     if (!this.currentThread) return;
     this.eventController?.abort();
-
-    this.eventController = this.api.streamEvents(
+    // An explicit subscribe (a switch, a resumed turn) supersedes a retry that
+    // was waiting to do the same thing.
+    if (this.eventStreamRetryTimer) {
+      clearTimeout(this.eventStreamRetryTimer);
+      this.eventStreamRetryTimer = null;
+    }
+    // Whatever this replaces is no longer what a late error is about.
+    const controller = this.api.streamEvents(
       this.currentThread.id,
       this.lastEventSeq,
-      (event: RuntimeEvent) => this.handleRuntimeEvent(event),
-      (err: Error) => {
+      (event: RuntimeEvent) => {
+        // Delivery is the proof that the stream is healthy: a conversation that
+        // survived a drop and resumed has nothing left to report about it.
+        this.eventStreamFailures = 0;
+        this.eventStreamErrorReported = false;
+        this.handleRuntimeEvent(event);
+      },
+      (err: Error) => this.handleEventStreamDrop(controller, err),
+    );
+    this.eventController = controller;
+    this.eventControllerThreadId = this.currentThread.id;
+  }
+
+  /** A live stream dropped.
+   *
+   *  These are ordinary: the runtime recycles idle connections, a laptop sleeps
+   *  and wakes, an engine is restarted under this window. None of them is news
+   *  the reader has to act on — the conversation is on screen and its history
+   *  is on disk — and the stream resumes from `lastEventSeq`, so the events
+   *  that landed while it was down are replayed by the runtime rather than
+   *  missed. Dropping the stream silently and reopening it is what the
+   *  background watchers already do.
+   *
+   *  So a drop is retried, not announced. Only a run of failures long enough
+   *  that the panel is plainly not receiving anything is reported, and even
+   *  then the retry keeps going: a runtime that comes back should reattach
+   *  without the reader having to reopen the view. */
+  private handleEventStreamDrop(controller: AbortController, err: Error): void {
+    // A stream this client replaced on purpose is not a drop, and its late
+    // error names a thread the view has already left.
+    if (this.eventController !== controller) return;
+    this.eventController = null;
+    this.eventStreamFailures += 1;
+    if (this.eventStreamFailures >= ChatProvider.EVENT_STREAM_REPORT_AFTER) {
+      // Once per outage: the retry below is still running, and an error per
+      // attempt would turn a runtime that is down into a stream of them.
+      if (!this.eventStreamErrorReported) {
+        this.eventStreamErrorReported = true;
         this.postMessage({ type: "error", message: `Event stream error: ${err.message}` });
       }
-    );
+    } else {
+      // Retired, not reported: the retry below is the answer to it.
+      this.debugLog(`event stream dropped (${err.message}); retrying`);
+    }
+    this.scheduleEventStreamRetry();
+  }
+
+  /** Reopen the stream for the conversation still on screen, after a delay that
+   *  grows while it keeps failing. */
+  private scheduleEventStreamRetry(): void {
+    if (this.eventStreamRetryTimer) return;
+    const delays = ChatProvider.EVENT_STREAM_RETRY_DELAYS_MS;
+    const delay = delays[Math.min(this.eventStreamFailures - 1, delays.length - 1)] ?? delays[delays.length - 1];
+    this.eventStreamRetryTimer = setTimeout(() => {
+      this.eventStreamRetryTimer = null;
+      void this.reopenEventStream();
+    }, delay);
+  }
+
+  private async reopenEventStream(): Promise<void> {
+    const threadId = this.eventControllerThreadId;
+    // Nothing to watch: the view was closed, or a conversation was cleared.
+    if (!threadId || this.currentThread?.id !== threadId) return;
+    if (this.eventController) return;
+    try {
+      // The engine this client last talked to may be gone — a restart gives it
+      // a new port — and the stream has to be opened against the one that is
+      // running now. `ensureReady` starts one if none is, and syncs the port
+      // and token this client will use.
+      await this.api.ensureReady();
+    } catch (err) {
+      // A retry that could not even reach the engine is still a failed attempt:
+      // counting it is what keeps the delay growing instead of hammering a
+      // runtime that is not there yet.
+      this.eventStreamFailures += 1;
+      this.debugLog(`event stream retry: engine not ready (${getErrorMessage(err)})`);
+      this.scheduleEventStreamRetry();
+      return;
+    }
+    if (this.currentThread?.id !== threadId || this.eventController) return;
+    this.subscribeToEvents();
   }
 
   /** Let go of a request the runtime has settled.
