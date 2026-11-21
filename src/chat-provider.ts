@@ -2094,7 +2094,13 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
           this.lastOutputTokens = u.output_tokens;
         }
       }
-      await this.refreshThreadUsage(id);
+      // Read, but not waited on: these totals repaint a chip in the status
+      // bar, and this rebuild is what the reader is actually waiting for.
+      // Holding the transcript back for a round trip to the pricing engine
+      // added that round trip to every switch; the read publishes its own
+      // `sessionStats` when it lands (see `refreshThreadUsage`), so nothing
+      // downstream has to wait for it here.
+      void this.refreshThreadUsage(id);
 
       // Switching back into a thread whose turn is still running server-side:
       // re-align the view with that turn so live SSE routes correctly, the
@@ -2969,10 +2975,16 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
 
       await this.loadHistory(threadId);
       this.subscribeToEvents();
+      // The thread record only. `loadHistory` above has already handed this
+      // view the transcript, and this message is the one that names the
+      // conversation it belongs to: the handler reads `thread`/`threadId` and
+      // nothing else out of it, so a second copy of `messages` was a second
+      // full serialisation of the conversation plus a second markdown pass
+      // over every block (see `postMessage`) — the same megabytes, twice, for
+      // a field nobody reads.
       this.postMessage({
         type: "threadLoaded",
         thread: this.currentThread,
-        messages: this.messages,
       });
       // threadLoaded carries the thread itself, but nothing reads mode or
       // permission out of it, so the chips would otherwise keep naming the

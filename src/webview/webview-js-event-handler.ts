@@ -112,6 +112,11 @@ ${PROVIDER_PICKER_JS}
    *  bypassing this function. */
   function clearTranscript() {
     messagesEl.innerHTML = '';
+    // The rows are gone; the observer's list of "what is on screen" still
+    // names them, and a resize would then measure detached elements.
+    if (window.__wvMessages && window.__wvMessages.resetClipState) {
+      window.__wvMessages.resetClipState();
+    }
     if (window.__wvMessages && window.__wvMessages.clearNavDots) {
       window.__wvMessages.clearNavDots();
     }

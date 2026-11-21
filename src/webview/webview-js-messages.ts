@@ -1234,7 +1234,11 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
     smartScrollToBottom();
     scheduleNavUpdate();
     flushPendingApprovals(pendingApprovals);
-    markClippedBlocks(el);
+    // Measurement is owed, but not now: see watchClippedBlocks. Asking this row
+    // whether it clips means laying its output out, and doing that per row
+    // during a rebuild laid out the whole growing transcript once per row —
+    // seconds on a long conversation, for rows still far below the fold.
+    watchClippedBlocks(el);
   }
 
   // ── Branch from a turn ──
@@ -1459,14 +1463,110 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
     var scope = root || messagesEl;
     if (!scope || !scope.querySelectorAll) return;
     var blocks = scope.querySelectorAll('.tool-output, .tool-input-command');
+    // Every measurement first, every class after. A read that follows a write
+    // throws the layout away and forces it again, so the interleaved version
+    // cost one reflow per block: a rebuilt transcript paid it once for each of
+    // its outputs, and the batch that exists to defer exactly that work could
+    // not defer it. Read together, the layout is computed once and the rest of
+    // the pass is arithmetic.
+    var clipped = new Array(blocks.length);
     for (var i = 0; i < blocks.length; i++) {
       var el = blocks[i];
       // Not laid out (the view is hidden): measuring would answer "everything
       // is clipped". Leave the answer it already has.
-      if (!el.clientHeight) continue;
-      if (el.scrollHeight - el.clientHeight > 2) el.classList.add('is-clipped');
-      else el.classList.remove('is-clipped');
+      if (!el.clientHeight) { clipped[i] = null; continue; }
+      clipped[i] = el.scrollHeight - el.clientHeight > 2;
     }
+    for (var j = 0; j < blocks.length; j++) {
+      if (clipped[j] === null) continue;
+      var block = blocks[j];
+      // A class that is already right is not rewritten: an unchanged class
+      // list is not what should invalidate the layout this pass just read.
+      if (clipped[j]) {
+        if (!block.classList.contains('is-clipped')) block.classList.add('is-clipped');
+      } else if (block.classList.contains('is-clipped')) {
+        block.classList.remove('is-clipped');
+      }
+    }
+  }
+
+  /** Measure a block that is on screen right now.
+   *
+   *  Reading scrollHeight forces the block's content to lay out, so asking a
+   *  row the browser has skipped (content-visibility: auto) costs the whole
+   *  layout that skip exists to avoid. A rebuilt transcript holds hundreds of
+   *  them, which is why measuring every row up front was seconds of work for
+   *  answers nobody could see yet. A block is therefore measured when it comes
+   *  into view — the one moment the answer can be on screen — and what the
+   *  reader never scrolls to is never laid out. */
+  function measureClippedBlock(el) {
+    if (!el || !el.clientHeight) return;
+    if (el.scrollHeight - el.clientHeight > 2) {
+      if (!el.classList.contains('is-clipped')) el.classList.add('is-clipped');
+    } else if (el.classList.contains('is-clipped')) {
+      el.classList.remove('is-clipped');
+    }
+  }
+
+  var CLIP_SELECTOR = '.tool-output, .tool-input-command';
+  // Blocks the observer has most recently called intersecting. A resize
+  // re-wraps exactly these (they are the ones whose measurement can change
+  // while the reader is looking at it), so the panel does not re-measure a
+  // whole conversation to answer a question about the visible screen.
+  var _clippedInView = new Set();
+  // Everything ever handed to the observer. An observer holds its targets
+  // until it is told to let go, so the rows of a transcript that has been
+  // replaced have to be named back one by one — otherwise every conversation
+  // this view ever opened stays in the intersection calculation.
+  var _observedClips = new Set();
+  // Environments without IntersectionObserver (the test harness) fall back to
+  // measuring on append, which is what the panel did before.
+  var _clipObserver = null;
+  if (typeof IntersectionObserver === 'function') {
+    _clipObserver = new IntersectionObserver(function(entries) {
+      for (var i = 0; i < entries.length; i++) {
+        var entry = entries[i];
+        var el = entry.target;
+        if (entry.isIntersecting) {
+          _clippedInView.add(el);
+          measureClippedBlock(el);
+        } else {
+          _clippedInView.delete(el);
+        }
+      }
+    }, { root: messagesEl, rootMargin: '200px 0px' });
+  }
+
+  /** Hand the blocks a new row drew to the observer (or measure them now when
+   *  there is no observer to wait for). */
+  function watchClippedBlocks(root) {
+    var scope = root || messagesEl;
+    if (!scope || !scope.querySelectorAll) return;
+    if (!_clipObserver) {
+      markClippedBlocks(scope);
+      return;
+    }
+    var blocks = scope.querySelectorAll(CLIP_SELECTOR);
+    for (var i = 0; i < blocks.length; i++) {
+      _observedClips.add(blocks[i]);
+      _clipObserver.observe(blocks[i]);
+    }
+  }
+
+  /** Re-measure only what is on screen: a resize invalidates those answers and
+   *  leaves the rest as the observer will settle them when they scroll in. */
+  function remeasureVisibleClippedBlocks() {
+    _clippedInView.forEach(function(el) { measureClippedBlock(el); });
+  }
+
+  /** Forget the rows of a transcript that was just replaced, so a rebuild does
+   *  not keep measuring elements that are no longer in the document. */
+  function resetClipState() {
+    if (_clipObserver) {
+      _observedClips.forEach(function(el) { _clipObserver.unobserve(el); });
+    }
+    _observedClips.clear();
+    _clippedInView.clear();
   }
 
   // A resize re-wraps the text, so the answer markClippedBlocks measured can
@@ -1477,7 +1577,7 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
     if (_clipMeasureTimer) clearTimeout(_clipMeasureTimer);
     _clipMeasureTimer = setTimeout(function() {
       _clipMeasureTimer = null;
-      markClippedBlocks();
+      remeasureVisibleClippedBlocks();
       // The rows moved, so which prompt is above the top edge may have
       // changed with them.
       scheduleTurnContextUpdate();
@@ -2547,6 +2647,8 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
     createThinkingBlock: createThinkingBlock,
     updateThinkingBlock: updateThinkingBlock,
     markClippedBlocks: markClippedBlocks,
+    watchClippedBlocks: watchClippedBlocks,
+    resetClipState: resetClipState,
     renderPlanApproveButton: renderPlanApproveButton,
     renderTurnForkAction: renderTurnForkAction,
     clearPendingTurnFork: clearPendingTurnFork,

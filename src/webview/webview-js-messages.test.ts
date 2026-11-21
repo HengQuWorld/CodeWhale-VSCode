@@ -158,9 +158,28 @@ describe("webview-js-messages.ts", () => {
     expect(script).toContain("markClippedBlocks: markClippedBlocks");
     expect(script).toContain("classList.add('is-clipped')");
     // The panel is resizable, and a width change re-wraps the text the answer
-    // was measured from, so the measurement is repeated.
+    // was measured from, so the measurement is repeated — for the blocks on
+    // screen, which are the ones whose answer a resize can change.
     expect(script).toContain("window.addEventListener('resize'");
-    expect(script).toContain("markClippedBlocks();");
+    expect(script).toContain("remeasureVisibleClippedBlocks();");
+  });
+
+  it("measures an output when it comes into view, not when the row is drawn", () => {
+    const script = getMessagesScript(makeTr());
+    // Reading scrollHeight lays the block's content out, so asking every row
+    // of a rebuild costs the whole conversation's layout for answers that are
+    // still below the fold. The rows are handed to an observer instead, and a
+    // harness without one falls back to measuring them on append.
+    expect(script).toContain("new IntersectionObserver(");
+    expect(script).toContain("function watchClippedBlocks(root)");
+    expect(script).toContain("watchClippedBlocks(el);");
+    expect(script).not.toContain("markClippedBlocks(el);");
+    // A replaced transcript carries no on-screen blocks, so the next resize
+    // must not measure detached elements — and the observer, which holds its
+    // targets until told otherwise, must be told.
+    expect(script).toContain("function resetClipState()");
+    expect(script).toContain("resetClipState: resetClipState");
+    expect(script).toContain("_clipObserver.unobserve(el);");
   });
 
   it("makes a clipped block scrollable by click and by focus", () => {
