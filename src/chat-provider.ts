@@ -458,6 +458,14 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
    *  view no longer shows, so its answer is discarded rather than written into
    *  the new transcript's records. */
   private changeGeneration = 0;
+  /** Which webview the transcript in `messages` was last delivered to, and for
+   *  which thread. A rebuild is owed when the view is a new one (a reload has
+   *  no DOM of its own) or the conversation changed — not when the host has
+   *  just rebuilt this very conversation for this very view. */
+  private deliveredTranscript: { threadId: string; generation: number } | null = null;
+  /** Bumped by every `webviewReady`, so a transcript delivered to the previous
+   *  view is never mistaken for one the current view holds. */
+  private webviewGeneration = 0;
   /** How many wholesale rebuilds are currently suppressing the panel's
    *  per-change publish, and whether one was suppressed since the last flush. */
   private changesPanelBatchDepth = 0;
@@ -525,6 +533,11 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
   /** True while a summary fetch is in flight, so a quiet discovery pass can
    *  yield to it instead of superseding the refresh that owns the rail. */
   private threadListFetchInFlight = false;
+  /** The session-list read in flight, and the filters it was asked for. The
+   *  startup read and the handshake that follows it ask for the same list; on
+   *  a long history that list is tens of megabytes, and both would read and
+   *  decode all of it to publish the same rows. */
+  private sessionListInFlight: { key: string; promise: Promise<void> } | null = null;
   /** Slow discovery sweep for attention nothing is watching yet. Chained, never
    *  fixed-interval, and cleared with the view. */
   private attentionDiscoveryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -980,6 +993,9 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         });
         break;
       case "webviewReady":
+        // A new view has no DOM: whatever the transcript was delivered to, it
+        // was not this.
+        this.webviewGeneration += 1;
         try {
           // A question from the webview that just went away can never be
           // answered: settle it as a no rather than leaving whoever asked it
@@ -1267,9 +1283,13 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
   }
 
   private async syncWebviewState(): Promise<void> {
-    await this.refreshRuntimeVersion();
-    await this.refreshApiCapabilities();
-    await this.refreshProviders();
+    // Same reason as the startup path: independent reads, so their round trips
+    // overlap instead of queueing in front of the transcript's rebuild.
+    await Promise.all([
+      this.refreshRuntimeVersion(),
+      this.refreshApiCapabilities(),
+      this.refreshProviders(),
+    ]);
     // A reloaded webview lost the banner with the rest of its DOM, so the
     // verdict has to be re-announced here, not only at init.
     void this.refreshWorkspaceTrust();
@@ -1298,7 +1318,18 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     this.postArmedSkill();
 
     if (this.currentThread?.id) {
-      await this.loadHistory(this.currentThread.id);
+      // A `webviewReady` that arrives after the startup read has already been
+      // delivered to this very view has the conversation on screen: rebuilding
+      // it again meant every turn and item re-serialised, re-rendered and the
+      // whole transcript redrawn, which on a long conversation is a second
+      // visible stall right after the first. Only a different view (a reload,
+      // whose generation moved) or a different conversation owes a rebuild.
+      const delivered = this.deliveredTranscript;
+      const holdsIt =
+        delivered !== null &&
+        delivered.threadId === this.currentThread.id &&
+        delivered.generation === this.webviewGeneration;
+      if (!holdsIt) await this.loadHistory(this.currentThread.id);
       this.subscribeToEvents();
     } else {
       // A fresh window has no thread. The one this workspace last had open
@@ -1444,17 +1475,31 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       this.debugLog("calling api.ensureReady()...");
       await this.api.ensureReady();
       this.debugLog(`engine running on ${this.engine.baseUrl}`);
-      // One read answers two questions: which workspace the engine itself
+      // Three independent reads — the engine's workspace verdict, its version
+      // and its route list — waited on one after another, which put their
+      // round trips in series on the path between the engine coming up and the
+      // conversation being reopened. Started together, the wait is the slowest
+      // of them rather than their sum.
+      //
+      // One of them answers two questions: which workspace the engine itself
       // scanned (a fallback for a window with no folder open), and whether it
       // trusts it. Nothing here reads `config.toml` — the engine owns that.
-      await this.refreshWorkspaceTrust();
-      await this.refreshRuntimeVersion();
-      await this.refreshApiCapabilities();
+      await Promise.all([
+        this.refreshWorkspaceTrust(),
+        this.refreshRuntimeVersion(),
+        this.refreshApiCapabilities(),
+      ]);
 
       this.debugLog("calling listThreads...");
       const allThreads = await this.api.listThreads({ limit: 100 });
       this.debugLog(`listThreads returned ${allThreads.length} threads`);
-      await this.refreshSessionList();
+      // Read, not waited on. This answers the Sessions rail, and on a store
+      // with a long history the answer is tens of megabytes — nothing the
+      // conversation being reopened needs, and it used to sit between the
+      // engine coming up and the first row of that conversation. The
+      // handshake's own `syncWebviewState` asks again once the view can
+      // actually receive it, so this is a head start, not the only read.
+      void this.refreshSessionList();
 
       // Filter threads to the current workspace. The runtime thread store is
       // global (not scoped by workspace), so listThreads may return stale
@@ -2189,6 +2234,9 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         messages: this.messages,
         planApprovalFor: this.planApprovalTargetId(this.turnMode(lastTurn)),
       });
+      // What the view now holds. A handshake that follows this must not
+      // rebuild the same conversation for the same view a second time.
+      this.deliveredTranscript = { threadId: id, generation: this.webviewGeneration };
       // After the rebuild, never before: it clears the approval panel, so a
       // prompt offered ahead of it would be wiped by its own history draw.
       this.postPendingPrompts(id, detail);
@@ -4311,6 +4359,11 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     // row must be filtered and published under the query it was asked for.
     const archived = this.showArchivedSessions;
     const showAll = this.showAllWorkspaces;
+    // Same question, already being answered: hand back the answer instead of
+    // asking the engine for the same megabytes a second time. A different
+    // filter is a different question and reads again.
+    const key = `${archived ? "a" : ""}|${showAll ? "w" : ""}`;
+    if (this.sessionListInFlight?.key === key) return this.sessionListInFlight.promise;
     const token = ++this.sessionListRefreshToken;
     const fetchAndSend = async () => {
       const result = await this.api.listSessions(
@@ -4349,12 +4402,20 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         showArchivedSessions: archived,
       });
     };
+    const run = (async () => {
+      try {
+        await fetchAndSend();
+      } catch {
+        setTimeout(async () => {
+          try { await fetchAndSend(); } catch { /* silent */ }
+        }, 2000);
+      }
+    })();
+    this.sessionListInFlight = { key, promise: run };
     try {
-      await fetchAndSend();
-    } catch {
-      setTimeout(async () => {
-        try { await fetchAndSend(); } catch { /* silent */ }
-      }, 2000);
+      await run;
+    } finally {
+      if (this.sessionListInFlight?.promise === run) this.sessionListInFlight = null;
     }
   }
 
