@@ -458,6 +458,10 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
    *  view no longer shows, so its answer is discarded rather than written into
    *  the new transcript's records. */
   private changeGeneration = 0;
+  /** How many wholesale rebuilds are currently suppressing the panel's
+   *  per-change publish, and whether one was suppressed since the last flush. */
+  private changesPanelBatchDepth = 0;
+  private changesPanelFlushPending = false;
   /** Background shell tasks this view can name: `task_id` → the command the
    *  task runs.
    *
@@ -1531,6 +1535,10 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       this.messages = [];
       this.shellTaskCommands.clear();
       this.resetChangeGroups();
+      // Every command in the conversation is about to be re-read, and each
+      // answer rewrites the whole Changes payload; the panel is told once, at
+      // the end of this rebuild (see `refreshChangesPanel`).
+      this.beginChangesPanelBatch();
       this.lastEventSeq = detail.latest_seq ?? 0;
       const itemById = new Map(detail.items.map((item) => [item.id, item]));
 
@@ -2184,9 +2192,15 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       // After the rebuild, never before: it clears the approval panel, so a
       // prompt offered ahead of it would be wiped by its own history draw.
       this.postPendingPrompts(id, detail);
+      // The rebuild is done asking: send the panel the one state it ended
+      // with, rather than the hundreds it asked for along the way.
+      this.endChangesPanelBatch();
       this.postMessage({ type: "status", text: `Loaded ${this.messages.length / 2} turns` });
       return this.lastEventSeq;
     } catch (err) {
+      // Closed on the way out too: a batch left open would keep suppressing the
+      // panel for every conversation that follows.
+      this.endChangesPanelBatch();
       this.postMessage({
         type: "error",
         message: formatError("Failed to load history", err),
@@ -6533,6 +6547,35 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
    *  only change was just reverted — are dropped here, where the record list is
    *  authoritative, rather than in the renderer. */
   private refreshChangesPanel(): void {
+    if (this.changesPanelBatchDepth > 0) {
+      // Inside a rebuild: `changesState` is the whole session, so each publish
+      // supersedes the one before it and only the last is worth delivering.
+      // Rebuilding a conversation asks for hundreds of them — every command's
+      // call-change answer rewrites one row — and each answers with the same
+      // growing list serialised across the panel boundary. They are sent once,
+      // when the rebuild is done with them; nothing outside a rebuild is
+      // delayed, so a single change still reaches the panel immediately.
+      this.changesPanelFlushPending = true;
+      return;
+    }
+    this.postChangesState();
+  }
+
+  /** Suppress the panel's per-change publish until the matching end. */
+  private beginChangesPanelBatch(): void {
+    this.changesPanelBatchDepth += 1;
+  }
+
+  private endChangesPanelBatch(): void {
+    if (this.changesPanelBatchDepth > 0) this.changesPanelBatchDepth -= 1;
+    if (this.changesPanelBatchDepth > 0) return;
+    if (!this.changesPanelFlushPending) return;
+    this.changesPanelFlushPending = false;
+    this.postChangesState();
+  }
+
+  /** The panel's payload, built and sent now. */
+  private postChangesState(): void {
     const populated = new Set(this.turnFileChanges.map((fc) => fc.turnIndex));
     this.postMessage({
       type: "changesState",
@@ -10880,6 +10923,10 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     this.stopActiveTaskDetailRefresh();
     this.stopAttentionDiscoveryPoll();
     this.activeTaskDetailId = null;
+    // A batch left open by an interrupted rebuild must not suppress the next
+    // conversation's publishes.
+    this.changesPanelBatchDepth = 0;
+    this.changesPanelFlushPending = false;
     this.fleet.cleanup();
     this.diffContentStore.clear();
     this.diffProviderDisposable?.dispose();
