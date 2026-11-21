@@ -289,6 +289,12 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
    *  two are routine; a stream that has not delivered anything across five
    *  retries is not. */
   private static readonly EVENT_STREAM_REPORT_AFTER = 5;
+  /** How many call-change reads may be in flight at once. Each one is a local
+   *  read, but a long session asks for a few dozen of them at the same
+   *  instant, and a runtime that was momentarily busy — or restarting — reset
+   *  the whole burst. Four keeps the pipe full without stacking a wall of
+   *  sockets in front of an engine that has just come back. */
+  private static readonly CALL_CHANGE_CONCURRENCY = 4;
 
   /** How long the optional steer-provenance read may take before a viewed
    *  session opens without its steer badges. A badge is never worth delaying a
@@ -442,6 +448,16 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
    *  fetch in flight. Together they make the enrichment one request per call. */
   private shellCallsEnriched = new Set<string>();
   private shellCallsInFlight = new Set<string>();
+  /** Calls waiting for a turn at the read below. A rebuilt transcript names
+   *  every command it ran, so the demand arrives in one burst; the queue is
+   *  what turns that burst into a few requests at a time. */
+  private shellCallQueue: string[] = [];
+  private shellCallsActive = 0;
+  /** Bumped whenever the change records are dropped for a rebuild. A read that
+   *  was already in flight when that happened describes a conversation this
+   *  view no longer shows, so its answer is discarded rather than written into
+   *  the new transcript's records. */
+  private changeGeneration = 0;
   /** Background shell tasks this view can name: `task_id` → the command the
    *  task runs.
    *
@@ -6009,7 +6025,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     known.turnId = known.turnId ?? ids.turnId ?? null;
     if (changedPaths) this.shellCallPaths.set(callId, changedPaths);
     this.applyCallChanges(callId);
-    void this.enrichCallChanges(callId);
+    this.enrichCallChanges(callId);
   }
 
   /** Read every `post-tool` receipt of one rebuilt turn, after its segments
@@ -6154,17 +6170,57 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
    *  paint with the answer. One request per call; a runtime that predates the
    *  route keeps the first paint, and its absence is never an error the user
    *  sees. */
-  private async enrichCallChanges(callId: string): Promise<void> {
+  private enrichCallChanges(callId: string): void {
     if (!this.apiCapabilities.callChanges) return;
     if (this.shellCallsEnriched.has(callId) || this.shellCallsInFlight.has(callId)) return;
     const ref = this.shellCallRefs.get(callId);
     const threadId = ref?.threadId ?? this.currentThread?.id ?? null;
     const turnId = ref?.turnId ?? null;
     if (!threadId || !turnId) return;
+    // Marked as in flight here rather than at the request: the second receipt
+    // for a call must not queue a second read while the first is still waiting
+    // its turn.
     this.shellCallsInFlight.add(callId);
+    this.shellCallQueue.push(callId);
+    this.pumpShellCallQueue();
+  }
+
+  /** Start as many queued reads as the concurrency limit allows.
+   *
+   *  One at a time would leave seconds of latency on a long rebuild for no
+   *  gain; unbounded is what produced the burst this queue exists to smooth. */
+  private pumpShellCallQueue(): void {
+    while (
+      this.shellCallsActive < ChatProvider.CALL_CHANGE_CONCURRENCY &&
+      this.shellCallQueue.length > 0
+    ) {
+      const callId = this.shellCallQueue.shift()!;
+      this.shellCallsActive += 1;
+      void this.readCallChanges(callId).finally(() => {
+        this.shellCallsActive -= 1;
+        this.pumpShellCallQueue();
+      });
+    }
+  }
+
+  private async readCallChanges(callId: string): Promise<void> {
+    const generation = this.changeGeneration;
+    const ref = this.shellCallRefs.get(callId);
+    const threadId = ref?.threadId ?? this.currentThread?.id ?? null;
+    const turnId = ref?.turnId ?? null;
+    if (!threadId || !turnId) {
+      this.shellCallsInFlight.delete(callId);
+      return;
+    }
     try {
       const answer = await this.api.getCallChanges(threadId, turnId, callId);
       this.shellCallsInFlight.delete(callId);
+      if (generation !== this.changeGeneration) {
+        // The transcript was replaced while this was in flight. Nothing is
+        // remembered about the answer either: the call belongs to a
+        // conversation this view has left, and its ids mean nothing here.
+        return;
+      }
       // Answered, whatever the answer: `unavailable` is a fact about the
       // span, so asking again would only repeat it.
       this.shellCallsEnriched.add(callId);
@@ -6172,6 +6228,9 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       this.applyCapturedCallChanges(callId, answer);
     } catch (err) {
       this.shellCallsInFlight.delete(callId);
+      // A read that failed is left un-remembered, so the next receipt for the
+      // call can ask again. It is not the reader's news: the first paint is
+      // already on screen and this was the enrichment of it.
       this.debugLog(`getCallChanges(${callId}) failed: ${getErrorMessage(err)}`);
     }
   }
@@ -6247,7 +6306,19 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     this.shellCallRefs.clear();
     this.shellCallPaths.clear();
     this.shellCallsEnriched.clear();
+    // The queued ids are dropped from both collections: the calls they name
+    // belonged to the conversation being replaced, and leaving them marked as
+    // in flight would make this transcript's calls with the same ids look
+    // already answered.
+    for (const queued of this.shellCallQueue) this.shellCallsInFlight.delete(queued);
+    this.shellCallQueue = [];
     this.shellCallsInFlight.clear();
+    // Reads already in flight were started for the records just dropped; the
+    // generation is what tells them, when they answer, that their conversation
+    // is gone. `shellCallsActive` is left alone on purpose: those reads still
+    // hold their slots until they return, and decrementing for them twice
+    // would let the next conversation start more than the limit.
+    this.changeGeneration += 1;
   }
 
   /**
@@ -10148,7 +10219,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
             });
           }
           if (completedCallId && this.shellCallRefs.has(completedCallId)) {
-            void this.enrichCallChanges(completedCallId);
+            this.enrichCallChanges(completedCallId);
           }
           if (pl.item?.metadata?.task_updates) {
             const checklist = (pl.item.metadata.task_updates as Record<string, unknown>).checklist;
