@@ -1,5 +1,31 @@
 # Change Log
 
+## 0.10.5
+
+Everything in this release is client-side and works on engine **v0.10.2**, the same floor 0.10.4 names; nothing here waits on an engine build. Editing a schedule uses the automation routes engine **v0.10.0** introduced, the same ones `/automation` and the create form already use.
+
+### New Features
+
+- **A scheduled automation is edited from its row** — Changing what a schedule ran, or when it ran, used to mean deleting it and building a new one, which also threw away its run history. Each row now has an **Edit** action that reopens the create form with the record's own name, content, schedule and permission. A schedule the form recognizes — daily, weekly, hourly, one-off — comes back as that preset with its days and time; anything else opens as a written expression with the text untouched, so saving never rewrites a schedule the form could not express. A finished one-off stays editable, and the save carries the revision the panel read: a record changed in another window is refused with a note to reopen, rather than silently overwritten.
+
+- **A memo's attachments come along into the schedule it makes** — Picking a memo used to carry only its text, so a screenshot or file parked on it disappeared without a word. The form now fills in the attachments too, written the way a send writes them — a file as the mention the run can read, anything else as an attachment line naming its path — and the row says how many ride along before the schedule exists. The composer's send path, its steer path and this panel now share that one writing rule, so the same picture cannot arrive described two ways depending on which door it came through.
+
+### Improvements
+
+- **A long conversation opens several times faster** — A thread with a few hundred messages used to sit on the previous conversation for seconds after the click, and the longer the history the worse it got, because every tool output was measured while the transcript was still growing. Outputs are now drawn straight away and measured when they come into view, which is the only moment their answer can be read; switching also sends the conversation once instead of twice and no longer holds the first row back for the running cost in the status bar.
+
+- **Command changes are read a few at a time** — Opening a session used to ask the engine what every command in it changed all in the same instant, so a session with a few hundred commands opened a few hundred sockets at once; a busy runtime answered the batch with a connection reset and those diffs were silently lost. The reads are queued four at a time, still one request per call, and a read that answers after the reader has switched conversations is discarded instead of being written into the transcript that replaced it. The Changes panel also receives the state it ended a rebuild with once, rather than the whole session again for every change, while a single change — a revert, a command starting — still arrives immediately.
+
+- **Reopening a window does not do the work twice** — Coming back to the last conversation fetched the stored session list twice, rebuilt and handed the whole transcript to the view twice within half a second, and asked the engine three unrelated questions one after another while the reader waited. Each now happens once, and the Sessions rail fills in beside the conversation instead of in front of it.
+
+### Bug Fixes
+
+- **Editing a schedule no longer moves it** — An hourly record that ran on the half hour came back running on the hour, one every three hours came back hourly, and a one-off carrying seconds lost them — every save looked successful and changed when the work would run. The form now adopts only a preset it can write back unchanged and hands anything else over as the written expression, so a schedule nobody edited is still the schedule that was there; hourly records also keep their minute past the hour. Saving an edit also leaves the record's approval exemption alone: the Execute switch decides whether a run may command the shell, and a record made elsewhere keeps whatever approval posture it already had.
+
+- **A dropped event stream resumes instead of reporting an error** — A short connection reset while a thread was loading put a red "Event stream error: connect ECONNRESET" line in the panel, though the history was on disk and the transcript on screen. The stream is now reopened from the last event it delivered, so events that landed in between are replayed rather than lost, and the panel stays quiet; only a stream that has delivered nothing across several retries says so, once. A stream that died mid-turn no longer stays registered as open, so the turn's own recovery can resubscribe.
+
+- **Prose between tool calls renders as it is written** — A long turn puts a paragraph between one call and the next, and those paragraphs stayed markdown source until the whole turn ended, so a turn with dozens of calls showed raw asterisks and unread lists under every card. The paragraph before a call is drawn when that call starts; a block already drawn is not rendered again, so a long turn costs one pass per paragraph rather than one per call. Streaming is untouched, and saved conversations are unchanged.
+
 ## 0.10.4
 
 Everything in this release is client-side and works on engine **v0.10.2**, the same floor 0.10.3 names; nothing here waits on an engine build. The schedules the new panel lists and edits are served by the automation routes engine **v0.10.0** introduced, the same ones `/automation` uses.

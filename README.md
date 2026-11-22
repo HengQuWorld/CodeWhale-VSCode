@@ -1,11 +1,11 @@
 # CodeWhale for VS Code — a lightweight GUI frontend for the CodeWhale agent
 
-[![Version](https://img.shields.io/badge/version-0.10.4-blue)](https://github.com/HengQuWorld/CodeWhale-VSCode)
+[![Version](https://img.shields.io/badge/version-0.10.5-blue)](https://github.com/HengQuWorld/CodeWhale-VSCode)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![CI](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/ci.yml/badge.svg)](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/ci.yml)
 [![Release](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/release.yml/badge.svg)](https://github.com/HengQuWorld/CodeWhale-VSCode/actions/workflows/release.yml)
 [![VS Code](https://img.shields.io/badge/VS%20Code-1.85+-informational)](https://code.visualstudio.com/)
-[![VSIX](https://img.shields.io/badge/VSIX-~608%20KB-brightgreen)](https://github.com/HengQuWorld/CodeWhale-VSCode/releases)
+[![VSIX](https://img.shields.io/badge/VSIX-~620%20KB-brightgreen)](https://github.com/HengQuWorld/CodeWhale-VSCode/releases)
 [![macOS](https://img.shields.io/badge/macOS-supported-brightgreen)](#requirements)
 [![Windows](https://img.shields.io/badge/Windows-supported-brightgreen)](#requirements)
 [![Linux](https://img.shields.io/badge/Linux-supported-brightgreen)](#requirements)
@@ -22,7 +22,7 @@ The split is deliberate: **the agent stays in the engine, the ergonomics stay in
 
 | | |
 |---|---|
-| VSIX size (0.10.4) | ~608 KB |
+| VSIX size (0.10.5) | ~620 KB |
 | Runtime npm dependencies | **none** — webpack inlines the extension's own TypeScript (and `marked` for rendering) |
 | Bundled engine or model | **none** — `codewhale` is a separate native binary |
 | Duplicated agent logic | **none** — the GUI is an adapter over the engine's local runtime API |
@@ -32,9 +32,9 @@ The frontend is a webview. `ChatProvider` runs in the extension host, speaks HTT
 
 Because nothing about the agent is copied into the extension, the engine can ship new capabilities and fixes without a frontend release.
 
-### Engine compatibility for 0.10.4
+### Engine compatibility for 0.10.5
 
-0.10.4 runs on engine **v0.10.2**, the same floor 0.10.3 names, and everything it ships is client-side: a **Memos** section listing every conversation's parked memos, an **Automations** section that lists, creates, runs, pauses and deletes the engine's schedules, markdown rendered above a question while the question is still waiting, and a navigation rail placed against the scrollbar the host draws. The three surfaces with a floor of their own are unchanged — the memory routes the panel reads (the same Context Lens routes the `/memory` review commands use), the **MCP** panel, and the automation routes the new panel edits all arrive with engine **v0.10.0** (the release that introduced the Context Lens routes, the MCP management routes whose listing names the layer each server belongs to and carries the configuration revision every edit presents, and the automation routes `/automation` uses), while the workspace-trust banner, the client a session reports itself as, and a second window or a second CodeWhale client on the same machine all need **v0.10.2**.
+0.10.5 runs on engine **v0.10.2**, the same floor 0.10.4 names, and everything it ships is client-side: schedules edited in place from their row, a memo's attachments carried into the schedule it creates, and conversations that open several times faster on long histories. The three surfaces with a floor of their own are unchanged — the memory routes the panel reads (the same Context Lens routes the `/memory` review commands use), the **MCP** panel, and the automation routes the **Automations** panel lists, creates and edits all arrive with engine **v0.10.0** (the release that introduced the Context Lens routes, the MCP management routes whose listing names the layer each server belongs to and carries the configuration revision every edit presents, and the automation routes `/automation` uses), while the workspace-trust banner, the client a session reports itself as, and a second window or a second CodeWhale client on the same machine all need **v0.10.2**.
 
 What still needs a Codewhale build newer than any tagged engine release:
 
@@ -140,12 +140,12 @@ npx @vscode/vsce package --no-dependencies
 Then install the generated `.vsix` (`Extensions: Install from VSIX...`), or from a terminal:
 
 ```bash
-code --install-extension ./brotherwhale-vscode-0.10.4.vsix --force
+code --install-extension ./brotherwhale-vscode-0.10.5.vsix --force
 ```
 
 > **Trae CN users:** if `code` is not on your `PATH`, use the bundled CLI:
 > ```bash
-> "/Applications/Trae CN.app/Contents/Resources/app/bin/code" --install-extension ./brotherwhale-vscode-0.10.4.vsix --force
+> "/Applications/Trae CN.app/Contents/Resources/app/bin/code" --install-extension ./brotherwhale-vscode-0.10.5.vsix --force
 > ```
 
 **Option C — Open VSX:** [Open VSX](https://open-vsx.org/extension/hengquworld/brotherwhale-vscode) carries the same builds for editors outside Microsoft's ecosystem — VSCodium, and CodeArts on HarmonyOS PC, whose extension panel has an Open VSX page. Search "CodeWhale" and install; no VSIX to side-load.
@@ -204,7 +204,7 @@ Switch from the status bar or with `/mode` (shortcuts `1`/`2`/`3`) and `/auto`. 
 
 ### Memos and scheduled work
 - **Memos across conversations** — the Activity tab's **Memos** section lists every memo parked beside a composer, grouped by the conversation holding it with the most recently used conversation first. Clicking a group opens that conversation, where its memos still wait for you to run them; nothing runs from the list itself, and the list is read off the same queue the strip above the composer shows.
-- **Automations** — the Activity tab's **Automations** section lists the engine's schedules with their state, next run and last run, and offers **Run now**, **Pause**, **Resume** and **Delete** on the row; a delete asks first. New schedules can be daily, weekly, hourly, one-off or a written expression, and can take their content from a parked memo, which fills the prompt and leaves the memo untouched. Running shell commands is a switch the form asks for and leaves off, so a schedule that does not need to execute gets only read-and-answer. A refusal from the engine — an expression it will not accept, a delete while a run is going — is shown where you typed, not swallowed.
+- **Automations** — the Activity tab's **Automations** section lists the engine's schedules with their state, next run and last run, and offers **Run now**, **Pause**, **Resume**, **Edit** and **Delete** on the row; a delete asks first. New schedules can be daily, weekly, hourly, one-off or a written expression, and can take their content from a parked memo, which fills the prompt and carries its attachments while leaving the memo untouched. **Edit** reopens the same form on the record's own name, content, schedule and permission and keeps its run history; a save carries the revision the panel read, so a record changed in another window is refused rather than overwritten. Running shell commands is a switch the form asks for and leaves off, so a schedule that does not need to execute gets only read-and-answer. A refusal from the engine — an expression it will not accept, a delete while a run is going — is shown where you typed, not swallowed.
 
 ### Tasks, agents, and Fleet
 - **Tasks** — create from a modal, track progress, open a detail overlay, filter by workspace; background threads raise attention when they need you.
@@ -328,7 +328,7 @@ Reloading or closing the extension stops that window's Runtime and interrupts ac
 
 **Installing a VSIX**
 ```bash
-code --install-extension /path/to/brotherwhale-vscode-0.10.4.vsix --force
+code --install-extension /path/to/brotherwhale-vscode-0.10.5.vsix --force
 ```
 
 ## FAQ
