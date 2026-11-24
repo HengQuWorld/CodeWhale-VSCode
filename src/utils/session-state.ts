@@ -166,6 +166,12 @@ export interface ChatMessage {
   timestamp: number;
   /** True when this user message was sent as mid-turn steering (TUI steer). */
   steered?: boolean;
+  /** The skill this message was produced under, when the user armed one for
+   *  it. The instruction itself is composed onto the wire (never into
+   *  `content`); this is the name the bubble badges. Absent on a message that
+   *  carried no skill, and on anything reconstructed from the engine's record
+   *  — which stores the composed text and no such metadata. */
+  skillName?: string;
   /** True when the runtime dropped this guidance before the model saw it
    *  (`turn.steer_dropped` — the turn moved on first). The words stay on
    *  screen where they were typed, labelled for what actually happened: a

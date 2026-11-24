@@ -1147,6 +1147,15 @@ export function getMessagesScript(_tr: WebviewTranslations): string {
       } else if (msg.steered) {
         html += ' <span class="steer-badge" title="' + __wvEscapeHtml(__i18n.steerBadgeTitle) + '">' + __wvEscapeHtml(__i18n.steerBadge) + '</span>';
       }
+      if (msg.skillName) {
+        // The skill's instruction rode the wire, not the bubble (see
+        // composeSkillTurnPrompt): the badge is the only trace in the
+        // transcript, and it is what tells a reader why the answer sounds
+        // like the skill.
+        var skillTitle = ((__i18n && __i18n.skillBadgeTitle) || "Carries skill '{name}'")
+          .replace('{name}', msg.skillName);
+        html += ' <span class="skill-badge" title="' + __wvEscapeHtml(skillTitle) + '">🧩 ' + __wvEscapeHtml(msg.skillName) + '</span>';
+      }
       html += '</div>';
     }
     html += '<div class="message-body" id="body-' + msg.id + '"></div>';

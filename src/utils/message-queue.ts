@@ -21,8 +21,17 @@ import * as fs from "fs";
 import * as path from "path";
 import { workspaceHistoryKey } from "./input-history";
 
-/** One parked prompt: what the user queued, when, and the attachments that
- *  rode with it. */
+/** The skill that rides a parked prompt: the name for the panel's badge, and
+ *  the body the dispatch composes into the instruction. Stored whole — the
+ *  engine-facing text is built when the memo runs, and a skill edited or
+ *  removed before then must not change what the user parked. */
+export interface QueuedSkill {
+  name: string;
+  body: string;
+}
+
+/** One parked prompt: what the user queued, when, the attachments that rode
+ *  with it, and the skill that was armed when it was parked. */
 export interface QueuedPrompt {
   /** Stable identity the panel's buttons and the slash command address. */
   id: string;
@@ -34,6 +43,16 @@ export interface QueuedPrompt {
    *  re-reads the files when it runs, so the queue file stays small and a
    *  moved file degrades to a named miss instead of a stale copy. */
   attachments?: QueuedAttachment[];
+  /** The skill armed when the memo was parked (TUI parity: the TUI's queue
+   *  carries `skill_instruction` the same way). Consumed at park time so it
+   *  cannot also ride the next message. */
+  skill?: QueuedSkill;
+  /** Whether this memo runs by itself when the turn above it ends. `false`
+   *  (or absent, on a memo parked before the flag existed) means the user
+   *  picks the moment — the panel's ▶ or `/queue run`. The choice is stored
+   *  per memo, not read from settings at dispatch time: a memo parked as
+   *  automatic stays automatic even if the setting later changes. */
+  auto?: boolean;
 }
 
 /** The on-disk shape of one parked attachment: where the file lives, what
@@ -72,11 +91,23 @@ function newPromptId(): string {
   return `q-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+/** One usable `{ name, body }` pair, or undefined. A memo parked before the
+ *  skill field existed (or with a half-written one) reads as "no skill"
+ *  rather than failing to load. */
+function normalizeSkill(raw: unknown): QueuedSkill | undefined {
+  if (typeof raw !== "object" || raw === null) return undefined;
+  const candidate = raw as Record<string, unknown>;
+  const name = typeof candidate.name === "string" ? candidate.name.trim() : "";
+  const body = typeof candidate.body === "string" ? candidate.body : "";
+  if (!name || !body.trim()) return undefined;
+  return { name, body };
+}
+
 function normalizeEntries(raw: unknown): QueuedPrompt[] {
   if (!Array.isArray(raw)) return [];
   return raw
     .filter(
-      (e): e is { id?: unknown; text?: unknown; ts?: unknown; attachments?: unknown } =>
+      (e): e is { id?: unknown; text?: unknown; ts?: unknown; attachments?: unknown; skill?: unknown; auto?: unknown } =>
         typeof e === "object" && e !== null
     )
     .filter((e) => typeof e.text === "string" && e.text.trim().length > 0)
@@ -85,6 +116,8 @@ function normalizeEntries(raw: unknown): QueuedPrompt[] {
       text: (e.text as string).trim(),
       ts: typeof e.ts === "number" && Number.isFinite(e.ts) ? e.ts : 0,
       attachments: normalizeAttachments(e.attachments),
+      skill: normalizeSkill(e.skill),
+      auto: e.auto === true ? true : undefined,
     }));
 }
 
@@ -159,12 +192,16 @@ function saveThreadQueue(
 /** Appends a prompt to a thread's queue (oldest first, TUI parity). Empty or
  *  whitespace-only text is dropped — parking nothing must not create an
  *  entry the panel then offers to run. Attachments ride along by path (an
- *  empty list parks as a plain prompt). Returns that thread's queue. */
+ *  empty list parks as a plain prompt), and so does an armed skill. `auto`
+ *  marks a memo that runs itself when the turn above it ends. Returns that
+ *  thread's queue. */
 export function enqueuePrompt(
   workspace: string,
   threadKey: string,
   text: string,
-  attachments: QueuedAttachment[] = []
+  attachments: QueuedAttachment[] = [],
+  skill?: QueuedSkill,
+  auto?: boolean
 ): QueuedPrompt[] {
   const trimmed = text.trim();
   if (!trimmed) return loadThreadQueue(workspace, threadKey);
@@ -174,6 +211,8 @@ export function enqueuePrompt(
     text: trimmed,
     ts: Date.now(),
     attachments: attachments.length > 0 ? attachments : undefined,
+    skill: normalizeSkill(skill),
+    auto: auto === true ? true : undefined,
   });
   const overflow = entries.length - MESSAGE_QUEUE_LIMIT;
   if (overflow > 0) entries.splice(0, overflow);
@@ -225,4 +264,28 @@ export function migrateThreadQueue(
   saveThreadQueue(workspace, fromKey, []);
   saveThreadQueue(workspace, toKey, merged);
   return merged;
+}
+
+/** Flips one memo's automatic flag. Returns the queue it left, or null when
+ *  the id named nothing (the caller reports that rather than repainting an
+ *  unchanged list). `auto: false` is stored as an absent field, the same way
+ *  a manual memo is written at park time — one spelling for "manual". */
+export function setPromptAuto(
+  workspace: string,
+  threadKey: string,
+  id: string,
+  auto: boolean
+): QueuedPrompt[] | null {
+  const entries = loadThreadQueue(workspace, threadKey);
+  const idx = entries.findIndex((e) => e.id === id);
+  if (idx < 0) return null;
+  const updated: QueuedPrompt = { ...entries[idx] };
+  if (auto) {
+    updated.auto = true;
+  } else {
+    delete updated.auto;
+  }
+  entries[idx] = updated;
+  saveThreadQueue(workspace, threadKey, entries);
+  return entries;
 }

@@ -153,28 +153,44 @@ export interface WebviewTranslations {
   thinkingClose: string;
   steerPlaceholder: string;
   /** The composer's steering action, as the button that carries it names
-   *  itself: plain text and Enter guide the running turn, and this button is
-   *  the same action with a mouse. */
+   *  itself: the explicit chord (Ctrl/Cmd+Enter) guides the running turn, and
+   *  this button is the same gesture with a mouse. A bare Enter parks the
+   *  message as a memo instead. */
   steerAction: string;
   /** The same button while the box is empty: it names what it is waiting
    *  for instead of looking like a control that would send nothing. */
   steerNeedsText: string;
-  /** What the box says while a turn runs on an engine that cannot take
-   *  guidance: plain text has nowhere to go, so the default "type a message"
-   *  must not be promised. */
+  /** What the box says while a turn runs: Enter parks the message as a memo,
+   *  and the explicit chord guides the turn. */
   steerUnavailablePlaceholder: string;
   steerBadge: string;
   steerBadgeTitle: string;
+  /** The chip on a message or memo that carries a skill (`{name}`). */
+  skillBadgeTitle: string;
   /** Composer's queue button, the strip's title/clear and row buttons, and
    *  the host's queue info messages — the parked-memo feature (TUI /queue
    *  parity). The host posts the strip's rows; the webview only renders. */
   queueAction: string;
   queueTitle: string;
+  /** The same title while at least one memo is marked automatic: the plain
+   *  "nothing runs until you pick" would be wrong then. */
+  queueTitleAuto: string;
   queueClear: string;
   queueRunTitle: string;
   queueEditTitle: string;
   queueDropTitle: string;
   queueQueuedInfo: string;
+  /** Parking messages for a memo that will run itself, and the line the host
+   *  posts as it does. */
+  queueQueuedAutoInfo: string;
+  queueAutoDispatchInfo: string;
+  /** The row's automatic switch: what each flip did, the tooltip for the
+   *  state the row is in, and the chip that marks an automatic memo. */
+  queueAutoOn: string;
+  queueAutoOff: string;
+  queueAutoEnableTitle: string;
+  queueAutoDisableTitle: string;
+  queueAutoBadge: string;
   queueBusyKept: string;
   queueAlreadyEmpty: string;
   queueCleared: string;

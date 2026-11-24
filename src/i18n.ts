@@ -231,6 +231,9 @@ interface Translations {
   queueAction: string;
   /** Queue strip title; `{n}` is the parked count, filled in by the webview. */
   queueTitle: string;
+  /** The same title while at least one memo is marked automatic: the plain
+   *  "nothing runs until you pick" would be wrong then. */
+  queueTitleAuto: string;
   /** The strip's clear-all button. */
   queueClear: string;
   /** Row buttons: run this memo now / load it back into the composer /
@@ -240,6 +243,18 @@ interface Translations {
   queueDropTitle: string;
   /** Posted when a prompt is parked; `{n}` is the queue's new length. */
   queueQueuedInfo: string;
+  /** The same, for a memo parked to run itself when the turn above it ends. */
+  queueQueuedAutoInfo: string;
+  /** Posted as an automatic memo is dispatched by the end of the turn above. */
+  queueAutoDispatchInfo: string;
+  /** Row switch: the memo waits for the user / runs when the turn ends. */
+  queueAutoOn: string;
+  queueAutoOff: string;
+  /** The switch's tooltip, by the state the row is in now. */
+  queueAutoEnableTitle: string;
+  queueAutoDisableTitle: string;
+  /** The chip that marks an automatic memo on its row. */
+  queueAutoBadge: string;
   /** A ▶ on a memo while a turn runs on an engine without steer support:
    *  the memo stays parked, and the message says what the way out is. */
   queueBusyKept: string;
@@ -519,6 +534,8 @@ interface Translations {
   skillsDisable: string;
   skillsArmed: string;
   skillsArmedClear: string;
+  /** The badge on a message or memo that carries a skill, {name} replaced. */
+  skillBadgeTitle: string;
   skillsNoActivation: string;
   skillsNoLifecycle: string;
   /** Live filter over the inventory's name and description. */
@@ -939,17 +956,25 @@ const en: Translations = {
   steerNoActiveTurn: "No running turn to steer",
   steerUnsupported: "Steering is not supported by this engine version",
   steerFailed: "Failed to steer",
-  steerPlaceholder: "Steer the running turn...",
-  steerAction: "Guide this turn (Enter)",
+  steerPlaceholder: "A turn is running — Enter queues, Ctrl+Enter guides it",
+  steerAction: "Guide this turn (Ctrl+Enter)",
   steerNeedsText: "Type a message to guide the running turn",
-  steerUnavailablePlaceholder: "A turn is running — this engine cannot take guidance",
+  steerUnavailablePlaceholder: "A turn is running — Enter queues the message",
   queueAction: "Queue as memo — runs only when you choose",
   queueTitle: "Queued memos ({n}) — nothing runs until you pick",
+  queueTitleAuto: "Queued memos ({n}) — ⚡ ones run when the turn ends",
   queueClear: "Clear all queued memos",
   queueRunTitle: "Run now",
   queueEditTitle: "Load into the composer",
   queueDropTitle: "Remove from queue",
   queueQueuedInfo: "Parked as a queued memo — nothing runs until you choose ({n} waiting).",
+  queueQueuedAutoInfo: "Parked as a queued memo — it runs on its own when the current turn ends ({n} waiting).",
+  queueAutoDispatchInfo: "The turn ended — running the automatic memo at the head of the queue.",
+  queueAutoOn: "This memo will run when the turn above it ends.",
+  queueAutoOff: "This memo now waits for you.",
+  queueAutoEnableTitle: "Run this memo automatically when the turn ends",
+  queueAutoDisableTitle: "Keep this memo until you run it yourself",
+  queueAutoBadge: "auto",
   queueBusyKept: "A turn is still running and this engine cannot take mid-turn guidance, so the memo stays queued. Run it after the turn ends — or stop the turn first.",
   queueAlreadyEmpty: "Queue already empty.",
   queueCleared: "Cleared {n} queued memo(s).",
@@ -1180,6 +1205,7 @@ const en: Translations = {
   skillsDisable: "Disable",
   skillsArmed: "Skill '{name}' is armed for your next message",
   skillsArmedClear: "Cancel the armed skill",
+  skillBadgeTitle: "Carries skill '{name}'",
   skillsNoActivation: "This engine cannot hand back a skill's body, so activation is unavailable. Listing and toggling still work.",
   skillsNoLifecycle: "This engine has no skill install/update/remove/trust routes; the panel can list and toggle only.",
   skillsSearchPlaceholder: "Search skills…",
@@ -1545,17 +1571,25 @@ const zhCn: Translations = {
   steerNoActiveTurn: "当前没有进行中的回复可引导",
   steerUnsupported: "当前引擎版本不支持引导",
   steerFailed: "引导失败",
-  steerPlaceholder: "引导当前回复...",
-  steerAction: "引导当前回合（Enter）",
+  steerPlaceholder: "回合进行中 — Enter 排队，Ctrl+Enter 引导本轮",
+  steerAction: "引导当前回合（Ctrl+Enter）",
   steerNeedsText: "输入内容后可引导当前回合",
-  steerUnavailablePlaceholder: "本回合运行中 — 当前引擎不支持引导",
+  steerUnavailablePlaceholder: "回合运行中 — Enter 排队，等本轮结束后执行",
   queueAction: "压入队列备忘——由你决定何时执行",
   queueTitle: "队列备忘（{n}）——选择执行前不会运行",
+  queueTitleAuto: "队列备忘（{n}）——带 ⚡ 的会在回合结束后自动执行",
   queueClear: "清空全部队列备忘",
   queueRunTitle: "立即执行",
   queueEditTitle: "放回输入框",
   queueDropTitle: "从队列移除",
   queueQueuedInfo: "已压入队列备忘——在你选择执行前不会运行（共 {n} 条）。",
+  queueQueuedAutoInfo: "已压入队列备忘——当前回合结束后会自动执行（共 {n} 条）。",
+  queueAutoDispatchInfo: "回合已结束——开始执行队列最前面的自动备忘。",
+  queueAutoOn: "这条备忘会在它上面那一轮结束后自动执行。",
+  queueAutoOff: "这条备忘改为等你手动执行。",
+  queueAutoEnableTitle: "回合结束后自动执行这条备忘",
+  queueAutoDisableTitle: "保留这条备忘，等你手动执行",
+  queueAutoBadge: "自动",
   queueBusyKept: "回合仍在运行，当前引擎不支持回合中引导——备忘保留在队列。等回合结束后执行，或先停止回合。",
   queueAlreadyEmpty: "队列备忘已为空。",
   queueCleared: "已清空 {n} 条队列备忘。",
@@ -1785,6 +1819,7 @@ const zhCn: Translations = {
   skillsDisable: "禁用",
   skillsArmed: "技能「{name}」已就绪，将应用于下一条消息",
   skillsArmedClear: "取消已就绪的技能",
+  skillBadgeTitle: "本条消息携带技能「{name}」",
   skillsNoActivation: "当前引擎无法返回技能正文，因此不能激活；列表与开关仍可用。",
   skillsNoLifecycle: "当前引擎没有技能安装/更新/移除/信任接口；面板只能列表与开关。",
   skillsSearchPlaceholder: "搜索技能…",
@@ -2189,11 +2224,19 @@ export function webviewTranslations(tr: Translations) {
     steerUnavailablePlaceholder: tr.steerUnavailablePlaceholder,
     queueAction: tr.queueAction,
     queueTitle: tr.queueTitle,
+    queueTitleAuto: tr.queueTitleAuto,
     queueClear: tr.queueClear,
     queueRunTitle: tr.queueRunTitle,
     queueEditTitle: tr.queueEditTitle,
     queueDropTitle: tr.queueDropTitle,
     queueQueuedInfo: tr.queueQueuedInfo,
+    queueQueuedAutoInfo: tr.queueQueuedAutoInfo,
+    queueAutoDispatchInfo: tr.queueAutoDispatchInfo,
+    queueAutoOn: tr.queueAutoOn,
+    queueAutoOff: tr.queueAutoOff,
+    queueAutoEnableTitle: tr.queueAutoEnableTitle,
+    queueAutoDisableTitle: tr.queueAutoDisableTitle,
+    queueAutoBadge: tr.queueAutoBadge,
     queueBusyKept: tr.queueBusyKept,
     queueAlreadyEmpty: tr.queueAlreadyEmpty,
     queueCleared: tr.queueCleared,
@@ -2422,6 +2465,7 @@ export function webviewTranslations(tr: Translations) {
     skillsDisable: tr.skillsDisable,
     skillsArmed: tr.skillsArmed,
     skillsArmedClear: tr.skillsArmedClear,
+    skillBadgeTitle: tr.skillBadgeTitle,
     skillsNoActivation: tr.skillsNoActivation,
     skillsNoLifecycle: tr.skillsNoLifecycle,
     skillsSearchPlaceholder: tr.skillsSearchPlaceholder,

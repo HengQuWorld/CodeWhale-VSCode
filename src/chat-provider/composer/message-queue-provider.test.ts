@@ -76,7 +76,7 @@ describe("queue as memo (provider)", () => {
     postMessage.mockClear();
     await provider.handleRunQueuedPrompt(id);
 
-    expect(send).toHaveBeenCalledWith("memo one", { queued: true, attachments: [] });
+    expect(send).toHaveBeenCalledWith("memo one", { queued: true, attachments: [], skill: null });
     expect(lastQueue(postMessage)).toHaveLength(0);
     expect(loadMessageQueue(WS)[DRAFT_QUEUE_KEY]).toBeUndefined();
   });
@@ -132,9 +132,103 @@ describe("queue as memo (provider)", () => {
     postMessage.mockClear();
     await provider.handleRunQueuedPrompt(id);
 
-    // Explicit [] attachments: the memo is its text, not the box's files.
-    expect(steer).toHaveBeenCalledWith("guide the turn", []);
+    // Explicit [] attachments and an explicit null skill: the memo is its own
+    // text and its own skill, never the composer's current arming.
+    expect(steer).toHaveBeenCalledWith("guide the turn", [], null);
     expect(lastQueue(postMessage)).toHaveLength(0);
+  });
+
+  it("parks the armed skill into the memo and consumes the arming", () => {
+    const { provider, postMessage } = createProvider();
+    provider.armSkill({ name: "frontend-design", body: "Read DESIGN.md first." });
+
+    provider.handleQueuePrompt("build the page");
+
+    const items = lastQueue(postMessage)!;
+    expect(items[0].skill).toEqual({
+      name: "frontend-design",
+      body: "Read DESIGN.md first.",
+    });
+    // One-shot: the arming is the memo's now, not the composer's. Leaving it
+    // live would silently attach it to whatever the next message was.
+    expect((provider as any).armedSkill).toBeNull();
+    expect(messagesOfType(postMessage, "skillArmed").pop()).toEqual({
+      type: "skillArmed",
+      name: null,
+    });
+  });
+
+  it("dispatches a memo's own skill, not the composer's current arming", async () => {
+    const { provider, postMessage } = createProvider();
+    provider.armSkill({ name: "debug", body: "Reproduce first." });
+    provider.handleQueuePrompt("memo with a skill");
+    const id = lastQueue(postMessage)![0].id;
+
+    // Something else armed since — the memo must not pick it up.
+    provider.armSkill({ name: "other", body: "Other body." });
+
+    const send = vi.fn(async () => true);
+    (provider as any).handleSendMessage = send;
+    await provider.handleRunQueuedPrompt(id);
+
+    expect(send).toHaveBeenCalledWith("memo with a skill", {
+      queued: true,
+      attachments: [],
+      skill: { name: "debug", body: "Reproduce first." },
+    });
+    // The composer's arming survives a memo dispatch — it was never its.
+    expect((provider as any).armedSkill).toEqual({ name: "other", body: "Other body." });
+  });
+
+  it("steers a busy memo with the skill it was parked with", async () => {
+    const { provider, postMessage } = createProvider();
+    provider.armSkill({ name: "debug", body: "Reproduce first." });
+    provider.handleQueuePrompt("guide it");
+    const id = lastQueue(postMessage)![0].id;
+    (provider as any).currentTurnId = "turn-1";
+    (provider as any).apiCapabilities.turnSteer = true;
+
+    const steer = vi.fn(async () => true);
+    (provider as any).handleSteer = steer;
+    await provider.handleRunQueuedPrompt(id);
+
+    expect(steer).toHaveBeenCalledWith("guide it", [], {
+      name: "debug",
+      body: "Reproduce first.",
+    });
+  });
+
+  it("parks an activation that carries a task while a turn runs", async () => {
+    const { provider, postMessage } = createProvider();
+    provider.armSkill({ name: "debug", body: "Reproduce first." });
+    (provider as any).currentTurnId = "turn-1";
+
+    await provider.sendMessage("fix it now");
+
+    // `/skill <name> <task>` while busy parks the task (TUI parity): sending
+    // would ask the busy thread for a second turn and the words would be lost.
+    const items = lastQueue(postMessage)!;
+    expect(items[0].text).toBe("fix it now");
+    expect(items[0].skill?.name).toBe("debug");
+    expect((provider as any).armedSkill).toBeNull();
+  });
+
+  it("edit puts the memo's skill back in the composer", () => {
+    const { provider, postMessage } = createProvider();
+    provider.armSkill({ name: "debug", body: "Reproduce first." });
+    provider.handleQueuePrompt("edit me");
+    const id = lastQueue(postMessage)![0].id;
+    postMessage.mockClear();
+
+    provider.handleEditQueuedPrompt(id, "edit me");
+
+    // Editing a memo and sending it must mean what running it would have
+    // meant, so the skill returns with the text.
+    expect((provider as any).armedSkill).toEqual({
+      name: "debug",
+      body: "Reproduce first.",
+    });
+    expect(messagesOfType(postMessage, "skillArmed").pop()?.name).toBe("debug");
   });
 
   it("edit hands the memo back through setInputText and takes it off the queue", () => {
@@ -321,5 +415,146 @@ describe("queued memos with attachments (provider)", () => {
     const reParked = loadMessageQueue(WS)[DRAFT_QUEUE_KEY][0];
     expect(reParked.text).toBe("will fail");
     expect(reParked.attachments?.map((a) => a.path)).toEqual([file]);
+  });
+});
+
+describe("queue auto-dispatch (provider)", () => {
+  afterEach(() => {
+    vscodeState.configValues.delete("queueAutoDispatch");
+  });
+
+  it("parks automatic only when the setting says so", () => {
+    const { provider, postMessage } = createProvider();
+
+    provider.handleQueuePrompt("waits for me");
+    expect(lastQueue(postMessage)![0].auto).toBeUndefined();
+    expect(messagesOfType(postMessage, "info").pop()?.message).toContain("nothing runs");
+
+    vscodeState.configValues.set("queueAutoDispatch", true);
+    provider.handleQueuePrompt("runs by itself");
+    expect(lastQueue(postMessage)![1].auto).toBe(true);
+    expect(messagesOfType(postMessage, "info").pop()?.message).toContain("on its own");
+  });
+
+  it("lets the caller override the setting either way", () => {
+    const { provider, postMessage } = createProvider();
+    vscodeState.configValues.set("queueAutoDispatch", true);
+
+    provider.handleQueuePrompt("manual on purpose", false);
+
+    expect(lastQueue(postMessage)![0].auto).toBeUndefined();
+  });
+
+  it("runs the head of the queue by itself when the turn above it ends", async () => {
+    const { provider } = createProvider();
+    // A turn just ended, so a thread exists — that is the state the drain runs
+    // in, and the queue lives under that thread's bucket.
+    (provider as any).currentThread = { id: "thread-1" };
+    provider.handleQueuePrompt("auto memo", true);
+
+    const send = vi.fn(async () => true);
+    (provider as any).handleSendMessage = send;
+
+    await (provider as any).drainAutoQueuedPrompt();
+
+    expect(send).toHaveBeenCalledWith(
+      "auto memo",
+      expect.objectContaining({ queued: true, skill: null })
+    );
+    expect(loadMessageQueue(WS)["thread-1"]).toBeUndefined();
+  });
+
+  it("does not pull an automatic memo past a manual one", async () => {
+    const { provider } = createProvider();
+    (provider as any).currentThread = { id: "thread-1" };
+    provider.handleQueuePrompt("manual first");
+    provider.handleQueuePrompt("auto second", true);
+
+    const send = vi.fn(async () => true);
+    (provider as any).handleSendMessage = send;
+
+    await (provider as any).drainAutoQueuedPrompt();
+
+    // The queue is ordered: the auto memo waits behind the memo the user
+    // chose to run by hand.
+    expect(send).not.toHaveBeenCalled();
+    expect(loadMessageQueue(WS)["thread-1"]).toHaveLength(2);
+  });
+
+  it("leaves the queue alone while a turn is still running", async () => {
+    const { provider } = createProvider();
+    (provider as any).currentThread = { id: "thread-1" };
+    provider.handleQueuePrompt("auto memo", true);
+
+    const send = vi.fn(async () => true);
+    (provider as any).handleSendMessage = send;
+    (provider as any).currentTurnId = "turn-1";
+
+    await (provider as any).drainAutoQueuedPrompt();
+
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("leaves a viewed saved session's queue alone", async () => {
+    const { provider } = createProvider();
+    (provider as any).currentThread = { id: "thread-1" };
+    provider.handleQueuePrompt("auto memo", true);
+
+    const send = vi.fn(async () => true);
+    (provider as any).handleSendMessage = send;
+    (provider as any).viewingSessionId = "session-1";
+
+    await (provider as any).drainAutoQueuedPrompt();
+
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("does not dispatch twice when the same turn.completed is replayed", async () => {
+    const { provider } = createProvider();
+    (provider as any).currentThread = { id: "thread-1" };
+    provider.handleQueuePrompt("auto memo", true);
+
+    let release: (() => void) | null = null;
+    const send = vi.fn(
+      () => new Promise<boolean>((resolve) => { release = () => resolve(true); })
+    );
+    (provider as any).handleSendMessage = send;
+
+    const first = (provider as any).drainAutoQueuedPrompt();
+    // A second delivery of the same event arrives while the first dispatch is
+    // still in flight: it must not run the memo again.
+    await (provider as any).drainAutoQueuedPrompt();
+    release!();
+    await first;
+
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  it("flips one memo's automatic flag from the panel row", () => {
+    const { provider, postMessage } = createProvider();
+    provider.handleQueuePrompt("memo");
+    const id = lastQueue(postMessage)![0].id;
+
+    provider.handleToggleQueuedAuto(id, true);
+    expect(lastQueue(postMessage)![0].auto).toBe(true);
+    expect(messagesOfType(postMessage, "info").pop()?.message).toContain("run when");
+
+    provider.handleToggleQueuedAuto(id, false);
+    expect(lastQueue(postMessage)![0].auto).toBeUndefined();
+    expect(messagesOfType(postMessage, "info").pop()?.message).toContain("waits for you");
+  });
+
+  it("re-parks a refused automatic dispatch with its flag intact", async () => {
+    const { provider, postMessage } = createProvider();
+    provider.handleQueuePrompt("auto memo", true);
+    const id = lastQueue(postMessage)![0].id;
+
+    (provider as any).handleSendMessage = vi.fn(async () => false);
+    postMessage.mockClear();
+    await provider.handleRunQueuedPrompt(id);
+
+    const items = lastQueue(postMessage)!;
+    expect(items).toHaveLength(1);
+    expect(items[0].auto).toBe(true);
   });
 });

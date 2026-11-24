@@ -34,6 +34,10 @@ class FakeElement {
   public selectionStart = 0;
   public selectionEnd = 0;
   public style: Record<string, string> = {};
+  /** Mirrors the DOM property the webview writes text into (`mq-title`,
+   *  tooltips). Separate from `innerHTML` because a real element keeps the two
+   *  as different things, and a test that reads one must see what it wrote. */
+  public textContent = "";
   public classList = new FakeClassList();
   public children: FakeElement[] = [];
   private text = "";
@@ -598,13 +602,11 @@ describe("webview-js-input runtime: the send button is the Stop button mid-turn"
   });
 });
 
-describe("webview-js-input runtime: Enter steers the turn that is running", () => {
-  // Steering is what makes Enter usable on a turn this client did not start —
-  // one adopted while loading a thread that had a turn in flight. The state
-  // it reads is the streaming flag, which the event handler arms; a fresh
-  // placeholder, a `turnStarted`, and a load that ends on a streaming bubble
-  // all leave it set.
-  it("posts steer for plain text while a turn is streaming", () => {
+describe("webview-js-input runtime: Enter parks while a turn runs, the chord steers", () => {
+  // TUI parity: bare Enter while the engine is busy queues the message, and
+  // steering is the explicit gesture (Ctrl+Enter, Cmd+Enter on macOS). The
+  // state it reads is the streaming flag, which the event handler arms.
+  it("parks plain text as a memo while a turn is streaming", () => {
     const h = createHarness();
     h.windowObj.__wvApiCapabilities = { turnSteer: true };
     h.windowObj.__wvMessages.isStreaming = () => true;
@@ -613,12 +615,40 @@ describe("webview-js-input runtime: Enter steers the turn that is running", () =
     h.input.dispatch("keydown", syntheticEvent({ key: "Enter", shiftKey: false }));
 
     expect(h.postMessages).toEqual([
+      { type: "queueMessage", text: "focus on the tests" },
+      { type: "inputHistoryPush", text: "focus on the tests" },
+    ]);
+  });
+
+  it("steers on the explicit chord while a turn is streaming", () => {
+    const h = createHarness();
+    h.windowObj.__wvApiCapabilities = { turnSteer: true };
+    h.windowObj.__wvMessages.isStreaming = () => true;
+    h.input.value = "focus on the tests";
+
+    h.input.dispatch("keydown", syntheticEvent({ key: "Enter", shiftKey: false, ctrlKey: true }));
+
+    expect(h.postMessages).toEqual([
       { type: "steer", text: "focus on the tests" },
       { type: "inputHistoryPush", text: "focus on the tests" },
     ]);
   });
 
-  it("blocks the prompt when the engine cannot steer", () => {
+  it("treats Cmd+Enter as the same chord (macOS)", () => {
+    const h = createHarness();
+    h.windowObj.__wvApiCapabilities = { turnSteer: true };
+    h.windowObj.__wvMessages.isStreaming = () => true;
+    h.input.value = "guide this";
+
+    h.input.dispatch("keydown", syntheticEvent({ key: "Enter", shiftKey: false, metaKey: true }));
+
+    expect(h.postMessages).toEqual([
+      { type: "steer", text: "guide this" },
+      { type: "inputHistoryPush", text: "guide this" },
+    ]);
+  });
+
+  it("parks the message on an engine that cannot steer", () => {
     const h = createHarness();
     h.windowObj.__wvApiCapabilities = { turnSteer: false };
     h.windowObj.__wvMessages.isStreaming = () => true;
@@ -626,10 +656,26 @@ describe("webview-js-input runtime: Enter steers the turn that is running", () =
 
     h.input.dispatch("keydown", syntheticEvent({ key: "Enter", shiftKey: false }));
 
-    // The pre-steer behaviour: an engine that cannot steer must not be sent a
-    // steer it would refuse, and must not be sent a new turn either — the
-    // thread is busy and `start_turn` refuses that too.
+    // The engine would refuse a second turn, but parking is a client-side
+    // queue: the message waits instead of being dropped.
+    expect(h.postMessages).toEqual([
+      { type: "queueMessage", text: "a new prompt" },
+      { type: "inputHistoryPush", text: "a new prompt" },
+    ]);
+  });
+
+  it("refuses the explicit chord when the engine cannot steer", () => {
+    const h = createHarness();
+    h.windowObj.__wvApiCapabilities = { turnSteer: false };
+    h.windowObj.__wvMessages.isStreaming = () => true;
+    h.input.value = "guide this";
+
+    h.input.dispatch("keydown", syntheticEvent({ key: "Enter", shiftKey: false, ctrlKey: true }));
+
+    // Nothing is sent and the words stay in the box: a steer this engine
+    // would refuse must not be posted, and the user did not ask to park.
     expect(h.postMessages).toEqual([]);
+    expect(h.input.value).toBe("guide this");
   });
 
   it("sends a new prompt when nothing is streaming", () => {
@@ -880,8 +926,9 @@ describe("webview-js-input runtime: the steer button, and not the Stop button", 
     h.windowObj.__wvMessages.isStreaming = () => true;
     h.windowObj.__wvInput.updateSendStopButton(true);
 
-    // Typing goes nowhere in this state (sendMessage drops it), so the default
-    // "type a message" would be a promise the composer cannot keep.
+    // Typing does not start a turn in this state (Enter parks the message, and
+    // the engine cannot take guidance), so the default "type a message"
+    // would be a promise the composer cannot keep.
     expect(h.input.getAttribute("placeholder")).toBe(makeTr().steerUnavailablePlaceholder);
 
     h.windowObj.__wvMessages.isStreaming = () => false;
@@ -1006,5 +1053,82 @@ describe("webview-js-input runtime: the composer while the host owns the convers
     h.getElement("btn-send-stop").dispatch("click", syntheticEvent());
 
     expect(h.postMessages).toEqual([{ type: "interrupt" }]);
+  });
+});
+
+describe("webview-js-input runtime: a parked memo's skill chip", () => {
+  it("names the skill the memo will apply, and only where there is one", () => {
+    const h = createHarness();
+    h.windowObj.__wvInput.renderMessageQueue([
+      { id: "q1", text: "build the page", ts: 1, skill: { name: "frontend-design", body: "B" } },
+      { id: "q2", text: "plain memo", ts: 2 },
+    ]);
+
+    const html = h.getElement("mq-items").innerHTML;
+    expect(html).toContain("mq-skill");
+    expect(html).toContain("frontend-design");
+    // Only the memo that carries one is chipped.
+    expect((html.match(/mq-skill/g) || []).length).toBe(1);
+  });
+});
+
+describe("webview-js-input runtime: a memo's automatic flag", () => {
+  it("marks the automatic memo and leaves the manual one plain", () => {
+    const h = createHarness();
+    h.windowObj.__wvInput.renderMessageQueue([
+      { id: "q1", text: "manual memo", ts: 1 },
+      { id: "q2", text: "auto memo", ts: 2, auto: true },
+    ]);
+
+    const html = h.getElement("mq-items").innerHTML;
+    expect(html).toContain("mq-auto-chip");
+    expect((html.match(/mq-auto-chip/g) || []).length).toBe(1);
+    expect(html).toContain("is-auto");
+  });
+
+  it("asks the host to flip the flag, carrying the state the row is in", () => {
+    const h = createHarness();
+    h.windowObj.__wvInput.renderMessageQueue([
+      { id: "q1", text: "memo", ts: 1 },
+    ]);
+
+    // The delegated listener lives on the strip, so the click travels through
+    // it the way a real one does.
+    const items = h.getElement("mq-items");
+    items.dispatch("click", syntheticEvent({
+      target: {
+        classList: { contains: (n: string) => n === "mq-act" || n === "mq-auto" },
+        closest: (sel: string) =>
+          sel === ".mq-act"
+            ? {
+                getAttribute: (a: string) => (a === "data-id" ? "q1" : null),
+                classList: { contains: (c: string) => c === "mq-auto" },
+              }
+            : null,
+        getAttribute: (a: string) => (a === "data-id" ? "q1" : null),
+      },
+    }));
+
+    expect(h.postMessages).toEqual([
+      { type: "queuedToggleAuto", id: "q1", auto: true },
+    ]);
+  });
+});
+
+describe("webview-js-input runtime: the queue title tells the truth", () => {
+  it("does not promise 'nothing runs' once a memo is automatic", () => {
+    const h = createHarness();
+    h.windowObj.__wvInput.renderMessageQueue([{ id: "q1", text: "memo", ts: 1 }]);
+    expect(h.getElement("mq-title").textContent).toBe(
+      makeTr().queueTitle.replace("{n}", "1")
+    );
+
+    h.windowObj.__wvInput.renderMessageQueue([
+      { id: "q1", text: "memo", ts: 1 },
+      { id: "q2", text: "auto memo", ts: 2, auto: true },
+    ]);
+    expect(h.getElement("mq-title").textContent).toBe(
+      makeTr().queueTitleAuto.replace("{n}", "2")
+    );
   });
 });

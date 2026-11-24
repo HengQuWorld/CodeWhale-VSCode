@@ -20,6 +20,10 @@ function createProvider(overrides: Record<string, unknown> = {}) {
       turn: { id: "turn-1", thread_id: "thread-1", status: "in_progress" },
     })),
     interruptTurn: vi.fn(async () => undefined),
+    steerTurn: vi.fn(async () => ({
+      thread: { id: "thread-1" },
+      turn: { id: "turn-1", thread_id: "thread-1", status: "in_progress" },
+    })),
     streamEvents: vi.fn(() => new AbortController()),
     getSkillDetail: vi.fn(async (name: string) => ({
       name,
@@ -124,8 +128,12 @@ describe("ChatProvider skill activation", () => {
     ]);
     expect((provider as any).armedSkill).toBeNull();
 
-    // A second message carries no skill.
+    // A second message carries no skill. The turn the first send started has
+    // ended by now — once it has, the next message is a new turn again (while
+    // one is running, `sendMessage` parks instead; see
+    // message-queue-provider.test.ts).
     (api.startTurn as any).mockClear();
+    (provider as any).currentTurnId = null;
     await provider.sendMessage("carry on");
     expect((api.startTurn as any).mock.calls[0][1]).toBe("carry on");
   });
@@ -185,6 +193,59 @@ describe("ChatProvider skill activation", () => {
     await provider.activateSkill("nope");
 
     expect(messagesOfType(postMessage, "error")[0].message).toContain("Run /skills to list available skills");
+  });
+
+  it("rides an armed skill on the next steer, addressed to guidance", async () => {
+    const { provider, api, postMessage } = createProvider();
+    (provider as any).apiCapabilities.turnSteer = true;
+    (provider as any).currentTurnId = "turn-1";
+
+    await provider.activateSkill("debug");
+    postMessage.mockClear();
+
+    const steered = await (provider as any).handleSteer("make it wider");
+    expect(steered).toBe(true);
+
+    const wire = (api.steerTurn as any).mock.calls[0][2] as string;
+    expect(wire).toContain("# Skill: debug");
+    expect(wire).toContain(SKILL_BODY);
+    // The steer's closing names the guidance; the activation one would point
+    // the model at "the user's request", which is a turn behind it.
+    expect(wire).toContain("Guidance for the turn already in progress: make it wider");
+    expect(wire).not.toContain("Now respond to the user's request");
+
+    // One-shot, like a send: the arming is consumed by the guidance.
+    expect((provider as any).armedSkill).toBeNull();
+    expect(messagesOfType(postMessage, "skillArmed").pop()).toEqual({
+      type: "skillArmed",
+      name: null,
+    });
+
+    // The bubble shows what the user typed, badged with the skill; the
+    // instruction rides the wire, not the transcript.
+    const bubble = messagesOfType(postMessage, "addMessage")
+      .map((m) => m.message)
+      .find((m: any) => m.role === "user");
+    expect(bubble.content).toBe("make it wider");
+    expect(bubble.skillName).toBe("debug");
+  });
+
+  it("keeps the skill armed when the engine refuses the steer", async () => {
+    const { provider, api } = createProvider();
+    (api.steerTurn as any).mockRejectedValueOnce(new Error("turn already finished"));
+    (provider as any).apiCapabilities.turnSteer = true;
+    (provider as any).currentTurnId = "turn-1";
+
+    await provider.activateSkill("debug");
+    const steered = await (provider as any).handleSteer("too late");
+
+    expect(steered).toBe(false);
+    // Nothing was delivered, so nothing was consumed: the user's next attempt
+    // still carries the skill they chose.
+    expect((provider as any).armedSkill).toEqual({
+      name: "debug",
+      body: SKILL_BODY,
+    });
   });
 
   it("re-announces the armed skill so a reload keeps the chip", async () => {

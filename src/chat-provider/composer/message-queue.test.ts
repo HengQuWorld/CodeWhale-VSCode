@@ -18,6 +18,7 @@ import {
   enqueuePrompt,
   loadMessageQueue,
   migrateThreadQueue,
+  setPromptAuto,
 } from "../../utils/message-queue";
 import {
   loadLastThreadId,
@@ -65,6 +66,72 @@ describe("message queue persistence", () => {
     enqueuePrompt(WS, "thread-a", "   ");
     enqueuePrompt(WS, "thread-a", "\n");
     expect(loadMessageQueue(WS)["thread-a"]).toBeUndefined();
+  });
+
+  it("parks the armed skill with the memo and reads it back", () => {
+    enqueuePrompt(WS, "thread-a", "build the page", [], {
+      name: "frontend-design",
+      body: "Read DESIGN.md first.",
+    });
+
+    const parked = loadMessageQueue(WS)["thread-a"][0];
+    expect(parked.skill).toEqual({
+      name: "frontend-design",
+      body: "Read DESIGN.md first.",
+    });
+
+    // A memo parked without one stays without one — an older record's missing
+    // field must not make the queue unreadable.
+    enqueuePrompt(WS, "thread-a", "plain memo");
+    expect(loadMessageQueue(WS)["thread-a"][1].skill).toBeUndefined();
+  });
+
+  it("drops a half-written skill instead of carrying an empty instruction", () => {
+    enqueuePrompt(WS, "thread-a", "memo", [], { name: "", body: "body" });
+    enqueuePrompt(WS, "thread-a", "memo 2", [], { name: "x", body: "   " });
+
+    const queue = loadMessageQueue(WS)["thread-a"];
+    expect(queue[0].skill).toBeUndefined();
+    expect(queue[1].skill).toBeUndefined();
+  });
+
+  it("parks the automatic flag with the memo", () => {
+    enqueuePrompt(WS, "thread-a", "manual memo");
+    enqueuePrompt(WS, "thread-a", "auto memo", [], undefined, true);
+
+    const queue = loadMessageQueue(WS)["thread-a"];
+    // Manual is the absent field, so one spelling covers every older record.
+    expect(queue[0].auto).toBeUndefined();
+    expect(queue[1].auto).toBe(true);
+  });
+
+  it("flips one memo's automatic flag and reports a miss", () => {
+    enqueuePrompt(WS, "thread-a", "memo");
+    const id = loadMessageQueue(WS)["thread-a"][0].id;
+
+    expect(setPromptAuto(WS, "thread-a", id, true)).toHaveLength(1);
+    expect(loadMessageQueue(WS)["thread-a"][0].auto).toBe(true);
+
+    expect(setPromptAuto(WS, "thread-a", id, false)).toHaveLength(1);
+    expect(loadMessageQueue(WS)["thread-a"][0].auto).toBeUndefined();
+
+    expect(setPromptAuto(WS, "thread-a", "no-such-id", true)).toBeNull();
+  });
+
+  it("reads a record written before the flag existed as manual", () => {
+    fs.mkdirSync(path.join(process.env.HOME!, ".codewhale", "message-queue"), {
+      recursive: true,
+    });
+    fs.writeFileSync(
+      queueFilePath(),
+      JSON.stringify({
+        "thread-a": [{ id: "q-old", text: "older memo", ts: 1 }],
+      })
+    );
+
+    const queue = loadMessageQueue(WS)["thread-a"];
+    expect(queue[0].text).toBe("older memo");
+    expect(queue[0].auto).toBeUndefined();
   });
 
   it("dequeues by id and reports a miss", () => {

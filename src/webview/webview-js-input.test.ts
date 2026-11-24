@@ -146,9 +146,13 @@ describe("webview-js-input.ts", () => {
     expect(script).toContain("/mode - Custom mode desc");
   });
 
-  it("routes plain text during streaming to steer (TUI steer parity)", () => {
+  it("parks plain text during streaming and steers on the explicit chord (TUI parity)", () => {
     const script = getInputScript(makeTr());
+    // Bare Enter while a turn runs parks the message as a memo...
+    expect(script).toContain("type: 'queueMessage'");
+    // ...and the explicit chord (Ctrl+Enter, Cmd+Enter on macOS) steers.
     expect(script).toContain("type: 'steer'");
+    expect(script).toContain("e.ctrlKey || e.metaKey");
     // Steering is gated on the runtime capability probe.
     expect(script).toContain("turnSteer");
     // Slash commands other than /interrupt and /clear stay blocked while streaming.

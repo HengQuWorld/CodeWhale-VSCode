@@ -246,7 +246,14 @@ export function getInputScript(tr: WebviewTranslations): string {
     return !!caps.turnSteer;
   }
 
-  function sendMessage() {
+  /** Hand the box's content to the host.
+   *
+   *  'explicitSteer' is the user asking for a steer by name (Ctrl/Cmd+Enter,
+   *  or the composer's steer button). Everything else follows TUI's Enter:
+   *  idle sends a new turn, and a running turn parks the message as a memo —
+   *  the engine refuses a second turn, and parking works even on an engine
+   *  that cannot steer. */
+  function sendMessage(explicitSteer) {
     var text = inputEl.value.trim();
     var isStreaming = window.__wvMessages.isStreaming();
     // Nothing goes anywhere while the host is replacing the conversation: the
@@ -255,9 +262,20 @@ export function getInputScript(tr: WebviewTranslations): string {
     if (!text && currentAttachments.length === 0) return;
     var isSlash = text.startsWith('/');
     var slashAllowedWhileStreaming = text.startsWith('/interrupt') || text.startsWith('/clear');
-    var canSteer = isStreaming && steerCapable();
     if (isStreaming && isSlash && !slashAllowedWhileStreaming) return;
-    if (isStreaming && !isSlash && !canSteer) return;
+
+    var route = isSlash ? 'slash' : 'send';
+    if (isStreaming && !isSlash) {
+      if (explicitSteer || !text) {
+        // An explicit gesture, or a message with no words to park (a memo is
+        // text): both guide the running turn, and both need an engine that
+        // takes guidance.
+        if (!steerCapable()) return;
+        route = 'steer';
+      } else {
+        route = 'queue';
+      }
+    }
     setComposerText('');
     window.__wvMessages.setUserScrolledUp(false);
     // An attachment-only message has no words to remember: pushing the empty
@@ -269,15 +287,18 @@ export function getInputScript(tr: WebviewTranslations): string {
     historyIndex = -1;
     draftBeforeHistory = '';
 
-    if (isSlash) {
+    if (route === 'slash') {
       var parts = text.split(' ');
       var command = parts[0].toLowerCase();
       var args = parts.slice(1).join(' ');
       vscode.postMessage({ type: 'slashCommand', command: command, args: args });
-    } else if (canSteer) {
-      // Mid-turn steering: plain text during a running turn guides the
-      // active turn instead of starting a new one (TUI steer parity).
+    } else if (route === 'steer') {
+      // Mid-turn steering: guidance into the turn that is running.
       vscode.postMessage({ type: 'steer', text: text });
+    } else if (route === 'queue') {
+      // Bare Enter while a turn runs parks the message (TUI parity), and the
+      // host takes the box's attachments with it the way a send would.
+      vscode.postMessage({ type: 'queueMessage', text: text });
     } else {
       vscode.postMessage({ type: 'sendMessage', text: text });
     }
@@ -312,10 +333,10 @@ export function getInputScript(tr: WebviewTranslations): string {
   }
 
   // ── Input placeholder ──
-  // While a turn runs, the box is a channel into that turn: it says so when
-  // the engine can take guidance. When the engine cannot, plain text has
-  // nowhere to go — sendMessage() drops it — so the default "type a
-  // message" must not stay up promising the opposite.
+  // While a turn runs, the box is a channel into it: Enter parks the message
+  // as a memo and the explicit chord guides the turn, and the placeholder has
+  // to say which, or the default "type a message" promises a new turn this
+  // composer cannot start.
   var inputDefaultPlaceholder = inputEl.getAttribute('placeholder') || '';
 
   function updateInputPlaceholder() {
@@ -422,9 +443,9 @@ export function getInputScript(tr: WebviewTranslations): string {
     if (!steerBtn) return;
     var streaming = !!(window.__wvMessages && window.__wvMessages.isStreaming());
     var shown = streaming && steerCapable();
-    // Armed by text or by an attachment: sendMessage() sends either, and a
-    // picture with no words is a complete piece of guidance ("this is what I
-    // mean"). Keying this off the text alone left the button dim over an
+    // Armed by text or by an attachment: the explicit steer sends either, and
+    // a picture with no words is a complete piece of guidance ("this is what
+    // I mean"). Keying this off the text alone left the button dim over an
     // image it would have sent.
     var armed = shown && (!!inputEl.value.trim() || currentAttachments.length > 0);
     steerBtn.classList.toggle('is-active', shown);
@@ -495,10 +516,18 @@ export function getInputScript(tr: WebviewTranslations): string {
       return;
     }
     var titleTpl = (__i18n && __i18n.queueTitle) || 'Queued memos ({n})';
+    // One automatic memo makes the plain title a lie, so the strip says which
+    // memos those are instead.
+    var anyAuto = queueItems.some(function(it) { return it && it.auto === true; });
+    if (anyAuto && __i18n && __i18n.queueTitleAuto) titleTpl = __i18n.queueTitleAuto;
     queueTitleEl.textContent = titleTpl.replace('{n}', String(queueItems.length));
     var runTitle = (__i18n && __i18n.queueRunTitle) || 'Run now';
     var editTitle = (__i18n && __i18n.queueEditTitle) || 'Load into the composer';
     var dropTitle = (__i18n && __i18n.queueDropTitle) || 'Remove from queue';
+    var skillTitleTpl = (__i18n && __i18n.skillBadgeTitle) || "Carries skill '{name}'";
+    var autoBadge = (__i18n && __i18n.queueAutoBadge) || 'auto';
+    var autoEnableTitle = (__i18n && __i18n.queueAutoEnableTitle) || 'Run this memo automatically when the turn ends';
+    var autoDisableTitle = (__i18n && __i18n.queueAutoDisableTitle) || 'Keep this memo until you run it yourself';
     var html = '';
     queueItems.forEach(function(item, idx) {
       var id = __wvEscapeHtml(item.id);
@@ -509,10 +538,28 @@ export function getInputScript(tr: WebviewTranslations): string {
         var names = atts.map(function(a) { return (a && (a.name || a.path)) || ''; }).join('\\n');
         clip = ' <span class="mq-clip" title="' + __wvEscapeHtml(names) + '">📎' + atts.length + '</span>';
       }
-      html += '<div class="mq-item" data-id="' + id + '">' +
+      // A memo can carry the skill that was armed when it was parked; the
+      // chip says so, because running it later applies that skill rather than
+      // whatever is armed now.
+      var skillChip = '';
+      if (item.skill && item.skill.name) {
+        skillChip = ' <span class="mq-skill" title="' +
+          __wvEscapeHtml(skillTitleTpl.replace('{name}', item.skill.name)) + '">🧩 ' +
+          __wvEscapeHtml(item.skill.name) + '</span>';
+      }
+      // A memo parked to run by itself says so, and the same row's ⚡ button is
+      // where the choice is undone: the host owns the flag, so the button only
+      // asks and the repaint comes back from the host.
+      var auto = item.auto === true;
+      var autoChip = auto
+        ? ' <span class="mq-auto-chip">⚡' + __wvEscapeHtml(autoBadge) + '</span>'
+        : '';
+      var autoTitle = auto ? autoDisableTitle : autoEnableTitle;
+      html += '<div class="mq-item' + (auto ? ' is-auto' : '') + '" data-id="' + id + '">' +
         '<span class="mq-index">' + (idx + 1) + '</span>' +
-        '<span class="mq-text" title="' + __wvEscapeHtml(item.text) + '">' + __wvEscapeHtml(queuePreview(item.text)) + clip + '</span>' +
+        '<span class="mq-text" title="' + __wvEscapeHtml(item.text) + '">' + __wvEscapeHtml(queuePreview(item.text)) + autoChip + skillChip + clip + '</span>' +
         '<span class="mq-actions">' +
+        '<button type="button" class="mq-act mq-auto' + (auto ? ' is-on' : '') + '" data-id="' + id + '" aria-pressed="' + (auto ? 'true' : 'false') + '" title="' + __wvEscapeHtml(autoTitle) + '" aria-label="' + __wvEscapeHtml(autoTitle) + '">⚡</button>' +
         '<button type="button" class="mq-act mq-run" data-id="' + id + '" title="' + __wvEscapeHtml(runTitle) + '" aria-label="' + __wvEscapeHtml(runTitle) + '">▶</button>' +
         '<button type="button" class="mq-act mq-edit" data-id="' + id + '" title="' + __wvEscapeHtml(editTitle) + '" aria-label="' + __wvEscapeHtml(editTitle) + '">✎</button>' +
         '<button type="button" class="mq-act mq-drop" data-id="' + id + '" title="' + __wvEscapeHtml(dropTitle) + '" aria-label="' + __wvEscapeHtml(dropTitle) + '">✕</button>' +
@@ -570,6 +617,18 @@ export function getInputScript(tr: WebviewTranslations): string {
         vscode.postMessage({ type: 'queuedEdit', id: id, text: finalText });
       } else if (btn.classList.contains('mq-drop')) {
         vscode.postMessage({ type: 'queuedDrop', id: id });
+      } else if (btn.classList.contains('mq-auto')) {
+        // The row knows the state it is in; the host flips it and repaints, so
+        // this only asks — the same shape the skill chip's ✕ has.
+        var current = null;
+        for (var k = 0; k < queueItems.length; k++) {
+          if (queueItems[k].id === id) { current = queueItems[k]; break; }
+        }
+        vscode.postMessage({
+          type: 'queuedToggleAuto',
+          id: id,
+          auto: !(current && current.auto === true)
+        });
       }
     });
   }
@@ -579,14 +638,14 @@ export function getInputScript(tr: WebviewTranslations): string {
     if (window.__wvMessages && window.__wvMessages.isStreaming()) {
       vscode.postMessage({ type: 'interrupt' });
     } else {
-      sendMessage();
+      sendMessage(false);
     }
   });
-  // The same action Enter takes while a turn is running — sendMessage()
-  // routes it — so the button cannot drift from the key it stands for.
+  // The steer button is the explicit gesture Enter no longer is: it always
+  // guides the running turn, and sendMessage() refuses when the engine cannot.
   steerBtn.addEventListener('click', function() {
     if (steerBtn.getAttribute('aria-disabled') === 'true') return;
-    sendMessage();
+    sendMessage(true);
   });
   attachBtn.addEventListener('click', function() { vscode.postMessage({ type: 'attachFile' }); });
 
@@ -948,7 +1007,9 @@ export function getInputScript(tr: WebviewTranslations): string {
 
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      sendMessage();
+      // TUI parity: a bare Enter while a turn runs parks the message; steering
+      // is the explicit chord (Ctrl+Enter, Cmd+Enter on macOS).
+      sendMessage(!!(e.ctrlKey || e.metaKey));
     }
   });
 

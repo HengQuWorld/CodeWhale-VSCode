@@ -1,5 +1,19 @@
 # Change Log
 
+## Unreleased
+
+Everything here is client-side; no engine change is needed for it.
+
+### New Features
+
+- **A parked memo can run itself when the turn ends** — A memo used to wait for a click no matter what, so a message written mid-turn sat there even when it was plainly the next thing to run. `brotherwhale.queueAutoDispatch` decides the default for new memos: on, a memo parked while a turn runs is dispatched as soon as that turn ends; off, it waits for you. The choice is recorded per memo, so a memo parked under one setting keeps it, and each row's ⚡ button flips that one memo either way. Only the memo at the head of the queue is ever dispatched automatically — a memo you kept for yourself holds the automatic one behind it, because the queue is ordered. A memo that fails to dispatch comes back to the queue with its flag intact rather than disappearing.
+
+### Improvements
+
+- **Enter during a turn parks the message; Ctrl+Enter guides the turn** — Typing while the model was working used to steer the running turn on every Enter, so a message meant for later landed in the middle of the current answer. Bare Enter now parks it as a queued memo, exactly as the TUI's composer does, and steering moved to the explicit chord (Ctrl+Enter, Cmd+Enter on macOS) that the composer's steer button also stands for. Parking works even on an engine that cannot steer, where the text previously had nowhere to go.
+
+- **An armed skill rides guidance and parked memos, not just new turns** — `/skill <name>` armed a skill for "the next message", but only a send consumed it: guidance sent into a running turn went out without the skill and left the chip lit for whatever message came next. An armed skill now goes with mid-turn guidance (with a closing that addresses the guidance rather than a request the model has already answered) and with a memo parked in the queue, which carries it until you run it; editing a memo gives the skill back to the composer. The bubble and the memo row name the skill, while the instruction itself stays on the wire. A skill is still one-shot.
+
 ## 0.10.5
 
 Everything in this release is client-side and works on engine **v0.10.2**, the same floor 0.10.4 names; nothing here waits on an engine build. Editing a schedule uses the automation routes engine **v0.10.0** introduced, the same ones `/automation` and the create form already use.

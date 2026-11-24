@@ -70,12 +70,14 @@ import { loadInputHistory, pushInputHistory } from "./utils/input-history";
 import {
   DRAFT_QUEUE_KEY,
   clearThreadQueue,
+  setPromptAuto,
   dequeuePrompt,
   enqueuePrompt,
   loadMessageQueue,
   migrateThreadQueue,
   type QueuedAttachment,
   type QueuedPrompt,
+  type QueuedSkill,
 } from "./utils/message-queue";
 import { loadLastThreadId, saveLastThreadId } from "./utils/last-thread";
 import { imageBytesMatchMime, sniffImageMime } from "./utils/image-bytes";
@@ -94,7 +96,12 @@ import {
 } from "./utils/completion-sound";
 import { MAX_EAGER_HASH_BYTES, sha256OfFile } from "./utils/file-hash";
 import { t, webviewTranslations, currentLocale } from "./i18n";
-import { composeSkillTurnPrompt } from "./utils/skill-activation";
+import {
+  buildSkillActivationInstruction,
+  buildSkillSteerInstruction,
+  composeSkillSteerPrompt,
+  composeSkillTurnPrompt,
+} from "./utils/skill-activation";
 import { ConfigPanel } from "./config-panel";
 import {
   SessionStateStore,
@@ -170,6 +177,11 @@ function agentRunAnswers(record: AgentRunRecord, runId: string): boolean {
  *  later `user_message` item inside that turn; `undelivered` marks one the
  *  runtime discarded before the model saw it. */
 type SteerMark = { text: string; steered: boolean; undelivered: boolean };
+
+/** A skill held for a message not yet sent: the name the chip and the bubble
+ *  badge show, and the `SKILL.md` body the wire prompt is composed from. The
+ *  composed instruction itself is built per path — see `armedSkill`. */
+type ArmedSkill = { name: string; body: string };
 
 /**
  * One pending attachment. `previewUrl` is a transient thumbnail payload: it is
@@ -422,12 +434,17 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
 
   /** The skill armed for the next outgoing message, if any. Set by `/skill
    *  <name>` (and the Skills panel's Activate action) and consumed — once —
-   *  by `handleSendMessage`, which composes it into that message's prompt.
-   *  Holding it here rather than in the webview keeps the composition on the
-   *  host, where the send path already is: a webview reload must not silently
-   *  disarm a skill, and a message sent by any other route (a task kickoff, a
-   *  restored draft) must not miss it. */
-  private armedSkill: { name: string; instruction: string } | null = null;
+   *  by whichever path the next message takes: a send composes it for a new
+   *  turn, a steer for the running one, and a parked memo carries it until it
+   *  runs. Holding it here rather than in the webview keeps the composition on
+   *  the host, where the send path already is: a webview reload must not
+   *  silently disarm a skill, and a message sent by any other route (a task
+   *  kickoff, a restored draft) must not miss it.
+   *
+   *  The body is stored rather than a pre-composed instruction because the
+   *  closing sentence differs by path — a fresh turn answers "the user's
+   *  request", a steer addresses guidance inside a turn already running. */
+  private armedSkill: ArmedSkill | null = null;
 
   /** One shell call whose own file changes the engine reported.
    *
@@ -487,6 +504,11 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
   // replaying buffered events) and currentSessionId is null, each call
   // would create a new session on the server, producing duplicates.
   private autoSaveInProgress = false;
+  /** True while a memo parked as automatic is being dispatched by the end of
+   *  the turn above it. Reconnect replays can deliver the same
+   *  `turn.completed` more than once, and a second dispatch would run the
+   *  memo twice. */
+  private autoDispatchInFlight = false;
   /** True while an action this client started is replacing the conversation on
    *  screen — fork, undo, retry. It is both the single-flight guard (one click
    *  must not start the same swap twice) and the reason the webview holds the
@@ -961,6 +983,13 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         break;
       case "queuedDrop":
         if (typeof msg.id === "string") this.handleDropQueuedPrompt(msg.id);
+        break;
+      case "queuedToggleAuto":
+        // The row's switch: one memo moves between "waits for me" and "runs
+        // when the turn above it ends", without reparking it.
+        if (typeof msg.id === "string") {
+          this.handleToggleQueuedAuto(msg.id, msg.auto === true);
+        }
         break;
       case "queuedClear":
         this.handleClearQueuedPrompts();
@@ -3399,29 +3428,58 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
    *  The memo is what the box holds: text plus the files waiting to go
    *  with it, the same pair a send would have taken. Attachments are
    *  stored by path; a moved file degrades to a named miss when the memo
-   *  runs, not to a silent loss of the whole memo. No-op on empty text. */
-  public handleQueuePrompt(text: string): void {
+   *  runs, not to a silent loss of the whole memo. No-op on empty text.
+   *
+   *  An armed skill is consumed into the memo (TUI parity: `build_queued_message`
+   *  takes `active_skill` into the queued message). Parking is the message —
+   *  leaving the arming live would silently attach it to whatever went next.
+   *
+   *  `auto` decides whether the memo runs itself when the turn above it ends.
+   *  Omitted, it follows `brotherwhale.queueAutoDispatch` — the setting is the
+   *  default, the memo records what it was parked with, and the panel's row
+   *  can flip that one memo afterwards. */
+  public handleQueuePrompt(text: string, auto?: boolean): void {
     if (!text.trim()) return;
     const attachments: QueuedAttachment[] = this.currentAttachments.map((a) => ({
       path: a.path,
       name: a.name,
       kind: a.kind,
     }));
+    const skill: QueuedSkill | undefined = this.armedSkill
+      ? { name: this.armedSkill.name, body: this.armedSkill.body }
+      : undefined;
+    const runByItself = this.resolveQueueAuto(auto);
     enqueuePrompt(
       this.currentWorkspaceKey(),
       this.queueThreadKey(),
       text,
-      attachments
+      attachments,
+      skill,
+      runByItself
     );
+    if (skill) this.clearArmedSkill();
     if (this.currentAttachments.length > 0) {
       this.currentAttachments = [];
       this.postAttachmentsChanged();
     }
+    const queuedCount = this.messageQueueFor(this.queueThreadKey()).length;
     this.postMessage({
       type: "info",
-      message: t().queueQueuedInfo.replace("{n}", String(this.messageQueueFor(this.queueThreadKey()).length)),
+      message: runByItself
+        ? t().queueQueuedAutoInfo.replace("{n}", String(queuedCount))
+        : t().queueQueuedInfo.replace("{n}", String(queuedCount)),
     });
     this.postMessageQueue();
+  }
+
+  /** The automatic flag for a memo being parked: what the caller asked for,
+   *  or the setting's default when the caller did not say. */
+  private resolveQueueAuto(explicit?: boolean): boolean {
+    if (typeof explicit === "boolean") return explicit;
+    return vscode.workspace.getConfiguration("brotherwhale").get<boolean>(
+      "queueAutoDispatch",
+      false
+    );
   }
 
   /** Rebuild live attachment records from a memo's stored paths. A file
@@ -3510,26 +3568,64 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     this.postMessageQueue();
 
     let dispatched = false;
+    // The memo's own skill rides either destination. Explicit `null` when it
+    // has none, so a memo parked before the skill was armed never picks up
+    // the composer's current arming.
+    const memoSkill: ArmedSkill | null = item.skill
+      ? { name: item.skill.name, body: item.skill.body }
+      : null;
     if (busy) {
-      dispatched = await this.handleSteer(item.text, records);
+      dispatched = await this.handleSteer(item.text, records, memoSkill);
     } else {
       dispatched = await this.handleSendMessage(item.text, {
         queued: true,
         attachments: records,
+        skill: memoSkill,
       });
     }
     if (!dispatched) {
       // Back where it was: a memo again, not a lost one — with the same
-      // attachment list it went out with. The thread key is re-read — a
-      // dispatch that had to create the thread first moved the queue's
-      // bucket mid-flight.
+      // attachment list, skill and automatic flag it went out with. The thread
+      // key is re-read — a dispatch that had to create the thread first moved
+      // the queue's bucket mid-flight.
       enqueuePrompt(
         this.currentWorkspaceKey(),
         this.queueThreadKey(),
         item.text,
-        item.attachments ?? []
+        item.attachments ?? [],
+        item.skill,
+        item.auto
       );
       this.postMessageQueue();
+    }
+  }
+
+  /** Run the head of the queue by itself, when it was parked to do that.
+   *
+   *  Called from `turn.completed`: the turn above the queue just finished, and
+   *  a memo marked automatic is waiting for exactly that moment. Only the head
+   *  is considered — the queue is ordered, and a manual memo ahead of an
+   *  automatic one holds it back, so an auto memo can never be pulled past
+   *  work the user chose to run by hand. */
+  private async drainAutoQueuedPrompt(): Promise<void> {
+    if (this.autoDispatchInFlight) return;
+    // Nothing to dispatch into yet, or a turn is still running (a second
+    // turn.completed from a reconnect, say): the memo waits.
+    if (!this.currentThread || this.currentTurnId) return;
+    // A viewed saved session is read-only: its memos belong to the thread the
+    // view will return to, not to the transcript on screen.
+    if (this.viewingSessionId) return;
+    const head = this.messageQueueFor(this.queueThreadKey())[0];
+    if (!head || !head.auto) return;
+    this.autoDispatchInFlight = true;
+    try {
+      this.postMessage({
+        type: "info",
+        message: t().queueAutoDispatchInfo,
+      });
+      await this.handleRunQueuedPrompt(head.id);
+    } finally {
+      this.autoDispatchInFlight = false;
     }
   }
 
@@ -3549,6 +3645,13 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       return;
     }
     dequeuePrompt(this.currentWorkspaceKey(), key, id);
+    // The memo's skill comes back to the composer with its text: editing a
+    // parked memo and sending it must mean the same thing it would have meant
+    // running it (TUI restores `active_skill` from the queued message the same
+    // way).
+    if (item.skill) {
+      this.armSkill({ name: item.skill.name, body: item.skill.body });
+    }
     if ((item.attachments ?? []).length > 0) {
       const { records, missing } = this.rebuildQueuedAttachments(
         item.attachments ?? [],
@@ -3577,6 +3680,26 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       this.postMessage({ type: "error", message: t().queueNotFound });
       return;
     }
+    this.postMessageQueue();
+  }
+
+  /** Flip one memo between "waits for me" and "runs when the turn above it
+   *  ends". A miss says so rather than repainting an unchanged list. */
+  public handleToggleQueuedAuto(id: string, auto: boolean): void {
+    const remaining = setPromptAuto(
+      this.currentWorkspaceKey(),
+      this.queueThreadKey(),
+      id,
+      auto
+    );
+    if (remaining === null) {
+      this.postMessage({ type: "error", message: t().queueNotFound });
+      return;
+    }
+    this.postMessage({
+      type: "info",
+      message: auto ? t().queueAutoOn : t().queueAutoOff,
+    });
     this.postMessageQueue();
   }
 
@@ -3901,7 +4024,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
    *  Returns whether the send reached the engine (turn started). */
   private async handleSendMessage(
     text: string,
-    opts?: { queued?: boolean; attachments?: AttachmentRecord[] }
+    opts?: { queued?: boolean; attachments?: AttachmentRecord[]; skill?: ArmedSkill | null }
   ): Promise<boolean> {
     const queued = opts?.queued === true;
     const composerAttachments =
@@ -3930,11 +4053,15 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     // engine receives the skill instructions plus the request — the same
     // split TUI's `/skill <name>` makes (the instruction is composed into the
     // queued message, the transcript shows an "Activated skill" system line).
-    const armedSkill = this.armedSkill;
+    //
+    // `opts.skill` is the dispatch of a memo that carries its own skill; it is
+    // explicit — `null` included — so running a memo never consumes (or is
+    // silently joined by) the skill currently armed in the composer.
+    const armedSkill = opts?.skill !== undefined ? opts.skill : this.armedSkill;
     const wireText = armedSkill
-      ? composeSkillTurnPrompt(armedSkill.instruction, fullText)
+      ? composeSkillTurnPrompt(buildSkillActivationInstruction(armedSkill), fullText)
       : fullText;
-    if (armedSkill) this.clearArmedSkill();
+    if (armedSkill && opts?.skill === undefined) this.clearArmedSkill();
 
     try {
       await this.api.ensureReady();
@@ -3989,6 +4116,9 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         status: "complete",
         timestamp: Date.now(),
         turnIndex: this.currentBubbleTurnIndex(),
+        // Named so the bubble can say the answer was produced under a skill —
+        // the instruction itself stays on the wire, out of the transcript.
+        skillName: armedSkill?.name,
       };
       this.messages.push(userMsg);
       this.postMessage({ type: "addMessage", message: userMsg });
@@ -4162,7 +4292,8 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
    *  blocks, so guidance carrying a screenshot reaches the model as one. */
   private async handleSteer(
     text: string,
-    attachmentsOverride?: AttachmentRecord[]
+    attachmentsOverride?: AttachmentRecord[],
+    skillOverride?: ArmedSkill | null
   ): Promise<boolean> {
     const trimmed = text.trim();
     // The composer's attachments ride the guidance exactly as they ride a
@@ -4189,11 +4320,17 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
       return false;
     }
 
-    // The wire prompt carries the attachment lines; the bubble below carries
-    // it too — the same text a send shows, and the same text the engine
-    // persists on the turn's user_message item, so the bubble reads the same
-    // before and after a reload.
+    // The wire prompt carries the attachment lines. Guidance is not a fresh
+    // request, so an armed skill rides it with a steer-shaped closing rather
+    // than the turn's own — see buildSkillSteerInstruction. Same consume rule
+    // as a send: the arming is one-shot. An explicit override (a memo's own
+    // skill, `null` included) is not the composer's arming and never clears
+    // it.
+    const armedSkill = skillOverride !== undefined ? skillOverride : this.armedSkill;
     const prompt = ChatProvider.promptWithAttachments(trimmed, attachments);
+    const wirePrompt = armedSkill
+      ? composeSkillSteerPrompt(buildSkillSteerInstruction(armedSkill), prompt)
+      : prompt;
 
     // The composer lets go of the attachments as soon as the guidance leaves
     // it — the same optimism a send makes, so a second click cannot send the
@@ -4209,7 +4346,7 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
     // stopping (interrupt requested) or already finished, and a refused steer
     // leaves no bubble behind.
     try {
-      await this.api.steerTurn(thread.id, turnId, prompt);
+      await this.api.steerTurn(thread.id, turnId, wirePrompt);
     } catch (err) {
       // The engine refused the guidance — a turn that moved on, a turn that is
       // stopping, a lost connection. The webview cleared the box the moment
@@ -4228,16 +4365,26 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         type: "error",
         message: formatError(t().steerFailed, err),
       });
+      // A refused steer leaves the skill armed, like it leaves the words in
+      // the box: the user's next attempt still carries what they chose.
       return false;
     }
+
+    if (armedSkill && skillOverride === undefined) this.clearArmedSkill();
 
     const steerMsg: ChatMessage = {
       id: `user-steer-${Date.now()}`,
       role: "user",
+      // What the user typed, not the composed instruction: the transcript
+      // says what they asked, and the badge below names the skill the answer
+      // was produced under. The engine's record holds the full wire text, so
+      // a reload draws the instruction block itself — the same asymmetry a
+      // skilled send already has.
       content: prompt,
       status: "complete",
       timestamp: Date.now(),
       steered: true,
+      skillName: armedSkill?.name,
       // The running turn's own number: guidance is asked inside a turn, so the
       // rail names it the way the Changes panel files guidance-driven edits.
       turnIndex: this.currentBubbleTurnIndex(),
@@ -4658,15 +4805,20 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
   }
 
   /** Refresh the task list shown in the sidebar, scoped to the current workspace */
-  /** Arm a skill for the next outgoing message. The instruction is composed
-   *  into that message's prompt by `handleSendMessage`, exactly as TUI's
-   *  `/skill <name>` does. Re-arming replaces any previous skill. */
-  public armSkill(skill: { name: string; description: string; instruction: string }): void {
-    this.armedSkill = { name: skill.name, instruction: skill.instruction };
+  /** Arm a skill for the next outgoing message. Its body is composed into
+   *  that message's prompt by the path the message takes — a send, a steer,
+   *  or a memo parked until later — exactly as TUI's `/skill <name>` does.
+   *  Re-arming replaces any previous skill. */
+  public armSkill(skill: {
+    name: string;
+    description?: string;
+    body: string;
+  }): void {
+    this.armedSkill = { name: skill.name, body: skill.body };
     this.postMessage({
       type: "skillArmed",
       name: skill.name,
-      description: skill.description,
+      description: skill.description ?? "",
     });
   }
 
@@ -4687,8 +4839,17 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
   }
 
   /** Send a user message through the normal send pipeline. Used by `/skill
-   *  <name> <task>`, where activation and submission are one user action. */
+   *  <name> <task>`, where activation and submission are one user action.
+   *
+   *  While a turn is running this parks the message instead, the same choice
+   *  the composer's Enter makes (TUI parity: `/skill x task` submitted mid-turn
+   *  queues there too). Sending it would ask the engine to start a second turn
+   *  on a busy thread, which it refuses — and the task would be lost. */
   public async sendMessage(text: string): Promise<void> {
+    if (this.currentTurnId) {
+      this.handleQueuePrompt(text);
+      return;
+    }
     await this.handleSendMessage(text);
   }
 
@@ -9682,6 +9843,10 @@ export class ChatProvider implements vscode.WebviewViewProvider, SlashCommandCon
         // so re-fetch the goal to surface updated tokens_used/status instead
         // of leaving the panel on its pre-turn value.
         void this.refreshGoal();
+        // A memo parked as automatic was waiting for exactly this moment: the
+        // turn above it has ended and the engine is idle again. Issued last so
+        // it runs against a transcript and a queue that are already settled.
+        void this.drainAutoQueuedPrompt();
         break;
       }
 

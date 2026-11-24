@@ -20,13 +20,23 @@ export function isUserInvocableSkill(invocation: string | undefined | null): boo
   return invocation === "model+user" || invocation === "explicit-only";
 }
 
-/** The instruction attached to the next message when a skill is activated.
- *  Byte-compatible with TUI's `activate_skill` (`commands/contract.rs`) so a
- *  skill behaves the same whichever surface armed it. */
-export function buildSkillActivationInstruction(skill: {
-  name: string;
-  body: string;
-}): string {
+/** How a skill's block ends on a fresh turn: the request that follows is the
+ *  whole task, so the closing can say "the user's request" and mean it. */
+const ACTIVATION_CLOSING =
+  "Now respond to the user's request following the above skill instructions.";
+
+/** How the same block ends when it rides a steer. The guidance that follows is
+ *  a fragment of a task already under way — not "the user's request" — so the
+ *  activation closing would point the model at the wrong thing. The turn's
+ *  opening prompt is behind it in the conversation; this names what the
+ *  guidance is instead. */
+const STEER_CLOSING =
+  "Apply these instructions to the guidance below, within the turn already in progress.";
+
+function skillInstructionBlock(
+  skill: { name: string; body: string },
+  closing: string
+): string {
   return [
     "You are now using a skill. Follow these instructions:",
     "",
@@ -36,14 +46,39 @@ export function buildSkillActivationInstruction(skill: {
     "",
     "---",
     "",
-    "Now respond to the user's request following the above skill instructions.",
+    closing,
   ].join("\n");
+}
+
+/** The instruction attached to the next message when a skill is activated.
+ *  Byte-compatible with TUI's `activate_skill` (`commands/contract.rs`) so a
+ *  skill behaves the same whichever surface armed it. */
+export function buildSkillActivationInstruction(skill: {
+  name: string;
+  body: string;
+}): string {
+  return skillInstructionBlock(skill, ACTIVATION_CLOSING);
+}
+
+/** The same block, addressed to mid-turn guidance rather than a new request. */
+export function buildSkillSteerInstruction(skill: {
+  name: string;
+  body: string;
+}): string {
+  return skillInstructionBlock(skill, STEER_CLOSING);
 }
 
 /** Compose an activated skill's instruction with the user's request, matching
  *  the engine-facing turn text TUI builds in `build_user_request`. */
 export function composeSkillTurnPrompt(instruction: string, userRequest: string): string {
   return `${instruction}\n\n---\n\nUser request: ${userRequest}`;
+}
+
+/** Compose the instruction with mid-turn guidance. Same frame as the turn
+ *  version, but the payload is named for what it is: guidance inside a turn
+ *  that is already running, whose task was stated earlier. */
+export function composeSkillSteerPrompt(instruction: string, steerText: string): string {
+  return `${instruction}\n\n---\n\nGuidance for the turn already in progress: ${steerText}`;
 }
 
 /** Narrow a parsed `--project` / `--global` argument (or a panel payload) to

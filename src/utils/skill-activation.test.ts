@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import {
   buildSkillActivationInstruction,
+  buildSkillSteerInstruction,
+  composeSkillSteerPrompt,
   composeSkillTurnPrompt,
   isUserInvocableSkill,
   parseSkillScope,
@@ -50,6 +52,35 @@ describe("skill-activation", () => {
     it("puts the request after the instruction behind a separator", () => {
       expect(composeSkillTurnPrompt("INSTRUCTION", "fix the bug")).toBe(
         "INSTRUCTION\n\n---\n\nUser request: fix the bug"
+      );
+    });
+  });
+
+  describe("buildSkillSteerInstruction", () => {
+    it("keeps the block and addresses guidance instead of \"the user's request\"", () => {
+      const instruction = buildSkillSteerInstruction({
+        name: "frontend-design",
+        body: "Read DESIGN.md first.",
+      });
+
+      // The body and heading are the same block a send composes...
+      expect(instruction).toContain("You are now using a skill.");
+      expect(instruction).toContain("# Skill: frontend-design");
+      expect(instruction).toContain("Read DESIGN.md first.");
+      // ...but the closing names the guidance a steer carries. The turn's
+      // opening request is behind it in the conversation, so "the user's
+      // request" would point the model at the wrong thing.
+      expect(instruction).not.toContain("Now respond to the user's request");
+      expect(instruction).toContain(
+        "Apply these instructions to the guidance below, within the turn already in progress."
+      );
+    });
+  });
+
+  describe("composeSkillSteerPrompt", () => {
+    it("puts the guidance after the instruction behind a separator", () => {
+      expect(composeSkillSteerPrompt("INSTRUCTION", "make it wider")).toBe(
+        "INSTRUCTION\n\n---\n\nGuidance for the turn already in progress: make it wider"
       );
     });
   });

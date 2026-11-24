@@ -16,7 +16,6 @@ import type { CodeWhaleApiClient } from "../types";
 import { formatError, getErrorMessage } from "../utils/error-handler";
 import { classifySkillScope } from "../utils/skill-scope";
 import {
-  buildSkillActivationInstruction,
   isUserInvocableSkill,
   parseSkillScope,
   skillReceiptMessage,
@@ -38,7 +37,7 @@ export interface SkillHost {
   postMessage(msg: Record<string, unknown>): void;
   debugLog(msg: string): void;
   /** Arm a skill for the next outgoing message. */
-  armSkill(skill: { name: string; description: string; instruction: string }): void;
+  armSkill(skill: { name: string; description?: string; body: string }): void;
   /** Send a message now — activation that carries its own task sends it. */
   sendMessage(text: string): Promise<void>;
 }
@@ -126,14 +125,12 @@ export class SkillController {
         });
         return;
       }
-      const instruction = buildSkillActivationInstruction({
-        name: detail.name,
-        body: detail.body,
-      });
+      // The body rides the arming: the send and steer paths each compose
+      // their own closing sentence from it.
       this.host.armSkill({
         name: detail.name,
         description: detail.description,
-        instruction,
+        body: detail.body,
       });
       // TUI writes an "Activated skill: X" system line into the transcript; the
       // chat-area info card is the GUI's equivalent, and it names the once-only

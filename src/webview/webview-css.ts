@@ -1310,6 +1310,47 @@ export function getWebviewCss(): string {
       color: inherit;
     }
 
+    /* A message produced under an armed skill. Named, not uppercased: the
+       skill name is an identifier, and it stays readable as one. */
+    .skill-badge {
+      display: inline-block;
+      font-size: 0.72em;
+      padding: 2px 8px;
+      margin-left: 6px;
+      border-radius: 999px;
+      vertical-align: 1px;
+      background: rgba(255,255,255,0.14);
+      color: inherit;
+      opacity: 0.9;
+    }
+
+    /* The same chip on a parked memo's row: what the memo will apply. */
+    .mq-skill {
+      display: inline-block;
+      margin-left: 6px;
+      padding: 1px 6px;
+      border-radius: 999px;
+      font-size: 0.82em;
+      background: rgba(255,255,255,0.12);
+    }
+
+    /* A memo that runs itself when the turn above it ends. The chip says so on
+       the row, and the ⚡ button beside ▶ is where the choice is undone. */
+    .mq-auto-chip {
+      display: inline-block;
+      margin-left: 6px;
+      padding: 1px 6px;
+      border-radius: 999px;
+      font-size: 0.82em;
+      background: rgba(255,255,255,0.12);
+      opacity: 0.85;
+    }
+
+    .mq-act.mq-auto.is-on {
+      color: var(--accent);
+      opacity: 1;
+    }
+
     /* Guidance the runtime dropped before the model read it: the accent
        fill promises delivery, so the bubble steps back to a warning tint and
        the badge stops shouting. */
